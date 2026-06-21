@@ -1,0 +1,16 @@
+{
+  "name": "waso",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Waso prototype — tierless continuation migration (design doc spike)",
+  "scripts": {
+    "spike": "node waso-spike.mjs",
+    "2p": "node waso-2p-client.mjs",
+    "build:wasm": "node build-wasm.mjs",
+    "wasm": "node build-wasm.mjs && node waso-wasm.mjs"
+  },
+  "dependencies": {
+    "wabt": "^1.0.39"
+  }
+}
