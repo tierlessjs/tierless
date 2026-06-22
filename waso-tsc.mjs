@@ -279,7 +279,31 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (boxed.has(id)) { if (slotOf.has(id)) emit("LOAD", slotOf.get(id)); else emit("LOADENV", capture(id)); valThunk(); emit("SETPROP", "v"); emit("POP"); return; }
       valThunk(); emit("STORE", slotOf.get(id));
     }
-    function assignTo(target, valThunk) {      // target = e (returns nothing; statement-shaped)
+    // A reference whose base/key are evaluated ONCE; {get, set} so assignment,
+    // compound, ++/--, and logical-assignment all single-eval and can leave a value.
+    function compileRef(target) {
+      if (ts.isParenthesizedExpression(target)) return compileRef(target.expression);
+      if (ts.isIdentifier(target)) return { get: () => readUse(target), set: (v) => writeUse(target, v) };
+      if (ts.isPropertyAccessExpression(target)) { const o = tempSlot(); expr(target.expression); emit("STORE", o); const key = target.name.text; return { get: () => { emit("LOAD", o); emit(getOp(key), key); }, set: (v) => { emit("LOAD", o); v(); emit(setOp(key), key); emit("POP"); } }; }
+      if (ts.isElementAccessExpression(target)) { const o = tempSlot(), kk = tempSlot(); expr(target.expression); emit("STORE", o); expr(target.argumentExpression); emit("STORE", kk); return { get: () => { emit("LOAD", o); emit("LOAD", kk); emit("INDEX"); }, set: (v) => { emit("LOAD", o); emit("LOAD", kk); v(); emit("SETINDEX"); } }; }
+      return null; // destructuring patterns handled by the caller
+    }
+    function assignExpr(target, rhsThunk) {    // target = rhs, leaving the assigned value (assignment is an expression)
+      if (ts.isArrayLiteralExpression(target) || ts.isObjectLiteralExpression(target)) { const t = tempSlot(); rhsThunk(); emit("STORE", t); destructureAssign(target, t); emit("LOAD", t); return; } // value of a destructuring assignment is the RHS
+      const r = compileRef(target); if (!r) fail(target, "unsupported assignment target");
+      const t = tempSlot(); rhsThunk(); emit("STORE", t); r.set(() => emit("LOAD", t)); emit("LOAD", t);
+    }
+    function compoundExpr(target, op, rhs) {   // target op= rhs, leaving the new value
+      const r = compileRef(target); if (!r) fail(target, "unsupported compound-assignment target");
+      const t = tempSlot(); r.get(); expr(rhs); emit("BIN", op); emit("STORE", t); r.set(() => emit("LOAD", t)); emit("LOAD", t);
+    }
+    function logicalAssignExpr(target, kind, rhs) { // &&= / ||= / ??=  (short-circuit), leaving the resulting value
+      const r = compileRef(target); if (!r) fail(target, "unsupported assignment target");
+      const t = tempSlot(); r.get(); emit("STORE", t); emit("LOAD", t);
+      if (kind === "&&") { /* assign when truthy */ } else if (kind === "||") emit("NOT"); else emit("ISNULLISH"); // assign when: truthy / falsy / nullish
+      const skip = label("la"); emit("JMPF", skip); expr(rhs); emit("STORE", t); r.set(() => emit("LOAD", t)); mark(skip); emit("LOAD", t);
+    }
+    function assignTo(target, valThunk) {      // target = e (returns nothing; statement-shaped) — used for destructuring elements
       if (ts.isIdentifier(target)) { writeUse(target, valThunk); return; }
       if (ts.isPropertyAccessExpression(target)) { expr(target.expression); valThunk(); emit(setOp(target.name.text), target.name.text); emit("POP"); return; }
       if (ts.isElementAccessExpression(target)) { expr(target.expression); expr(target.argumentExpression); valThunk(); emit("SETINDEX"); return; }
@@ -308,19 +332,10 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         else fail(p, "unsupported destructuring-assignment property");
       }
     }
-    function compoundTo(target, op, rhs) {     // target op= rhs
-      if (ts.isIdentifier(target)) { writeUse(target, () => { readUse(target); expr(rhs); emit("BIN", op); }); return; }
-      if (ts.isPropertyAccessExpression(target)) { expr(target.expression); emit("DUP"); emit(getOp(target.name.text), target.name.text); expr(rhs); emit("BIN", op); emit(setOp(target.name.text), target.name.text); emit("POP"); return; }
-      if (ts.isElementAccessExpression(target)) { const a = tempSlot(), k = tempSlot(), t = tempSlot(); expr(target.expression); emit("STORE", a); expr(target.argumentExpression); emit("STORE", k); emit("LOAD", a); emit("LOAD", k); emit("INDEX"); expr(rhs); emit("BIN", op); emit("STORE", t); emit("LOAD", a); emit("LOAD", k); emit("LOAD", t); emit("SETINDEX"); return; } // arr[i] op= rhs / o[sym] op= rhs
-      fail(target, "unsupported compound-assignment target");
-    }
-    function incDec(target, op, post) {        // x++ / ++x / x-- / --x — leaves the result (old if postfix, new if prefix). INC/DEC are type-aware (1 vs 1n)
-      const step = op === "+" ? "INC" : "DEC"; const t = tempSlot();
-      if (ts.isIdentifier(target)) { readUse(target); emit("STORE", t); writeUse(target, () => { emit("LOAD", t); emit(step); }); }
-      else if (ts.isPropertyAccessExpression(target)) { expr(target.expression); emit("DUP"); emit(getOp(target.name.text), target.name.text); emit("STORE", t); emit("LOAD", t); emit(step); emit(setOp(target.name.text), target.name.text); emit("POP"); }
-      else if (ts.isElementAccessExpression(target)) { expr(target.expression); emit("DUP"); expr(target.argumentExpression); emit("DUP"); const k = tempSlot(); emit("STORE", k); emit("INDEX"); emit("STORE", t); emit("LOAD", k); emit("LOAD", t); emit(step); emit("SETINDEX"); }
-      else fail(target, "unsupported ++/-- target");
-      if (post) emit("LOAD", t); else { emit("LOAD", t); emit(step); } // value of the expression
+    function incDec(target, op, post) {        // x++ / ++x — single-eval base; leaves old (postfix) or new (prefix). INC/DEC are type-aware (1 vs 1n)
+      const step = op === "+" ? "INC" : "DEC"; const r = compileRef(target); if (!r) fail(target, "unsupported ++/-- target");
+      const t = tempSlot(); r.get(); emit("STORE", t); r.set(() => { emit("LOAD", t); emit(step); });
+      if (post) emit("LOAD", t); else { emit("LOAD", t); emit(step); }
       return true;
     }
     function bindStackTop(nameNode) { // a value is on the stack; store into the binding (decl/for-of/destructure)
@@ -449,15 +464,15 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isPostfixUnaryExpression(node)) return incDec(node.operand, node.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-", true); // x++: old value
       if (ts.isBinaryExpression(node)) {
         const k = node.operatorToken.kind;
-        if (k === ts.SyntaxKind.EqualsToken) { assignTo(node.left, () => expr(node.right)); return false; }
-        if (COMPOUND.has(k)) { compoundTo(node.left, COMPOUND.get(k), node.right); return false; }
+        if (k === ts.SyntaxKind.EqualsToken) { assignExpr(node.left, () => expr(node.right)); return true; } // assignment is an expression (a = b = c works)
+        if (COMPOUND.has(k)) { compoundExpr(node.left, COMPOUND.get(k), node.right); return true; }
         if (k === ts.SyntaxKind.AmpersandAmpersandToken) { expr(node.left); emit("DUP"); const end = label("and"); emit("JMPF", end); emit("POP"); expr(node.right); mark(end); return true; }
         if (k === ts.SyntaxKind.BarBarToken) { expr(node.left); emit("DUP"); const rhs = label("or"), end = label("oend"); emit("JMPF", rhs); emit("JMP", end); mark(rhs); emit("POP"); expr(node.right); mark(end); return true; }
         if (k === ts.SyntaxKind.QuestionQuestionToken) { expr(node.left); emit("DUP"); emit("ISNULLISH"); const end = label("nc"); emit("JMPF", end); emit("POP"); expr(node.right); mark(end); return true; }
         if (k === ts.SyntaxKind.CommaToken) { if (expr(node.left)) emit("POP"); return expr(node.right); }
-        if (k === ts.SyntaxKind.AmpersandAmpersandEqualsToken) { assignTo(node.left, () => { expr(node.left); emit("DUP"); const e = label("ae"); emit("JMPF", e); emit("POP"); expr(node.right); mark(e); }); return false; }
-        if (k === ts.SyntaxKind.BarBarEqualsToken) { assignTo(node.left, () => { expr(node.left); emit("DUP"); const r = label("oe"), e = label("oee"); emit("JMPF", r); emit("JMP", e); mark(r); emit("POP"); expr(node.right); mark(e); }); return false; }
-        if (k === ts.SyntaxKind.QuestionQuestionEqualsToken) { assignTo(node.left, () => { expr(node.left); emit("DUP"); emit("ISNULLISH"); const e = label("nce"); emit("JMPF", e); emit("POP"); expr(node.right); mark(e); }); return false; }
+        if (k === ts.SyntaxKind.AmpersandAmpersandEqualsToken) { logicalAssignExpr(node.left, "&&", node.right); return true; }
+        if (k === ts.SyntaxKind.BarBarEqualsToken) { logicalAssignExpr(node.left, "||", node.right); return true; }
+        if (k === ts.SyntaxKind.QuestionQuestionEqualsToken) { logicalAssignExpr(node.left, "??", node.right); return true; }
         if (k === ts.SyntaxKind.InstanceOfKeyword) { const cn = ts.isIdentifier(node.right) ? classNameOf(node.right) : null; if (!cn) fail(node, "instanceof needs a class name"); expr(node.left); emit("ISA", cn); return true; }
         const op = BINOP[k]; if (!op) fail(node, "unsupported operator");
         expr(node.left); expr(node.right); emit("BIN", op); return true;

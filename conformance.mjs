@@ -102,6 +102,8 @@ t("for-of / for-in", `function go(){const a=[];for(const x of [1,2,3])a.push(x);
 t("switch fall-through + default", `function f(n){switch(n){case 1:case 2:return"lo";case 3:return"mid";default:return"hi";}} function go(){return [1,2,3,9].map(f);}`);
 t("break / continue / labeled", `function go(){const a=[];outer:for(let i=0;i<3;i++){for(let j=0;j<3;j++){if(j===1)continue;if(i===2)break outer;a.push(i+""+j);}}return a;}`);
 t("comma operator + void", `function go(){let x=0;const y=(x=5,x*2);return [y,void 0];}`);
+t("assignment is an expression (chained, in-condition, single-eval base)", `function go(){let a,b;a=b=5;let calls=0;const get=()=>{calls++;return {v:1};};get().v+=10;let m,i=0,out=[];const arr=[7,8,9];while((m=arr[i++])!==undefined)out.push(m);let x=1;const r=(x&&=3);return {a,b,calls,out,x,r,nested:(()=>{const o={};let t;o.z=t=4;return [o.z,t];})()};}`);
+t("++ / -- single-eval + value (postfix/prefix on var/prop/elem)", `function go(){let i=5;const a=i++,c=++i;const o={n:1};const d=o.n++;const arr=[10];const e=arr[0]--;let calls=0;const g=()=>{calls++;return o;};g().n++;return {a,c,i,d,on:o.n,e,a0:arr[0],calls};}`);
 
 section("functions, closures, scoping");
 t("defaults + rest + spread", `function f(a,b=10,...rest){return [a,b,rest];} function go(){return [f(1),f(1,2),f(1,2,3,4),f(1,...[5,6])];}`);
