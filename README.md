@@ -47,28 +47,32 @@ ratio                          : ~978x smaller
 The Hacker News thread shape is the canonical client-side waterfall: loading a
 thread means fetching the story, then each comment, then its children — one
 dependent request per node, with no "fetch the whole thread" API. The benchmark
-runs **one sequential traversal** under the runtime in two placements:
-
-- **REST** — the traversal stays on the client; every `api.item` is an RPC round
-  trip. O(nodes) sequential round trips.
-- **Waso** — the *same* traversal migrates to the server once and runs every
-  `api.item` where the API lives, shipping the assembled thread back. O(1).
+runs the **same traversal** under the runtime across a 2×2 of concurrency ×
+placement (all four cells executed, not modeled):
 
 ```
-                              round trips   latency
-REST (fetch each item)         254 rt       13208ms
-Waso (migrate once)              2 rt          608ms     = 21.7x faster
-level-parallel client (ref)      6 rt          312ms     (computed, hand-tuned)
+                       per-item (sequential)     per-level (concurrent)
+  client (REST, stay)   13208ms / 254 rt            312ms /   6 rt
+  Waso   (migrate)        608ms /   2 rt            112ms /   2 rt
 ```
 
-The only difference is *where the code runs* — the traversal source is identical.
+Two independent levers, both on identical traversal source:
+- **concurrency** collapses round trips from O(nodes) to O(depth);
+- **migration** collapses the *client* round trips to 2 — once the traversal is
+  on the server, its per-level rounds are cheap server↔API hops, not client↔server
+  RTTs.
+
+**Waso (migrate + concurrent) = 112ms** beats naive REST (13208ms, **118×**) and
+even a hand-tuned parallel client (312ms, **2.8×**) — because the client still
+pays one RTT per tree level (6 levels here) while Waso pays 2 client RTTs total,
+regardless of depth. `--real` injects real sleeps; measured **12.8s → 0.10s**.
+
 This is the "minimal change to an existing app" story: the obvious sequential
-code an agent writes gets ~22x for free, no batching/resolvers/client
-orchestration. Honest caveat, printed by the benchmark: a hand-tuned
-level-parallel client (~312ms) would edge out this run, because the migrated
-traversal calls `api.item` *sequentially* on the server; closing that needs
-server-side concurrency (future work). The win shown is over the code people
-actually write.
+code an agent writes, migrated, beats the optimal hand-tuned client — no
+batching, resolvers, or client orchestration in the source. (The per-level
+concurrency assumes the server can fetch a level at once, which it can, being
+co-located with the data; the public per-item API the client is stuck with
+cannot.)
 
 ## How it works
 
