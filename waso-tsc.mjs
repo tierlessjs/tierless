@@ -107,9 +107,6 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   }
   const resourceSet = new Set(resources);
   const { bindingOf, bindingsByFn, boxed } = resolveBindings(sf);
-  const generatorBindings = new Set();   // nested `function*` decls -> a call on that binding makes an iterator
-  const markGens = (n) => { if ((ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n)) && n.asteriskToken && n.name && bindingOf.has(n.name)) generatorBindings.add(bindingOf.get(n.name)); ts.forEachChild(n, markGens); };
-  markGens(sf);
   const out = {};
   let gen = 0;
   const neededBuilders = new Set();   // classes whose class-object builder (%Name) must be generated
@@ -124,7 +121,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     emit("CLSGET", cname); emit("DUP"); emit("ISNULLISH"); emit("JMPF", ready); emit("POP"); // cached -> return it
     const co = tempSlot(); emit("NEWOBJ"); emit("STORE", co);
     emit("LOAD", co); emit("PUSH", chain.map((c) => c.name)); emit("SETPROP", "__class__"); emit("POP");
-    for (const cls of chain) for (const m of cls.smethods) { const info = cls.compiled[`static ${m.name}`]; emit("LOAD", co); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.staticThisId ? ["L", co] : provide(id)))); emit("SETPROP", m.name); emit("POP"); }
+    for (const cls of chain) for (const m of cls.smethods) { const info = cls.compiled[`static ${m.name}`]; emit("LOAD", co); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.staticThisId ? ["L", co] : provide(id))), !!m.node.asteriskToken); emit("SETPROP", m.name); emit("POP"); }
     for (const cls of chain) for (const fld of cls.sfields) { emit("LOAD", co); expr(fld.init); emit("SETPROP", fld.name); emit("POP"); } // init runs code
     const accs = new Map();
     for (const cls of chain) for (const a of cls.saccessors) { const e = accs.get(a.name) || {}; e[a.kind] = { cls, info: cls.compiled[`static ${a.kind} ${a.name}`] }; accs.set(a.name, e); }
@@ -198,7 +195,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     function readUse(idNode) {
       const id = bindingOf.get(idNode);
       if (id == null) {
-        if (topFns.has(idNode.text)) { compileTop(idNode.text); emit("MAKECLOSURE", idNode.text, []); return; }
+        if (topFns.has(idNode.text)) { compileTop(idNode.text); emit("MAKECLOSURE", idNode.text, [], generatorFns.has(idNode.text)); return; }
         if (classes.has(idNode.text)) { classObject(idNode.text); return; }  // bare `ClassName` -> the class object
         if (idNode.text === "undefined") { emit("PUSH", undefined); return; }
         if (idNode.text === "NaN") { emit("PUSH", NaN); return; }
@@ -240,7 +237,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isArrayBindingPattern(pattern)) { pattern.elements.forEach((el, i) => { if (ts.isOmittedExpression(el)) return; emit("LOAD", srcSlot); emit("PUSH", i); emit("INDEX"); if (ts.isIdentifier(el.name)) bindStackTop(el.name); else { const t = tempSlot(); emit("STORE", t); bindPattern(el.name, t); } }); return; }
       fail(pattern, "unsupported binding pattern");
     }
-    function closureOf(fnNode) { const childName = `${name}$${gen++}`; const child = compileFn(fnNode, childName); out[childName] = child; emit("MAKECLOSURE", childName, child.freeIds.map(provide)); }
+    function closureOf(fnNode) { const childName = `${name}$${gen++}`; const child = compileFn(fnNode, childName); out[childName] = child; emit("MAKECLOSURE", childName, child.freeIds.map(provide), !!fnNode.asteriskToken); }
 
     function optChain(node) {                                   // `?.` chain with short-circuit to the chain end
       const end = label("oc");
@@ -273,7 +270,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const chain = []; for (let c = rec; c; c = c.superName ? compileClass(c.superName) : null) chain.unshift(c); // base-first
         const inst = tempSlot(); emit("NEWOBJ"); emit("STORE", inst);
         emit("LOAD", inst); emit("PUSH", chain.map((c) => c.name)); emit("SETPROP", "__class__"); emit("POP"); // tag for instanceof (base..derived)
-        for (const cls of chain) for (const m of cls.methods) { const info = cls.compiled[m.name]; emit("LOAD", inst); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.thisId ? ["L", inst] : provide(id)))); emit("SETPROP", m.name); emit("POP"); } // derived overrides base
+        for (const cls of chain) for (const m of cls.methods) { const info = cls.compiled[m.name]; emit("LOAD", inst); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.thisId ? ["L", inst] : provide(id))), !!m.node.asteriskToken); emit("SETPROP", m.name); emit("POP"); } // derived overrides base
         const accs = new Map(); // name -> { get?: {cls,info}, set?: {cls,info} }, derived overriding base
         for (const cls of chain) for (const a of cls.accessors) { const e = accs.get(a.name) || {}; e[a.kind] = { cls, info: cls.compiled[`${a.kind} ${a.name}`] }; accs.set(a.name, e); }
         if (accs.size) {                                            // build the instance's __accessors__ table (closures capture this)
@@ -402,7 +399,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const resName = `${callee.expression.getText(sf)}.${callee.name.text}`;
         if (resourceSet.has(resName)) { node.arguments.forEach((a) => expr(a)); emit("RES", resName, node.arguments.length); return true; }
         const m = callee.name.text;
-        if (m === "next" && node.arguments.length <= 1) { expr(callee.expression); node.arguments[0] ? expr(node.arguments[0]) : emit("PUSH", undefined); emit("GENNEXT"); return true; } // it.next(v)
+        if ((m === "next" || m === "return" || m === "throw") && node.arguments.length <= 1) { expr(callee.expression); node.arguments[0] ? expr(node.arguments[0]) : emit("PUSH", undefined); emit(m === "next" ? "GENNEXT" : m === "return" ? "GENRET" : "GENTHROW"); return true; } // it.next/return/throw(v)
         if (m === "push") { expr(callee.expression); expr(node.arguments[0]); emit("ARRPUSH"); return false; }
         if (HOF.has(m)) return hof(callee.expression, m, node.arguments);
         if (PLAIN_METHODS.has(m)) { expr(callee.expression); node.arguments.forEach((a) => expr(a)); emit("CALLM", m, node.arguments.length); return true; }
@@ -410,7 +407,6 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       }
       if (ts.isIdentifier(callee) && bindingOf.get(callee) == null && !topFns.has(callee.text) && resourceSet.has(callee.text)) { node.arguments.forEach((a) => expr(a)); emit("RES", callee.text, node.arguments.length); return true; }
       if (ts.isIdentifier(callee) && callee.text === "BigInt" && bindingOf.get(callee) == null && !topFns.has(callee.text)) { expr(node.arguments[0]); emit("TOBIG"); return true; } // BigInt(x) conversion
-      if (ts.isIdentifier(callee)) { const bid = bindingOf.get(callee); if ((bid == null && generatorFns.has(callee.text)) || (bid != null && generatorBindings.has(bid))) { readUse(callee); node.arguments.forEach((a) => expr(a)); emit("GENMAKE", node.arguments.length); return true; } } // gen() -> iterator (top-level or nested function*)
       return closureCall(callee, node.arguments);
     }
     function closureCall(callee, args) {
@@ -435,7 +431,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isBlock(node)) return node.statements.forEach(stmt);
       if (ts.isFunctionDeclaration(node)) { // nested fn decl: fill the pre-created cell with the closure
         const childName = `${name}$${gen++}`; const child = compileFn(node, childName); out[childName] = child;
-        emit("LOAD", slotOf.get(bindingOf.get(node.name))); emit("MAKECLOSURE", childName, child.freeIds.map(provide)); emit("SETPROP", "v"); emit("POP");
+        emit("LOAD", slotOf.get(bindingOf.get(node.name))); emit("MAKECLOSURE", childName, child.freeIds.map(provide), !!node.asteriskToken); emit("SETPROP", "v"); emit("POP");
         return;
       }
       if (ts.isVariableStatement(node)) { for (const d of node.declarationList.declarations) declOne(d); return; }
@@ -517,6 +513,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         emit("LOAD", iter); emit("ITERNEXT");                     // -> value, done
         emit("JMPF", body); emit("POP"); emit("JMP", end);        // done -> drop value, exit
         mark(body);                                               // stack: [value]
+        if (node.awaitModifier) emit("AWAIT");                    // `for await`: await each value (identity for a plain value)
         const decl = node.initializer.declarations[0];
         if (ts.isIdentifier(decl.name)) bindStackTop(decl.name); else { const t = tempSlot(); emit("STORE", t); bindPattern(decl.name, t); }
         cf.push({ loop: true, brk: end, cont: step, name: lbl }); stmt(node.statement); cf.pop();

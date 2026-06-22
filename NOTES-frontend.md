@@ -254,9 +254,30 @@ Generators, the on-thesis one: a generator's state IS our continuation frame, so
   gap as async.
 Verified vs eval (probe-realts): range/fib via for-of, two-way echo via next(),
 yield* delegation with return value.
-Deferred tail (4d, noted): generator METHODS (`*m()` — needs call-site knowledge
-of the receiver's class), `.return()`/`.throw()` + finally-on-abandon, async
-generators (`for await`), spread `[...gen()]` (APPENDALL assumes a host-iterable).
+## #4 step 17 (done — generator tail; completes generators)
+Closed out the 4d tail:
+- generator METHODS (`*m()`, `static *m()`, `async *m()`): solved by marking the
+  CLOSURE as a generator (MAKECLOSURE 4th arg) and having CALLV/CALLVS build the
+  iterator when `callee.gen`. This replaced GENMAKE and unified top-level / nested
+  / method / `const g = gen; g()` — no call-site type knowledge needed.
+- `.return(v)`: GENRET — injects a sentinel that the finally machinery propagates
+  back out (carrying v), so FINALLY-ON-ABANDON runs; a finally that returns/throws
+  overrides. `.throw(e)`: GENTHROW — injects e at the suspension point (caught by
+  an in-generator try/catch -> may yield again; else propagates to the caller).
+  Both fall back to a plain `.return`/`.throw` method call for non-generators.
+- spread over generators: APPENDALL drives the iterator (so `[...gen()]` and
+  `f(...gen())` work).
+- async generators: `async function*` is already a generator (asterisk) whose body
+  has AWAIT ops; added `for await` (awaits each value — identity for a plain/
+  resolved value). Verified vs Node's real async generators.
+Remaining frontier (one, honest): a GENUINE async resource awaited *inside* a
+generator, suspending to the host mid-iteration. genAdvance drives the generator
+on a recursive run(); a Suspend there carries the generator's frames, not the
+outer continuation, so the two would need to be composed/linked and resumed in
+order (the outer op GENNEXT/ITERNEXT becoming a resumable suspension point). The
+local case (await of plain/resolved values) works; cross-tier migration of an
+*outer* continuation that merely *holds* a paused generator also works (§J). It's
+mid-generator host-suspension specifically that's unbuilt.
 
 ## Next real gap (surfaced building generators): BLOCK SCOPING
 Scoping is function-scoped, so two same-named block-locals in one function collide

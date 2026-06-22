@@ -235,6 +235,13 @@ export function run(tier, frames, host) {
       if (frames.length === 0) throw new WasoUncaught(v);
     }
   };
+  const makeGen = (callee, args) => ({ __gen__: true, frames: [{ fn: callee.fn, ip: 0, locals: args, stack: [], env: callee.env, handlers: [] }], done: false, started: false });
+  // Unwind a generator's own frames to its nearest handler, seeding the thrown
+  // value (for .throw()/.return() injection). Returns false if nothing caught it.
+  const unwindToHandler = (gframes, v) => {
+    while (gframes.length) { const cur = gframes[gframes.length - 1]; if (cur.handlers && cur.handlers.length) { const h = cur.handlers.pop(); cur.stack.length = h.sp; cur.stack.push(v); cur.ip = h.ip; return true; } gframes.pop(); }
+    return false;
+  };
   // Drive a generator's own frame stack to the next yield (a recursive run on its
   // frames; YIELD unwinds back here) or to completion (RET past its base frame).
   const genAdvance = (g, sendVal) => {
@@ -243,6 +250,28 @@ export function run(tier, frames, host) {
     g.started = true;
     try { const r = run(tier, g.frames, host); g.done = true; return { value: r.value, done: true }; }
     catch (e) { if (e instanceof Yielded) return { value: e.value, done: false }; throw e; } // Suspend/Miss propagate (mid-gen migration)
+  };
+  // it.return(v): complete the generator, running any active finally blocks. Inject
+  // a sentinel that the finally machinery propagates back out (carrying v); a finally
+  // that itself returns/throws overrides (real JS semantics).
+  const genReturn = (g, v) => {
+    if (g.done || !g.started) { g.done = true; return { value: v, done: true }; }
+    if (!unwindToHandler(g.frames, { __genret__: v })) { g.done = true; return { value: v, done: true }; } // no finally -> just complete
+    try { const r = run(tier, g.frames, host); g.done = true; return { value: r.value, done: true }; } // finally ran and fell through / overrode
+    catch (e) {
+      g.done = true;
+      if (e instanceof Yielded) { g.done = false; return { value: e.value, done: false }; }              // finally yielded
+      if (e instanceof WasoUncaught && e.value && e.value.__genret__ !== undefined) return { value: e.value.__genret__, done: true };
+      throw e;                                                                                            // finally threw -> propagate to caller
+    }
+  };
+  // it.throw(e): inject e at the suspension point. Caught by a try/catch in the
+  // generator -> it may yield again; otherwise propagates to the caller.
+  const genThrow = (g, e) => {
+    if (!g.started || g.done) { g.done = true; throw new WasoUncaught(e); }
+    if (!unwindToHandler(g.frames, e)) { g.done = true; throw new WasoUncaught(e); } // uncaught in generator -> caller
+    try { const r = run(tier, g.frames, host); g.done = true; return { value: r.value, done: true }; }
+    catch (err) { if (err instanceof Yielded) return { value: err.value, done: false }; g.done = true; throw err; }
   };
   while (true) {
     const f = frames[frames.length - 1];
@@ -293,9 +322,9 @@ export function run(tier, frames, host) {
       case "JMP":    f.ip = ins[1]; break;
       case "JMPF":   { const c = f.stack.pop(); f.ip = c ? f.ip + 1 : ins[1]; break; }
       case "LOADENV": f.stack.push(f.env[ins[1]]); f.ip++; break;
-      case "MAKECLOSURE": {                                   // ["MAKECLOSURE", fn, [["L"|"E", idx]...]]
+      case "MAKECLOSURE": {                                   // ["MAKECLOSURE", fn, [["L"|"E", idx]...], isGenerator?]
         const env = ins[2].map(([kind, i]) => (kind === "L" ? f.locals[i] : f.env[i]));
-        f.stack.push({ __waso_closure__: true, fn: ins[1], env });
+        f.stack.push({ __waso_closure__: true, fn: ins[1], env, gen: !!ins[3] });
         f.ip++; break;
       }
       case "CALLV": {                                          // call a closure value: ["CALLV", argc]
@@ -305,6 +334,7 @@ export function run(tier, frames, host) {
         const callee = f.stack.pop();
         if (!isClosure(callee)) throw new Error("CALLV on non-closure");
         f.ip++; // caller resumes after the CALLV
+        if (callee.gen) { f.stack.push(makeGen(callee, args)); break; } // a generator call yields an iterator, doesn't run the body
         frames.push({ fn: callee.fn, ip: 0, locals: args, stack: [], env: callee.env, handlers: [] }); // no padding: a missing param LOADs as undefined; rest gathering needs exact args
         break;
       }
@@ -313,11 +343,12 @@ export function run(tier, frames, host) {
         const callee = f.stack.pop();
         if (!isClosure(callee)) throw new Error("CALLVS on non-closure");
         f.ip++;
+        if (callee.gen) { f.stack.push(makeGen(callee, argsArr.slice())); break; }
         frames.push({ fn: callee.fn, ip: 0, locals: argsArr.slice(), stack: [], env: callee.env, handlers: [] });
         break;
       }
       case "GATHERREST": { const r = ins[1]; const rest = f.locals.slice(r); f.locals.length = r; f.locals[r] = rest; f.ip++; break; } // rest param: gather extra args into an array
-      case "APPENDALL": { const src = f.stack.pop(); const tgt = f.stack[f.stack.length - 1]; for (const e of src) tgt.push(e); f.ip++; break; } // array spread
+      case "APPENDALL": { const src = f.stack.pop(); const tgt = f.stack[f.stack.length - 1]; if (isGenerator(src)) { while (true) { const r = genAdvance(src, undefined); if (r.done) break; tgt.push(r.value); } } else for (const e of src) tgt.push(e); f.ip++; break; } // array/generator spread
       case "ASSIGNALL": { const src = f.stack.pop(); Object.assign(f.stack[f.stack.length - 1], src); f.ip++; break; }                         // object spread
       case "CALLM": {                                          // call a host method: ["CALLM", name, argc] (stdlib intrinsics)
         const argc = ins[2];
@@ -356,13 +387,6 @@ export function run(tier, frames, host) {
         f.ip++; break; // plain value: identity
       }
       case "YIELD":  { const v = f.stack.pop(); f.ip++; throw new Yielded(v); }   // pause this generator; resume pushes the sent value
-      case "GENMAKE": {                                         // gen(args) -> an iterator wrapping a fresh paused frame stack
-        const argc = ins[1]; const args = [];
-        for (let k = 0; k < argc; k++) args.unshift(f.stack.pop());
-        const callee = f.stack.pop();                           // a closure: carries fn + env (env=[] top-level, `this`+captures for a method)
-        f.stack.push({ __gen__: true, frames: [{ fn: callee.fn, ip: 0, locals: args, stack: [], env: callee.env, handlers: [] }], done: false, started: false });
-        f.ip++; break;
-      }
       case "ITER": { const v = d(f.stack.pop()); f.stack.push(Array.isArray(v) ? { __it__: "arr", a: v, i: 0 } : v); f.ip++; break; } // normalize for-of source
       case "ITERNEXT": {                                        // -> push value, then done (bool)
         const it = f.stack.pop();
@@ -376,6 +400,18 @@ export function run(tier, frames, host) {
         const m = o && o.next;
         if (isClosure(m)) { frames.push({ fn: m.fn, ip: 0, locals: [sendVal], stack: [], env: m.env, handlers: [] }); break; } // user iterator object
         f.stack.push(o.next(sendVal)); break;                   // host method
+      }
+      case "GENRET": {                                          // it.return(v) -> { value, done:true }, running finallys
+        const v = f.stack.pop(); const o = d(f.stack.pop()); f.ip++;
+        if (isGenerator(o)) { let r; try { r = genReturn(o, v); } catch (e) { if (e instanceof WasoUncaught) { doThrow(e.value); break; } throw e; } f.stack.push({ value: r.value, done: r.done }); break; }
+        const m = o && o.return; if (isClosure(m)) { frames.push({ fn: m.fn, ip: 0, locals: [v], stack: [], env: m.env, handlers: [] }); break; }
+        f.stack.push(o && o.return ? o.return(v) : { value: v, done: true }); break;
+      }
+      case "GENTHROW": {                                        // it.throw(e) -> caught in gen (may yield) or propagates to caller
+        const e = f.stack.pop(); const o = d(f.stack.pop()); f.ip++;
+        if (isGenerator(o)) { let r; try { r = genThrow(o, e); } catch (ex) { if (ex instanceof WasoUncaught) { doThrow(ex.value); break; } throw ex; } f.stack.push({ value: r.value, done: r.done }); break; }
+        const m = o && o.throw; if (isClosure(m)) { frames.push({ fn: m.fn, ip: 0, locals: [e], stack: [], env: m.env, handlers: [] }); break; }
+        if (o && o.throw) { f.stack.push(o.throw(e)); break; } doThrow(e); break;
       }
       case "MKREJECT": { f.stack.push({ __waso_reject__: true, value: f.stack.pop() }); f.ip++; break; } // Promise.reject(e)
       case "THROW": { doThrow(f.stack.pop()); break; }

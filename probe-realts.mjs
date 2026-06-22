@@ -231,6 +231,41 @@ function* outer() { yield 0; const r = yield* inner(); yield r; yield 3; }
 function collect(it) { const out = []; for (const v of it) { out.push(v); } return out; }
 function go() { return collect(outer()); }`, "go", []);
 
+check("generator methods + spread [...gen()] + f(...gen())",
+`class Range {
+  constructor(a, b) { this.a = a; this.b = b; }
+  *values() { for (let i = this.a; i < this.b; i++) { yield i; } }   // generator method (this-bound)
+}
+function sum3(a, b, c) { return a + b + c; }
+function go() {
+  const r = new Range(1, 4);
+  const viaForOf = [];
+  for (const v of r.values()) { viaForOf.push(v); }
+  const spread = [0, ...r.values(), 9];           // spread a fresh generator
+  const called = sum3(...r.values());             // spread into a call
+  return { viaForOf, spread, called };
+}`, "go", []);
+
+check("generator .return() runs finally on abandon; .throw() caught inside",
+`function* withCleanup(log) {
+  try { yield 1; yield 2; yield 3; } finally { log.push("cleanup"); }
+}
+function* catcher() {
+  try { yield "a"; } catch (e) { yield "caught:" + e; } yield "after";
+}
+function go() {
+  const log = [];
+  const g = withCleanup(log);
+  const first = g.next().value;        // 1
+  const ret = g.return("STOP");        // runs finally -> { value:"STOP", done:true }
+  const done = g.next();               // { value: undefined, done: true }
+  const c = catcher();
+  const c0 = c.next().value;           // "a"
+  const c1 = c.throw("BOOM").value;    // "caught:BOOM"
+  const c2 = c.next().value;           // "after"
+  return { first, ret, done, log, c0, c1, c2 };
+}`, "go", []);
+
 check("for-in + computed object keys + delete",
 `function go(o) {
   const out = {};
@@ -427,6 +462,16 @@ async function checkAsync(name, src, entry, args) {
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}`);
   if (!ok) { pass = false; if (err) console.log(`        error: ${err.message}`); else console.log(`        waso=${J(got)}  node=${J(ref)}`); }
 }
+
+await checkAsync("async generator + for await (yield + await compose)",
+`async function* numbers(n) {
+  for (let i = 0; i < n; i++) { const v = await Promise.resolve(i * 10); yield v; }
+}
+async function go() {
+  const out = [];
+  for await (const x of numbers(4)) { out.push(x + 1); }
+  return out;
+}`, "go", []);
 
 await checkAsync("async/await between functions (no Promise object)",
 `async function double(x) { return x * 2; }
