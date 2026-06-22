@@ -226,6 +226,12 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     const envIdx = new Map(); const envIds = [];
     const capture = (id) => { if (!envIdx.has(id)) { envIdx.set(id, envIds.length); envIds.push(id); } return envIdx.get(id); };
     const provide = (id) => (slotOf.has(id) ? ["L", slotOf.get(id)] : ["E", capture(id)]);
+    // `this` model: a non-arrow fn reads its receiver from the call frame (LOADTHIS),
+    // falling back to its home this (env-captured instance, for ctor/accessor/super
+    // paths that don't set a receiver). Arrows capture `this` lexically. `thisFwd` is
+    // the id a child arrow uses to reference THIS function's `this`.
+    const isArrow = node && ts.isArrowFunction(node);
+    let _thisFwd = opts.thisId; const thisFwd = () => (_thisFwd != null ? _thisFwd : (_thisFwd = thisCounter--));
     const asm = []; const posMap = new Map(); let lab = 0; let here = node;
     const emit = (...x) => { asm.push(x); posMap.set(x, here ? lineColOf(here) : null); };
     const mark = (l) => asm.push(l);
@@ -373,7 +379,12 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       }
       fail(pattern, "unsupported binding pattern");
     }
-    function closureOf(fnNode) { const childName = `${name}$${gen++}`; const child = compileFn(fnNode, childName, ts.isArrowFunction(fnNode) ? { thisId: opts.thisId, superName: opts.superName } : {}); out[childName] = child; emit("MAKECLOSURE", childName, child.freeIds.map(provide), !!fnNode.asteriskToken); } // arrows capture lexical this/super
+    function closureOf(fnNode) {
+      const childName = `${name}$${gen++}`; const isA = ts.isArrowFunction(fnNode);
+      const child = compileFn(fnNode, childName, isA ? { thisId: thisFwd(), superName: opts.superName } : {}); out[childName] = child; // arrows capture lexical this/super
+      const fwd = _thisFwd; // the id arrows use for our `this`; a non-arrow owner snapshots its dynamic this as ["T"], an arrow owner forwards its (already-lexical) captured this
+      emit("MAKECLOSURE", childName, child.freeIds.map((id) => (isA && !isArrow && id === fwd ? ["T", opts.thisId != null ? capture(opts.thisId) : -1] : provide(id))), !!fnNode.asteriskToken);
+    }
 
     function optChain(node) {                                   // `?.` chain with short-circuit to the chain end
       const end = label("oc");
@@ -409,7 +420,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (node.kind === ts.SyntaxKind.TrueKeyword) { emit("PUSH", true); return true; }
       if (node.kind === ts.SyntaxKind.FalseKeyword) { emit("PUSH", false); return true; }
       if (node.kind === ts.SyntaxKind.NullKeyword) { emit("PUSH", null); return true; }
-      if (node.kind === ts.SyntaxKind.ThisKeyword) { if (opts.thisId == null) { emit("PUSH", undefined); return true; } emit("LOADENV", capture(opts.thisId)); return true; } // module/regular-fn `this` is undefined (strict)
+      if (node.kind === ts.SyntaxKind.ThisKeyword) { if (isArrow) { if (opts.thisId == null) { emit("PUSH", undefined); return true; } emit("LOADENV", capture(opts.thisId)); return true; } emit("LOADTHIS", opts.thisId != null ? capture(opts.thisId) : -1); return true; } // arrow: lexical; else dynamic receiver, home this as fallback
       if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.NewKeyword) { if (opts.ctorOf) classObject(opts.ctorOf); else emit("PUSH", undefined); return true; } // new.target: the class in a ctor, else undefined
       if (ts.isNewExpression(node)) {
         if (ts.isIdentifier(node.expression) && bindingOf.get(node.expression) == null && CTOR_GLOBALS.has(node.expression.text)) { const a = node.arguments || []; a.forEach((x) => expr(x)); emit("CTORG", node.expression.text, a.length); return true; } // new Map/Set/Date/...

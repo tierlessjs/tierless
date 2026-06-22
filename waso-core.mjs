@@ -128,7 +128,8 @@ export function serializeContinuation(cont, sourceTier) {
     const s0 = roots.length; for (const x of f.stack) roots.push(x);
     const e0 = roots.length; for (const x of env) roots.push(x);      // closure env travels too
     let gb; if (f.gb) { gb = roots.length; roots.push(f.gb); }        // generator boundary: ship the genObj by ref (identity-shared with the `it` local)
-    return { fn: f.fn, ip: f.ip, nl: f.locals.length, ns: f.stack.length, ne: env.length, l0, s0, e0, gb, mode: f.mode, handlers: (f.handlers || []).map((h) => ({ ip: h.ip, sp: h.sp })) };
+    let tv; if (f.thisVal != null) { tv = roots.length; roots.push(f.thisVal); } // dynamic `this` receiver travels (identity-shared with locals/env)
+    return { fn: f.fn, ip: f.ip, nl: f.locals.length, ns: f.stack.length, ne: env.length, l0, s0, e0, gb, tv, mode: f.mode, handlers: (f.handlers || []).map((h) => ({ ip: h.ip, sp: h.sp })) };
   });
   let pending = null;
   if (cont.pending && cont.pending.name !== undefined) {        // resource boundary
@@ -154,6 +155,7 @@ export function deserializeContinuation(wire) {
     env: vals.slice(f.e0, f.e0 + f.ne),
     handlers: (f.handlers || []).map((h) => ({ ip: h.ip, sp: h.sp })),
     ...(f.gb !== undefined ? { gb: vals[f.gb], mode: f.mode } : {}),  // restore generator boundary (same genObj instance as `it`)
+    ...(f.tv !== undefined ? { thisVal: vals[f.tv] } : {}),           // restore dynamic `this`
   }));
   let pending = null;
   if (wire.pending && wire.pending.name !== undefined)
@@ -227,6 +229,9 @@ function binop(op, a, b) {
     default: throw new Error("bad binop " + op);
   }
 }
+// Operators that ToPrimitive their operands (objects coerce via valueOf/toString).
+// Excludes ===/!==/==/!= (identity/abstract-eq) and bitwise/shift.
+const COERCING = new Set(["+", "-", "*", "/", "%", "**", "<", "<=", ">", ">="]);
 
 export function run(tier, frames, host) {
   const d = (x) => {
@@ -256,11 +261,32 @@ export function run(tier, frames, host) {
     for (const fr of g.frames) frames.push(fr);
     g.frames = null;                                          // now live on the main stack (YIELD saves them back)
   };
-  const makeGen = (callee, args) => ({ __gen__: true, frames: [{ fn: callee.fn, ip: 0, locals: args, stack: [], env: callee.env, handlers: [] }], done: false, started: false });
-  const callClosure = (cl, args) => run(tier, [{ fn: cl.fn, ip: 0, locals: args.slice(), stack: [], env: cl.env, handlers: [] }], host).value; // run a non-suspending closure to completion (for synchronous drains)
+  const makeGen = (callee, args, thisVal) => ({ __gen__: true, frames: [{ fn: callee.fn, ip: 0, locals: args, stack: [], env: callee.env, handlers: [], thisVal }], done: false, started: false });
+  // A bound closure (Function.prototype.bind) fixes `this` and prepends args; binding
+  // is flattened so `target` is never itself bound. `enter` resolves binding, then
+  // either pushes a call frame (returning undefined) or returns a generator object.
+  const bindClosure = (cl, bthis, bargs) => (cl.bound ? { __waso_closure__: true, bound: true, target: cl.target, bthis: cl.bthis, bargs: cl.bargs.concat(bargs), gen: cl.gen } : { __waso_closure__: true, bound: true, target: cl, bthis, bargs, gen: cl.gen });
+  const enter = (callee, args, thisVal) => {
+    if (callee.bound) { args = callee.bargs.concat(args); thisVal = callee.bthis; callee = callee.target; }
+    if (callee.gen) return makeGen(callee, args, thisVal);
+    frames.push({ fn: callee.fn, ip: 0, locals: args, stack: [], env: callee.env, handlers: [], thisVal });
+    return undefined;
+  };
+  const callClosure = (cl, args, thisVal) => { if (cl.bound) { args = cl.bargs.concat(args); thisVal = cl.bthis; cl = cl.target; } return run(tier, [{ fn: cl.fn, ip: 0, locals: args.slice(), stack: [], env: cl.env, handlers: [], thisVal }], host).value; }; // run a non-suspending closure to completion (for synchronous drains)
+  // fn.call(thisArg, ...a) / fn.apply(thisArg, aArr) / fn.bind(thisArg, ...partial)
+  const fnProto = (cl, which, args) => (which === "bind" ? bindClosure(cl, args[0], args.slice(1)) : enter(cl, which === "apply" ? (args[1] != null ? args[1].slice() : []) : args.slice(1), args[0]));
   // Bridge a Waso closure into a real host function so host methods that take a
   // callback (Array.from mapFn, String.replace fn, Array.sort comparator, ...) work.
   const hostArgs = (args) => args.map((a) => (isClosure(a) ? (...xs) => callClosure(a, xs) : a));
+  // ToPrimitive for a Waso instance: arithmetic/relational/+ coerce objects by
+  // calling their own valueOf then toString closures (hint number/default order).
+  // Host objects (Map/Set/Date) and plain data fall through to native coercion.
+  const toPrim = (v) => {
+    if (v === null || typeof v !== "object") return v;
+    const vo = v.valueOf; if (isClosure(vo)) { const r = callClosure(vo, []); if (r === null || typeof r !== "object") return r; } // `this` is baked into the method's env
+    const ts = v.toString; if (isClosure(ts)) { const r = callClosure(ts, []); if (r === null || typeof r !== "object") return r; }
+    return v;
+  };
   // Unwind a generator's own frames to its nearest handler, seeding the thrown
   // value (for .throw()/.return() injection). Returns false if nothing caught it.
   const unwindToHandler = (gframes, v) => {
@@ -364,12 +390,13 @@ export function run(tier, frames, host) {
       case "INDEX":  { const a = d(f.stack[f.stack.length - 2]); const i = f.stack[f.stack.length - 1]; f.stack.length -= 2; const acc = a != null && a.__accessors__ && a.__accessors__[i]; if (acc && acc.get) { f.ip++; frames.push({ fn: acc.get.fn, ip: 0, locals: [], stack: [], env: acc.get.env, handlers: [] }); break; } f.stack.push(a[i]); f.ip++; break; } // computed access fires a getter
       case "SETINDEX": { const a = d(f.stack[f.stack.length - 3]); const i = f.stack[f.stack.length - 2]; const v = f.stack[f.stack.length - 1]; f.stack.length -= 3; const acc = a != null && a.__accessors__ && a.__accessors__[i]; if (acc && acc.set) { f.ip++; frames.push({ fn: acc.set.fn, ip: 0, locals: [v], stack: [], env: acc.set.env, handlers: [] }); break; } a[i] = v; f.ip++; break; }
       case "SETHIDDEN": { const o = f.stack[f.stack.length - 2]; const v = f.stack[f.stack.length - 1]; f.stack.length -= 2; Object.defineProperty(o, ins[1], { value: v, writable: true, enumerable: false, configurable: true }); f.stack.push(o); f.ip++; break; } // non-enumerable own prop (instance method/tag)
-      case "BIN":    { const b = f.stack.pop(); const a = f.stack.pop(); f.stack.push(binop(ins[1], a, b)); f.ip++; break; }
+      case "BIN":    { let b = f.stack.pop(); let a = f.stack.pop(); if (COERCING.has(ins[1])) { a = toPrim(a); b = toPrim(b); } f.stack.push(binop(ins[1], a, b)); f.ip++; break; } // ToPrimitive only for coercing ops (not ===/!==/==/!=/&|^ identity-or-int)
       case "JMP":    f.ip = ins[1]; break;
       case "JMPF":   { const c = f.stack.pop(); f.ip = c ? f.ip + 1 : ins[1]; break; }
       case "LOADENV": f.stack.push(f.env[ins[1]]); f.ip++; break;
-      case "MAKECLOSURE": {                                   // ["MAKECLOSURE", fn, [["L"|"E", idx]...], isGenerator?]
-        const env = ins[2].map(([kind, i]) => (kind === "L" ? f.locals[i] : f.env[i]));
+      case "LOADTHIS": f.stack.push(f.thisVal != null ? f.thisVal : (ins[1] >= 0 ? f.env[ins[1]] : undefined)); f.ip++; break; // dynamic `this`: call-site receiver, else the lexical/home this
+      case "MAKECLOSURE": {                                   // ["MAKECLOSURE", fn, [["L"|"E"|"T", idx]...], isGenerator?]
+        const env = ins[2].map(([kind, i]) => (kind === "L" ? f.locals[i] : kind === "T" ? (f.thisVal != null ? f.thisVal : (i >= 0 ? f.env[i] : undefined)) : f.env[i])); // "T": snapshot current dynamic this for an arrow's lexical capture
         f.stack.push({ __waso_closure__: true, fn: ins[1], env, gen: !!ins[3] });
         f.ip++; break;
       }
@@ -380,8 +407,7 @@ export function run(tier, frames, host) {
         const callee = f.stack.pop();
         if (!isClosure(callee)) throw new Error("CALLV on non-closure");
         f.ip++; // caller resumes after the CALLV
-        if (callee.gen) { f.stack.push(makeGen(callee, args)); break; } // a generator call yields an iterator, doesn't run the body
-        frames.push({ fn: callee.fn, ip: 0, locals: args, stack: [], env: callee.env, handlers: [] }); // no padding: a missing param LOADs as undefined; rest gathering needs exact args
+        const g = enter(callee, args, undefined); if (g !== undefined) f.stack.push(g); // a generator call yields an iterator, doesn't run the body; plain call has no receiver
         break;
       }
       case "CALLVS": {                                         // call a closure with a spread args array: ["CALLVS"]
@@ -389,8 +415,7 @@ export function run(tier, frames, host) {
         const callee = f.stack.pop();
         if (!isClosure(callee)) throw new Error("CALLVS on non-closure");
         f.ip++;
-        if (callee.gen) { f.stack.push(makeGen(callee, argsArr.slice())); break; }
-        frames.push({ fn: callee.fn, ip: 0, locals: argsArr.slice(), stack: [], env: callee.env, handlers: [] });
+        const g = enter(callee, argsArr.slice(), undefined); if (g !== undefined) f.stack.push(g);
         break;
       }
       case "GATHERREST": { const r = ins[1]; const rest = f.locals.slice(r); f.locals.length = r; f.locals[r] = rest; f.ip++; break; } // rest param: gather extra args into an array
@@ -415,14 +440,18 @@ export function run(tier, frames, host) {
       case "CALLMS": { const argsArr = f.stack.pop(); const o = d(f.stack.pop()); f.stack.push(o[ins[1]](...hostArgs(argsArr))); f.ip++; break; } // host method, spread args
       case "CALLDYN": case "CALLDYNS": {                       // obj[key](args): dynamic dispatch, this = obj
         let args; if (ins[0] === "CALLDYNS") args = f.stack.pop().slice(); else { args = []; for (let k = 0; k < ins[1]; k++) args.unshift(f.stack.pop()); }
-        const key = f.stack.pop(); const o = d(f.stack.pop()); const m = o[key]; f.ip++;
-        if (isClosure(m)) { if (m.gen) { f.stack.push(makeGen(m, args)); break; } frames.push({ fn: m.fn, ip: 0, locals: args, stack: [], env: m.env, handlers: [] }); break; }
+        const key = f.stack.pop(); const o = d(f.stack.pop()); f.ip++;
+        if (isClosure(o) && (key === "call" || key === "apply" || key === "bind")) { const g = fnProto(o, key, args); if (g !== undefined) f.stack.push(g); break; } // Function.prototype.call/apply/bind on a closure
+        const m = o[key];
+        if (isClosure(m)) { const g = enter(m, args, o); if (g !== undefined) f.stack.push(g); break; } // this = receiver
         f.stack.push(m.apply(o, hostArgs(args))); break;        // host method (arr[Symbol.iterator](), etc.)
       }
       case "CALLMETHOD": case "CALLMETHODS": {                   // obj.m(args): dispatch user-closure method vs host method
         let args; if (ins[0] === "CALLMETHODS") args = f.stack.pop().slice(); else { args = []; for (let k = 0; k < ins[2]; k++) args.unshift(f.stack.pop()); }
-        const o = d(f.stack.pop()); const m = o[ins[1]]; f.ip++;
-        if (isClosure(m)) { if (m.gen) { f.stack.push(makeGen(m, args)); break; } frames.push({ fn: m.fn, ip: 0, locals: args, stack: [], env: m.env, handlers: [] }); break; } // user method (closure captures this)
+        const o = d(f.stack.pop()); f.ip++;
+        if (isClosure(o) && (ins[1] === "call" || ins[1] === "apply" || ins[1] === "bind")) { const g = fnProto(o, ins[1], args); if (g !== undefined) f.stack.push(g); break; } // closure.call/apply/bind
+        const m = o[ins[1]];
+        if (isClosure(m)) { const g = enter(m, args, o); if (g !== undefined) f.stack.push(g); break; } // user method: this = receiver (call-site bound)
         f.stack.push(m.apply(o, hostArgs(args))); break;                  // host method (Map.set, Set.add, ...)
       }
       case "PUSHTRY": (f.handlers || (f.handlers = [])).push({ ip: ins[1], sp: f.stack.length }); f.ip++; break;

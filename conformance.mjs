@@ -173,6 +173,13 @@ await (async () => {
   await w("closure called after migration", `function adder(n){return x=>x+n;} async function go(){const add=adder(100);const y=await ckpt(5);return add(y);}`);
   await w("shared mutable cell survives, then mutated", `function mk(){let n=0;return {inc:()=>++n,get:()=>n};} async function go(){const c=mk();c.inc();await ckpt(0);c.inc();c.inc();return c.get();}`);
 
+  section("dynamic `this` & bound closures across the wire");
+  await w("borrowed method suspends mid-call, reads dynamic this after migration", `function read(){return this.n;} async function go(){const o2={n:42,read};await ckpt(0);return o2.read();}`);
+  await w("dynamic this resolved AFTER a checkpoint inside the method", `const o={n:7,async m(){const a=await ckpt(1);return this.n+a;}}; async function go(){const o2={n:100,m:o.m};return [await o.m(),await o2.m()];}`, "go", [], 2);
+  await w("bound closure created, migrated, then invoked", `function add(a,b){return this.k+a+b;} async function go(){const g=add.bind({k:10},1);await ckpt(0);return g(2);}`);
+  await w("arrow capturing dynamic this migrates and stays bound to the receiver", `const o={n:5,make(){return ()=>this.n;}}; async function go(){const o2={n:99,make:o.make};const f=o2.make();await ckpt(0);return f();}`);
+  await w("call/apply with this across a checkpoint", `function read(){return this.v;} async function go(){const a=await ckpt(1);return [read.call({v:a}),read.apply({v:a+1})];}`);
+
   section("classes & generators across the wire");
   await w("class instance migrates, methods still work", `class Acct{constructor(b){this.bal=b;}dep(n){this.bal+=n;return this.bal;}} async function go(){const a=new Acct(100);a.dep(50);await ckpt(0);return [a.dep(25),a instanceof Acct,JSON.stringify(a)];}`);
   await w("half-consumed generator migrates and keeps going", `function* nat(){let i=0;while(true)yield i++;} async function go(){const it=nat();const a=it.next().value;await ckpt(0);return [a,it.next().value,it.next().value];}`);
