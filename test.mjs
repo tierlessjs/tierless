@@ -9,6 +9,7 @@ const cases = [
   { file: "waso-wasm.mjs",           needs: ["matches plain JS (2000)? YES", "2 frame(s)"] },
   { file: "waso-wasm-2p-client.mjs", needs: ["matches plain JS (2000)? YES", "2 frame(s)", "Dataset never crossed the pipe? YES"] },
   { file: "waso-policy.mjs",         needs: ["informed rule-> FETCH", "verified correct"] },
+  { file: "bench-hn.mjs",            needs: ["2 rt", "identical 254-node threads? YES"] },
 ];
 
 // Build the wasm once up front.

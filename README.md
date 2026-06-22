@@ -40,6 +40,35 @@ ratio                          : ~978x smaller
 | `npm run wasm` | `waso-wasm.mjs` | **TypeScript → Waso IR → wasm**; the continuation is a slice of wasm linear memory (§4.2) |
 | `npm run wasm:2p` | `waso-wasm-2p-*.mjs` | the full stack: the linear-memory slice crosses a real pipe between two processes |
 | `npm run policy` | `waso-policy.mjs` | migrate-vs-fetch cost model with real measured sizes (§6) |
+| `npm run bench:hn` | `bench-hn.mjs` | **HN waterfall benchmark**: REST round trips vs continuation migration (`--real` for wall-clock) |
+
+### The benchmark (`npm run bench:hn`)
+
+The Hacker News thread shape is the canonical client-side waterfall: loading a
+thread means fetching the story, then each comment, then its children — one
+dependent request per node, with no "fetch the whole thread" API. The benchmark
+runs **one sequential traversal** under the runtime in two placements:
+
+- **REST** — the traversal stays on the client; every `api.item` is an RPC round
+  trip. O(nodes) sequential round trips.
+- **Waso** — the *same* traversal migrates to the server once and runs every
+  `api.item` where the API lives, shipping the assembled thread back. O(1).
+
+```
+                              round trips   latency
+REST (fetch each item)         254 rt       13208ms
+Waso (migrate once)              2 rt          608ms     = 21.7x faster
+level-parallel client (ref)      6 rt          312ms     (computed, hand-tuned)
+```
+
+The only difference is *where the code runs* — the traversal source is identical.
+This is the "minimal change to an existing app" story: the obvious sequential
+code an agent writes gets ~22x for free, no batching/resolvers/client
+orchestration. Honest caveat, printed by the benchmark: a hand-tuned
+level-parallel client (~312ms) would edge out this run, because the migrated
+traversal calls `api.item` *sequentially* on the server; closing that needs
+server-side concurrency (future work). The win shown is over the code people
+actually write.
 
 ## How it works
 
