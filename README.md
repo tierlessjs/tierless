@@ -41,6 +41,7 @@ ratio                          : ~978x smaller
 | `npm run wasm:2p` | `waso-wasm-2p-*.mjs` | the full stack: the linear-memory slice crosses a real pipe between two processes |
 | `npm run policy` | `waso-policy.mjs` | migrate-vs-fetch cost model with real measured sizes (§6) |
 | `npm run bench:hn` | `bench-hn.mjs` | **HN waterfall benchmark**: REST round trips vs continuation migration (`--real` for wall-clock) |
+| `npm run bench:sweep` | `bench-sweep.mjs` | the benchmark as a **scale curve** over thread size and RTT (writes `bench-sweep.csv`) |
 
 ### The benchmark (`npm run bench:hn`)
 
@@ -73,6 +74,22 @@ batching, resolvers, or client orchestration in the source. (The per-level
 concurrency assumes the server can fetch a level at once, which it can, being
 co-located with the data; the public per-item API the client is stuck with
 cannot.)
+
+`npm run bench:sweep` shows this as a curve, not a single point — round trips
+and latency as the thread grows and as RTT varies:
+
+```
+  nodes  depth │   REST (naive)      parallel client    Waso (migrate)  │  vs REST   vs client
+     10      2 │    10rt   520ms    3rt   156ms   2rt   106ms │      5x      1.5x
+    300      5 │   300rt   15.6s    6rt   312ms   2rt   112ms │    139x      2.8x
+  10000      9 │ 10000rt  520.0s   10rt   520ms   2rt   120ms │   4333x      4.3x
+```
+
+REST round trips grow O(nodes); the parallel client O(depth)≈log(nodes); Waso
+stays **2, flat**. So Waso's win vs naive grows without bound, and it holds
+~depth/2 even against the optimal client — and the gap widens as RTT rises,
+since Waso's cost is ~constant in round trips while both client strategies
+scale linearly with the network.
 
 ## How it works
 
