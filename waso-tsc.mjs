@@ -54,6 +54,7 @@ function resolveBindings(sf) {
   let next = 1;
   const bindingOf = new Map(), declFn = new Map(), bindingsByFn = new Map();
   const captured = new Set(), assigned = new Set(), forceBox = new Set();
+  const usesArguments = new Map();            // non-arrow fnNode -> its synthetic `arguments` binding id
   const isPropName = (node) => { const p = node.parent; return p && ((ts.isPropertyAccessExpression(p) && p.name === node) || (ts.isPropertyAssignment(p) && p.name === node) || (ts.isParameter(p) && p.name === node) || (ts.isVariableDeclaration(p) && p.name === node) || (ts.isBindingElement(p) && p.name === node) || (isFnLike(p) && p.name === node)); };
   const isWrite = (node) => { const p = node.parent; if (!p) return false; if (ts.isBinaryExpression(p) && p.left === node && (p.operatorToken.kind === ts.SyntaxKind.EqualsToken || COMPOUND.has(p.operatorToken.kind))) return true; if ((ts.isPostfixUnaryExpression(p) || ts.isPrefixUnaryExpression(p)) && p.operand === node) return true; return false; };
   const isLexical = (flags) => !!(flags & (ts.NodeFlags.Let | ts.NodeFlags.Const));
@@ -76,6 +77,14 @@ function resolveBindings(sf) {
       ts.forEachChild(n, rec);
     };
     if (fnNode.body) rec(fnNode.body);
+    // `arguments`: a non-arrow function that references it (directly or in a nested
+    // arrow) gets a synthetic binding; the prologue snapshots the passed args.
+    if (!ts.isArrowFunction(fnNode)) {
+      let uses = false;
+      const scan = (n) => { if (n !== fnNode && isFnLike(n) && !ts.isArrowFunction(n)) return; if (ts.isIdentifier(n) && n.text === "arguments" && !isPropName(n)) uses = true; ts.forEachChild(n, scan); };
+      if (fnNode.body) ts.forEachChild(fnNode.body, scan);
+      if (uses) { const id = next++; scope.names.set("arguments", id); declFn.set(id, fnNode); bindingsByFn.get(fnNode).push(id); usesArguments.set(fnNode, id); }
+    }
   };
   // block-scoped names declared directly in a block: let/const + class (functions are hoisted to the fn scope)
   const hoistBlock = (statements, scope) => { for (const st of statements) { if (ts.isVariableStatement(st) && isLexical(st.declarationList.flags)) for (const d of st.declarationList.declarations) { const ids = []; patternIds(d.name, ids); ids.forEach((nm) => declareIn(scope, nm)); } else if (ts.isClassDeclaration(st) && st.name) declareIn(scope, st.name); } };
@@ -103,7 +112,7 @@ function resolveBindings(sf) {
   sf.statements.forEach(walk);
   const boxed = new Set([...captured].filter((id) => assigned.has(id)));
   for (const id of forceBox) boxed.add(id);
-  return { bindingOf, declFn, bindingsByFn, boxed };
+  return { bindingOf, declFn, bindingsByFn, boxed, usesArguments };
 }
 
 export function compileModule(source, { resources = [], entry = "main", file = "app.ts" } = {}) {
@@ -114,8 +123,10 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   // Classes: an instance is an object whose method properties are closures
   // capturing `this`; the constructor (with field inits prepended) runs at `new`.
   const classes = new Map();
-  const accessorNames = new Set();   // property names that are a get/set in SOME class -> read/write uses the accessor-aware op
+  const accessorNames = new Set();   // property names that are a get/set in SOME class/object-literal -> read/write uses the accessor-aware op
+  const objLiteralThis = new Map();  // object-literal node -> synthetic thisId (for methods/getters that use `this`)
   let thisCounter = -1;
+  { const scan = (n) => { if ((ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n)) && (ts.isIdentifier(n.name) || ts.isStringLiteral(n.name))) accessorNames.add(n.name.text); ts.forEachChild(n, scan); }; scan(sf); } // pre-scan ALL accessor names (class + object-literal)
   for (const s of sf.statements) if (ts.isClassDeclaration(s) && s.name) {
     let superName = null;
     for (const h of s.heritageClauses || []) if (h.token === ts.SyntaxKind.ExtendsKeyword && ts.isIdentifier(h.types[0].expression)) superName = h.types[0].expression.text;
@@ -133,7 +144,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     classes.set(s.name.text, { name: s.name.text, thisId: thisCounter--, staticThisId: thisCounter--, fields, methods, accessors, sfields, smethods, saccessors, ctor, superName });
   }
   const resourceSet = new Set(resources);
-  const { bindingOf, bindingsByFn, boxed } = resolveBindings(sf);
+  const { bindingOf, bindingsByFn, boxed, usesArguments } = resolveBindings(sf);
   const out = {};
   let gen = 0;
   const neededBuilders = new Set();   // classes whose class-object builder (%Name) must be generated
@@ -313,6 +324,16 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isBigIntLiteral(node)) { emit("PUSH", BigInt(node.text.slice(0, -1))); return true; } // `123n` -> 123n (hex/oct/bin too)
       if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) { emit("PUSH", node.text); return true; }
       if (ts.isTemplateExpression(node)) { emit("PUSH", node.head.text); for (const span of node.templateSpans) { expr(span.expression); emit("BIN", "+"); emit("PUSH", span.literal.text); emit("BIN", "+"); } return true; }
+      if (ts.isTaggedTemplateExpression(node)) {                  // tag`a${x}b` -> tag(strings, x) ; strings.raw set
+        const tpl = node.template, rawOf = (n) => (n.rawText !== undefined ? n.rawText : n.text);
+        let cooked, raws, exprs;
+        if (ts.isNoSubstitutionTemplateLiteral(tpl)) { cooked = [tpl.text]; raws = [rawOf(tpl)]; exprs = []; }
+        else { cooked = [tpl.head.text, ...tpl.templateSpans.map((s) => s.literal.text)]; raws = [rawOf(tpl.head), ...tpl.templateSpans.map((s) => rawOf(s.literal))]; exprs = tpl.templateSpans.map((s) => s.expression); }
+        const strArr = cooked.slice(); strArr.raw = raws; const argc = 1 + exprs.length; // a constant array (template-string identity is cached, matching JS)
+        if (ts.isPropertyAccessExpression(node.tag)) { expr(node.tag.expression); emit("PUSH", strArr); exprs.forEach((e) => expr(e)); emit("CALLMETHOD", node.tag.name.text, argc); } // e.g. String.raw`...`
+        else { expr(node.tag); emit("PUSH", strArr); exprs.forEach((e) => expr(e)); emit("CALLV", argc); }
+        return true;
+      }
       if (node.kind === ts.SyntaxKind.TrueKeyword) { emit("PUSH", true); return true; }
       if (node.kind === ts.SyntaxKind.FalseKeyword) { emit("PUSH", false); return true; }
       if (node.kind === ts.SyntaxKind.NullKeyword) { emit("PUSH", null); return true; }
@@ -389,15 +410,39 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isPropertyAccessExpression(node)) { expr(node.expression); emit(getOp(node.name.text), node.name.text); return true; }
       if (ts.isElementAccessExpression(node)) { expr(node.expression); expr(node.argumentExpression); emit("INDEX"); return true; }
       if (ts.isObjectLiteralExpression(node)) {
-        emit("NEWOBJ");
+        const hasFn = node.properties.some((p) => ts.isMethodDeclaration(p) || ts.isGetAccessorDeclaration(p) || ts.isSetAccessorDeclaration(p));
+        if (!hasFn) {                                            // fast path: plain data object, chained on the stack
+          emit("NEWOBJ");
+          for (const p of node.properties) {
+            if (ts.isSpreadAssignment(p)) { expr(p.expression); emit("ASSIGNALL"); }
+            else if (ts.isPropertyAssignment(p) && ts.isComputedPropertyName(p.name)) { emit("DUP"); expr(p.name.expression); expr(p.initializer); emit("SETINDEX"); } // {[k]: v}
+            else if (ts.isPropertyAssignment(p)) { expr(p.initializer); emit("SETPROP", p.name.text); }
+            else if (ts.isShorthandPropertyAssignment(p)) { readUse(p.name); emit("SETPROP", p.name.text); }
+            else fail(p, "unsupported property");
+          }
+          return true;
+        }
+        // methods/getters/setters bind `this` = the literal -> build in a temp, give the literal a synthetic thisId
+        const o = tempSlot(); emit("NEWOBJ"); emit("STORE", o);
+        let tid = objLiteralThis.get(node); if (tid == null) { tid = thisCounter--; objLiteralThis.set(node, tid); }
+        const mk = (fnNode) => { const prog = `obj$${gen++}`; const c = compileFn(fnNode, prog, { thisId: tid }); out[prog] = c; emit("MAKECLOSURE", prog, c.freeIds.map((id) => (id === tid ? ["L", o] : provide(id))), !!fnNode.asteriskToken); };
+        const accs = new Map();
         for (const p of node.properties) {
-          if (ts.isSpreadAssignment(p)) { expr(p.expression); emit("ASSIGNALL"); }
-          else if (ts.isPropertyAssignment(p) && ts.isComputedPropertyName(p.name)) { emit("DUP"); expr(p.name.expression); expr(p.initializer); emit("SETINDEX"); } // {[k]: v}
-          else if (ts.isPropertyAssignment(p)) { expr(p.initializer); emit("SETPROP", p.name.text); }
-          else if (ts.isShorthandPropertyAssignment(p)) { readUse(p.name); emit("SETPROP", p.name.text); }
+          if (ts.isSpreadAssignment(p)) { emit("LOAD", o); expr(p.expression); emit("ASSIGNALL"); emit("POP"); }
+          else if (ts.isMethodDeclaration(p) && !ts.isComputedPropertyName(p.name)) { emit("LOAD", o); mk(p); emit("SETPROP", p.name.text); emit("POP"); }
+          else if (ts.isGetAccessorDeclaration(p) && !ts.isComputedPropertyName(p.name)) { const e = accs.get(p.name.text) || {}; e.get = p; accs.set(p.name.text, e); }
+          else if (ts.isSetAccessorDeclaration(p) && !ts.isComputedPropertyName(p.name)) { const e = accs.get(p.name.text) || {}; e.set = p; accs.set(p.name.text, e); }
+          else if (ts.isPropertyAssignment(p) && ts.isComputedPropertyName(p.name)) { emit("LOAD", o); expr(p.name.expression); expr(p.initializer); emit("SETINDEX"); }
+          else if (ts.isPropertyAssignment(p)) { emit("LOAD", o); expr(p.initializer); emit("SETPROP", p.name.text); emit("POP"); }
+          else if (ts.isShorthandPropertyAssignment(p)) { emit("LOAD", o); readUse(p.name); emit("SETPROP", p.name.text); emit("POP"); }
           else fail(p, "unsupported property");
         }
-        return true;
+        if (accs.size) {
+          const tbl = tempSlot(); emit("NEWOBJ"); emit("STORE", tbl);
+          for (const [aname, e] of accs) { const ent = tempSlot(); emit("NEWOBJ"); emit("STORE", ent); for (const kind of ["get", "set"]) { if (!e[kind]) continue; emit("LOAD", ent); mk(e[kind]); emit("SETPROP", kind); emit("POP"); } emit("LOAD", tbl); emit("LOAD", ent); emit("SETPROP", aname); emit("POP"); }
+          emit("LOAD", o); emit("LOAD", tbl); emit("SETHIDDEN", "__accessors__"); emit("POP");
+        }
+        emit("LOAD", o); return true;
       }
       if (ts.isArrayLiteralExpression(node)) { emit("NEWARR"); for (const el of node.elements) { if (ts.isSpreadElement(el)) { expr(el.expression); emit("APPENDALL"); } else { emit("DUP"); expr(el); emit("ARRPUSH"); } } return true; }
       if (ts.isCallExpression(node)) return call(node);
@@ -596,6 +641,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     if (opts.emitBody) { opts.emitBody({ emit, expr, tempSlot, label, mark, provide }); const { code, pos } = assemble(); return { nlocals: topSlot, code, pos, freeIds: envIds }; } // synthetic class-object builder
 
     // --- prologue: rest param, default params, box captured params, fields, hoist nested fn decls
+    if (usesArguments.has(node)) { emit("ARGUMENTS"); emit("STORE", slotOf.get(usesArguments.get(node))); } // snapshot passed args before defaults/rest mutate locals
     for (const p of node.parameters) if (p.dotDotDotToken && ts.isIdentifier(p.name)) emit("GATHERREST", slotOf.get(bindingOf.get(p.name)));
     for (const p of node.parameters) if (p.initializer && ts.isIdentifier(p.name)) { const s = slotOf.get(bindingOf.get(p.name)); const skip = label("dflt"); emit("LOAD", s); emit("PUSH", undefined); emit("BIN", "==="); emit("JMPF", skip); expr(p.initializer); emit("STORE", s); mark(skip); }
     for (const p of node.parameters) if (ts.isIdentifier(p.name) && boxed.has(bindingOf.get(p.name))) { const s = slotOf.get(bindingOf.get(p.name)); emit("NEWOBJ"); emit("LOAD", s); emit("SETPROP", "v"); emit("STORE", s); }

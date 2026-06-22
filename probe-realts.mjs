@@ -292,6 +292,34 @@ check("array higher-order: find / findIndex / some / every (early-terminating)",
   };
 }`, "go", []);
 
+check("arguments object (length, index, with named params, captured by nested arrow, spread)",
+`function variadic() { let s = 0; for (let i = 0; i < arguments.length; i++) { s += arguments[i]; } return s; }
+function tail(first) { return Array.from(arguments).slice(1); }
+function viaArrow() { return (() => arguments[0] + arguments[1])(); }
+function go() { return [variadic(1, 2, 3, 4), tail("a", "b", "c"), viaArrow(10, 20)]; }`, "go", []);
+
+check("tagged templates (user tag + method tag + String.raw)",
+`function tag(strs, ...vals) { let s = strs[0]; for (let i = 0; i < vals.length; i++) { s += "[" + vals[i] + "]" + strs[i + 1]; } return s; }
+function go() {
+  const x = 2, y = 3;
+  const obj = { join(strs, ...v) { return strs[0] + v.join(",") + strs[strs.length - 1]; } };
+  return [tag\`sum \${x}+\${y}\`, obj.join\`p\${x}q\${y}r\`, String.raw\`a\\nb\`];
+}`, "go", []);
+
+check("object literals with methods / getters / setters / generator methods (this-bound, data enumerable)",
+`function go() {
+  const o = {
+    _v: 1, label: "x",
+    get v() { return this._v; },
+    set v(n) { this._v = n * 2; },
+    dbl() { return this._v * 2; },
+    chain() { return this.dbl() + 1; },
+    *seq() { yield this._v; yield this._v + 1; },
+  };
+  const a = o.v; o.v = 5; const seq = []; for (const k of o.seq()) { seq.push(k); }
+  return { a, after: o.v, dbl: o.dbl(), chain: o.chain(), seq, dataKeys: Object.keys(o).filter((k) => k !== "v") };
+}`, "go", []);
+
 check("++ / -- as expression values (postfix old / prefix new), props, elements, unary +/-",
 `function go() {
   let i = 5;
