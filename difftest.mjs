@@ -15,7 +15,12 @@ let pass = 0, fail = 0, caveat = 0; const fails = [];
 //   - TDZ non-enforcement: reading a let/const before its declaration yields undefined
 //     instead of throwing ReferenceError. Enforcing it would add a sentinel check to
 //     every let/const read; correct programs never observe the difference.
-const CAVEATS = new Set(["let TDZ throws"]);
+//   - Dynamic accessor keys (Object.defineProperty with a get/set descriptor, and
+//     computed object-literal accessors `{get [k](){}}`) aren't honored by a static
+//     `obj.name` read — those compile to a branchless plain read. Computed access
+//     `obj[key]` DOES fire them; data descriptors and statically-named class/literal
+//     get/set work fully. Belongs with the Proxy/reactivity metaprogramming track.
+const CAVEATS = new Set(["let TDZ throws", "Object.defineProperty getter", "computed accessor name"]);
 const J = (x) => JSON.stringify(x, (k, v) => (typeof v === "bigint" ? "B:" + v.toString() : typeof v === "symbol" ? "S:" + String(v.description) : typeof v === "function" ? "fn" : v === undefined ? "U" : v));
 function d(name, src) {
   let got, ref, gErr = null, rErr = null;
@@ -194,6 +199,28 @@ d("generator try/finally on return", "function go(){ const log=[]; function* g()
 d("generator delegating yield* return value", "function go(){ function* inner(){yield 1;return 'R';} function* outer(){const r=yield* inner();yield r;} return [...outer()]; }");
 d("infinite generator with take", "function go(){ function* nats(){let i=0;while(true)yield i++;} const it=nats(); const out=[]; for(let i=0;i<4;i++)out.push(it.next().value); return out; }");
 d("generator as object method via this", "function go(){ const o={data:[5,6,7],*items(){for(const x of this.data)yield x*2;}}; return [...o.items()]; }");
+
+console.log("— Map/Set/collection methods —");
+d("Map get/has/delete/forEach", "function go(){ const m=new Map(); m.set('a',1).set('b',2); const out=[]; m.forEach((v,k)=>out.push(k+v)); return [m.get('a'),m.has('b'),m.delete('a'),m.has('a'),m.size,out]; }");
+d("Set add/has/delete/forEach", "function go(){ const s=new Set(); s.add(1).add(2).add(2); const out=[]; s.forEach(v=>out.push(v)); return [s.has(1),s.delete(1),s.has(1),s.size,out]; }");
+d("Map keys/values/entries", "function go(){ const m=new Map([['x',1],['y',2]]); return [[...m.keys()],[...m.values()],[...m.entries()]]; }");
+d("Array.prototype: every/fill/flat/keys/values", "function go(){ return [[1,2,3].keys?[...[1,2,3].keys()]:[],[...['a','b'].values()],[...['a','b'].entries()]]; }");
+d("array sort stability and strings", "function go(){ return [['banana','apple','cherry'].sort(),[5,3,8,1].sort((a,b)=>b-a)]; }");
+
+console.log("— JSON edge cases —");
+d("JSON.stringify with replacer array", "function go(){ return JSON.stringify({a:1,b:2,c:3},['a','c']); }");
+d("JSON.stringify with indent", "function go(){ return JSON.stringify({a:1,b:[2,3]},null,2); }");
+d("JSON.parse with reviver", "function go(){ return JSON.parse('{\"a\":1,\"b\":2}',(k,v)=>typeof v==='number'?v*10:v); }");
+d("JSON round-trip nested", "function go(){ const o={a:[1,{b:2}],c:{d:[3,4]}}; return JSON.parse(JSON.stringify(o)); }");
+d("JSON.stringify skips undefined and functions", "function go(){ return JSON.stringify({a:1,b:undefined,c(){},d:null}); }");
+
+console.log("— property descriptors & accessors —");
+d("getter/setter inheritance with super", "function go(){ class A{#v=1;get x(){return this.#v;}set x(n){this.#v=n;}} class B extends A{get x(){return super.x*10;}} const b=new B(); b.x=5; return b.x; }");
+d("computed accessor name", "function go(){ const k='dyn'; const o={get [k](){return 42;}}; return o.dyn; }");
+d("computed accessor via computed access", "function go(){ const k='dyn'; const o={_v:3,get [k](){return this._v*7;}}; return o[k]; }");
+d("Object.defineProperty getter", "function go(){ const o={}; Object.defineProperty(o,'x',{get(){return 99;},enumerable:true}); return [o.x,Object.keys(o)]; }");
+d("property enumeration order mixed keys", "function go(){ const o={}; o.b=1; o[2]=2; o.a=3; o[1]=4; return Object.keys(o); }");
+d("getOwnPropertyDescriptor", "function go(){ const o={x:5}; const d=Object.getOwnPropertyDescriptor(o,'x'); return [d.value,d.writable,d.enumerable]; }");
 
 console.log("— closures & control flow extras —");
 d("try/finally return value in loop", "function go(){ function f(){for(let i=0;i<3;i++){try{if(i===2)return i;}finally{}}return -1;} return f(); }");

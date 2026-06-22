@@ -371,6 +371,14 @@ export function run(tier, frames, host) {
       case "DELPROP": { const o = d(f.stack.pop()); f.stack.push(delete o[ins[1]]); f.ip++; break; }
       case "DELINDEX": { const k = f.stack.pop(); const o = d(f.stack.pop()); f.stack.push(delete o[k]); f.ip++; break; }
       case "NEWARR": f.stack.push([]); f.ip++; break;
+      case "ISARRAY": f.stack.push(Array.isArray(d(f.stack.pop()))); f.ip++; break;
+      case "JSONSTR": {                                         // JSON.stringify that drops Waso closures & class objects (JS omits functions)
+        const space = f.stack.pop(); const replacer = f.stack.pop(); const val = f.stack.pop(); f.ip++;
+        const isFn = (v) => isClosure(v) || (v != null && typeof v === "object" && v.__classobj__);
+        const ur = isClosure(replacer) ? (k, v) => callClosure(replacer, [k, v]) : null;
+        const rep = Array.isArray(replacer) ? replacer : (k, v) => (isFn(v) ? undefined : ur ? ur(k, v) : v);
+        f.stack.push(JSON.stringify(val, rep, space)); break;
+      }
       // deref ops peek-then-deref so a deref-miss leaves the stack/ip untouched (re-runnable)
       case "ARRPUSH": { const a = d(f.stack[f.stack.length - 2]); const v = f.stack[f.stack.length - 1]; f.stack.length -= 2; a.push(v); f.ip++; break; }
       case "NEWOBJ": f.stack.push({}); f.ip++; break;
@@ -388,6 +396,7 @@ export function run(tier, frames, host) {
         const acc = o != null && o.__accessors__ && o.__accessors__[ins[1]];
         f.stack.length -= 2; f.ip++;
         if (acc && acc.set) { frames.push({ fn: acc.set.fn, ip: 0, locals: [v], stack: [], env: acc.set.env, handlers: [] }); break; } // setter RETs undefined into this frame (the SETPROP value contract)
+        if (acc && acc.get) { f.stack.push(o); break; } // getter-only accessor: a write is a no-op (non-strict), not a junk own property
         o[ins[1]] = v; f.stack.push(o); break;
       }
       case "INDEX":  { const a = d(f.stack[f.stack.length - 2]); const i = f.stack[f.stack.length - 1]; f.stack.length -= 2; const acc = a != null && a.__accessors__ && a.__accessors__[i]; if (acc && acc.get) { f.ip++; frames.push({ fn: acc.get.fn, ip: 0, locals: [], stack: [], env: acc.get.env, handlers: [] }); break; } f.stack.push(a[i]); f.ip++; break; } // computed access fires a getter

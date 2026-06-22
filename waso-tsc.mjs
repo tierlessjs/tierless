@@ -184,7 +184,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     for (const cls of chain) for (const m of cls.smethods) { const info = cls.compiled[`static ${m.name}`]; emit("LOAD", co); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.staticThisId ? ["L", co] : provide(id))), !!m.node.asteriskToken); emit("SETPROP", m.name); emit("POP"); }
     for (const cls of chain) for (const fld of cls.sfields) { emit("LOAD", co); expr(fld.init); emit("SETPROP", fld.name); emit("POP"); } // init runs code
     const accs = new Map();
-    for (const cls of chain) for (const a of cls.saccessors) { const e = accs.get(a.name) || {}; e[a.kind] = { cls, info: cls.compiled[`static ${a.kind} ${a.name}`] }; accs.set(a.name, e); }
+    for (const cls of chain) { const byName = new Map(); for (const a of cls.saccessors) { const e = byName.get(a.name) || {}; e[a.kind] = { cls, info: cls.compiled[`static ${a.kind} ${a.name}`] }; byName.set(a.name, e); } for (const [n, e] of byName) accs.set(n, e); } // derived shadows base per name
     if (accs.size) {
       const tbl = tempSlot(); emit("NEWOBJ"); emit("STORE", tbl);
       for (const [aname, e] of accs) {
@@ -440,8 +440,8 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const classNames = (hostBase ? (hostBase === "Error" ? ["Error"] : ["Error", hostBase]) : []).concat(chain.map((c) => c.name));
         emit("LOAD", inst); emit("PUSH", classNames); emit("SETHIDDEN", "__class__"); emit("POP"); // non-enumerable: JSON/for-in/keys see only data fields
         for (const cls of chain) for (const m of cls.methods) { const info = cls.compiled[m.name]; emit("LOAD", inst); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.thisId ? ["L", inst] : provide(id))), !!m.node.asteriskToken); emit("SETHIDDEN", m.name); emit("POP"); } // methods non-enumerable (derived overrides base)
-        const accs = new Map(); // name -> { get?: {cls,info}, set?: {cls,info} }, derived overriding base
-        for (const cls of chain) for (const a of cls.accessors) { const e = accs.get(a.name) || {}; e[a.kind] = { cls, info: cls.compiled[`${a.kind} ${a.name}`] }; accs.set(a.name, e); }
+        const accs = new Map(); // name -> { get?: {cls,info}, set?: {cls,info} }
+        for (const cls of chain) { const byName = new Map(); for (const a of cls.accessors) { const e = byName.get(a.name) || {}; e[a.kind] = { cls, info: cls.compiled[`${a.kind} ${a.name}`] }; byName.set(a.name, e); } for (const [n, e] of byName) accs.set(n, e); } // derived class's accessor fully shadows the base's for that name (get+set merge only WITHIN a class) — matches JS prototype accessor semantics
         if (accs.size) {                                            // build the instance's __accessors__ table (closures capture this)
           const tbl = tempSlot(); emit("NEWOBJ"); emit("STORE", tbl);
           for (const [aname, e] of accs) {
@@ -525,21 +525,30 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const o = tempSlot(); emit("NEWOBJ"); emit("STORE", o);
         let tid = objLiteralThis.get(node); if (tid == null) { tid = thisCounter--; objLiteralThis.set(node, tid); }
         const mk = (fnNode) => { const prog = `obj$${gen++}`; const c = compileFn(fnNode, prog, { thisId: tid }); out[prog] = c; emit("MAKECLOSURE", prog, c.freeIds.map((id) => (id === tid ? ["L", o] : provide(id))), !!fnNode.asteriskToken); };
-        const accs = new Map();
+        const accs = new Map(); const caccs = []; // static (by name) and computed ({kind,keyExpr,node}) accessors
         for (const p of node.properties) {
           if (ts.isSpreadAssignment(p)) { emit("LOAD", o); expr(p.expression); emit("ASSIGNALL"); emit("POP"); }
           else if (ts.isMethodDeclaration(p) && ts.isComputedPropertyName(p.name)) { emit("LOAD", o); expr(p.name.expression); mk(p); emit("SETINDEX"); } // { [k](){} } / { [Symbol.iterator](){} }
           else if (ts.isMethodDeclaration(p) && !ts.isComputedPropertyName(p.name)) { emit("LOAD", o); mk(p); emit("SETPROP", p.name.text); emit("POP"); }
-          else if (ts.isGetAccessorDeclaration(p) && !ts.isComputedPropertyName(p.name)) { const e = accs.get(p.name.text) || {}; e.get = p; accs.set(p.name.text, e); }
-          else if (ts.isSetAccessorDeclaration(p) && !ts.isComputedPropertyName(p.name)) { const e = accs.get(p.name.text) || {}; e.set = p; accs.set(p.name.text, e); }
+          else if (ts.isGetAccessorDeclaration(p) && ts.isComputedPropertyName(p.name)) { caccs.push({ kind: "get", keyExpr: p.name.expression, node: p }); } // { get [k](){} }
+          else if (ts.isSetAccessorDeclaration(p) && ts.isComputedPropertyName(p.name)) { caccs.push({ kind: "set", keyExpr: p.name.expression, node: p }); }
+          else if (ts.isGetAccessorDeclaration(p)) { const e = accs.get(p.name.text) || {}; e.get = p; accs.set(p.name.text, e); }
+          else if (ts.isSetAccessorDeclaration(p)) { const e = accs.get(p.name.text) || {}; e.set = p; accs.set(p.name.text, e); }
           else if (ts.isPropertyAssignment(p) && ts.isComputedPropertyName(p.name)) { emit("LOAD", o); expr(p.name.expression); expr(p.initializer); emit("SETINDEX"); }
           else if (ts.isPropertyAssignment(p)) { emit("LOAD", o); expr(p.initializer); emit("SETPROP", p.name.text); emit("POP"); }
           else if (ts.isShorthandPropertyAssignment(p)) { emit("LOAD", o); readUse(p.name); emit("SETPROP", p.name.text); emit("POP"); }
           else fail(p, "unsupported property");
         }
-        if (accs.size) {
+        if (accs.size || caccs.length) {
           const tbl = tempSlot(); emit("NEWOBJ"); emit("STORE", tbl);
           for (const [aname, e] of accs) { const ent = tempSlot(); emit("NEWOBJ"); emit("STORE", ent); for (const kind of ["get", "set"]) { if (!e[kind]) continue; emit("LOAD", ent); mk(e[kind]); emit("SETPROP", kind); emit("POP"); } emit("LOAD", tbl); emit("LOAD", ent); emit("SETPROP", aname); emit("POP"); }
+          for (const c of caccs) { // computed key: evaluate, merge into the table entry at runtime (so get+set on the same key coexist)
+            const kt = tempSlot(); expr(c.keyExpr); emit("STORE", kt);
+            const et = tempSlot(); emit("LOAD", tbl); emit("LOAD", kt); emit("INDEX"); emit("STORE", et);
+            const skip = label("cacc"); emit("LOAD", et); emit("ISNULLISH"); emit("JMPF", skip); emit("NEWOBJ"); emit("STORE", et); mark(skip);
+            emit("LOAD", et); mk(c.node); emit("SETPROP", c.kind); emit("POP");
+            emit("LOAD", tbl); emit("LOAD", kt); emit("LOAD", et); emit("SETINDEX");
+          }
           emit("LOAD", o); emit("LOAD", tbl); emit("SETHIDDEN", "__accessors__"); emit("POP");
         }
         emit("LOAD", o); return true;
@@ -553,7 +562,8 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       const src = tempSlot(), fn = tempSlot(), i = tempSlot();
       expr(objNode); emit("STORE", src);
       expr(args[0]); emit("STORE", fn);
-      let acc = null, outv = null, res = null;
+      let acc = null, outv = null, res = null, hostFallback = null;
+      if (kind === "forEach") { hostFallback = label("hofhost"); emit("LOAD", src); emit("ISARRAY"); emit("JMPF", hostFallback); } // Map/Set/host-iterable forEach -> dispatch to the host method (the inline loop is array-only)
       if (kind === "reduce") { if (args.length < 2) fail(objNode, "reduce needs an initial value"); acc = tempSlot(); expr(args[1]); emit("STORE", acc); }
       else if (kind === "map" || kind === "filter") { outv = tempSlot(); emit("NEWARR"); emit("STORE", outv); }
       else if (kind === "find") { res = tempSlot(); emit("PUSH", undefined); emit("STORE", res); }
@@ -574,7 +584,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       else if (kind === "some") { const skip = label("sm"); callCb(); emit("JMPF", skip); emit("PUSH", true); emit("STORE", res); emit("JMP", end); mark(skip); }
       else if (kind === "every") { const skip = label("ev"); callCb(); emit("NOT"); emit("JMPF", skip); emit("PUSH", false); emit("STORE", res); emit("JMP", end); mark(skip); }
       emit("LOAD", i); emit("PUSH", 1); emit("BIN", "+"); emit("STORE", i); emit("JMP", loop); mark(end);
-      if (kind === "forEach") return false;
+      if (kind === "forEach") { if (hostFallback) { const done = label("hofdone"); emit("JMP", done); mark(hostFallback); emit("LOAD", src); emit("LOAD", fn); emit("CALLMETHOD", "forEach", 1); emit("POP"); mark(done); } return false; }
       emit("LOAD", kind === "reduce" ? acc : outv != null ? outv : res); return true;
     }
 
@@ -618,6 +628,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const resName = `${callee.expression.getText(sf)}.${callee.name.text}`;
         if (resourceSet.has(resName)) { node.arguments.forEach((a) => expr(a)); emit("RES", resName, node.arguments.length); return true; }
         const m = callee.name.text;
+        if (ts.isIdentifier(callee.expression) && callee.expression.text === "JSON" && m === "stringify" && bindingOf.get(callee.expression) == null) { const a = node.arguments; a[0] ? expr(a[0]) : emit("PUSH", undefined); a[1] ? expr(a[1]) : emit("PUSH", undefined); a[2] ? expr(a[2]) : emit("PUSH", undefined); emit("JSONSTR"); return true; } // skip Waso closures (functions) like JS does
         if (ts.isIdentifier(callee.expression) && bindingOf.get(callee.expression) == null && GLOBAL_OBJS.has(callee.expression.text)) { emit("GLOBAL", callee.expression.text); hostMethod(m, node.arguments); return true; } // Math.max / Object.keys / JSON.stringify / Array.isArray ...
         if ((m === "next" || m === "return" || m === "throw") && node.arguments.length <= 1) { expr(callee.expression); node.arguments[0] ? expr(node.arguments[0]) : emit("PUSH", undefined); emit(m === "next" ? "GENNEXT" : m === "return" ? "GENRET" : "GENTHROW"); return true; } // it.next/return/throw(v)
         if (m === "push") { expr(callee.expression); expr(node.arguments[0]); emit("ARRPUSH"); return false; }
