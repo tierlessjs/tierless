@@ -130,6 +130,18 @@ check("class with field defaults (no explicit constructor)",
 }
 function go() { return new Box().area(); }`, "go", []);
 
+check("class extends / super (constructor + method) / override",
+`class Animal {
+  constructor(name) { this.name = name; }
+  speak() { return this.name + " makes a sound"; }
+}
+class Dog extends Animal {
+  constructor(name) { super(name); this.legs = 4; }
+  speak() { return super.speak() + " (woof)"; }
+  describe() { return this.speak() + ", legs=" + this.legs; }
+}
+function go() { const d = new Dog("Rex"); return [d.name, d.legs, d.speak(), d.describe()]; }`, "go", []);
+
 check("nullish ?? + let-no-init + typeof",
 `function pick(a, b) {
   let chosen;

@@ -110,9 +110,19 @@ property/element assignment (obj.p = v / arr[i] = v via new SETINDEX op),
 compound (this.x += y), and ++/-- on properties. Verified vs Node's eval:
 counter (ctor/fields/methods/this), cart (method using reduce + this), greeter
 (method calling method + string method), box (field defaults, no ctor). All match.
-Still TODO for arbitrary files: class inheritance (extends/super), getters/
-setters/static, real Promise + async stdlib, spread/rest, switch, for-in,
-finally, block-scoped shadowing, generators.
+## #4 steps 7-10 (done — operators, modern syntax, rest, classes/inheritance)
+Verified vs Node's eval (probe-realts.mjs, 22 snippets):
+- null/undefined/NaN/Infinity, typeof, void, ?? , ??=/||=/&&=, switch, **, let-no-init
+- optional chaining ?. (property/index/call, short-circuit to chain end)
+- spread: array [...a], object {...o}, call f(...args) (CALLVS); rest params (GATHERREST)
+  (calling convention no longer pads locals; wire codec encodes arrays by index)
+- classes: fields, methods, this, new; AND extends/super (super(...) ctor chain,
+  super.method(), method override, base-first method binding).
+Still TODO for arbitrary files: getters/setters/static members, real Promise +
+async stdlib, for-in, finally, generators, regex/bigint, labeled statements,
+computed member names, comma operator. Known limits: inheritance requires
+explicit constructors; derived field inits run at ctor entry (before super);
+boxing/scoping is function-scoped (no block-scoped shadowing).
 
 ## Don't forget
 - **Source maps**: NJS captured the stack but deferred line/file metadata. Our

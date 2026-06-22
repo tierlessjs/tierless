@@ -82,14 +82,15 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   const classes = new Map();
   let thisCounter = -1;
   for (const s of sf.statements) if (ts.isClassDeclaration(s) && s.name) {
-    if (s.heritageClauses) throw new Error("waso-tsc: class inheritance (extends) not supported yet: " + s.name.text);
+    let superName = null;
+    for (const h of s.heritageClauses || []) if (h.token === ts.SyntaxKind.ExtendsKeyword && ts.isIdentifier(h.types[0].expression)) superName = h.types[0].expression.text;
     const fields = [], methods = []; let ctor = null;
     for (const mem of s.members) {
       if (ts.isPropertyDeclaration(mem) && mem.initializer && ts.isIdentifier(mem.name)) fields.push({ name: mem.name.text, init: mem.initializer });
       else if (ts.isMethodDeclaration(mem) && ts.isIdentifier(mem.name)) methods.push({ name: mem.name.text, node: mem });
       else if (ts.isConstructorDeclaration(mem) && mem.body) ctor = mem;
     }
-    classes.set(s.name.text, { thisId: thisCounter--, fields, methods, ctor });
+    classes.set(s.name.text, { thisId: thisCounter--, fields, methods, ctor, superName });
   }
   const resourceSet = new Set(resources);
   const { bindingOf, bindingsByFn, boxed } = resolveBindings(sf);
@@ -98,9 +99,12 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   const lineColOf = (node) => { const lc = sf.getLineAndCharacterOfPosition(node.getStart(sf)); return { file, line: lc.line + 1, col: lc.character + 1, text: node.getText(sf).replace(/\s+/g, " ").slice(0, 32) }; };
   const compileTop = (name) => { if (name in out) return; out[name] = null; out[name] = compileFn(topFns.get(name), name); };
   const compileClass = (cname) => {
-    const rec = classes.get(cname); if (rec.compiled) return rec; rec.compiled = {};
-    for (const m of rec.methods) { const prog = `${cname}#${m.name}`; const c = compileFn(m.node, prog, { thisId: rec.thisId }); out[prog] = c; rec.compiled[m.name] = { prog, freeIds: c.freeIds }; }
-    if (rec.ctor) { const prog = `${cname}#constructor`; const c = compileFn(rec.ctor, prog, { thisId: rec.thisId, fieldInits: rec.fields }); out[prog] = c; rec.compiled.__ctor__ = { prog, freeIds: c.freeIds }; }
+    const rec = classes.get(cname); if (rec.compiled) return rec;
+    if (rec.superName) compileClass(rec.superName);
+    rec.compiled = {};
+    const o = { thisId: rec.thisId, superName: rec.superName };
+    for (const m of rec.methods) { const prog = `${cname}#${m.name}`; const c = compileFn(m.node, prog, o); out[prog] = c; rec.compiled[m.name] = { prog, freeIds: c.freeIds }; }
+    if (rec.ctor) { const prog = `${cname}#constructor`; const c = compileFn(rec.ctor, prog, { ...o, fieldInits: rec.fields }); out[prog] = c; rec.compiled.__ctor__ = { prog, freeIds: c.freeIds }; }
     return rec;
   };
 
@@ -191,10 +195,12 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isNewExpression(node)) {
         if (!ts.isIdentifier(node.expression) || !classes.has(node.expression.text)) fail(node, "unsupported `new`");
         const rec = compileClass(node.expression.text);
+        const chain = []; for (let c = rec; c; c = c.superName ? compileClass(c.superName) : null) chain.unshift(c); // base-first
         const inst = tempSlot(); emit("NEWOBJ"); emit("STORE", inst);
-        for (const m of rec.methods) { const info = rec.compiled[m.name]; emit("LOAD", inst); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === rec.thisId ? ["L", inst] : provide(id)))); emit("SETPROP", m.name); emit("POP"); }
+        for (const cls of chain) for (const m of cls.methods) { const info = cls.compiled[m.name]; emit("LOAD", inst); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.thisId ? ["L", inst] : provide(id)))); emit("SETPROP", m.name); emit("POP"); } // derived overrides base
         const args = node.arguments || [];
         if (rec.ctor) { const info = rec.compiled.__ctor__; emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === rec.thisId ? ["L", inst] : provide(id)))); args.forEach((a) => expr(a)); emit("CALLV", args.length); emit("POP"); }
+        else if (rec.superName) fail(node, "a derived class needs an explicit constructor");
         else for (const f of rec.fields) { emit("LOAD", inst); expr(f.init); emit("SETPROP", f.name); emit("POP"); }
         emit("LOAD", inst); return true;
       }
@@ -252,8 +258,17 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       emit("LOAD", kind === "reduce" ? acc : outv); return true;
     }
 
+    function superCall(supProg, supThisId, args) {
+      const sup = classes.get(opts.superName); compileClass(opts.superName);
+      const info = supProg === "__ctor__" ? sup.compiled.__ctor__ : sup.compiled[supProg];
+      if (!info) fail(args.node || node, "super target not found: " + supProg);
+      emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === sup.thisId ? ["E", capture(opts.thisId)] : provide(id))));
+      args.forEach((a) => expr(a)); emit("CALLV", args.length); return true;
+    }
     function call(node) {
       const callee = node.expression;
+      if (callee.kind === ts.SyntaxKind.SuperKeyword) { if (!opts.superName) fail(node, "super outside a derived class"); return superCall("__ctor__", null, node.arguments); }
+      if (ts.isPropertyAccessExpression(callee) && callee.expression.kind === ts.SyntaxKind.SuperKeyword) { if (!opts.superName) fail(node, "super outside a derived class"); return superCall(callee.name.text, null, node.arguments); }
       if (ts.isPropertyAccessExpression(callee)) {
         const resName = `${callee.expression.getText(sf)}.${callee.name.text}`;
         if (resourceSet.has(resName)) { node.arguments.forEach((a) => expr(a)); emit("RES", resName, node.arguments.length); return true; }
