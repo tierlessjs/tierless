@@ -179,6 +179,8 @@ await (async () => {
   await w("bound closure created, migrated, then invoked", `function add(a,b){return this.k+a+b;} async function go(){const g=add.bind({k:10},1);await ckpt(0);return g(2);}`);
   await w("arrow capturing dynamic this migrates and stays bound to the receiver", `const o={n:5,make(){return ()=>this.n;}}; async function go(){const o2={n:99,make:o.make};const f=o2.make();await ckpt(0);return f();}`);
   await w("call/apply with this across a checkpoint", `function read(){return this.v;} async function go(){const a=await ckpt(1);return [read.call({v:a}),read.apply({v:a+1})];}`);
+  await w("accessor-inheritance instance migrates, getter/setter still resolve", `class A{constructor(v){this._v=v;}get x(){return this._v;}set x(n){this._v=n;}} class B extends A{get x(){return super.x*10;}} async function go(){const b=new B(3);await ckpt(0);const r=b.x;b._v=4;return [r,b.x];}`);
+  await w("Map.forEach + accumulator survive a mid-iteration checkpoint", `async function go(){const m=new Map([['a',1],['b',2]]);const out=[];m.forEach((v,k)=>out.push(k+v));await ckpt(0);m.set('c',3);m.forEach((v,k)=>out.push(k+v));return out;}`);
 
   section("classes & generators across the wire");
   await w("class instance migrates, methods still work", `class Acct{constructor(b){this.bal=b;}dep(n){this.bal+=n;return this.bal;}} async function go(){const a=new Acct(100);a.dep(50);await ckpt(0);return [a.dep(25),a instanceof Acct,JSON.stringify(a)];}`);
