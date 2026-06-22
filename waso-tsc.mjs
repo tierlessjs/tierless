@@ -16,7 +16,7 @@ import ts from "typescript";
 
 const BINOP = {
   [ts.SyntaxKind.PlusToken]: "+", [ts.SyntaxKind.MinusToken]: "-", [ts.SyntaxKind.AsteriskToken]: "*",
-  [ts.SyntaxKind.SlashToken]: "/", [ts.SyntaxKind.PercentToken]: "%",
+  [ts.SyntaxKind.SlashToken]: "/", [ts.SyntaxKind.PercentToken]: "%", [ts.SyntaxKind.AsteriskAsteriskToken]: "**",
   [ts.SyntaxKind.LessThanToken]: "<", [ts.SyntaxKind.LessThanEqualsToken]: "<=",
   [ts.SyntaxKind.GreaterThanToken]: ">", [ts.SyntaxKind.GreaterThanEqualsToken]: ">=",
   [ts.SyntaxKind.EqualsEqualsEqualsToken]: "===", [ts.SyntaxKind.ExclamationEqualsEqualsToken]: "!==",
@@ -119,7 +119,13 @@ export function compileModule(source, { resources = [], entry = "main", file = "
 
     function readUse(idNode) {
       const id = bindingOf.get(idNode);
-      if (id == null) { if (topFns.has(idNode.text)) { compileTop(idNode.text); emit("MAKECLOSURE", idNode.text, []); return; } fail(idNode, "unresolved identifier"); }
+      if (id == null) {
+        if (topFns.has(idNode.text)) { compileTop(idNode.text); emit("MAKECLOSURE", idNode.text, []); return; }
+        if (idNode.text === "undefined") { emit("PUSH", undefined); return; }
+        if (idNode.text === "NaN") { emit("PUSH", NaN); return; }
+        if (idNode.text === "Infinity") { emit("PUSH", Infinity); return; }
+        fail(idNode, "unresolved identifier");
+      }
       if (slotOf.has(id)) { emit("LOAD", slotOf.get(id)); if (boxed.has(id)) emit("GETPROP", "v"); return; }
       emit("LOADENV", capture(id)); if (boxed.has(id)) emit("GETPROP", "v");
     }
@@ -164,6 +170,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isTemplateExpression(node)) { emit("PUSH", node.head.text); for (const span of node.templateSpans) { expr(span.expression); emit("BIN", "+"); emit("PUSH", span.literal.text); emit("BIN", "+"); } return true; }
       if (node.kind === ts.SyntaxKind.TrueKeyword) { emit("PUSH", true); return true; }
       if (node.kind === ts.SyntaxKind.FalseKeyword) { emit("PUSH", false); return true; }
+      if (node.kind === ts.SyntaxKind.NullKeyword) { emit("PUSH", null); return true; }
       if (node.kind === ts.SyntaxKind.ThisKeyword) { if (opts.thisId == null) fail(node, "`this` outside a method"); emit("LOADENV", capture(opts.thisId)); return true; }
       if (ts.isNewExpression(node)) {
         if (!ts.isIdentifier(node.expression) || !classes.has(node.expression.text)) fail(node, "unsupported `new`");
@@ -177,6 +184,8 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       }
       if (ts.isIdentifier(node)) { readUse(node); return true; }
       if (ts.isAwaitExpression(node)) { expr(node.expression); emit("AWAIT"); return true; }
+      if (ts.isTypeOfExpression(node)) { expr(node.expression); emit("TYPEOF"); return true; }
+      if (ts.isVoidExpression(node)) { expr(node.expression); emit("POP"); emit("PUSH", undefined); return true; }
       if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) { closureOf(node); return true; }
       if (ts.isConditionalExpression(node)) { expr(node.condition); const els = label("tern"), end = label("tend"); emit("JMPF", els); expr(node.whenTrue); emit("JMP", end); mark(els); expr(node.whenFalse); mark(end); return true; }
       if (ts.isPrefixUnaryExpression(node)) {
@@ -192,6 +201,10 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         if (COMPOUND.has(k)) { compoundTo(node.left, COMPOUND.get(k), node.right); return false; }
         if (k === ts.SyntaxKind.AmpersandAmpersandToken) { expr(node.left); emit("DUP"); const end = label("and"); emit("JMPF", end); emit("POP"); expr(node.right); mark(end); return true; }
         if (k === ts.SyntaxKind.BarBarToken) { expr(node.left); emit("DUP"); const rhs = label("or"), end = label("oend"); emit("JMPF", rhs); emit("JMP", end); mark(rhs); emit("POP"); expr(node.right); mark(end); return true; }
+        if (k === ts.SyntaxKind.QuestionQuestionToken) { expr(node.left); emit("DUP"); emit("ISNULLISH"); const end = label("nc"); emit("JMPF", end); emit("POP"); expr(node.right); mark(end); return true; }
+        if (k === ts.SyntaxKind.AmpersandAmpersandEqualsToken) { assignTo(node.left, () => { expr(node.left); emit("DUP"); const e = label("ae"); emit("JMPF", e); emit("POP"); expr(node.right); mark(e); }); return false; }
+        if (k === ts.SyntaxKind.BarBarEqualsToken) { assignTo(node.left, () => { expr(node.left); emit("DUP"); const r = label("oe"), e = label("oee"); emit("JMPF", r); emit("JMP", e); mark(r); emit("POP"); expr(node.right); mark(e); }); return false; }
+        if (k === ts.SyntaxKind.QuestionQuestionEqualsToken) { assignTo(node.left, () => { expr(node.left); emit("DUP"); emit("ISNULLISH"); const e = label("nce"); emit("JMPF", e); emit("POP"); expr(node.right); mark(e); }); return false; }
         const op = BINOP[k]; if (!op) fail(node, "unsupported operator");
         expr(node.left); expr(node.right); emit("BIN", op); return true;
       }
@@ -239,7 +252,9 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     }
 
     function declOne(d) {
-      if (ts.isIdentifier(d.name)) { const id = bindingOf.get(d.name); if (boxed.has(id)) { emit("NEWOBJ"); expr(d.initializer); emit("SETPROP", "v"); emit("STORE", slotOf.get(id)); } else { expr(d.initializer); emit("STORE", slotOf.get(id)); } return; }
+      const init = () => (d.initializer ? expr(d.initializer) : emit("PUSH", undefined)); // `let x;` -> undefined
+      if (ts.isIdentifier(d.name)) { const id = bindingOf.get(d.name); if (boxed.has(id)) { emit("NEWOBJ"); init(); emit("SETPROP", "v"); emit("STORE", slotOf.get(id)); } else { init(); emit("STORE", slotOf.get(id)); } return; }
+      if (!d.initializer) fail(d, "destructuring needs an initializer");
       const t = tempSlot(); expr(d.initializer); emit("STORE", t); bindPattern(d.name, t); // destructuring
     }
 
@@ -247,8 +262,18 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     function stmtInner(node) {
       if (ts.isBlock(node)) return node.statements.forEach(stmt);
       if (ts.isFunctionDeclaration(node)) return;                  // nested fn decl: hoisted in the prologue
-      if (ts.isVariableStatement(node)) { for (const d of node.declarationList.declarations) { if (!d.initializer) fail(d, "needs initializer"); declOne(d); } return; }
+      if (ts.isVariableStatement(node)) { for (const d of node.declarationList.declarations) declOne(d); return; }
       if (ts.isExpressionStatement(node)) { if (expr(node.expression)) emit("POP"); return; }
+      if (ts.isSwitchStatement(node)) {
+        const disc = tempSlot(); expr(node.expression); emit("STORE", disc);
+        const end = label("swend"); const clauses = node.caseBlock.clauses;
+        const at = clauses.map(() => label("sw")); let def = -1;
+        clauses.forEach((cl, i) => { if (ts.isDefaultClause(cl)) { def = i; return; } emit("LOAD", disc); expr(cl.expression); emit("BIN", "==="); emit("NOT"); emit("JMPF", at[i]); }); // jump to clause if ===
+        emit("JMP", def >= 0 ? at[def] : end);
+        loops.push({ brk: end, cont: loops.length ? loops[loops.length - 1].cont : end });
+        clauses.forEach((cl, i) => { mark(at[i]); cl.statements.forEach(stmt); }); // fall-through is implicit
+        loops.pop(); mark(end); return;
+      }
       if (ts.isThrowStatement(node)) { expr(node.expression); emit("THROW"); return; }
       if (ts.isTryStatement(node)) {
         if (node.finallyBlock) fail(node, "finally not supported yet");

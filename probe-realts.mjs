@@ -130,6 +130,49 @@ check("class with field defaults (no explicit constructor)",
 }
 function go() { return new Box().area(); }`, "go", []);
 
+check("nullish ?? + let-no-init + typeof",
+`function pick(a, b) {
+  let chosen;
+  chosen = a ?? b;
+  return typeof chosen + ":" + chosen;
+}
+function go() { return [pick(0, 9), pick(undefined, 9), pick(null, 7), pick("x", 1)]; }`, "go", []);
+
+check("switch with fall-through + default",
+`function classify(n) {
+  switch (n) {
+    case 0: return "zero";
+    case 1:
+    case 2: return "small";
+    case 3: { const s = "thr" + "ee"; return s; }
+    default: return "big";
+  }
+}
+function go() { return [0,1,2,3,9].map((n) => classify(n)); }`, "go", []);
+
+check("logical assignment ??= ||= &&=",
+`function norm(o) {
+  o.a ??= 10;
+  o.b ||= 20;
+  o.c &&= 30;
+  return o;
+}
+function go() { return norm({ a: undefined, b: 0, c: 5 }); }`, "go", []);
+
+check("exponent ** + void + switch break",
+`function go() {
+  let out = [];
+  for (let i = 0; i < 4; i++) {
+    switch (i) {
+      case 1: out.push(-1); break;
+      case 2: out.push(2 ** 10); break;
+      default: out.push(i);
+    }
+  }
+  out.push(void 99);
+  return out;
+}`, "go", []);
+
 console.log(`\nResult: ${pass ? "all PASS" : "FAILURES"} — Waso compiles real JS and matches Node's own`);
 console.log(`execution across templates, default params, for-of, array/object literals,`);
 console.log(`destructuring (incl. nested), nested function declarations, and closures.`);

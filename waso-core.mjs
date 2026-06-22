@@ -195,7 +195,7 @@ export function isClosure(x) { return x !== null && typeof x === "object" && x._
 function binop(op, a, b) {
   switch (op) {
     case "+": return (typeof a === "string" || typeof b === "string") ? String(a) + String(b) : a + b;
-    case "-": return a - b; case "*": return a * b; case "/": return a / b; case "%": return a % b;
+    case "-": return a - b; case "*": return a * b; case "/": return a / b; case "%": return a % b; case "**": return a ** b;
     case "<": return a < b; case "<=": return a <= b; case ">": return a > b; case ">=": return a >= b;
     case "===": return a === b; case "!==": return a !== b;
     default: throw new Error("bad binop " + op);
@@ -219,6 +219,8 @@ export function run(tier, frames, host) {
       case "POP":    f.stack.pop(); f.ip++; break;
       case "DUP":    f.stack.push(f.stack[f.stack.length - 1]); f.ip++; break;
       case "NOT":    f.stack.push(!f.stack.pop()); f.ip++; break;
+      case "TYPEOF": f.stack.push(typeof f.stack.pop()); f.ip++; break;
+      case "ISNULLISH": { const v = f.stack.pop(); f.stack.push(v === null || v === undefined); f.ip++; break; }
       case "NEWARR": f.stack.push([]); f.ip++; break;
       // deref ops peek-then-deref so a deref-miss leaves the stack/ip untouched (re-runnable)
       case "ARRPUSH": { const a = d(f.stack[f.stack.length - 2]); const v = f.stack[f.stack.length - 1]; f.stack.length -= 2; a.push(v); f.ip++; break; }
