@@ -13,6 +13,7 @@ const cases = [
   { file: "bench-sweep.mjs",         needs: ["Correctness across all sizes: YES"] },
   { file: "bench-conduit.mjs",       needs: ["less data", "identical feeds? YES"] },
   { file: "probe-heap.mjs",          needs: ["Section B: all PASS"] },
+  { file: "probe-fetch.mjs",         needs: ["all PASS — a migrated continuation"] },
 ];
 
 // Build the wasm once up front.
