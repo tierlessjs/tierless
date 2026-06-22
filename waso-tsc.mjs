@@ -194,8 +194,8 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     rec.compiled = {};
     const o = { thisId: rec.thisId, superName: rec.superName };
     const cprog = `${cname}#constructor`; // ctor FIRST so a method body that does `new ThisClass()` finds it mid-compile
-    if (rec.ctor) { const c = compileFn(rec.ctor, cprog, { ...o, fieldInits: rec.fields }); out[cprog] = c; rec.compiled.__ctor__ = { prog: cprog, freeIds: c.freeIds }; }
-    else { const c = compileFn({ parameters: [] }, cprog, { ...o, emitBody: (ctx) => buildImplicitCtor(rec, ctx) }); out[cprog] = c; rec.compiled.__ctor__ = { prog: cprog, freeIds: c.freeIds }; } // synthesized (this/super available for field inits)
+    if (rec.ctor) { const c = compileFn(rec.ctor, cprog, { ...o, fieldInits: rec.fields, ctorOf: cname }); out[cprog] = c; rec.compiled.__ctor__ = { prog: cprog, freeIds: c.freeIds }; }
+    else { const c = compileFn({ parameters: [] }, cprog, { ...o, ctorOf: cname, emitBody: (ctx) => buildImplicitCtor(rec, ctx) }); out[cprog] = c; rec.compiled.__ctor__ = { prog: cprog, freeIds: c.freeIds }; } // synthesized (this/super available for field inits)
     for (const m of rec.methods) { const prog = `${cname}#${m.name}`; const c = compileFn(m.node, prog, o); out[prog] = c; rec.compiled[m.name] = { prog, freeIds: c.freeIds }; }
     for (const a of rec.accessors) { const prog = `${cname}#${a.kind} ${a.name}`; const c = compileFn(a.node, prog, o); out[prog] = c; rec.compiled[`${a.kind} ${a.name}`] = { prog, freeIds: c.freeIds }; }
     const so = { thisId: rec.staticThisId, superName: rec.superName }; // static `this` = the class object
@@ -352,6 +352,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (node.kind === ts.SyntaxKind.FalseKeyword) { emit("PUSH", false); return true; }
       if (node.kind === ts.SyntaxKind.NullKeyword) { emit("PUSH", null); return true; }
       if (node.kind === ts.SyntaxKind.ThisKeyword) { if (opts.thisId == null) { emit("PUSH", undefined); return true; } emit("LOADENV", capture(opts.thisId)); return true; } // module/regular-fn `this` is undefined (strict)
+      if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.NewKeyword) { if (opts.ctorOf) classObject(opts.ctorOf); else emit("PUSH", undefined); return true; } // new.target: the class in a ctor, else undefined
       if (ts.isNewExpression(node)) {
         if (ts.isIdentifier(node.expression) && bindingOf.get(node.expression) == null && CTOR_GLOBALS.has(node.expression.text)) { const a = node.arguments || []; a.forEach((x) => expr(x)); emit("CTORG", node.expression.text, a.length); return true; } // new Map/Set/Date/...
         const cname = ts.isIdentifier(node.expression) ? classNameOf(node.expression) : null;
