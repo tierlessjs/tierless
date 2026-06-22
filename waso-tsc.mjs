@@ -21,6 +21,9 @@ const BINOP = {
   [ts.SyntaxKind.GreaterThanToken]: ">", [ts.SyntaxKind.GreaterThanEqualsToken]: ">=",
   [ts.SyntaxKind.EqualsEqualsEqualsToken]: "===", [ts.SyntaxKind.ExclamationEqualsEqualsToken]: "!==",
   [ts.SyntaxKind.EqualsEqualsToken]: "===", [ts.SyntaxKind.ExclamationEqualsToken]: "!==",
+  [ts.SyntaxKind.InKeyword]: "in",
+  [ts.SyntaxKind.AmpersandToken]: "&", [ts.SyntaxKind.BarToken]: "|", [ts.SyntaxKind.CaretToken]: "^",
+  [ts.SyntaxKind.LessThanLessThanToken]: "<<", [ts.SyntaxKind.GreaterThanGreaterThanToken]: ">>", [ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken]: ">>>",
 };
 const COMPOUND = new Map([
   [ts.SyntaxKind.PlusEqualsToken, "+"], [ts.SyntaxKind.MinusEqualsToken, "-"], [ts.SyntaxKind.AsteriskEqualsToken, "*"],
@@ -31,7 +34,8 @@ const isChainRoot = (n) => ts.isOptionalChain(n) && !(n.parent && isAccess(n.par
 const HOF = new Set(["map", "filter", "forEach", "reduce"]); // callback is a Waso closure -> inline-compiled
 const PLAIN_METHODS = new Set(["slice", "indexOf", "lastIndexOf", "includes", "join", "concat", "toUpperCase",
   "toLowerCase", "split", "trim", "trimStart", "trimEnd", "charAt", "charCodeAt", "substring", "substr", "repeat",
-  "padStart", "padEnd", "startsWith", "endsWith", "replace", "replaceAll", "toFixed", "at"]); // host intrinsics
+  "padStart", "padEnd", "startsWith", "endsWith", "replace", "replaceAll", "toFixed", "at",
+  "test", "exec", "match", "matchAll", "search", "reverse", "fill"]); // host intrinsics (incl. regex)
 const patternIds = (name, out) => {
   if (ts.isIdentifier(name)) out.push(name);
   else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name))
@@ -42,7 +46,7 @@ const patternIds = (name, out) => {
 function resolveBindings(sf) {
   let next = 1;
   const bindingOf = new Map(), declFn = new Map(), bindingsByFn = new Map();
-  const captured = new Set(), assigned = new Set();
+  const captured = new Set(), assigned = new Set(), forceBox = new Set();
   const declNames = (fn) => {
     const out = [];
     fn.parameters.forEach((p) => patternIds(p.name, out));
@@ -61,6 +65,7 @@ function resolveBindings(sf) {
   const walk = (node) => {
     const fn = isFnLike(node);
     if (fn) { const scope = { names: new Map() }; scopes.push(scope); const ids = []; for (const nameNode of declNames(node)) { const id = next++; scope.names.set(nameNode.text, id); bindingOf.set(nameNode, id); declFn.set(id, node); ids.push(id); } bindingsByFn.set(node, ids); }
+    if (ts.isFunctionDeclaration(node) && node.name && bindingOf.has(node.name)) forceBox.add(bindingOf.get(node.name)); // nested fn decl name -> live binding (capture timing + recursion)
     if (ts.isIdentifier(node) && !isPropName(node)) {
       let id = null, at = -1;
       for (let i = scopes.length - 1; i >= 0; i--) if (scopes[i].names.has(node.text)) { id = scopes[i].names.get(node.text); at = i; break; }
@@ -70,7 +75,9 @@ function resolveBindings(sf) {
     if (fn) scopes.pop();
   };
   walk(sf);
-  return { bindingOf, declFn, bindingsByFn, boxed: new Set([...captured].filter((id) => assigned.has(id))) };
+  const boxed = new Set([...captured].filter((id) => assigned.has(id)));
+  for (const id of forceBox) boxed.add(id);
+  return { bindingOf, declFn, bindingsByFn, boxed };
 }
 
 export function compileModule(source, { resources = [], entry = "main", file = "app.ts" } = {}) {
@@ -90,7 +97,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       else if (ts.isMethodDeclaration(mem) && ts.isIdentifier(mem.name)) methods.push({ name: mem.name.text, node: mem });
       else if (ts.isConstructorDeclaration(mem) && mem.body) ctor = mem;
     }
-    classes.set(s.name.text, { thisId: thisCounter--, fields, methods, ctor, superName });
+    classes.set(s.name.text, { name: s.name.text, thisId: thisCounter--, fields, methods, ctor, superName });
   }
   const resourceSet = new Set(resources);
   const { bindingOf, bindingsByFn, boxed } = resolveBindings(sf);
@@ -120,7 +127,22 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     const mark = (l) => asm.push(l);
     const label = (s) => `${s}_${gen}_${lab++}`;
     const fail = (nd, m) => { throw new Error(`waso-tsc: ${m}: \`${nd.getText(sf).slice(0, 40)}\``); };
-    const loops = [];
+    // Unified control-flow stack (innermost last): loop/switch break-continue
+    // targets AND active try handlers / finally blocks. break/continue/return
+    // that cross a try must POPTRY its handler and run its finally first; this is
+    // how an abrupt completion routes through finally (full JS semantics).
+    const cf = [];
+    let pendingLabel = null; const takeLabel = () => { const l = pendingLabel; pendingLabel = null; return l; }; // label attaches to the next loop
+    const targetFor = (kind) => { for (let i = cf.length - 1; i >= 0; i--) { const e = cf[i]; if (kind === "break" && (e.loop || e.swtch)) return i; if (kind === "continue" && e.loop) return i; } return -1; };
+    const targetForLabel = (name, kind) => { for (let i = cf.length - 1; i >= 0; i--) { const e = cf[i]; if (e.name === name && (kind === "break" || e.loop)) return i; } return -1; };
+    const crossedHasFin = (stop) => { for (let i = cf.length - 1; i > stop; i--) if (cf[i].fin) return true; return false; };
+    function unwind(stop) { // emit POPTRY + inline finally for every try crossed, innermost first
+      for (let i = cf.length - 1; i > stop; i--) {
+        const e = cf[i];
+        if (e.tryPop) emit("POPTRY");
+        if (e.fin) { const removed = cf.splice(i); stmt(e.fin); cf.push(...removed); } // finally (+ inner) not active while emitting itself
+      }
+    }
     const assemble = () => { const labels = {}, code = []; for (const l of asm) (typeof l === "string") ? (labels[l] = code.length) : code.push(l); for (const ins of code) if ((ins[0] === "JMP" || ins[0] === "JMPF" || ins[0] === "PUSHTRY") && typeof ins[1] === "string") ins[1] = labels[ins[1]]; return { code, pos: code.map((ins) => posMap.get(ins) || null) }; };
 
     function readUse(idNode) {
@@ -197,6 +219,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const rec = compileClass(node.expression.text);
         const chain = []; for (let c = rec; c; c = c.superName ? compileClass(c.superName) : null) chain.unshift(c); // base-first
         const inst = tempSlot(); emit("NEWOBJ"); emit("STORE", inst);
+        emit("LOAD", inst); emit("PUSH", chain.map((c) => c.name)); emit("SETPROP", "__class__"); emit("POP"); // tag for instanceof (base..derived)
         for (const cls of chain) for (const m of cls.methods) { const info = cls.compiled[m.name]; emit("LOAD", inst); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.thisId ? ["L", inst] : provide(id)))); emit("SETPROP", m.name); emit("POP"); } // derived overrides base
         const args = node.arguments || [];
         if (rec.ctor) { const info = rec.compiled.__ctor__; emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === rec.thisId ? ["L", inst] : provide(id)))); args.forEach((a) => expr(a)); emit("CALLV", args.length); emit("POP"); }
@@ -208,10 +231,13 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isAwaitExpression(node)) { expr(node.expression); emit("AWAIT"); return true; }
       if (ts.isTypeOfExpression(node)) { expr(node.expression); emit("TYPEOF"); return true; }
       if (ts.isVoidExpression(node)) { expr(node.expression); emit("POP"); emit("PUSH", undefined); return true; }
+      if (ts.isRegularExpressionLiteral(node)) { const m = node.text.match(/^\/(.*)\/([a-z]*)$/s); emit("PUSH", new RegExp(m[1], m[2])); return true; }
+      if (ts.isDeleteExpression(node)) { const t = node.expression; if (ts.isPropertyAccessExpression(t)) { expr(t.expression); emit("DELPROP", t.name.text); } else if (ts.isElementAccessExpression(t)) { expr(t.expression); expr(t.argumentExpression); emit("DELINDEX"); } else fail(node, "unsupported delete"); return true; }
       if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) { closureOf(node); return true; }
       if (ts.isConditionalExpression(node)) { expr(node.condition); const els = label("tern"), end = label("tend"); emit("JMPF", els); expr(node.whenTrue); emit("JMP", end); mark(els); expr(node.whenFalse); mark(end); return true; }
       if (ts.isPrefixUnaryExpression(node)) {
         if (node.operator === ts.SyntaxKind.ExclamationToken) { expr(node.operand); emit("NOT"); return true; }
+        if (node.operator === ts.SyntaxKind.TildeToken) { expr(node.operand); emit("BITNOT"); return true; }
         if (node.operator === ts.SyntaxKind.MinusToken) { emit("PUSH", 0); expr(node.operand); emit("BIN", "-"); return true; }
         if (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken) { incDec(node.operand, node.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-"); return false; }
         fail(node, "unsupported unary");
@@ -224,15 +250,27 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         if (k === ts.SyntaxKind.AmpersandAmpersandToken) { expr(node.left); emit("DUP"); const end = label("and"); emit("JMPF", end); emit("POP"); expr(node.right); mark(end); return true; }
         if (k === ts.SyntaxKind.BarBarToken) { expr(node.left); emit("DUP"); const rhs = label("or"), end = label("oend"); emit("JMPF", rhs); emit("JMP", end); mark(rhs); emit("POP"); expr(node.right); mark(end); return true; }
         if (k === ts.SyntaxKind.QuestionQuestionToken) { expr(node.left); emit("DUP"); emit("ISNULLISH"); const end = label("nc"); emit("JMPF", end); emit("POP"); expr(node.right); mark(end); return true; }
+        if (k === ts.SyntaxKind.CommaToken) { if (expr(node.left)) emit("POP"); return expr(node.right); }
         if (k === ts.SyntaxKind.AmpersandAmpersandEqualsToken) { assignTo(node.left, () => { expr(node.left); emit("DUP"); const e = label("ae"); emit("JMPF", e); emit("POP"); expr(node.right); mark(e); }); return false; }
         if (k === ts.SyntaxKind.BarBarEqualsToken) { assignTo(node.left, () => { expr(node.left); emit("DUP"); const r = label("oe"), e = label("oee"); emit("JMPF", r); emit("JMP", e); mark(r); emit("POP"); expr(node.right); mark(e); }); return false; }
         if (k === ts.SyntaxKind.QuestionQuestionEqualsToken) { assignTo(node.left, () => { expr(node.left); emit("DUP"); emit("ISNULLISH"); const e = label("nce"); emit("JMPF", e); emit("POP"); expr(node.right); mark(e); }); return false; }
+        if (k === ts.SyntaxKind.InstanceOfKeyword) { if (!ts.isIdentifier(node.right) || !classes.has(node.right.text)) fail(node, "instanceof needs a class name"); expr(node.left); emit("ISA", node.right.text); return true; }
         const op = BINOP[k]; if (!op) fail(node, "unsupported operator");
         expr(node.left); expr(node.right); emit("BIN", op); return true;
       }
       if (ts.isPropertyAccessExpression(node)) { expr(node.expression); emit("GETPROP", node.name.text); return true; }
       if (ts.isElementAccessExpression(node)) { expr(node.expression); expr(node.argumentExpression); emit("INDEX"); return true; }
-      if (ts.isObjectLiteralExpression(node)) { emit("NEWOBJ"); for (const p of node.properties) { if (ts.isSpreadAssignment(p)) { expr(p.expression); emit("ASSIGNALL"); } else if (ts.isPropertyAssignment(p)) { expr(p.initializer); emit("SETPROP", p.name.text); } else if (ts.isShorthandPropertyAssignment(p)) { readUse(p.name); emit("SETPROP", p.name.text); } else fail(p, "unsupported property"); } return true; }
+      if (ts.isObjectLiteralExpression(node)) {
+        emit("NEWOBJ");
+        for (const p of node.properties) {
+          if (ts.isSpreadAssignment(p)) { expr(p.expression); emit("ASSIGNALL"); }
+          else if (ts.isPropertyAssignment(p) && ts.isComputedPropertyName(p.name)) { emit("DUP"); expr(p.name.expression); expr(p.initializer); emit("SETINDEX"); } // {[k]: v}
+          else if (ts.isPropertyAssignment(p)) { expr(p.initializer); emit("SETPROP", p.name.text); }
+          else if (ts.isShorthandPropertyAssignment(p)) { readUse(p.name); emit("SETPROP", p.name.text); }
+          else fail(p, "unsupported property");
+        }
+        return true;
+      }
       if (ts.isArrayLiteralExpression(node)) { emit("NEWARR"); for (const el of node.elements) { if (ts.isSpreadElement(el)) { expr(el.expression); emit("APPENDALL"); } else { emit("DUP"); expr(el); emit("ARRPUSH"); } } return true; }
       if (ts.isCallExpression(node)) return call(node);
       fail(node, "unsupported expression");
@@ -318,7 +356,11 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     function stmt(node) { const save = here; here = node; try { stmtInner(node); } finally { here = save; } }
     function stmtInner(node) {
       if (ts.isBlock(node)) return node.statements.forEach(stmt);
-      if (ts.isFunctionDeclaration(node)) return;                  // nested fn decl: hoisted in the prologue
+      if (ts.isFunctionDeclaration(node)) { // nested fn decl: fill the pre-created cell with the closure
+        const childName = `${name}$${gen++}`; const child = compileFn(node, childName); out[childName] = child;
+        emit("LOAD", slotOf.get(bindingOf.get(node.name))); emit("MAKECLOSURE", childName, child.freeIds.map(provide)); emit("SETPROP", "v"); emit("POP");
+        return;
+      }
       if (ts.isVariableStatement(node)) { for (const d of node.declarationList.declarations) declOne(d); return; }
       if (ts.isExpressionStatement(node)) { if (expr(node.expression)) emit("POP"); return; }
       if (ts.isSwitchStatement(node)) {
@@ -327,45 +369,83 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const at = clauses.map(() => label("sw")); let def = -1;
         clauses.forEach((cl, i) => { if (ts.isDefaultClause(cl)) { def = i; return; } emit("LOAD", disc); expr(cl.expression); emit("BIN", "==="); emit("NOT"); emit("JMPF", at[i]); }); // jump to clause if ===
         emit("JMP", def >= 0 ? at[def] : end);
-        loops.push({ brk: end, cont: loops.length ? loops[loops.length - 1].cont : end });
+        cf.push({ swtch: true, brk: end });
         clauses.forEach((cl, i) => { mark(at[i]); cl.statements.forEach(stmt); }); // fall-through is implicit
-        loops.pop(); mark(end); return;
+        cf.pop(); mark(end); return;
       }
       if (ts.isThrowStatement(node)) { expr(node.expression); emit("THROW"); return; }
       if (ts.isTryStatement(node)) {
-        if (node.finallyBlock) fail(node, "finally not supported yet");
-        const cat = label("catch"), end = label("tryend");
-        emit("PUSHTRY", cat); stmt(node.tryBlock); emit("POPTRY"); emit("JMP", end);
-        mark(cat);
-        const cc = node.catchClause;
-        if (cc && cc.variableDeclaration && ts.isIdentifier(cc.variableDeclaration.name)) bindStackTop(cc.variableDeclaration.name);
-        else emit("POP");
-        if (cc) stmt(cc.block);
+        const cc = node.catchClause, fin = node.finallyBlock;
+        // try BODY catch CATCH finally FIN  ==  try { try BODY catch CATCH } finally FIN.
+        // The try/catch is registered on cf (so abrupt completions POPTRY it); the
+        // finally is registered as a fin entry (so they run it on the way out too).
+        const emitTryCatch = () => {
+          if (!cc) { stmt(node.tryBlock); return; }
+          const cat = label("catch"), done = label("trydone");
+          emit("PUSHTRY", cat);
+          cf.push({ tryPop: true }); stmt(node.tryBlock); cf.pop();   // handler live only in the try body
+          emit("POPTRY"); emit("JMP", done);
+          mark(cat);
+          if (cc.variableDeclaration && ts.isIdentifier(cc.variableDeclaration.name)) bindStackTop(cc.variableDeclaration.name);
+          else emit("POP");
+          stmt(cc.block);                                            // catch body: handler already gone
+          mark(done);
+        };
+        if (!fin) { emitTryCatch(); return; }
+        const h = label("fin"), end = label("tryend"); const exc = tempSlot();
+        emit("PUSHTRY", h);
+        cf.push({ tryPop: true, fin }); emitTryCatch(); cf.pop();     // finally wraps the (try/)catch
+        emit("POPTRY"); stmt(fin); emit("JMP", end);                 // normal completion -> run finally
+        mark(h); emit("STORE", exc); stmt(fin); emit("LOAD", exc); emit("THROW"); // exception -> finally, re-throw
         mark(end); return;
       }
-      if (ts.isReturnStatement(node)) { if (!node.expression) emit("PUSH", 0); else expr(node.expression); emit("RET"); return; }
+      if (ts.isReturnStatement(node)) {
+        if (!node.expression) { unwind(-1); emit("PUSH", 0); emit("RET"); return; }
+        expr(node.expression);
+        if (crossedHasFin(-1)) { const t = tempSlot(); emit("STORE", t); unwind(-1); emit("LOAD", t); } // value computed before finally
+        else unwind(-1);                                             // only POPTRYs; operand stack untouched
+        emit("RET"); return;
+      }
       if (ts.isIfStatement(node)) { expr(node.expression); const els = label("else"), end = label("end"); emit("JMPF", node.elseStatement ? els : end); stmt(node.thenStatement); if (node.elseStatement) { emit("JMP", end); mark(els); stmt(node.elseStatement); } mark(end); return; }
-      if (ts.isWhileStatement(node)) { const loop = label("loop"), end = label("end"); mark(loop); expr(node.expression); emit("JMPF", end); loops.push({ brk: end, cont: loop }); stmt(node.statement); loops.pop(); emit("JMP", loop); mark(end); return; }
+      if (ts.isLabeledStatement(node)) {
+        const body = node.statement;
+        if (ts.isWhileStatement(body) || ts.isForStatement(body) || ts.isForOfStatement(body) || ts.isForInStatement(body) || ts.isDoStatement(body)) { pendingLabel = node.label.text; stmt(body); return; }
+        const end = label("lbl"); cf.push({ swtch: true, brk: end, name: node.label.text }); stmt(body); cf.pop(); mark(end); return; // labeled block: only `break label`
+      }
+      if (ts.isWhileStatement(node)) { const lbl = takeLabel(); const loop = label("loop"), end = label("end"); mark(loop); expr(node.expression); emit("JMPF", end); cf.push({ loop: true, brk: end, cont: loop, name: lbl }); stmt(node.statement); cf.pop(); emit("JMP", loop); mark(end); return; }
+      if (ts.isDoStatement(node)) { const lbl = takeLabel(); const loop = label("loop"), step = label("step"), end = label("end"); mark(loop); cf.push({ loop: true, brk: end, cont: step, name: lbl }); stmt(node.statement); cf.pop(); mark(step); expr(node.expression); emit("JMPF", end); emit("JMP", loop); mark(end); return; }
       if (ts.isForStatement(node)) {
+        const lbl = takeLabel();
         if (node.initializer && ts.isVariableDeclarationList(node.initializer)) for (const d of node.initializer.declarations) declOne(d);
+        else if (node.initializer) { if (expr(node.initializer)) emit("POP"); }
         const loop = label("loop"), step = label("step"), end = label("end"); mark(loop);
         if (node.condition) { expr(node.condition); emit("JMPF", end); }
-        loops.push({ brk: end, cont: step }); stmt(node.statement); loops.pop();
+        cf.push({ loop: true, brk: end, cont: step, name: lbl }); stmt(node.statement); cf.pop();
         mark(step); if (node.incrementor) { if (expr(node.incrementor)) emit("POP"); } emit("JMP", loop); mark(end); return;
       }
+      if (ts.isForInStatement(node)) {
+        const lbl = takeLabel(); const iter = tempSlot(), idx = tempSlot();
+        expr(node.expression); emit("KEYS"); emit("STORE", iter); emit("PUSH", 0); emit("STORE", idx);
+        const loop = label("loop"), step = label("step"), end = label("end"); mark(loop);
+        emit("LOAD", idx); emit("LOAD", iter); emit("GETPROP", "length"); emit("BIN", "<"); emit("JMPF", end);
+        const decl = node.initializer.declarations[0];
+        emit("LOAD", iter); emit("LOAD", idx); emit("INDEX"); bindStackTop(decl.name);
+        cf.push({ loop: true, brk: end, cont: step, name: lbl }); stmt(node.statement); cf.pop();
+        mark(step); emit("LOAD", idx); emit("PUSH", 1); emit("BIN", "+"); emit("STORE", idx); emit("JMP", loop); mark(end); return;
+      }
       if (ts.isForOfStatement(node)) {
-        const iter = tempSlot(), idx = tempSlot();
+        const lbl = takeLabel(); const iter = tempSlot(), idx = tempSlot();
         expr(node.expression); emit("STORE", iter); emit("PUSH", 0); emit("STORE", idx);
         const loop = label("loop"), step = label("step"), end = label("end"); mark(loop);
         emit("LOAD", idx); emit("LOAD", iter); emit("GETPROP", "length"); emit("BIN", "<"); emit("JMPF", end);
         const decl = node.initializer.declarations[0];
         emit("LOAD", iter); emit("LOAD", idx); emit("INDEX");
         if (ts.isIdentifier(decl.name)) bindStackTop(decl.name); else { const t = tempSlot(); emit("STORE", t); bindPattern(decl.name, t); }
-        loops.push({ brk: end, cont: step }); stmt(node.statement); loops.pop();
+        cf.push({ loop: true, brk: end, cont: step, name: lbl }); stmt(node.statement); cf.pop();
         mark(step); emit("LOAD", idx); emit("PUSH", 1); emit("BIN", "+"); emit("STORE", idx); emit("JMP", loop); mark(end); return;
       }
-      if (ts.isBreakStatement(node)) { if (!loops.length) fail(node, "break outside loop"); emit("JMP", loops[loops.length - 1].brk); return; }
-      if (ts.isContinueStatement(node)) { if (!loops.length) fail(node, "continue outside loop"); emit("JMP", loops[loops.length - 1].cont); return; }
+      if (ts.isBreakStatement(node)) { const i = node.label ? targetForLabel(node.label.text, "break") : targetFor("break"); if (i < 0) fail(node, "break has no target"); unwind(i); emit("JMP", cf[i].brk); return; }
+      if (ts.isContinueStatement(node)) { const i = node.label ? targetForLabel(node.label.text, "continue") : targetFor("continue"); if (i < 0) fail(node, "continue has no target"); unwind(i); emit("JMP", cf[i].cont); return; }
       fail(node, "unsupported statement");
     }
 
@@ -374,9 +454,11 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     for (const p of node.parameters) if (p.initializer && ts.isIdentifier(p.name)) { const s = slotOf.get(bindingOf.get(p.name)); const skip = label("dflt"); emit("LOAD", s); emit("PUSH", undefined); emit("BIN", "==="); emit("JMPF", skip); expr(p.initializer); emit("STORE", s); mark(skip); }
     for (const p of node.parameters) if (ts.isIdentifier(p.name) && boxed.has(bindingOf.get(p.name))) { const s = slotOf.get(bindingOf.get(p.name)); emit("NEWOBJ"); emit("LOAD", s); emit("SETPROP", "v"); emit("STORE", s); }
     if (opts.fieldInits) for (const f of opts.fieldInits) { emit("LOADENV", capture(opts.thisId)); expr(f.init); emit("SETPROP", f.name); emit("POP"); } // class field initializers, with `this` bound
-    const hoist = []; const findFnDecls = (n) => { if (ts.isFunctionExpression(n) || ts.isArrowFunction(n)) return; if (ts.isFunctionDeclaration(n) && n !== node) { hoist.push(n); return; } ts.forEachChild(n, findFnDecls); };
-    if (node.body) ts.forEachChild(node.body, findFnDecls);
-    for (const fd of hoist) { const childName = `${name}$${gen++}`; const child = compileFn(fd, childName); out[childName] = child; emit("MAKECLOSURE", childName, child.freeIds.map(provide)); bindStackTop(fd.name); }
+    // Pre-create empty cells for nested fn decls (boxed) so they're live bindings
+    // before their lexical definition (recursion + capture timing). Filled below.
+    const findFnDecls = (n, acc) => { if (ts.isFunctionExpression(n) || ts.isArrowFunction(n)) return; if (ts.isFunctionDeclaration(n) && n !== node) { acc.push(n); return; } ts.forEachChild(n, (c) => findFnDecls(c, acc)); };
+    const fnDecls = []; if (node.body) ts.forEachChild(node.body, (c) => findFnDecls(c, fnDecls));
+    for (const fd of fnDecls) { emit("NEWOBJ"); emit("STORE", slotOf.get(bindingOf.get(fd.name))); }
 
     if (node.body && ts.isBlock(node.body)) node.body.statements.forEach(stmt);
     else { expr(node.body); emit("RET"); }

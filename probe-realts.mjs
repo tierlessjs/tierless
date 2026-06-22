@@ -142,6 +142,105 @@ class Dog extends Animal {
 }
 function go() { const d = new Dog("Rex"); return [d.name, d.legs, d.speak(), d.describe()]; }`, "go", []);
 
+check("instanceof (incl. inheritance + negative cases)",
+`class Animal { constructor(n) { this.n = n; } }
+class Dog extends Animal { constructor(n) { super(n); } }
+class Cat extends Animal { constructor(n) { super(n); } }
+function go() {
+  const d = new Dog("Rex"), c = new Cat("Tom");
+  return [d instanceof Dog, d instanceof Animal, d instanceof Cat, c instanceof Animal, (5) instanceof Animal];
+}`, "go", []);
+
+check("for-in + computed object keys + delete",
+`function go(o) {
+  const out = {};
+  for (const k in o) { out[k] = o[k] * 2; }
+  const key = "z";
+  out[key] = 99;
+  const tag = { [key + "1"]: 1, ["k" + 2]: 2 };
+  delete out.a;
+  return { out, tag };
+}`, "go", [{ a: 1, b: 2, c: 3 }]);
+
+check("try / finally (runs on normal and on throw) + comma + bitwise",
+`function go() {
+  const log = [];
+  function attempt(x) {
+    try {
+      if (x < 0) { throw "neg"; }
+      return x;
+    } finally {
+      log.push("cleanup");
+    }
+  }
+  let caught = "none";
+  try { attempt(-1); } catch (e) { caught = e; }
+  const ok = attempt(5);
+  const bits = (5 & 3) | (8 >> 1);
+  const c = (log.push("x"), bits);
+  return { log, caught, ok, bits, c, masked: ~0 };
+}`, "go", []);
+
+check("finally runs on return / break / continue, and nested + override",
+`function go() {
+  const log = [];
+  function ret(x) { try { if (x < 0) { return "neg"; } return "pos"; } finally { log.push("f" + x); } }
+  function loopBreak() {
+    const seen = [];
+    for (let i = 0; i < 5; i++) {
+      try { if (i === 2) { break; } if (i === 1) { continue; } seen.push(i); } finally { log.push("L" + i); }
+    }
+    return seen;
+  }
+  function nested() {
+    try { try { return "inner"; } finally { log.push("a"); } } finally { log.push("b"); }
+  }
+  function override() { try { return "x"; } finally { return "y"; } }   // finally's return wins
+  const r1 = ret(5), r2 = ret(-1);
+  const sb = loopBreak();
+  const n = nested();
+  const ov = override();
+  return { r1, r2, sb, n, ov, log };
+}`, "go", []);
+
+check("do-while + labeled break/continue across nested loops",
+`function go() {
+  const out = [];
+  let i = 0;
+  do { out.push("d" + i); i++; } while (i < 3);
+  outer: for (let a = 0; a < 3; a++) {
+    for (let b = 0; b < 3; b++) {
+      if (b === 1) { continue outer; }
+      if (a === 2) { break outer; }
+      out.push(a + "," + b);
+    }
+  }
+  return out;
+}`, "go", []);
+
+check("labeled continue runs finally on the way out",
+`function go() {
+  const log = [];
+  loop: for (let i = 0; i < 3; i++) {
+    try { if (i === 1) { continue loop; } log.push("body" + i); } finally { log.push("fin" + i); }
+  }
+  return log;
+}`, "go", []);
+
+check("return value computed before finally mutates it",
+`function go() {
+  let n = 1;
+  function f() { try { return n; } finally { n = 99; } }   // returns 1, not 99
+  const r = f();
+  return { r, n };
+}`, "go", []);
+
+check("regex: test / match / replace",
+`function go(s) {
+  const re = /[a-z]+/g;
+  return { has: /\\d/.test(s), words: s.match(/[a-z]+/g), up: s.replace(/o/g, "0") };
+}`, "go", ["foo 12 bar"]);
+
 check("nullish ?? + let-no-init + typeof",
 `function pick(a, b) {
   let chosen;

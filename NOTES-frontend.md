@@ -124,6 +124,51 @@ computed member names, comma operator. Known limits: inheritance requires
 explicit constructors; derived field inits run at ctor entry (before super);
 boxing/scoping is function-scoped (no block-scoped shadowing).
 
+## #4 step 11 (done — Promise/async stdlib, no colored functions)
+Promise.resolve/reject/all/race lowered onto AWAIT (await of a plain value =
+identity; reject = MKREJECT -> throw at AWAIT; all/race = sequential awaits).
+
+## #4 step 12 (done — the language tail: finally/for-in/regex/labels/instanceof)
+Verified vs Node's eval (probe-realts.mjs, now 32 snippets). Added:
+- **for-in** (KEYS op), **computed object keys** `{[e]: v}`, **delete** (DELPROP/
+  DELINDEX), **regex literals** + test/exec/match/replace, **comma** operator,
+  **bitwise** `& | ^ << >> >>>` + unary `~` (BITNOT), `in`, **do-while**,
+  for(;;) with a non-declaration initializer.
+- **try/finally with FULL abrupt-completion semantics.** Rewrote control flow
+  onto ONE unified stack (`cf`): loops/switch break-continue targets AND active
+  try handlers / finally blocks, innermost last. A `return`/`break`/`continue`
+  that crosses a try now POPTRYs its handler and emits its `finally` inline on the
+  way out (`unwind`), so finally runs on every exit path — normal, throw, return,
+  break, continue — including **nested** finally (innermost first) and **finally-
+  override** (a finally that itself returns/throws wins). `return e` evaluates `e`
+  *before* running finally (return value snapshotted into a temp). try/catch/
+  finally is lowered as `try { try/catch } finally` so a throw from the catch
+  body still runs finally. This is the real JS semantics, not a caveat.
+- **labeled statements**: `label: for(...)`, `break label` / `continue label`
+  resolve to the named loop on `cf` and unwind any finally between (proven:
+  labeled-continue runs the intervening finally).
+- **instanceof**: instances carry a `__class__` chain tag (base..derived) set at
+  `new`; `x instanceof C` (ISA op) checks membership — works through inheritance,
+  false for primitives/plain objects. (Note: the tag is an enumerable own prop,
+  so a *raw* instance shipped as JSON differs from Node — but raw instances were
+  already non-round-trippable since methods are own closure props; computed
+  values are unaffected. A real impl would mark it non-enumerable.)
+
+Still deferred (genuine model friction, not just unwritten) — all would need work
+beyond lowering:
+- **getters/setters**: a property *access* would have to invoke a Waso closure,
+  i.e. GETPROP/SETPROP would push a frame and themselves become suspension points.
+  Doable but invasive (every member access is potentially a migration point).
+- **static members**: need to reify a runtime class object (statics live on it)
+  and resolve a bare `ClassName` identifier to it; `new` is currently a special
+  form, not a value.
+- **generators**: a second flavor of suspendable frame (yield). Our continuation
+  machinery could host it, but it needs its own lowering + a resumable-iterator
+  protocol; for-of currently assumes array-shaped iterables.
+- **BigInt**: literals + a numeric tower the i32/JS-number interpreter doesn't model.
+Known limits unchanged: inheritance requires explicit constructors; derived field
+inits run at ctor entry (before super); boxing/scoping is function-scoped.
+
 ## Don't forget
 - **Source maps**: NJS captured the stack but deferred line/file metadata. Our
   §10.6. Design it into the transform from the start, don't bolt on.

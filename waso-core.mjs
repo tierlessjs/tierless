@@ -202,6 +202,9 @@ function binop(op, a, b) {
     case "-": return a - b; case "*": return a * b; case "/": return a / b; case "%": return a % b; case "**": return a ** b;
     case "<": return a < b; case "<=": return a <= b; case ">": return a > b; case ">=": return a >= b;
     case "===": return a === b; case "!==": return a !== b;
+    case "in": return a in b;
+    case "&": return a & b; case "|": return a | b; case "^": return a ^ b;
+    case "<<": return a << b; case ">>": return a >> b; case ">>>": return a >>> b;
     default: throw new Error("bad binop " + op);
   }
 }
@@ -232,7 +235,13 @@ export function run(tier, frames, host) {
       case "DUP":    f.stack.push(f.stack[f.stack.length - 1]); f.ip++; break;
       case "NOT":    f.stack.push(!f.stack.pop()); f.ip++; break;
       case "TYPEOF": f.stack.push(typeof f.stack.pop()); f.ip++; break;
+      case "BITNOT": f.stack.push(~f.stack.pop()); f.ip++; break;
+      case "ISA": { const o = d(f.stack.pop()); f.stack.push(!!(o && typeof o === "object" && Array.isArray(o.__class__) && o.__class__.includes(ins[1]))); f.ip++; break; } // instanceof
+
       case "ISNULLISH": { const v = f.stack.pop(); f.stack.push(v === null || v === undefined); f.ip++; break; }
+      case "KEYS":   f.stack.push(Object.keys(d(f.stack.pop()))); f.ip++; break;            // for-in
+      case "DELPROP": { const o = d(f.stack.pop()); f.stack.push(delete o[ins[1]]); f.ip++; break; }
+      case "DELINDEX": { const k = f.stack.pop(); const o = d(f.stack.pop()); f.stack.push(delete o[k]); f.ip++; break; }
       case "NEWARR": f.stack.push([]); f.ip++; break;
       // deref ops peek-then-deref so a deref-miss leaves the stack/ip untouched (re-runnable)
       case "ARRPUSH": { const a = d(f.stack[f.stack.length - 2]); const v = f.stack[f.stack.length - 1]; f.stack.length -= 2; a.push(v); f.ip++; break; }
