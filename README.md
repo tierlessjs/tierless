@@ -136,10 +136,13 @@ depth; Conduit = bandwidth on fan-out filtering + joins.
   so a continuation captured inside a nested call carries every live frame. The
   demo shows `db.query` migrating 1 frame (`render`) and `DOM.renderList`
   migrating 2 frames (`render → show`).
-- **Heap model (§5).** Heaps are tier-local. Large values become opaque handles
-  into the owning tier's heap instead of being copied, so they don't travel with
-  the continuation. The dataset stays in the server's `HEAP_BIG`; only the small
-  `matched` result migrates.
+- **Heap model (§5).** Heaps are tier-local. The continuation wire format
+  (`waso-heap.mjs`) is an identity-preserving, cycle-safe graph codec: shared
+  references stay shared and cycles survive the round trip, while a subgraph
+  larger than a threshold becomes an opaque handle into the owning tier's heap
+  instead of being copied. Dereferencing a handle on another tier fetches it
+  across a channel with a version-invalidated cache (single-writer coherence,
+  `waso-fetch.mjs`). `probe-heap.mjs` / `probe-fetch.mjs` exercise these.
 - **Migrate-vs-fetch (§6).** At a boundary the runtime can ship the continuation
   *or* fetch the data and stay put. `waso-policy.mjs` prices both with real
   bytes and shows the decision flipping between regimes, degrading to the naive

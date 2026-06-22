@@ -12,8 +12,8 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
-  Tier, run, Suspend, serializeContinuation, deserializeContinuation, contBytes,
-  initialFrames, isHandle, fmt,
+  Tier, run, Suspend, serializeContinuation, deserializeContinuation, contBytes, pendingName, wireHandles,
+  initialFrames, fmt,
 } from "./waso-core.mjs";
 import { writeFrame, readFrames } from "./waso-frame.mjs";
 
@@ -75,11 +75,10 @@ async function main() {
 
       meta = msg.meta;
       const back = contBytes(msg.wire);
-      migrations.push({ from: "server", to: "client", resource: msg.wire.pending.name, bytes: back });
+      migrations.push({ from: "server", to: "client", resource: pendingName(msg.wire), bytes: back });
 
-      // Prove the big array did NOT come back: the rows local must be a handle.
-      const rowsLocal = msg.wire.frames[0].locals[1];
-      if (!isHandle(rowsLocal)) throw new Error("FAIL: server shipped the rows array inline!");
+      // Prove the big array did NOT come back: it must have stayed as a §5 handle.
+      if (wireHandles(msg.wire).length === 0) throw new Error("FAIL: server shipped the rows array inline!");
 
       const got = deserializeContinuation(msg.wire);
       frames = got.frames;

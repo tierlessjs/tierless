@@ -22,6 +22,8 @@
 //
 // Locals: 0=minAge, 1=rows, 2=matched, 3=i, 4=row
 
+import { encodeGraph, decodeGraph } from "./waso-heap.mjs";
+
 export const L = { minAge: 0, rows: 1, matched: 2, i: 3, row: 4 };
 
 // Labeled assembly form: jump targets are label strings, resolved to indices.
@@ -110,66 +112,47 @@ export function isHandle(x) {
 }
 
 // ---------------------------------------------------------------------------
-// Wire format. Two things JSON gets wrong that only bite across a real
-// serialization boundary, both handled explicitly here:
-//   - `undefined` array elements silently become `null` through JSON. We tag
-//     them so a padded-but-unset local survives the round trip as undefined.
-//   - large objects must NOT be copied into the bytes; they become §5 handles
-//     into the source tier's heap and stay put.
+// Wire format — identity-preserving, cycle-safe graph encoding (waso-heap.mjs).
+// All values reachable from the continuation are encoded into one shared table,
+// so object identity and cycles survive the round trip; a subgraph larger than
+// HANDLE_THRESHOLD becomes a §5 handle into the source tier's heap (tier-local,
+// not shipped). See probe-heap.mjs for the failure modes this replaces, and
+// waso-fetch.mjs for dereferencing a handle on the other tier.
 // ---------------------------------------------------------------------------
 
-const UNDEF = { __waso_undef__: true };
-
-function encodeValue(v, sourceTier) {
-  if (v === undefined) return UNDEF;
-  if (v === null || typeof v !== "object") return v;        // primitive
-  if (isHandle(v)) return v;                                // already a handle
-  const bytes = Buffer.byteLength(JSON.stringify(v));
-  if (bytes > HANDLE_THRESHOLD) {
-    const id = sourceTier.heapPut(v);                       // stays on this tier
-    return { __waso_handle__: true, owner: sourceTier.id, id,
-             kind: Array.isArray(v) ? "array" : "object",
-             length: Array.isArray(v) ? v.length : undefined, bytes };
-  }
-  return v;                                                 // small enough: copy
-}
-
-function decodeValue(v) {
-  if (v !== null && typeof v === "object" && v.__waso_undef__ === true) return undefined;
-  return v; // handles stay handles; the interpreter derefs them on access
-}
-
-// Produce the plain wire object (handles substituted). Caller turns it into
-// bytes (for framing/measurement) with JSON.stringify.
 export function serializeContinuation(cont, sourceTier) {
-  const frames = cont.frames.map((f) => ({
-    fn: f.fn,
-    ip: f.ip,
-    locals: f.locals.map((x) => encodeValue(x, sourceTier)),
-    stack: f.stack.map((x) => encodeValue(x, sourceTier)),
-  }));
-  const pending = cont.pending && {
-    name: cont.pending.name,
-    args: cont.pending.args.map((x) => encodeValue(x, sourceTier)),
-  };
-  return { frames, pending };
+  const roots = [];                          // all values, flattened; graph dedupes shared refs
+  const frames = cont.frames.map((f) => {
+    const l0 = roots.length; for (const x of f.locals) roots.push(x);
+    const s0 = roots.length; for (const x of f.stack) roots.push(x);
+    return { fn: f.fn, ip: f.ip, nl: f.locals.length, ns: f.stack.length, l0, s0 };
+  });
+  let pending = null;
+  if (cont.pending) {
+    const a0 = roots.length; for (const x of cont.pending.args) roots.push(x);
+    pending = { name: cont.pending.name, a0, argc: cont.pending.args.length };
+  }
+  return { frames, pending, graph: encodeGraph(roots, { tier: sourceTier, threshold: HANDLE_THRESHOLD }) };
 }
 
 export function deserializeContinuation(wire) {
+  const vals = decodeGraph(wire.graph);      // rebuilds the graph (identity + cycles restored)
   const frames = wire.frames.map((f) => ({
-    fn: f.fn,
-    ip: f.ip,
-    locals: f.locals.map(decodeValue),
-    stack: f.stack.map(decodeValue),
+    fn: f.fn, ip: f.ip,
+    locals: vals.slice(f.l0, f.l0 + f.nl),
+    stack: vals.slice(f.s0, f.s0 + f.ns),
   }));
-  const pending = wire.pending && {
-    name: wire.pending.name,
-    args: wire.pending.args.map(decodeValue),
-  };
+  const pending = wire.pending
+    ? { name: wire.pending.name, args: vals.slice(wire.pending.a0, wire.pending.a0 + wire.pending.argc) }
+    : null;
   return { frames, pending };
 }
 
 export function contBytes(wire) { return Buffer.byteLength(JSON.stringify(wire)); }
+
+// Accessors so callers don't reach into the wire's internal shape.
+export function pendingName(wire) { return wire.pending && wire.pending.name; }
+export function wireHandles(wire) { return wire.graph.objs.filter((o) => o.k === "H").map((o) => o.h); }
 
 // ---------------------------------------------------------------------------
 // Interpreter. Runs frames on a tier until it returns or hits a resource it

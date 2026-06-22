@@ -7,7 +7,7 @@
 
 import {
   Tier, run, Suspend, serializeContinuation, deserializeContinuation,
-  isHandle, makeDataset, fmt,
+  wireHandles, makeDataset, fmt,
 } from "./waso-core.mjs";
 import { writeFrame, readFrames } from "./waso-frame.mjs";
 
@@ -53,9 +53,9 @@ readFrames(process.stdin, (msg) => {
     // the big rows array becomes a §5 handle into THIS process's heap and never
     // crosses the pipe.
     const wire = serializeContinuation({ frames: e.frames, pending: e.pending }, server);
-    const rowsLocal = wire.frames[0].locals[1]; // sanity: rows must be a handle
-    console.error(`server: suspending for ${e.pending.name}; rows local is ` +
-      (isHandle(rowsLocal) ? `a handle (${fmt(rowsLocal.bytes)} stays here)` : "INLINE (!!)"));
+    const handles = wireHandles(wire); // sanity: the big rows array must have stayed as a handle
+    console.error(`server: suspending for ${e.pending.name}; ${handles.length} handle(s) stayed here ` +
+      `(dataset ${fmt(fullResultBytes)} did not cross)`);
     writeFrame(process.stdout, { type: "suspend", wire, meta: { fullResultBytes, n: N } });
   }
 });
