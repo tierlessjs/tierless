@@ -292,6 +292,27 @@ check("array higher-order: find / findIndex / some / every (early-terminating)",
   };
 }`, "go", []);
 
+check("local class declarations (name collisions, capture, instanceof, extends, factory)",
+`function a() { class Box { kind() { return "a"; } } return new Box().kind(); }
+function b() { class Box { kind() { return "b"; } } return new Box().kind(); }   // same name, distinct class
+function makeAdder(n) { class Adder { add(x) { return x + n; } } return new Adder(); } // captures outer n
+function go() {
+  class Animal { constructor(nm) { this.nm = nm; } speak() { return this.nm; } }
+  class Dog extends Animal { speak() { return super.speak() + " woof"; } }  // local extends, no explicit ctor
+  const d = new Dog("Rex");
+  return { a: a(), b: b(), add: makeAdder(10).add(5), speak: d.speak(), isAnimal: d instanceof Animal, name: d.nm };
+}`, "go", []);
+
+check("implicit constructors: base with no ctor + super(), derived field inits after super, multi-level",
+`class A { constructor(n) { this.n = n; } }
+class B extends A {}                              // implicit ctor forwards args to super
+class C extends B { c = this.n + 1; }            // implicit ctor: super() then field init
+class Base { x = 5; y = 10; }                     // field-only, no ctor
+class Sub extends Base { z = this.x + this.y; }
+function go() {
+  return { b: new B(7).n, c1: new C(3).n, c2: new C(3).c, base: new Base().x, sub: new Sub().z };
+}`, "go", []);
+
 check("arguments object (length, index, with named params, captured by nested arrow, spread)",
 `function variadic() { let s = 0; for (let i = 0; i < arguments.length; i++) { s += arguments[i]; } return s; }
 function tail(first) { return Array.from(arguments).slice(1); }

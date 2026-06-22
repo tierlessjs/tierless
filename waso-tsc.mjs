@@ -122,14 +122,15 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   for (const s of sf.statements) if (ts.isFunctionDeclaration(s) && s.name) { topFns.set(s.name.text, s); if (s.asteriskToken) generatorFns.add(s.name.text); }
   // Classes: an instance is an object whose method properties are closures
   // capturing `this`; the constructor (with field inits prepended) runs at `new`.
-  const classes = new Map();
+  const resourceSet = new Set(resources);
+  const { bindingOf, bindingsByFn, boxed, usesArguments } = resolveBindings(sf);
+  const classes = new Map();         // unique class name -> record
+  const classOfBinding = new Map();  // bindingId -> unique class name (LOCAL classes, which have a block binding)
   const accessorNames = new Set();   // property names that are a get/set in SOME class/object-literal -> read/write uses the accessor-aware op
   const objLiteralThis = new Map();  // object-literal node -> synthetic thisId (for methods/getters that use `this`)
-  let thisCounter = -1;
+  let thisCounter = -1, classUid = 0;
   { const scan = (n) => { if ((ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n)) && (ts.isIdentifier(n.name) || ts.isStringLiteral(n.name))) accessorNames.add(n.name.text); ts.forEachChild(n, scan); }; scan(sf); } // pre-scan ALL accessor names (class + object-literal)
-  for (const s of sf.statements) if (ts.isClassDeclaration(s) && s.name) {
-    let superName = null;
-    for (const h of s.heritageClauses || []) if (h.token === ts.SyntaxKind.ExtendsKeyword && ts.isIdentifier(h.types[0].expression)) superName = h.types[0].expression.text;
+  const collectClass = (s) => {
     const isStatic = (mem) => (mem.modifiers || []).some((m) => m.kind === ts.SyntaxKind.StaticKeyword);
     const named = (n) => (n && (ts.isIdentifier(n) || ts.isPrivateIdentifier(n)) ? n.text : null); // `#x` private fields/methods -> "#x" key
     const fields = [], methods = [], accessors = [], sfields = [], smethods = [], saccessors = []; let ctor = null;
@@ -141,10 +142,14 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       else if (ts.isSetAccessorDeclaration(mem) && nm) { (st ? saccessors : accessors).push({ name: nm, kind: "set", node: mem }); accessorNames.add(nm); }
       else if (ts.isConstructorDeclaration(mem) && mem.body) ctor = mem;
     }
-    classes.set(s.name.text, { name: s.name.text, thisId: thisCounter--, staticThisId: thisCounter--, fields, methods, accessors, sfields, smethods, saccessors, ctor, superName });
-  }
-  const resourceSet = new Set(resources);
-  const { bindingOf, bindingsByFn, boxed, usesArguments } = resolveBindings(sf);
+    const extendsId = (s.heritageClauses || []).filter((h) => h.token === ts.SyntaxKind.ExtendsKeyword).flatMap((h) => h.types).map((t) => t.expression).find((e) => ts.isIdentifier(e)) || null;
+    const uname = s.parent === sf ? s.name.text : `${s.name.text}$c${classUid++}`; // top-level keeps its name; local gets a unique one (no collisions)
+    classes.set(uname, { name: uname, thisId: thisCounter--, staticThisId: thisCounter--, fields, methods, accessors, sfields, smethods, saccessors, ctor, superName: null, _ext: extendsId });
+    if (s.name && bindingOf.has(s.name)) classOfBinding.set(bindingOf.get(s.name), uname);
+  };
+  { const w = (n) => { if (ts.isClassDeclaration(n) && n.name) collectClass(n); ts.forEachChild(n, w); }; w(sf); } // classes ANYWHERE (top-level + local)
+  const classNameOf = (idNode) => { const b = bindingOf.get(idNode); if (b != null && classOfBinding.has(b)) return classOfBinding.get(b); if (classes.has(idNode.text)) return idNode.text; return null; };
+  for (const rec of classes.values()) { const e = rec._ext; if (e) rec.superName = (bindingOf.has(e) && classOfBinding.has(bindingOf.get(e))) ? classOfBinding.get(bindingOf.get(e)) : (classes.has(e.text) ? e.text : null); } // resolve supers (local or top-level)
   const out = {};
   let gen = 0;
   const neededBuilders = new Set();   // classes whose class-object builder (%Name) must be generated
@@ -175,18 +180,27 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     emit("LOAD", co); emit("CLSPUT", cname); emit("RET");           // cache & return
     mark(ready); emit("RET");                                       // cached value already on stack
   };
+  // Implicit constructor (when a class declares none): super(...args) if derived,
+  // then own field inits. So `super()` always has a target and `new` always calls a ctor.
+  const buildImplicitCtor = (rec, { emit, expr, provide, capture }) => {
+    if (rec.superName) { const sup = classes.get(rec.superName); compileClass(rec.superName); const info = sup.compiled.__ctor__; emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === sup.thisId ? ["E", capture(rec.thisId)] : provide(id)))); emit("ARGUMENTS"); emit("CALLVS"); emit("POP"); }
+    for (const f of rec.fields) { emit("LOADENV", capture(rec.thisId)); expr(f.init); emit("SETPROP", f.name); emit("POP"); }
+    emit("PUSH", undefined); emit("RET");
+  };
   const compileTop = (name) => { if (name in out) return; out[name] = null; out[name] = compileFn(topFns.get(name), name); };
   const compileClass = (cname) => {
     const rec = classes.get(cname); if (rec.compiled) return rec;
     if (rec.superName) compileClass(rec.superName);
     rec.compiled = {};
     const o = { thisId: rec.thisId, superName: rec.superName };
+    const cprog = `${cname}#constructor`; // ctor FIRST so a method body that does `new ThisClass()` finds it mid-compile
+    if (rec.ctor) { const c = compileFn(rec.ctor, cprog, { ...o, fieldInits: rec.fields }); out[cprog] = c; rec.compiled.__ctor__ = { prog: cprog, freeIds: c.freeIds }; }
+    else { const c = compileFn({ parameters: [] }, cprog, { ...o, emitBody: (ctx) => buildImplicitCtor(rec, ctx) }); out[cprog] = c; rec.compiled.__ctor__ = { prog: cprog, freeIds: c.freeIds }; } // synthesized (this/super available for field inits)
     for (const m of rec.methods) { const prog = `${cname}#${m.name}`; const c = compileFn(m.node, prog, o); out[prog] = c; rec.compiled[m.name] = { prog, freeIds: c.freeIds }; }
     for (const a of rec.accessors) { const prog = `${cname}#${a.kind} ${a.name}`; const c = compileFn(a.node, prog, o); out[prog] = c; rec.compiled[`${a.kind} ${a.name}`] = { prog, freeIds: c.freeIds }; }
     const so = { thisId: rec.staticThisId, superName: rec.superName }; // static `this` = the class object
     for (const m of rec.smethods) { const prog = `${cname}#static ${m.name}`; const c = compileFn(m.node, prog, so); out[prog] = c; rec.compiled[`static ${m.name}`] = { prog, freeIds: c.freeIds }; }
     for (const a of rec.saccessors) { const prog = `${cname}#static ${a.kind} ${a.name}`; const c = compileFn(a.node, prog, so); out[prog] = c; rec.compiled[`static ${a.kind} ${a.name}`] = { prog, freeIds: c.freeIds }; }
-    if (rec.ctor) { const prog = `${cname}#constructor`; const c = compileFn(rec.ctor, prog, { ...o, fieldInits: rec.fields }); out[prog] = c; rec.compiled.__ctor__ = { prog, freeIds: c.freeIds }; }
     return rec;
   };
 
@@ -232,10 +246,10 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     function classObject(cname) { compileClass(cname); neededBuilders.add(cname); emit("MAKECLOSURE", `%${cname}`, []); emit("CALLV", 0); return true; }
     const unresolvedId = (n) => bindingOf.get(n) == null && !topFns.has(n.text) && !classes.has(n.text) && !GLOBAL_OBJS.has(n.text) && !GLOBAL_CALLS.has(n.text) && !CTOR_GLOBALS.has(n.text) && !["undefined", "NaN", "Infinity"].includes(n.text);
     function readUse(idNode) {
+      const cn = classNameOf(idNode); if (cn) { classObject(cn); return; }  // bare `ClassName` (top-level or local) -> the class object
       const id = bindingOf.get(idNode);
       if (id == null) {
         if (topFns.has(idNode.text)) { compileTop(idNode.text); emit("MAKECLOSURE", idNode.text, [], generatorFns.has(idNode.text)); return; }
-        if (classes.has(idNode.text)) { classObject(idNode.text); return; }  // bare `ClassName` -> the class object
         if (GLOBAL_OBJS.has(idNode.text)) { emit("GLOBAL", idNode.text); return; } // bare `Math`/`JSON`/... -> host global
         if (idNode.text === "undefined") { emit("PUSH", undefined); return; }
         if (idNode.text === "NaN") { emit("PUSH", NaN); return; }
@@ -340,8 +354,9 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (node.kind === ts.SyntaxKind.ThisKeyword) { if (opts.thisId == null) { emit("PUSH", undefined); return true; } emit("LOADENV", capture(opts.thisId)); return true; } // module/regular-fn `this` is undefined (strict)
       if (ts.isNewExpression(node)) {
         if (ts.isIdentifier(node.expression) && bindingOf.get(node.expression) == null && CTOR_GLOBALS.has(node.expression.text)) { const a = node.arguments || []; a.forEach((x) => expr(x)); emit("CTORG", node.expression.text, a.length); return true; } // new Map/Set/Date/...
-        if (!ts.isIdentifier(node.expression) || !classes.has(node.expression.text)) fail(node, "unsupported `new`");
-        const rec = compileClass(node.expression.text);
+        const cname = ts.isIdentifier(node.expression) ? classNameOf(node.expression) : null;
+        if (!cname) fail(node, "unsupported `new`");
+        const rec = compileClass(cname);
         const chain = []; for (let c = rec; c; c = c.superName ? compileClass(c.superName) : null) chain.unshift(c); // base-first
         const inst = tempSlot(); emit("NEWOBJ"); emit("STORE", inst);
         emit("LOAD", inst); emit("PUSH", chain.map((c) => c.name)); emit("SETHIDDEN", "__class__"); emit("POP"); // non-enumerable: JSON/for-in/keys see only data fields
@@ -357,10 +372,8 @@ export function compileModule(source, { resources = [], entry = "main", file = "
           }
           emit("LOAD", inst); emit("LOAD", tbl); emit("SETHIDDEN", "__accessors__"); emit("POP");
         }
-        const args = node.arguments || [];
-        if (rec.ctor) { const info = rec.compiled.__ctor__; emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === rec.thisId ? ["L", inst] : provide(id)))); args.forEach((a) => expr(a)); emit("CALLV", args.length); emit("POP"); }
-        else if (rec.superName) fail(node, "a derived class needs an explicit constructor");
-        else for (const f of rec.fields) { emit("LOAD", inst); expr(f.init); emit("SETPROP", f.name); emit("POP"); }
+        const args = node.arguments || []; // every class has a constructor now (explicit or synthesized)
+        const info = rec.compiled.__ctor__; emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === rec.thisId ? ["L", inst] : provide(id)))); args.forEach((a) => expr(a)); emit("CALLV", args.length); emit("POP");
         emit("LOAD", inst); return true;
       }
       if (ts.isIdentifier(node)) { readUse(node); return true; }
@@ -403,7 +416,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         if (k === ts.SyntaxKind.AmpersandAmpersandEqualsToken) { assignTo(node.left, () => { expr(node.left); emit("DUP"); const e = label("ae"); emit("JMPF", e); emit("POP"); expr(node.right); mark(e); }); return false; }
         if (k === ts.SyntaxKind.BarBarEqualsToken) { assignTo(node.left, () => { expr(node.left); emit("DUP"); const r = label("oe"), e = label("oee"); emit("JMPF", r); emit("JMP", e); mark(r); emit("POP"); expr(node.right); mark(e); }); return false; }
         if (k === ts.SyntaxKind.QuestionQuestionEqualsToken) { assignTo(node.left, () => { expr(node.left); emit("DUP"); emit("ISNULLISH"); const e = label("nce"); emit("JMPF", e); emit("POP"); expr(node.right); mark(e); }); return false; }
-        if (k === ts.SyntaxKind.InstanceOfKeyword) { if (!ts.isIdentifier(node.right) || !classes.has(node.right.text)) fail(node, "instanceof needs a class name"); expr(node.left); emit("ISA", node.right.text); return true; }
+        if (k === ts.SyntaxKind.InstanceOfKeyword) { const cn = ts.isIdentifier(node.right) ? classNameOf(node.right) : null; if (!cn) fail(node, "instanceof needs a class name"); expr(node.left); emit("ISA", cn); return true; }
         const op = BINOP[k]; if (!op) fail(node, "unsupported operator");
         expr(node.left); expr(node.right); emit("BIN", op); return true;
       }
@@ -538,6 +551,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     function stmt(node) { const save = here; here = node; try { stmtInner(node); } finally { here = save; } }
     function stmtInner(node) {
       if (ts.isBlock(node)) return node.statements.forEach(stmt);
+      if (ts.isClassDeclaration(node)) return; // local class decl: collected up-front, built lazily on first `new`/reference
       if (ts.isFunctionDeclaration(node)) { // nested fn decl: fill the pre-created cell with the closure
         const childName = `${name}$${gen++}`; const child = compileFn(node, childName); out[childName] = child;
         emit("LOAD", slotOf.get(bindingOf.get(node.name))); emit("MAKECLOSURE", childName, child.freeIds.map(provide), !!node.asteriskToken); emit("SETPROP", "v"); emit("POP");
@@ -638,7 +652,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       fail(node, "unsupported statement");
     }
 
-    if (opts.emitBody) { opts.emitBody({ emit, expr, tempSlot, label, mark, provide }); const { code, pos } = assemble(); return { nlocals: topSlot, code, pos, freeIds: envIds }; } // synthetic class-object builder
+    if (opts.emitBody) { opts.emitBody({ emit, expr, tempSlot, label, mark, provide, capture }); const { code, pos } = assemble(); return { nlocals: topSlot, code, pos, freeIds: envIds }; } // synthetic class-object builder
 
     // --- prologue: rest param, default params, box captured params, fields, hoist nested fn decls
     if (usesArguments.has(node)) { emit("ARGUMENTS"); emit("STORE", slotOf.get(usesArguments.get(node))); } // snapshot passed args before defaults/rest mutate locals
