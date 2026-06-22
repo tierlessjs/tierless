@@ -32,8 +32,8 @@ const isFnLike = (n) => ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n
 const isAccess = (n) => ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n) || ts.isCallExpression(n);
 const isChainRoot = (n) => ts.isOptionalChain(n) && !(n.parent && isAccess(n.parent) && n.parent.expression === n && ts.isOptionalChain(n.parent));
 const HOF = new Set(["map", "filter", "forEach", "reduce", "find", "findIndex", "some", "every"]); // callback is a Waso closure -> inline-compiled
-const GLOBAL_OBJS = new Set(["Math", "JSON", "Object", "Array", "Number", "String", "Boolean", "console", "Date"]); // host stdlib (match waso-heap GLOBALS)
-const GLOBAL_CALLS = new Set(["parseInt", "parseFloat", "isNaN", "isFinite", "Number", "String", "Boolean"]); // callable globals
+const GLOBAL_OBJS = new Set(["Math", "JSON", "Object", "Array", "Number", "String", "Boolean", "console", "Date", "Symbol"]); // host stdlib (match waso-heap GLOBALS)
+const GLOBAL_CALLS = new Set(["parseInt", "parseFloat", "isNaN", "isFinite", "Number", "String", "Boolean", "Symbol"]); // callable globals
 const CTOR_GLOBALS = new Set(["Map", "Set", "WeakMap", "WeakSet", "Date", "Error", "RegExp"]); // host constructors via `new` (match waso-heap CTORS)
 const PLAIN_METHODS = new Set(["slice", "indexOf", "lastIndexOf", "includes", "join", "concat", "toUpperCase",
   "toLowerCase", "split", "trim", "trimStart", "trimEnd", "charAt", "charCodeAt", "substring", "substr", "repeat",

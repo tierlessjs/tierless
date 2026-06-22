@@ -23,8 +23,9 @@ export function isHandle(x) {
 // not data: a GLOBAL op pushes them, and the codec ships them BY REFERENCE (a
 // {k:"glob"} tag re-bound per tier) — never deep-copied. Matches how closures and
 // class objects travel.
-export const GLOBALS = { Math, JSON, Object, Array, Number, String, Boolean, parseInt, parseFloat, isNaN, isFinite, console, Date };
+export const GLOBALS = { Math, JSON, Object, Array, Number, String, Boolean, parseInt, parseFloat, isNaN, isFinite, console, Date, Symbol };
 const GLOBAL_NAME = new Map(Object.entries(GLOBALS).map(([k, v]) => [v, k]));
+const WELLKNOWN = new Map(Object.getOwnPropertyNames(Symbol).filter((k) => typeof Symbol[k] === "symbol").map((k) => [Symbol[k], k])); // Symbol.iterator, .asyncIterator, ...
 // Host constructors reachable via `new` (Map/Set serialize through the codec below).
 export const CTORS = { Map, Set, WeakMap, WeakSet, Date, Error, RegExp };
 
@@ -52,6 +53,11 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024 } = {})
   function enc(v) {
     if (v === undefined) return { k: "u" };
     if (typeof v === "bigint") return { k: "big", v: v.toString() };   // BigInt isn't JSON-safe
+    if (typeof v === "symbol") {                                       // well-known by name; Symbol.for by key; unique by graph node (identity within a round-trip)
+      if (WELLKNOWN.has(v)) return { k: "symw", name: WELLKNOWN.get(v) };
+      const key = Symbol.keyFor(v); if (key !== undefined) return { k: "symf", key };
+      if (idOf.has(v)) return { k: "r", id: idOf.get(v) }; const id = objs.length; idOf.set(v, id); objs.push({ k: "symu", d: v.description }); return { k: "r", id };
+    }
     if (GLOBAL_NAME.has(v)) return { k: "glob", name: GLOBAL_NAME.get(v) }; // host global -> by reference
     if (v === null || typeof v !== "object") return { k: "p", v };
     if (idOf.has(v)) return { k: "r", id: idOf.get(v) };
@@ -80,8 +86,8 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024 } = {})
 }
 
 export function decodeGraph({ roots, objs }) {
-  const built = objs.map((s) => (s.k === "a" ? [] : s.k === "o" ? {} : s.k === "map" ? new Map() : s.k === "set" ? new Set() : s.h)); // pre-create for cycles/sharing
-  const dec = (n) => (n.k === "u" ? undefined : n.k === "big" ? BigInt(n.v) : n.k === "glob" ? GLOBALS[n.name] : n.k === "p" ? n.v : built[n.id]);
+  const built = objs.map((s) => (s.k === "a" ? [] : s.k === "o" ? {} : s.k === "map" ? new Map() : s.k === "set" ? new Set() : s.k === "symu" ? Symbol(s.d) : s.h)); // pre-create for cycles/sharing
+  const dec = (n) => (n.k === "u" ? undefined : n.k === "big" ? BigInt(n.v) : n.k === "glob" ? GLOBALS[n.name] : n.k === "symw" ? Symbol[n.name] : n.k === "symf" ? Symbol.for(n.key) : n.k === "p" ? n.v : built[n.id]);
   objs.forEach((s, i) => {
     if (s.k === "a") for (const n of s.e) built[i].push(dec(n));
     else if (s.k === "o") for (const key in s.f) { const val = dec(s.f[key]); if (s.h && s.h[key]) Object.defineProperty(built[i], key, { value: val, writable: true, enumerable: false, configurable: true }); else built[i][key] = val; }
