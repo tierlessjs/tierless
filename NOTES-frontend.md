@@ -38,6 +38,23 @@ async can't do. So for #4 the boundary shape is `await`, and the transform's job
 is to emit our AWAIT (+ serializable descriptor) at each suspension, not to rely
 on the engine's async state. Same suspension also resolves a remote handle fetch.
 
+## #4 step 1 (done — waso-tsc.mjs, probe-frontend.mjs)
+Built a TS->JS-IR frontend targeting the de-risked runtime (NOT the wasm IR).
+Done: closure conversion (free-var analysis -> MAKECLOSURE + LOADENV; top-level
+fn ref = closure with no captures), CALLV over first-class closures, multi-frame
+CALL/RET in waso-core, and `await` lowering (await expr -> expr; AWAIT). Proven:
+real TS `makeAdder`/`main` compiles + runs (=32); and a closure that is live
+across an `await` survives a serialize/deserialize boundary mid-await (env
+travels as data, code by fn-name) and still works (=105). Confirms: async needs
+NO colored functions here — `await` is just a suspension, any fn can suspend.
+
+Subset so far: number/string literals, identifiers, +-* and comparisons,
+member/element access, object/empty-array literals, calls (closure + resource +
+.push), const/let, if/for, return, arrow/function expressions, await.
+TODO next: mutable captured vars (currently env is by-value snapshot — fine for
+read; shared mutation across a closure boundary is the open case), broader
+control flow, and source-map metadata (line/file through the transform).
+
 ## Don't forget
 - **Source maps**: NJS captured the stack but deferred line/file metadata. Our
   §10.6. Design it into the transform from the start, don't bolt on.

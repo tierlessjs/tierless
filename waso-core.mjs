@@ -123,9 +123,11 @@ export function isHandle(x) {
 export function serializeContinuation(cont, sourceTier) {
   const roots = [];                          // all values, flattened; graph dedupes shared refs
   const frames = cont.frames.map((f) => {
+    const env = f.env || [];
     const l0 = roots.length; for (const x of f.locals) roots.push(x);
     const s0 = roots.length; for (const x of f.stack) roots.push(x);
-    return { fn: f.fn, ip: f.ip, nl: f.locals.length, ns: f.stack.length, l0, s0 };
+    const e0 = roots.length; for (const x of env) roots.push(x);      // closure env travels too
+    return { fn: f.fn, ip: f.ip, nl: f.locals.length, ns: f.stack.length, ne: env.length, l0, s0, e0 };
   });
   let pending = null;
   if (cont.pending && cont.pending.name !== undefined) {        // resource boundary
@@ -144,6 +146,7 @@ export function deserializeContinuation(wire) {
     fn: f.fn, ip: f.ip,
     locals: vals.slice(f.l0, f.l0 + f.nl),
     stack: vals.slice(f.s0, f.s0 + f.ns),
+    env: vals.slice(f.e0, f.e0 + f.ne),
   }));
   let pending = null;
   if (wire.pending && wire.pending.name !== undefined)
@@ -180,6 +183,11 @@ export class Miss {
   constructor(handle) { this.handle = handle; }
 }
 
+// A first-class closure: a code pointer (fn name) + a captured environment. The
+// env is plain data, so a closure — and a continuation holding one — serializes
+// through the graph codec (code travels by reference, env by value).
+export function isClosure(x) { return x !== null && typeof x === "object" && x.__waso_closure__ === true; }
+
 function binop(op, a, b) {
   switch (op) {
     case "+": return (typeof a === "string" || typeof b === "string") ? String(a) + String(b) : a + b;
@@ -215,7 +223,29 @@ export function run(tier, frames, host) {
       case "BIN":    { const b = f.stack.pop(); const a = f.stack.pop(); f.stack.push(binop(ins[1], a, b)); f.ip++; break; }
       case "JMP":    f.ip = ins[1]; break;
       case "JMPF":   { const c = f.stack.pop(); f.ip = c ? f.ip + 1 : ins[1]; break; }
-      case "RET":    return { type: "done", value: f.stack.pop() };
+      case "LOADENV": f.stack.push(f.env[ins[1]]); f.ip++; break;
+      case "MAKECLOSURE": {                                   // ["MAKECLOSURE", fn, [["L"|"E", idx]...]]
+        const env = ins[2].map(([kind, i]) => (kind === "L" ? f.locals[i] : f.env[i]));
+        f.stack.push({ __waso_closure__: true, fn: ins[1], env });
+        f.ip++; break;
+      }
+      case "CALLV": {                                          // call a closure value: ["CALLV", argc]
+        const argc = ins[1];
+        const args = [];
+        for (let k = 0; k < argc; k++) args.unshift(f.stack.pop());
+        const callee = f.stack.pop();
+        if (!isClosure(callee)) throw new Error("CALLV on non-closure");
+        f.ip++; // caller resumes after the CALLV
+        frames.push({ fn: callee.fn, ip: 0, locals: padLocals(args, PROGRAM[callee.fn].nlocals), stack: [], env: callee.env });
+        break;
+      }
+      case "RET": {
+        const v = f.stack.pop();
+        frames.pop();
+        if (frames.length === 0) return { type: "done", value: v };
+        frames[frames.length - 1].stack.push(v);             // return into the caller
+        break;
+      }
       case "RES": {
         const argc = ins[2];
         const args = [];
@@ -244,7 +274,7 @@ export function padLocals(args, n) {
 }
 
 export function initialFrames(entry, args) {
-  return [{ fn: entry, ip: 0, locals: padLocals(args, PROGRAM[entry].nlocals), stack: [] }];
+  return [{ fn: entry, ip: 0, locals: padLocals(args, PROGRAM[entry].nlocals), stack: [], env: [] }];
 }
 
 // ---------------------------------------------------------------------------
