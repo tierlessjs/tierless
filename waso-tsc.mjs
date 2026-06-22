@@ -110,10 +110,19 @@ function resolveBindings(sf) {
     }
     ts.forEachChild(node, walk);
   };
+  // Module scope: top-level let/const/var are module bindings (stored per tier via
+  // MGET/MSET, not frame slots), so functions can read/write them.
+  const moduleBindings = new Map(); // bindingId -> name
+  const mscope = { kind: "module", names: new Map(), fnNode: null };
+  scopes.push(mscope);
+  for (const st of sf.statements) {
+    if (ts.isVariableStatement(st)) for (const d of st.declarationList.declarations) { const ids = []; patternIds(d.name, ids); for (const nm of ids) { const id = next++; mscope.names.set(nm.text, id); bindingOf.set(nm, id); declFn.set(id, null); moduleBindings.set(id, nm.text); } }
+  }
   sf.statements.forEach(walk);
-  const boxed = new Set([...captured].filter((id) => assigned.has(id)));
+  scopes.pop();
+  const boxed = new Set([...captured].filter((id) => assigned.has(id) && !moduleBindings.has(id)));
   for (const id of forceBox) boxed.add(id);
-  return { bindingOf, declFn, bindingsByFn, boxed, usesArguments };
+  return { bindingOf, declFn, bindingsByFn, boxed, usesArguments, moduleBindings };
 }
 
 export function compileModule(source, { resources = [], entry = "main", file = "app.ts" } = {}) {
@@ -124,7 +133,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   // Classes: an instance is an object whose method properties are closures
   // capturing `this`; the constructor (with field inits prepended) runs at `new`.
   const resourceSet = new Set(resources);
-  const { bindingOf, bindingsByFn, boxed, usesArguments } = resolveBindings(sf);
+  const { bindingOf, bindingsByFn, boxed, usesArguments, moduleBindings } = resolveBindings(sf);
   const classes = new Map();         // unique class name -> record
   const classOfBinding = new Map();  // bindingId -> unique class name (LOCAL classes, which have a block binding)
   const accessorNames = new Set();   // property names that are a get/set in SOME class/object-literal -> read/write uses the accessor-aware op
@@ -260,11 +269,13 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         if (idNode.text === "Infinity") { emit("PUSH", Infinity); return; }
         fail(idNode, "unresolved identifier");
       }
+      if (moduleBindings.has(id)) { emit("MGET", moduleBindings.get(id)); return; } // module-level binding (per-tier registry)
       if (slotOf.has(id)) { emit("LOAD", slotOf.get(id)); if (boxed.has(id)) emit("GETPROP", "v"); return; }
       emit("LOADENV", capture(id)); if (boxed.has(id)) emit("GETPROP", "v");
     }
     function writeUse(idNode, valThunk) {
       const id = bindingOf.get(idNode); if (id == null) fail(idNode, "assign to non-variable");
+      if (moduleBindings.has(id)) { valThunk(); emit("MSET", moduleBindings.get(id)); return; } // module-level binding
       if (boxed.has(id)) { if (slotOf.has(id)) emit("LOAD", slotOf.get(id)); else emit("LOADENV", capture(id)); valThunk(); emit("SETPROP", "v"); emit("POP"); return; }
       valThunk(); emit("STORE", slotOf.get(id));
     }
@@ -314,7 +325,8 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     }
     function bindStackTop(nameNode) { // a value is on the stack; store into the binding (decl/for-of/destructure)
       const id = bindingOf.get(nameNode);
-      if (boxed.has(id)) { const t = tempSlot(); emit("STORE", t); emit("NEWOBJ"); emit("LOAD", t); emit("SETPROP", "v"); emit("STORE", slotOf.get(id)); }
+      if (moduleBindings.has(id)) { emit("MSET", moduleBindings.get(id)); }
+      else if (boxed.has(id)) { const t = tempSlot(); emit("STORE", t); emit("NEWOBJ"); emit("LOAD", t); emit("SETPROP", "v"); emit("STORE", slotOf.get(id)); }
       else emit("STORE", slotOf.get(id));
     }
     function bindOne(el, pushRaw) {              // raw value -> apply default (if value===undefined) -> bind name/pattern
@@ -574,9 +586,9 @@ export function compileModule(source, { resources = [], entry = "main", file = "
 
     function declOne(d) {
       const init = () => (d.initializer ? expr(d.initializer) : emit("PUSH", undefined)); // `let x;` -> undefined
-      if (ts.isIdentifier(d.name)) { const id = bindingOf.get(d.name); if (boxed.has(id)) { emit("NEWOBJ"); init(); emit("SETPROP", "v"); emit("STORE", slotOf.get(id)); } else { init(); emit("STORE", slotOf.get(id)); } return; }
+      if (ts.isIdentifier(d.name)) { const id = bindingOf.get(d.name); if (moduleBindings.has(id)) { init(); emit("MSET", moduleBindings.get(id)); } else if (boxed.has(id)) { emit("NEWOBJ"); init(); emit("SETPROP", "v"); emit("STORE", slotOf.get(id)); } else { init(); emit("STORE", slotOf.get(id)); } return; }
       if (!d.initializer) fail(d, "destructuring needs an initializer");
-      const t = tempSlot(); expr(d.initializer); emit("STORE", t); bindPattern(d.name, t); // destructuring
+      const t = tempSlot(); expr(d.initializer); emit("STORE", t); bindPattern(d.name, t); // destructuring (module-level pattern targets resolve via writeUse->MSET)
     }
 
     function stmt(node) { const save = here; here = node; try { stmtInner(node); } finally { here = save; } }
@@ -683,7 +695,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       fail(node, "unsupported statement");
     }
 
-    if (opts.emitBody) { opts.emitBody({ emit, expr, tempSlot, label, mark, provide, capture }); const { code, pos } = assemble(); return { nlocals: topSlot, code, pos, freeIds: envIds }; } // synthetic class-object builder
+    if (opts.emitBody) { opts.emitBody({ emit, expr, stmt, tempSlot, label, mark, provide, capture }); const { code, pos } = assemble(); return { nlocals: topSlot, code, pos, freeIds: envIds }; } // synthetic class-object builder / module-init
 
     // --- prologue: rest param, default params, box captured params, fields, hoist nested fn decls
     if (usesArguments.has(node)) { emit("ARGUMENTS"); emit("STORE", slotOf.get(usesArguments.get(node))); } // snapshot passed args before defaults/rest mutate locals
@@ -707,6 +719,11 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   }
 
   compileTop(entry);
+  // Module-init: run the top-level statements (var decls -> MSET, side-effecting
+  // expressions) once per tier, before anything else. Function/class declarations
+  // and TS-only nodes are NOT executed here (handled separately).
+  const initStmts = sf.statements.filter((s) => ts.isVariableStatement(s) || ts.isExpressionStatement(s) || ts.isIfStatement(s) || ts.isForStatement(s) || ts.isForOfStatement(s) || ts.isForInStatement(s) || ts.isWhileStatement(s) || ts.isDoStatement(s) || ts.isSwitchStatement(s) || ts.isTryStatement(s) || ts.isBlock(s) || ts.isThrowStatement(s));
+  if (initStmts.length) { const stub = { parameters: [] }; bindingsByFn.set(stub, bindingsByFn.get(null) || []); out["%moduleinit"] = compileFn(stub, "%moduleinit", { emitBody: ({ stmt, emit }) => { for (const s of initStmts) stmt(s); emit("PUSH", undefined); emit("RET"); } }); }
   // Generate class-object builders now that every class is fully compiled (so
   // static-method freeIds are known). Fixpoint: a field init may reference more classes.
   const builtBuilders = new Set();

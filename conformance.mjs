@@ -121,6 +121,11 @@ t("object literal: shorthand/computed/spread/getter-setter", `function go(){cons
 t("array spread/holes/flat/includes", `function go(){return {sp:[0,...[1,2],3],fl:[1,[2,3],[4]].flat(),inc:[1,2,3].includes(2),idx:[5,6,7].indexOf(6)};}`);
 t("Map / Set / JSON / Object.*", `function go(){const m=new Map([["a",1]]);m.set("b",2);const s=new Set([1,1,2]);return {m:[...m],size:m.size,set:[...s],keys:Object.keys({x:1,y:2}),json:JSON.parse(JSON.stringify({z:[1,2]}))};}`);
 
+section("module-level bindings");
+t("module const/let, shared & mutated across functions", `const PI=3.14159; let hits=0; const log=[]; function track(n){hits++;log.push(n);} function go(){track("a");track("b");return {area:PI*2*2|0,hits,log};}`, "go");
+t("module computed init + destructuring + closures over module state", `const base=10; const derived=base*3+1; const {x,y}=({x:1,y:2}); let acc=0; const add=(n)=>{acc+=n;}; function go(){add(5);add(derived);return {derived,x,y,acc};}`, "go");
+t("module side-effecting statements + var hoisting", `let items=[]; items.push("init"); function use(){items.push("used");} function go(){use();return {items,hoisted:typeof later};} var later=1;`, "go");
+
 section("classes");
 t("fields/methods/this/new/getters/setters", `class Temp{constructor(c){this._c=c;}get f(){return this._c*9/5+32;}set f(v){this._c=(v-32)*5/9;}desc(){return this._c+"C";}} function go(){const t=new Temp(100);const a=t.f;t.f=32;return [a,t._c,t.desc()];}`);
 t("inheritance/super/override/instanceof", `class A{constructor(n){this.n=n;}who(){return"A:"+this.n;}} class B extends A{who(){return super.who()+"/B";}} function go(){const b=new B(5);return [b.who(),b instanceof A,b instanceof B,b.n];}`);
@@ -179,6 +184,7 @@ await (async () => {
   await w("destructuring + Map + closure all live across one await", `async function go(){const m=new Map([["k",[1,2,3]]]);const {k:[first,...tail]}=Object.fromEntries?{k:m.get("k")}:{k:m.get("k")};const f=x=>x+first;const y=await ckpt(10);return [f(y),tail];}`);
   await w("custom iterable consumed across checkpoints (iterator state migrates)", `async function go(){const it={i:0,n:3,[Symbol.iterator](){return this;},next(){return this.i<this.n?{value:this.i++,done:false}:{value:undefined,done:true};}};const out=[];for(const x of it){out.push(await ckpt(x*10));}return out;}`, "go", [], 3);
   await w("symbol-keyed state + Symbol value survive the wire", `async function go(){const s=Symbol("id");const o={[s]:1};await ckpt(0);o[s]+=await ckpt(41);return [o[s],typeof s,s.description];}`);
+  await w("module-level state persists across a migration (per-tier)", `let counter=0; const bump=()=>++counter; async function go(){bump();const a=await ckpt(0);bump();bump();return [counter,a];}`, "go", [], 1);
 })();
 
 console.log(`\n${"=".repeat(64)}`);

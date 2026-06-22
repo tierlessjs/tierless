@@ -306,6 +306,7 @@ export function run(tier, frames, host) {
     try { const r = run(tier, g.frames, host); g.done = true; return { value: r.value, done: true }; }
     catch (err) { if (err instanceof Yielded) return { value: err.value, done: false }; g.done = true; throw err; }
   };
+  if (PROGRAM["%moduleinit"] && tier && !tier.__minit) { tier.__minit = true; run(tier, [{ fn: "%moduleinit", ip: 0, locals: [], stack: [], env: [], handlers: [] }], host); } // module-level statements, once per tier
   while (true) {
     const f = frames[frames.length - 1];
     const ins = PROGRAM[f.fn].code[f.ip];
@@ -320,6 +321,8 @@ export function run(tier, frames, host) {
       case "BITNOT": f.stack.push(~f.stack.pop()); f.ip++; break;
       case "TOBIG":  f.stack.push(BigInt(f.stack.pop())); f.ip++; break;     // BigInt(x)
       case "ARGUMENTS": f.stack.push(Array.prototype.slice.call(f.locals)); f.ip++; break;                          // `arguments`: snapshot the passed args (strict)
+      case "MGET": f.stack.push(tier.module ? tier.module.get(ins[1]) : undefined); f.ip++; break;                  // module-level binding (per-tier)
+      case "MSET": (tier.module || (tier.module = new Map())).set(ins[1], f.stack.pop()); f.ip++; break;
       case "GLOBAL": f.stack.push(GLOBALS[ins[1]]); f.ip++; break;                                                // host stdlib global (Math/JSON/Object/...)
       case "CALLG": { const argc = ins[2]; const args = []; for (let k = 0; k < argc; k++) args.unshift(f.stack.pop()); f.stack.push(GLOBALS[ins[1]](...args)); f.ip++; break; } // parseInt/Number/... bare call
       case "CTORG": { const argc = ins[2]; const args = []; for (let k = 0; k < argc; k++) args.unshift(f.stack.pop()); f.stack.push(new CTORS[ins[1]](...args)); f.ip++; break; } // new Map/Set/Date/...
