@@ -233,6 +233,10 @@ d("proxy method synthesized by get", "function go(){ const p=new Proxy({n:10},{g
 d("proxy reactive increment", "function go(){ let writes=0; const p=new Proxy({count:0},{set(t,k,v){writes++;t[k]=v;return true;}}); p.count++; p.count+=10; return [p.count,writes]; }");
 d("proxy default passthrough (empty handler)", "function go(){ const p=new Proxy({a:1},{}); p.b=2; return [p.a,p.b,'a' in p,Object.keys(p)]; }");
 d("proxy validation throws on bad set", "function go(){ const p=new Proxy({age:0},{set(t,k,v){if(k==='age'&&v<0)throw new RangeError('neg');t[k]=v;return true;}}); let err='ok'; try{p.age=-1;}catch(e){err=e instanceof RangeError?'range':'other';} p.age=5; return [err,p.age]; }");
+d("Reflect get/set/has/delete", "function go(){ const o={a:1,b:2}; Reflect.set(o,'c',3); const had=Reflect.has(o,'a'); Reflect.deleteProperty(o,'a'); return [Reflect.get(o,'b'),o.c,had,Reflect.has(o,'a')]; }");
+d("Reflect.ownKeys and apply", "function go(){ function f(x,y){return this.k+x+y;} return [Reflect.ownKeys({p:1,q:2}),Reflect.apply(f,{k:10},[2,3])]; }");
+d("proxy handler delegates to Reflect", "function go(){ const log=[]; const p=new Proxy({a:1},{get(t,k,r){log.push('g:'+k);return Reflect.get(t,k,r);},set(t,k,v,r){log.push('s:'+k);return Reflect.set(t,k,v,r);}}); p.b=p.a+5; return [p.b,log]; }");
+d("Reflect.set returns boolean", "function go(){ const o={}; const r=Reflect.set(o,'x',9); return [r,o.x]; }");
 
 console.log("— closures & control flow extras —");
 d("try/finally return value in loop", "function go(){ function f(){for(let i=0;i<3;i++){try{if(i===2)return i;}finally{}}return -1;} return f(); }");

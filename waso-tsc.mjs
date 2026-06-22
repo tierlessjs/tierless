@@ -632,6 +632,15 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const m = callee.name.text;
         if (ts.isIdentifier(callee.expression) && callee.expression.text === "JSON" && m === "stringify" && bindingOf.get(callee.expression) == null) { const a = node.arguments; a[0] ? expr(a[0]) : emit("PUSH", undefined); a[1] ? expr(a[1]) : emit("PUSH", undefined); a[2] ? expr(a[2]) : emit("PUSH", undefined); emit("JSONSTR"); return true; } // skip Waso closures (functions) like JS does
         if (ts.isIdentifier(callee.expression) && callee.expression.text === "Object" && m === "keys" && node.arguments.length === 1 && bindingOf.get(callee.expression) == null) { expr(node.arguments[0]); emit("KEYS"); return true; } // proxy-aware (ownKeys trap)
+        if (ts.isIdentifier(callee.expression) && callee.expression.text === "Reflect" && bindingOf.get(callee.expression) == null) { const a = node.arguments; // proxy-aware reflection (handlers delegate to these)
+          if (m === "get") { expr(a[0]); expr(a[1]); emit("INDEX"); return true; }
+          if (m === "set") { expr(a[0]); expr(a[1]); expr(a[2]); emit("SETINDEX"); emit("PUSH", true); return true; }
+          if (m === "has") { expr(a[1]); expr(a[0]); emit("HASKEY"); return true; }
+          if (m === "deleteProperty") { expr(a[0]); expr(a[1]); emit("DELINDEX"); return true; }
+          if (m === "ownKeys") { expr(a[0]); emit("KEYS"); return true; }
+          if (m === "apply") { expr(a[0]); expr(a[1]); expr(a[2]); emit("REFAPPLY"); return true; }
+          fail(node, "unsupported Reflect." + m);
+        }
         if (ts.isIdentifier(callee.expression) && bindingOf.get(callee.expression) == null && GLOBAL_OBJS.has(callee.expression.text)) { emit("GLOBAL", callee.expression.text); hostMethod(m, node.arguments); return true; } // Math.max / Object.keys / JSON.stringify / Array.isArray ...
         if ((m === "next" || m === "return" || m === "throw") && node.arguments.length <= 1) { expr(callee.expression); node.arguments[0] ? expr(node.arguments[0]) : emit("PUSH", undefined); emit(m === "next" ? "GENNEXT" : m === "return" ? "GENRET" : "GENTHROW"); return true; } // it.next/return/throw(v)
         if (m === "push") { expr(callee.expression); expr(node.arguments[0]); emit("ARRPUSH"); return false; }

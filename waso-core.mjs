@@ -383,6 +383,7 @@ export function run(tier, frames, host) {
       case "DELINDEX": { const k = f.stack.pop(); const o = d(f.stack.pop()); const px = proxyOf(o); f.stack.push(px ? proxyDelete(px, k) : delete o[k]); f.ip++; break; }
       case "NEWPROXY": { const handler = f.stack.pop(); const target = d(f.stack.pop()); const p = {}; Object.defineProperty(p, "__proxy__", { value: { target, handler }, enumerable: false, writable: true, configurable: true }); f.stack.push(p); f.ip++; break; } // new Proxy(target, handler)
       case "HASKEY": { const o = d(f.stack.pop()); const k = f.stack.pop(); const px = proxyOf(o); f.stack.push(px ? proxyHas(px, k) : k in o); f.ip++; break; } // `k in o`, proxy-aware
+      case "REFAPPLY": { const argsArr = f.stack.pop(); const thisArg = f.stack.pop(); const fn = f.stack.pop(); f.ip++; if (isClosure(fn)) { const g = enter(fn, (argsArr || []).slice(), thisArg); if (g !== undefined) f.stack.push(g); break; } f.stack.push(fn.apply(thisArg, hostArgs(argsArr || []))); break; } // Reflect.apply(fn, thisArg, args)
       case "NEWARR": f.stack.push([]); f.ip++; break;
       case "ISARRAY": f.stack.push(Array.isArray(d(f.stack.pop()))); f.ip++; break;
       case "JSONSTR": {                                         // JSON.stringify that drops Waso closures & class objects (JS omits functions)
