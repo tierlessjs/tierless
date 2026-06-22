@@ -429,6 +429,8 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       args.forEach((a) => expr(a)); emit("CALLV", args.length); return true;
     }
     function promiseAll(arrNode) { expr(arrNode); emit("AWAITALL"); return true; } // resolve all elements CONCURRENTLY (one suspension) -> array
+    const spreadArgs = (args) => { emit("NEWARR"); for (const a of args) { if (ts.isSpreadElement(a)) { expr(a.expression); emit("APPENDALL"); } else { emit("DUP"); expr(a); emit("ARRPUSH"); } } }; // build an args array on the stack
+    const hostMethod = (m, args) => { if (args.some((a) => ts.isSpreadElement(a))) { spreadArgs(args); emit("CALLMS", m); } else { args.forEach((a) => expr(a)); emit("CALLM", m, args.length); } }; // object already on stack
     function call(node) {
       const callee = node.expression;
       if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === "Promise" && bindingOf.get(callee.expression) == null) {
@@ -445,11 +447,11 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const resName = `${callee.expression.getText(sf)}.${callee.name.text}`;
         if (resourceSet.has(resName)) { node.arguments.forEach((a) => expr(a)); emit("RES", resName, node.arguments.length); return true; }
         const m = callee.name.text;
-        if (ts.isIdentifier(callee.expression) && bindingOf.get(callee.expression) == null && GLOBAL_OBJS.has(callee.expression.text)) { emit("GLOBAL", callee.expression.text); node.arguments.forEach((a) => expr(a)); emit("CALLM", m, node.arguments.length); return true; } // Math.max / Object.keys / JSON.stringify / Array.isArray ...
+        if (ts.isIdentifier(callee.expression) && bindingOf.get(callee.expression) == null && GLOBAL_OBJS.has(callee.expression.text)) { emit("GLOBAL", callee.expression.text); hostMethod(m, node.arguments); return true; } // Math.max / Object.keys / JSON.stringify / Array.isArray ...
         if ((m === "next" || m === "return" || m === "throw") && node.arguments.length <= 1) { expr(callee.expression); node.arguments[0] ? expr(node.arguments[0]) : emit("PUSH", undefined); emit(m === "next" ? "GENNEXT" : m === "return" ? "GENRET" : "GENTHROW"); return true; } // it.next/return/throw(v)
         if (m === "push") { expr(callee.expression); expr(node.arguments[0]); emit("ARRPUSH"); return false; }
         if (HOF.has(m)) return hof(callee.expression, m, node.arguments);
-        if (PLAIN_METHODS.has(m)) { expr(callee.expression); node.arguments.forEach((a) => expr(a)); emit("CALLM", m, node.arguments.length); return true; }
+        if (PLAIN_METHODS.has(m)) { expr(callee.expression); hostMethod(m, node.arguments); return true; }
         return closureCall(callee, node.arguments); // user method (closure property)
       }
       if (ts.isIdentifier(callee) && bindingOf.get(callee) == null && !topFns.has(callee.text) && resourceSet.has(callee.text)) { node.arguments.forEach((a) => expr(a)); emit("RES", callee.text, node.arguments.length); return true; }

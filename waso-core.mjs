@@ -366,6 +366,7 @@ export function run(tier, frames, host) {
         f.stack.push(o[ins[1]](...args));
         f.ip++; break;
       }
+      case "CALLMS": { const argsArr = f.stack.pop(); const o = d(f.stack.pop()); f.stack.push(o[ins[1]](...argsArr)); f.ip++; break; } // host method, spread args
       case "PUSHTRY": (f.handlers || (f.handlers = [])).push({ ip: ins[1], sp: f.stack.length }); f.ip++; break;
       case "POPTRY":  f.handlers.pop(); f.ip++; break;
       case "RET": {
