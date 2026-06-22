@@ -127,7 +127,7 @@ export function serializeContinuation(cont, sourceTier) {
     const l0 = roots.length; for (const x of f.locals) roots.push(x);
     const s0 = roots.length; for (const x of f.stack) roots.push(x);
     const e0 = roots.length; for (const x of env) roots.push(x);      // closure env travels too
-    return { fn: f.fn, ip: f.ip, nl: f.locals.length, ns: f.stack.length, ne: env.length, l0, s0, e0 };
+    return { fn: f.fn, ip: f.ip, nl: f.locals.length, ns: f.stack.length, ne: env.length, l0, s0, e0, handlers: (f.handlers || []).map((h) => ({ ip: h.ip, sp: h.sp })) };
   });
   let pending = null;
   if (cont.pending && cont.pending.name !== undefined) {        // resource boundary
@@ -147,6 +147,7 @@ export function deserializeContinuation(wire) {
     locals: vals.slice(f.l0, f.l0 + f.nl),
     stack: vals.slice(f.s0, f.s0 + f.ns),
     env: vals.slice(f.e0, f.e0 + f.ne),
+    handlers: (f.handlers || []).map((h) => ({ ip: h.ip, sp: h.sp })),
   }));
   let pending = null;
   if (wire.pending && wire.pending.name !== undefined)
@@ -182,6 +183,9 @@ export class Suspend {
 export class Miss {
   constructor(handle) { this.handle = handle; }
 }
+
+// Thrown out of run() when a Waso `throw` unwinds past all frames (uncaught).
+export class WasoUncaught { constructor(value) { this.value = value; } }
 
 // A first-class closure: a code pointer (fn name) + a captured environment. The
 // env is plain data, so a closure — and a continuation holding one — serializes
@@ -238,7 +242,27 @@ export function run(tier, frames, host) {
         const callee = f.stack.pop();
         if (!isClosure(callee)) throw new Error("CALLV on non-closure");
         f.ip++; // caller resumes after the CALLV
-        frames.push({ fn: callee.fn, ip: 0, locals: padLocals(args, PROGRAM[callee.fn].nlocals), stack: [], env: callee.env });
+        frames.push({ fn: callee.fn, ip: 0, locals: padLocals(args, PROGRAM[callee.fn].nlocals), stack: [], env: callee.env, handlers: [] });
+        break;
+      }
+      case "CALLM": {                                          // call a host method: ["CALLM", name, argc] (stdlib intrinsics)
+        const argc = ins[2];
+        const args = [];
+        for (let k = 0; k < argc; k++) args.unshift(f.stack.pop());
+        const o = d(f.stack.pop());
+        f.stack.push(o[ins[1]](...args));
+        f.ip++; break;
+      }
+      case "PUSHTRY": (f.handlers || (f.handlers = [])).push({ ip: ins[1], sp: f.stack.length }); f.ip++; break;
+      case "POPTRY":  f.handlers.pop(); f.ip++; break;
+      case "THROW": {
+        const v = f.stack.pop();
+        while (true) {                                         // unwind frames to the nearest handler
+          const cur = frames[frames.length - 1];
+          if (cur.handlers && cur.handlers.length) { const h = cur.handlers.pop(); cur.stack.length = h.sp; cur.stack.push(v); cur.ip = h.ip; break; }
+          frames.pop();
+          if (frames.length === 0) throw new WasoUncaught(v);
+        }
         break;
       }
       case "RET": {
@@ -276,7 +300,7 @@ export function padLocals(args, n) {
 }
 
 export function initialFrames(entry, args) {
-  return [{ fn: entry, ip: 0, locals: padLocals(args, PROGRAM[entry].nlocals), stack: [], env: [] }];
+  return [{ fn: entry, ip: 0, locals: padLocals(args, PROGRAM[entry].nlocals), stack: [], env: [], handlers: [] }];
 }
 
 // ---------------------------------------------------------------------------

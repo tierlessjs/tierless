@@ -26,6 +26,10 @@ const COMPOUND = new Map([
   [ts.SyntaxKind.PlusEqualsToken, "+"], [ts.SyntaxKind.MinusEqualsToken, "-"], [ts.SyntaxKind.AsteriskEqualsToken, "*"],
 ]);
 const isFnLike = (n) => ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n);
+const HOF = new Set(["map", "filter", "forEach", "reduce"]); // callback is a Waso closure -> inline-compiled
+const PLAIN_METHODS = new Set(["slice", "indexOf", "lastIndexOf", "includes", "join", "concat", "toUpperCase",
+  "toLowerCase", "split", "trim", "trimStart", "trimEnd", "charAt", "charCodeAt", "substring", "substr", "repeat",
+  "padStart", "padEnd", "startsWith", "endsWith", "replace", "replaceAll", "toFixed", "at"]); // host intrinsics
 const patternIds = (name, out) => {
   if (ts.isIdentifier(name)) out.push(name);
   else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name))
@@ -91,7 +95,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     const label = (s) => `${s}_${gen}_${lab++}`;
     const fail = (nd, m) => { throw new Error(`waso-tsc: ${m}: \`${nd.getText(sf).slice(0, 40)}\``); };
     const loops = [];
-    const assemble = () => { const labels = {}, code = []; for (const l of asm) (typeof l === "string") ? (labels[l] = code.length) : code.push(l); for (const ins of code) if ((ins[0] === "JMP" || ins[0] === "JMPF") && typeof ins[1] === "string") ins[1] = labels[ins[1]]; return { code, pos: code.map((ins) => posMap.get(ins) || null) }; };
+    const assemble = () => { const labels = {}, code = []; for (const l of asm) (typeof l === "string") ? (labels[l] = code.length) : code.push(l); for (const ins of code) if ((ins[0] === "JMP" || ins[0] === "JMPF" || ins[0] === "PUSHTRY") && typeof ins[1] === "string") ins[1] = labels[ins[1]]; return { code, pos: code.map((ins) => posMap.get(ins) || null) }; };
 
     function readUse(idNode) {
       const id = bindingOf.get(idNode);
@@ -152,11 +156,38 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       fail(node, "unsupported expression");
     }
 
+    function hof(objNode, kind, args) {                         // inline-compile map/filter/forEach/reduce
+      const src = tempSlot(), fn = tempSlot(), i = tempSlot();
+      expr(objNode); emit("STORE", src);
+      expr(args[0]); emit("STORE", fn);
+      let acc = null, outv = null;
+      if (kind === "reduce") { if (args.length < 2) fail(objNode, "reduce needs an initial value"); acc = tempSlot(); expr(args[1]); emit("STORE", acc); }
+      else if (kind !== "forEach") { outv = tempSlot(); emit("NEWARR"); emit("STORE", outv); }
+      emit("PUSH", 0); emit("STORE", i);
+      const loop = label("hof"), end = label("hofend"); mark(loop);
+      emit("LOAD", i); emit("LOAD", src); emit("GETPROP", "length"); emit("BIN", "<"); emit("JMPF", end);
+      const elemThenIndex = () => { emit("LOAD", src); emit("LOAD", i); emit("INDEX"); emit("LOAD", i); };
+      if (kind === "map") { emit("LOAD", outv); emit("LOAD", fn); elemThenIndex(); emit("CALLV", 2); emit("ARRPUSH"); }
+      else if (kind === "filter") { const skip = label("flt"); emit("LOAD", fn); elemThenIndex(); emit("CALLV", 2); emit("JMPF", skip); emit("LOAD", outv); emit("LOAD", src); emit("LOAD", i); emit("INDEX"); emit("ARRPUSH"); mark(skip); }
+      else if (kind === "forEach") { emit("LOAD", fn); elemThenIndex(); emit("CALLV", 2); emit("POP"); }
+      else if (kind === "reduce") { emit("LOAD", fn); emit("LOAD", acc); elemThenIndex(); emit("CALLV", 3); emit("STORE", acc); }
+      emit("LOAD", i); emit("PUSH", 1); emit("BIN", "+"); emit("STORE", i); emit("JMP", loop); mark(end);
+      if (kind === "forEach") return false;
+      emit("LOAD", kind === "reduce" ? acc : outv); return true;
+    }
+
     function call(node) {
       const callee = node.expression;
-      const resName = ts.isPropertyAccessExpression(callee) ? `${callee.expression.getText(sf)}.${callee.name.text}` : ts.isIdentifier(callee) && bindingOf.get(callee) == null && !topFns.has(callee.text) ? callee.text : null;
-      if (resName && resourceSet.has(resName)) { node.arguments.forEach((a) => expr(a)); emit("RES", resName, node.arguments.length); return true; }
-      if (ts.isPropertyAccessExpression(callee) && callee.name.text === "push") { expr(callee.expression); expr(node.arguments[0]); emit("ARRPUSH"); return false; }
+      if (ts.isPropertyAccessExpression(callee)) {
+        const resName = `${callee.expression.getText(sf)}.${callee.name.text}`;
+        if (resourceSet.has(resName)) { node.arguments.forEach((a) => expr(a)); emit("RES", resName, node.arguments.length); return true; }
+        const m = callee.name.text;
+        if (m === "push") { expr(callee.expression); expr(node.arguments[0]); emit("ARRPUSH"); return false; }
+        if (HOF.has(m)) return hof(callee.expression, m, node.arguments);
+        if (PLAIN_METHODS.has(m)) { expr(callee.expression); node.arguments.forEach((a) => expr(a)); emit("CALLM", m, node.arguments.length); return true; }
+        expr(callee); node.arguments.forEach((a) => expr(a)); emit("CALLV", node.arguments.length); return true; // user method (closure property)
+      }
+      if (ts.isIdentifier(callee) && bindingOf.get(callee) == null && !topFns.has(callee.text) && resourceSet.has(callee.text)) { node.arguments.forEach((a) => expr(a)); emit("RES", callee.text, node.arguments.length); return true; }
       expr(callee); node.arguments.forEach((a) => expr(a)); emit("CALLV", node.arguments.length); return true;
     }
 
@@ -171,6 +202,18 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isFunctionDeclaration(node)) return;                  // nested fn decl: hoisted in the prologue
       if (ts.isVariableStatement(node)) { for (const d of node.declarationList.declarations) { if (!d.initializer) fail(d, "needs initializer"); declOne(d); } return; }
       if (ts.isExpressionStatement(node)) { if (expr(node.expression)) emit("POP"); return; }
+      if (ts.isThrowStatement(node)) { expr(node.expression); emit("THROW"); return; }
+      if (ts.isTryStatement(node)) {
+        if (node.finallyBlock) fail(node, "finally not supported yet");
+        const cat = label("catch"), end = label("tryend");
+        emit("PUSHTRY", cat); stmt(node.tryBlock); emit("POPTRY"); emit("JMP", end);
+        mark(cat);
+        const cc = node.catchClause;
+        if (cc && cc.variableDeclaration && ts.isIdentifier(cc.variableDeclaration.name)) bindStackTop(cc.variableDeclaration.name);
+        else emit("POP");
+        if (cc) stmt(cc.block);
+        mark(end); return;
+      }
       if (ts.isReturnStatement(node)) { if (!node.expression) emit("PUSH", 0); else expr(node.expression); emit("RET"); return; }
       if (ts.isIfStatement(node)) { expr(node.expression); const els = label("else"), end = label("end"); emit("JMPF", node.elseStatement ? els : end); stmt(node.thenStatement); if (node.elseStatement) { emit("JMP", end); mark(els); stmt(node.elseStatement); } mark(end); return; }
       if (ts.isWhileStatement(node)) { const loop = label("loop"), end = label("end"); mark(loop); expr(node.expression); emit("JMPF", end); loops.push({ brk: end, cont: loop }); stmt(node.statement); loops.pop(); emit("JMP", loop); mark(end); return; }

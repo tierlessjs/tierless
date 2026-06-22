@@ -147,7 +147,22 @@ for (const fr of trace || []) console.log(`    #${fr.depth} ${fr.fn.padEnd(6)} $
 check("continuation has a TS-level frame for `step` with a real line", !!(trace && trace.find((f) => f.fn === "step" && f.loc && f.loc.line)));
 check("the deepest frame points at the await/fetch line", !!(trace && trace[trace.length - 1].loc && /ext|fetchThing/.test(trace[trace.length - 1].loc.text)));
 
+// ---- Section H: a try/catch handler survives migration mid-await ----------
+console.log("\n--- H. try/catch handler survives a migration mid-await ---");
+loadModule(PROGRAM, `
+  function task() {
+    try {
+      const y = await ext();   // suspend here — the catch handler is live on the frame
+      throw y;                 // after resume, throw the resolved value
+    } catch (e) {
+      return e + 1;            // caught only if the handler survived the wire
+    }
+  }
+`, { entry: "task", resources: ["ext"] });
+const handler = await runViaWire("task"); // serializes/deserializes at the await
+check(`thrown value is caught after resume (got ${handler.value}, expected 6)`, handler.value === 6);
+
 console.log(`\nResult: ${pass ? "all PASS" : "FAILURES"} — closures, mutable shared captures (migration-safe),`);
-console.log(`lexical shadowing, while/break/continue/&&/||/?:/+=, and source-mapped continuations`);
-console.log(`(a serialized continuation prints as a TS stack trace).`);
+console.log(`lexical shadowing, while/break/continue/&&/||/?:/+=, source-mapped continuations,`);
+console.log(`and a try/catch handler that survives migration mid-await.`);
 if (!pass) process.exitCode = 1;

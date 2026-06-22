@@ -87,9 +87,20 @@ probe-realts.mjs compiles 5 real JS snippets and checks Waso's output EQUALS
 Node's own eval (templates+defaults+for-of+nested fn; array-lit+ternary+while+
 break/continue; destructuring+template; closures-in-array+higher-order;
 nested-destructuring-in-for-of+default+compound). All match.
-Still TODO for real files: classes, try/catch/throw (needs interpreter
-exception unwinding), spread, array higher-order builtins (.map/.filter — need
-stdlib), real Promise, switch, block-scoped shadowing, for-in.
+## #4 step 5 (done — stdlib + exceptions, verified vs eval)
+- Array higher-order methods (.map/.filter/.forEach/.reduce) inline-compiled to
+  IR loops + CALLV, so callbacks are real Waso closures (suspendable — proven a
+  callback could await). Plain methods (slice/join/split/toUpperCase/... string
+  + array) via a new CALLM op that delegates to the host value's method.
+- try/catch/throw: new PUSHTRY/POPTRY/THROW ops + a per-frame handler stack;
+  THROW unwinds frames to the nearest handler (works across calls). Handlers are
+  part of the serialized continuation -> a try/catch survives migration mid-await
+  (proven: thrown-after-resume value is caught). finally not yet supported.
+- probe-realts.mjs now checks 9 real-JS snippets === Node's eval, incl.
+  map/filter/reduce, chained string methods, throw caught locally, and throw
+  propagating across a call frame.
+Still TODO for arbitrary files: classes/new/this, real Promise + async stdlib,
+spread/rest, switch, for-in, finally, block-scoped shadowing, generators.
 
 ## Don't forget
 - **Source maps**: NJS captured the stack but deferred line/file metadata. Our

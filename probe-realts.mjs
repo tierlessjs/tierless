@@ -66,6 +66,39 @@ check("nested destructuring + default + compound assignment",
   return sum + sum * tax;
 }`, "total", [{ items: [{ price: 10, qty: 2 }, { price: 5, qty: 3 }], tax: 0.1 }]);
 
+check("array higher-order: map / filter / reduce (closures as callbacks)",
+`function pipeline(xs) {
+  const evens = xs.filter((x) => x % 2 === 0);
+  const doubled = evens.map((x, i) => x * 2 + i);
+  return doubled.reduce((a, b) => a + b, 0);
+}`, "pipeline", [[1, 2, 3, 4, 5, 6]]);
+
+check("string methods via CALLM + templates",
+`function slugify(title) {
+  return title.trim().toLowerCase().split(" ").join("-");
+}`, "slugify", ["  Hello World Again  "]);
+
+check("try / catch / throw (value thrown, caught, recovered)",
+`function safeDiv(a, b) {
+  try {
+    if (b === 0) { throw { code: "DIV0" }; }
+    return a / b;
+  } catch (e) {
+    return e.code === "DIV0" ? -1 : -2;
+  }
+}
+function go() { return [safeDiv(10, 2), safeDiv(1, 0)]; }`, "go", []);
+
+check("throw propagates across a call into an outer catch",
+`function inner(x) { if (x < 0) { throw "negative"; } return x * 2; }
+function outer(xs) {
+  const out = [];
+  for (const x of xs) {
+    try { out.push(inner(x)); } catch (e) { out.push(e); }
+  }
+  return out;
+}`, "outer", [[3, -1, 5]]);
+
 console.log(`\nResult: ${pass ? "all PASS" : "FAILURES"} — Waso compiles real JS and matches Node's own`);
 console.log(`execution across templates, default params, for-of, array/object literals,`);
 console.log(`destructuring (incl. nested), nested function declarations, and closures.`);
