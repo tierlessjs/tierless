@@ -292,6 +292,23 @@ check("array higher-order: find / findIndex / some / every (early-terminating)",
   };
 }`, "go", []);
 
+check("Map / Set: construct, methods, for-of, spread, size",
+`function go() {
+  const m = new Map([["a", 1], ["b", 2]]);
+  m.set("c", 3);
+  let total = 0; for (const [k, v] of m) { total += v; }
+  const s = new Set([1, 2, 2, 3]); s.add(4);
+  const doubled = []; for (const v of s) { doubled.push(v * 2); }
+  return { get: m.get("b"), has: [m.has("a"), m.has("z")], size: m.size, total, keys: [...m.keys()], setHas: s.has(2), setSize: s.size, doubled, spread: [...s] };
+}`, "go", []);
+
+check("user methods named get/set/has are NOT hijacked by host-method dispatch",
+`class Box { constructor(v) { this.v = v; } get() { return this.v * 2; } set(x) { this.v = x; } has() { return this.v > 0; } }
+function go() { const b = new Box(5); const a = b.get(); b.set(10); return [a, b.get(), b.has()]; }`, "go", []);
+
+check("for-of over a string",
+`function go() { const out = []; for (const c of "hi!") { out.push(c); } return out; }`, "go", []);
+
 check("destructuring defaults + rest (object & array, nested, for-of)",
 `function go() {
   const { a = 5, b = 2, ...restO } = { a: 10, c: 3, d: 4 };

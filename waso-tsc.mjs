@@ -34,6 +34,7 @@ const isChainRoot = (n) => ts.isOptionalChain(n) && !(n.parent && isAccess(n.par
 const HOF = new Set(["map", "filter", "forEach", "reduce", "find", "findIndex", "some", "every"]); // callback is a Waso closure -> inline-compiled
 const GLOBAL_OBJS = new Set(["Math", "JSON", "Object", "Array", "Number", "String", "Boolean", "console", "Date"]); // host stdlib (match waso-heap GLOBALS)
 const GLOBAL_CALLS = new Set(["parseInt", "parseFloat", "isNaN", "isFinite", "Number", "String", "Boolean"]); // callable globals
+const CTOR_GLOBALS = new Set(["Map", "Set", "WeakMap", "WeakSet", "Date", "Error", "RegExp"]); // host constructors via `new` (match waso-heap CTORS)
 const PLAIN_METHODS = new Set(["slice", "indexOf", "lastIndexOf", "includes", "join", "concat", "toUpperCase",
   "toLowerCase", "split", "trim", "trimStart", "trimEnd", "charAt", "charCodeAt", "substring", "substr", "repeat",
   "padStart", "padEnd", "startsWith", "endsWith", "replace", "replaceAll", "toFixed", "at",
@@ -308,6 +309,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (node.kind === ts.SyntaxKind.NullKeyword) { emit("PUSH", null); return true; }
       if (node.kind === ts.SyntaxKind.ThisKeyword) { if (opts.thisId == null) fail(node, "`this` outside a method"); emit("LOADENV", capture(opts.thisId)); return true; }
       if (ts.isNewExpression(node)) {
+        if (ts.isIdentifier(node.expression) && bindingOf.get(node.expression) == null && CTOR_GLOBALS.has(node.expression.text)) { const a = node.arguments || []; a.forEach((x) => expr(x)); emit("CTORG", node.expression.text, a.length); return true; } // new Map/Set/Date/...
         if (!ts.isIdentifier(node.expression) || !classes.has(node.expression.text)) fail(node, "unsupported `new`");
         const rec = compileClass(node.expression.text);
         const chain = []; for (let c = rec; c; c = c.superName ? compileClass(c.superName) : null) chain.unshift(c); // base-first
@@ -452,7 +454,9 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         if (m === "push") { expr(callee.expression); expr(node.arguments[0]); emit("ARRPUSH"); return false; }
         if (HOF.has(m)) return hof(callee.expression, m, node.arguments);
         if (PLAIN_METHODS.has(m)) { expr(callee.expression); hostMethod(m, node.arguments); return true; }
-        return closureCall(callee, node.arguments); // user method (closure property)
+        expr(callee.expression); // obj.m(...): CALLMETHOD dispatches user-closure method vs host method (Map/Set/...) at runtime
+        if (node.arguments.some((a) => ts.isSpreadElement(a))) { spreadArgs(node.arguments); emit("CALLMETHODS", m); } else { node.arguments.forEach((a) => expr(a)); emit("CALLMETHOD", m, node.arguments.length); }
+        return true;
       }
       if (ts.isIdentifier(callee) && bindingOf.get(callee) == null && !topFns.has(callee.text) && resourceSet.has(callee.text)) { node.arguments.forEach((a) => expr(a)); emit("RES", callee.text, node.arguments.length); return true; }
       if (ts.isIdentifier(callee) && callee.text === "BigInt" && bindingOf.get(callee) == null && !topFns.has(callee.text)) { expr(node.arguments[0]); emit("TOBIG"); return true; } // BigInt(x) conversion

@@ -22,7 +22,7 @@
 //
 // Locals: 0=minAge, 1=rows, 2=matched, 3=i, 4=row
 
-import { encodeGraph, decodeGraph, GLOBALS } from "./waso-heap.mjs";
+import { encodeGraph, decodeGraph, GLOBALS, CTORS } from "./waso-heap.mjs";
 
 export const L = { minAge: 0, rows: 1, matched: 2, i: 3, row: 4 };
 
@@ -294,6 +294,7 @@ export function run(tier, frames, host) {
       case "TOBIG":  f.stack.push(BigInt(f.stack.pop())); f.ip++; break;     // BigInt(x)
       case "GLOBAL": f.stack.push(GLOBALS[ins[1]]); f.ip++; break;                                                // host stdlib global (Math/JSON/Object/...)
       case "CALLG": { const argc = ins[2]; const args = []; for (let k = 0; k < argc; k++) args.unshift(f.stack.pop()); f.stack.push(GLOBALS[ins[1]](...args)); f.ip++; break; } // parseInt/Number/... bare call
+      case "CTORG": { const argc = ins[2]; const args = []; for (let k = 0; k < argc; k++) args.unshift(f.stack.pop()); f.stack.push(new CTORS[ins[1]](...args)); f.ip++; break; } // new Map/Set/Date/...
       case "CLSGET": f.stack.push(tier.statics && tier.statics.get(ins[1])); f.ip++; break;                       // class-object registry (per tier)
       case "CLSPUT": (tier.statics || (tier.statics = new Map())).set(ins[1], f.stack[f.stack.length - 1]); f.ip++; break; // peek + cache, leave on stack
       case "INC":    { const v = f.stack.pop(); f.stack.push(typeof v === "bigint" ? v + 1n : v + 1); f.ip++; break; } // ++ (type-aware: 1n for bigint)
@@ -367,6 +368,12 @@ export function run(tier, frames, host) {
         f.ip++; break;
       }
       case "CALLMS": { const argsArr = f.stack.pop(); const o = d(f.stack.pop()); f.stack.push(o[ins[1]](...argsArr)); f.ip++; break; } // host method, spread args
+      case "CALLMETHOD": case "CALLMETHODS": {                   // obj.m(args): dispatch user-closure method vs host method
+        let args; if (ins[0] === "CALLMETHODS") args = f.stack.pop().slice(); else { args = []; for (let k = 0; k < ins[2]; k++) args.unshift(f.stack.pop()); }
+        const o = d(f.stack.pop()); const m = o[ins[1]]; f.ip++;
+        if (isClosure(m)) { if (m.gen) { f.stack.push(makeGen(m, args)); break; } frames.push({ fn: m.fn, ip: 0, locals: args, stack: [], env: m.env, handlers: [] }); break; } // user method (closure captures this)
+        f.stack.push(m.apply(o, args)); break;                  // host method (Map.set, Set.add, ...)
+      }
       case "PUSHTRY": (f.handlers || (f.handlers = [])).push({ ip: ins[1], sp: f.stack.length }); f.ip++; break;
       case "POPTRY":  f.handlers.pop(); f.ip++; break;
       case "RET": {
@@ -396,7 +403,14 @@ export function run(tier, frames, host) {
         f.ip++; break; // plain value: identity
       }
       case "YIELD":  { const v = f.stack.pop(); f.ip++; throw new Yielded(v); }   // pause this generator; resume pushes the sent value
-      case "ITER": { const v = d(f.stack.pop()); f.stack.push(Array.isArray(v) ? { __it__: "arr", a: v, i: 0 } : v); f.ip++; break; } // normalize for-of source
+      case "ITER": {                                            // normalize for-of source: array / generator / our iterator / host-iterable (Map/Set/string)
+        const v = d(f.stack.pop());
+        if (Array.isArray(v)) f.stack.push({ __it__: "arr", a: v, i: 0 });
+        else if (v !== null && (isGenerator(v) || (typeof v === "object" && v.__it__))) f.stack.push(v);
+        else if (v !== null && v !== undefined && typeof v[Symbol.iterator] === "function") f.stack.push({ __it__: "arr", a: Array.from(v), i: 0 }); // Map/Set/string -> drain to array
+        else f.stack.push(v);
+        f.ip++; break;
+      }
       case "ITERNEXT": {                                        // -> push value, then done (bool)
         const it = f.stack.pop();
         if (it && it.__it__ === "arr") { if (it.i < it.a.length) { f.stack.push(it.a[it.i++]); f.stack.push(false); } else { f.stack.push(undefined); f.stack.push(true); } f.ip++; break; }

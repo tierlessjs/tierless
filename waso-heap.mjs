@@ -25,6 +25,8 @@ export function isHandle(x) {
 // class objects travel.
 export const GLOBALS = { Math, JSON, Object, Array, Number, String, Boolean, parseInt, parseFloat, isNaN, isFinite, console, Date };
 const GLOBAL_NAME = new Map(Object.entries(GLOBALS).map(([k, v]) => [v, k]));
+// Host constructors reachable via `new` (Map/Set serialize through the codec below).
+export const CTORS = { Map, Set, WeakMap, WeakSet, Date, Error, RegExp };
 
 // Cycle-safe, early-exiting size estimate (never JSON.stringify a cyclic graph).
 function approxExceeds(root, limit) {
@@ -61,6 +63,8 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024 } = {})
       return { k: "r", id };
     }
     const id = objs.length; idOf.set(v, id);              // reserve id BEFORE recursing (cycle-safe)
+    if (v instanceof Map) { const slot = { k: "map", e: [] }; objs.push(slot); for (const [mk, mv] of v) slot.e.push([enc(mk), enc(mv)]); return { k: "r", id }; }
+    if (v instanceof Set) { const slot = { k: "set", e: [] }; objs.push(slot); for (const sv of v) slot.e.push(enc(sv)); return { k: "r", id }; }
     if (Array.isArray(v)) { const slot = { k: "a", e: [] }; objs.push(slot); for (let i = 0; i < v.length; i++) slot.e.push(enc(v[i])); return { k: "r", id }; } // by index: holes -> undefined
     const slot = { k: "o", f: {} }; objs.push(slot);
     for (const key of Object.keys(v)) slot.f[key] = enc(v[key]);
@@ -71,11 +75,13 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024 } = {})
 }
 
 export function decodeGraph({ roots, objs }) {
-  const built = objs.map((s) => (s.k === "a" ? [] : s.k === "o" ? {} : s.h)); // pre-create for cycles/sharing
+  const built = objs.map((s) => (s.k === "a" ? [] : s.k === "o" ? {} : s.k === "map" ? new Map() : s.k === "set" ? new Set() : s.h)); // pre-create for cycles/sharing
   const dec = (n) => (n.k === "u" ? undefined : n.k === "big" ? BigInt(n.v) : n.k === "glob" ? GLOBALS[n.name] : n.k === "p" ? n.v : built[n.id]);
   objs.forEach((s, i) => {
     if (s.k === "a") for (const n of s.e) built[i].push(dec(n));
     else if (s.k === "o") for (const key in s.f) built[i][key] = dec(s.f[key]);
+    else if (s.k === "map") for (const [kn, vn] of s.e) built[i].set(dec(kn), dec(vn));
+    else if (s.k === "set") for (const vn of s.e) built[i].add(dec(vn));
     // k:"H" -> built[i] is already the handle object
   });
   return roots.map(dec);
