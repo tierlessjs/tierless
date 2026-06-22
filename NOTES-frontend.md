@@ -187,6 +187,28 @@ arithmetic (incl. correct TypeError-on-mixing, integer-division, `**`):
 Verified vs Node's eval (probe-realts: 25-digit factorial, 2n**64n, 7n/2n=3n,
 bitwise, mixed-type compare, typeof, BigInt()). All match.
 
+## #4 step 14 (done — getters/setters; deferred build-out 2 of 4)
+The read path stays branchless for the common case via COMPILE-TIME NAME
+SPECIALIZATION: the frontend collects `accessorNames` (every property that is a
+get/set in any class); a read/write of a name in that set emits the accessor-aware
+op (GETPROPA/SETPROPA), everything else stays the plain GETPROP/SETPROP. So
+`.length`/`.id`/methods never pay a check; only accessor-named accesses do, and
+even those fall through to a plain field when the receiver has no such accessor.
+- Instances carry an `__accessors__` table built at `new` (base..derived, derived
+  overrides), each entry { get?, set? } a closure capturing `this`.
+- GETPROPA calls the getter as a real frame (RET lands the value on the caller);
+  SETPROPA calls the setter(v) as a frame (RETs undefined, satisfying SETPROP's
+  value contract). Compound `obj.x += 1` and `obj.x++` route through both.
+- Pausable getters need NO dispatch: a value whose access may suspend is a handle,
+  and the existing `d()` on the object operand already pauses at use. Computational
+  getters (recompute/side-effect) are the GETPROPA path.
+- Payoff proven (probe-frontend §I): a getter that touches a server resource
+  SUSPENDS AND MIGRATES *inside the property read* — the getter's own half-evaluated
+  frame rides the wire and resumes on the other tier. Native JS can't: getters
+  can't be `async`, so the platform cannot suspend there at all.
+Verified vs eval (probe-realts): get/set pair (Temp °C/°F), read-only getter
+(Rect.area), compound-through-accessor, getter override via inheritance.
+
 ## Don't forget
 - **Source maps**: NJS captured the stack but deferred line/file metadata. Our
   §10.6. Design it into the transform from the start, don't bolt on.

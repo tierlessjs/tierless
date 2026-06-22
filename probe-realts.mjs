@@ -152,6 +152,33 @@ function go() {
   return [d instanceof Dog, d instanceof Animal, d instanceof Cat, c instanceof Animal, (5) instanceof Animal];
 }`, "go", []);
 
+check("getters/setters: get/set pair, read-only getter, compound through accessor",
+`class Temp {
+  constructor(c) { this._c = c; }
+  get celsius() { return this._c; }
+  set celsius(v) { this._c = v; }
+  get fahrenheit() { return this._c * 9 / 5 + 32; }
+  set fahrenheit(f) { this._c = (f - 32) * 5 / 9; }
+}
+class Rect {
+  constructor(w, h) { this.w = w; this.h = h; }
+  get area() { return this.w * this.h; }          // read-only computed
+}
+function go() {
+  const t = new Temp(100);
+  const f0 = t.fahrenheit;                          // 212 (getter)
+  t.fahrenheit = 32;                                // setter -> _c = 0
+  const c0 = t.celsius;                             // 0
+  t.celsius += 25;                                  // compound: get then set -> 25
+  const r = new Rect(3, 4);
+  return { f0, c0, c: t.celsius, area: r.area };
+}`, "go", []);
+
+check("getter override through inheritance (derived wins)",
+`class Shape { constructor(n) { this.n = n; } get label() { return "shape:" + this.n; } }
+class Circle extends Shape { constructor(n) { super(n); } get label() { return "circle:" + this.n; } }
+function go() { return [new Shape("a").label, new Circle("b").label]; }`, "go", []);
+
 check("for-in + computed object keys + delete",
 `function go(o) {
   const out = {};

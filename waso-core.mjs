@@ -252,6 +252,20 @@ export function run(tier, frames, host) {
       case "NEWOBJ": f.stack.push({}); f.ip++; break;
       case "SETPROP": { const o = d(f.stack[f.stack.length - 2]); const v = f.stack[f.stack.length - 1]; f.stack.length -= 2; o[ins[1]] = v; f.stack.push(o); f.ip++; break; }
       case "GETPROP": { const o = d(f.stack[f.stack.length - 1]); f.stack.pop(); f.stack.push(o[ins[1]]); f.ip++; break; }
+      case "GETPROPA": {                                       // accessor-aware read: call the getter as a frame, else plain
+        const o = d(f.stack[f.stack.length - 1]);
+        const acc = o != null && o.__accessors__ && o.__accessors__[ins[1]];
+        f.stack.pop(); f.ip++;
+        if (acc && acc.get) { frames.push({ fn: acc.get.fn, ip: 0, locals: [], stack: [], env: acc.get.env, handlers: [] }); break; } // getter RET lands the value on this frame
+        f.stack.push(o[ins[1]]); break;
+      }
+      case "SETPROPA": {                                       // accessor-aware write: call the setter(v) as a frame, else plain
+        const v = f.stack[f.stack.length - 1]; const o = d(f.stack[f.stack.length - 2]);
+        const acc = o != null && o.__accessors__ && o.__accessors__[ins[1]];
+        f.stack.length -= 2; f.ip++;
+        if (acc && acc.set) { frames.push({ fn: acc.set.fn, ip: 0, locals: [v], stack: [], env: acc.set.env, handlers: [] }); break; } // setter RETs undefined into this frame (the SETPROP value contract)
+        o[ins[1]] = v; f.stack.push(o); break;
+      }
       case "INDEX":  { const a = d(f.stack[f.stack.length - 2]); const i = f.stack[f.stack.length - 1]; f.stack.length -= 2; f.stack.push(a[i]); f.ip++; break; }
       case "SETINDEX": { const a = d(f.stack[f.stack.length - 3]); const i = f.stack[f.stack.length - 2]; const v = f.stack[f.stack.length - 1]; f.stack.length -= 3; a[i] = v; f.ip++; break; }
       case "BIN":    { const b = f.stack.pop(); const a = f.stack.pop(); f.stack.push(binop(ins[1], a, b)); f.ip++; break; }

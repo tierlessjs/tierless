@@ -162,7 +162,44 @@ loadModule(PROGRAM, `
 const handler = await runViaWire("task"); // serializes/deserializes at the await
 check(`thrown value is caught after resume (got ${handler.value}, expected 6)`, handler.value === 6);
 
+// ---- Section I: a GETTER suspends & migrates mid property-access -----------
+// Getters can't be `async` in JS, yet here `w.rows` touches a server resource and
+// the continuation migrates *inside the property read* — the half-evaluated
+// access (the getter's own frame) rides the wire. Something native JS can't do.
+console.log("\n--- I. a getter migrates mid property-access (no `await` possible) ---");
+loadModule(PROGRAM, `
+  class Widget { get rows() { return db.query("people"); } }   // getter hits a server resource
+  function task() { const w = new Widget(); return w.rows.length; }
+`, { entry: "task", resources: ["db.query"] });
+
+const clientTier = { id: "client", has: () => false, resources: {} }; // no resources here -> must migrate
+function runMigrating(entry) {
+  let frames = initialFrames(entry, []);
+  let migratedInsideGetter = false;
+  while (true) {
+    let res;
+    try { res = run(clientTier, frames, { deref: (x) => x }); }
+    catch (e) {
+      if (!(e instanceof Suspend)) throw e;
+      if (!(e.pending && e.pending.name)) throw new Error("expected a resource suspension");
+      const wire = serializeContinuation({ frames: e.frames, pending: e.pending }, clientTier);
+      const got = deserializeContinuation(JSON.parse(JSON.stringify(wire)));
+      // the deepest suspended frame is the GETTER, paused mid-evaluation:
+      migratedInsideGetter = /#get rows$/.test(got.frames[got.frames.length - 1].fn);
+      const value = e.pending.name === "db.query" ? ["alice", "bob", "carol"] : null; // server resolves it
+      got.frames[got.frames.length - 1].stack.push(value);
+      frames = got.frames;
+      continue;
+    }
+    return { value: res.value, migratedInsideGetter };
+  }
+}
+const g = runMigrating("task");
+check(`the suspended frame was the getter itself (paused mid-access)`, g.migratedInsideGetter);
+check(`getter resumes on the other tier and the access completes (got ${g.value}, expected 3)`, g.value === 3);
+
 console.log(`\nResult: ${pass ? "all PASS" : "FAILURES"} — closures, mutable shared captures (migration-safe),`);
 console.log(`lexical shadowing, while/break/continue/&&/||/?:/+=, source-mapped continuations,`);
-console.log(`and a try/catch handler that survives migration mid-await.`);
+console.log(`a try/catch handler that survives migration mid-await, and a getter that`);
+console.log(`migrates mid property-access (which native JS getters cannot do).`);
 if (!pass) process.exitCode = 1;

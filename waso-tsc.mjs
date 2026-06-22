@@ -28,7 +28,7 @@ const BINOP = {
 const COMPOUND = new Map([
   [ts.SyntaxKind.PlusEqualsToken, "+"], [ts.SyntaxKind.MinusEqualsToken, "-"], [ts.SyntaxKind.AsteriskEqualsToken, "*"],
 ]);
-const isFnLike = (n) => ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n) || ts.isMethodDeclaration(n) || ts.isConstructorDeclaration(n);
+const isFnLike = (n) => ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n) || ts.isMethodDeclaration(n) || ts.isConstructorDeclaration(n) || ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n);
 const isAccess = (n) => ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n) || ts.isCallExpression(n);
 const isChainRoot = (n) => ts.isOptionalChain(n) && !(n.parent && isAccess(n.parent) && n.parent.expression === n && ts.isOptionalChain(n.parent));
 const HOF = new Set(["map", "filter", "forEach", "reduce"]); // callback is a Waso closure -> inline-compiled
@@ -87,17 +87,20 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   // Classes: an instance is an object whose method properties are closures
   // capturing `this`; the constructor (with field inits prepended) runs at `new`.
   const classes = new Map();
+  const accessorNames = new Set();   // property names that are a get/set in SOME class -> read/write uses the accessor-aware op
   let thisCounter = -1;
   for (const s of sf.statements) if (ts.isClassDeclaration(s) && s.name) {
     let superName = null;
     for (const h of s.heritageClauses || []) if (h.token === ts.SyntaxKind.ExtendsKeyword && ts.isIdentifier(h.types[0].expression)) superName = h.types[0].expression.text;
-    const fields = [], methods = []; let ctor = null;
+    const fields = [], methods = [], accessors = []; let ctor = null;
     for (const mem of s.members) {
       if (ts.isPropertyDeclaration(mem) && mem.initializer && ts.isIdentifier(mem.name)) fields.push({ name: mem.name.text, init: mem.initializer });
       else if (ts.isMethodDeclaration(mem) && ts.isIdentifier(mem.name)) methods.push({ name: mem.name.text, node: mem });
+      else if (ts.isGetAccessorDeclaration(mem) && ts.isIdentifier(mem.name)) { accessors.push({ name: mem.name.text, kind: "get", node: mem }); accessorNames.add(mem.name.text); }
+      else if (ts.isSetAccessorDeclaration(mem) && ts.isIdentifier(mem.name)) { accessors.push({ name: mem.name.text, kind: "set", node: mem }); accessorNames.add(mem.name.text); }
       else if (ts.isConstructorDeclaration(mem) && mem.body) ctor = mem;
     }
-    classes.set(s.name.text, { name: s.name.text, thisId: thisCounter--, fields, methods, ctor, superName });
+    classes.set(s.name.text, { name: s.name.text, thisId: thisCounter--, fields, methods, accessors, ctor, superName });
   }
   const resourceSet = new Set(resources);
   const { bindingOf, bindingsByFn, boxed } = resolveBindings(sf);
@@ -111,6 +114,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     rec.compiled = {};
     const o = { thisId: rec.thisId, superName: rec.superName };
     for (const m of rec.methods) { const prog = `${cname}#${m.name}`; const c = compileFn(m.node, prog, o); out[prog] = c; rec.compiled[m.name] = { prog, freeIds: c.freeIds }; }
+    for (const a of rec.accessors) { const prog = `${cname}#${a.kind} ${a.name}`; const c = compileFn(a.node, prog, o); out[prog] = c; rec.compiled[`${a.kind} ${a.name}`] = { prog, freeIds: c.freeIds }; }
     if (rec.ctor) { const prog = `${cname}#constructor`; const c = compileFn(rec.ctor, prog, { ...o, fieldInits: rec.fields }); out[prog] = c; rec.compiled.__ctor__ = { prog, freeIds: c.freeIds }; }
     return rec;
   };
@@ -127,6 +131,11 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     const mark = (l) => asm.push(l);
     const label = (s) => `${s}_${gen}_${lab++}`;
     const fail = (nd, m) => { throw new Error(`waso-tsc: ${m}: \`${nd.getText(sf).slice(0, 40)}\``); };
+    // Accessor-aware property ops only for names that are a get/set SOMEWHERE; every
+    // other read/write stays the plain (branchless) op. Falls through to a plain
+    // field at runtime when the actual receiver has no such accessor.
+    const getOp = (name) => (accessorNames.has(name) ? "GETPROPA" : "GETPROP");
+    const setOp = (name) => (accessorNames.has(name) ? "SETPROPA" : "SETPROP");
     // Unified control-flow stack (innermost last): loop/switch break-continue
     // targets AND active try handlers / finally blocks. break/continue/return
     // that cross a try must POPTRY its handler and run its finally first; this is
@@ -164,19 +173,19 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     }
     function assignTo(target, valThunk) {      // target = e (returns nothing; statement-shaped)
       if (ts.isIdentifier(target)) { writeUse(target, valThunk); return; }
-      if (ts.isPropertyAccessExpression(target)) { expr(target.expression); valThunk(); emit("SETPROP", target.name.text); emit("POP"); return; }
+      if (ts.isPropertyAccessExpression(target)) { expr(target.expression); valThunk(); emit(setOp(target.name.text), target.name.text); emit("POP"); return; }
       if (ts.isElementAccessExpression(target)) { expr(target.expression); expr(target.argumentExpression); valThunk(); emit("SETINDEX"); return; }
       fail(target, "unsupported assignment target");
     }
     function compoundTo(target, op, rhs) {     // target op= rhs
       if (ts.isIdentifier(target)) { writeUse(target, () => { readUse(target); expr(rhs); emit("BIN", op); }); return; }
-      if (ts.isPropertyAccessExpression(target)) { expr(target.expression); emit("DUP"); emit("GETPROP", target.name.text); expr(rhs); emit("BIN", op); emit("SETPROP", target.name.text); emit("POP"); return; }
+      if (ts.isPropertyAccessExpression(target)) { expr(target.expression); emit("DUP"); emit(getOp(target.name.text), target.name.text); expr(rhs); emit("BIN", op); emit(setOp(target.name.text), target.name.text); emit("POP"); return; }
       fail(target, "unsupported compound-assignment target");
     }
     function incDec(target, op) {              // target++ / target-- / ++target  (type-aware: INC/DEC pick 1 vs 1n)
       const step = op === "+" ? "INC" : "DEC";
       if (ts.isIdentifier(target)) { writeUse(target, () => { readUse(target); emit(step); }); return; }
-      if (ts.isPropertyAccessExpression(target)) { expr(target.expression); emit("DUP"); emit("GETPROP", target.name.text); emit(step); emit("SETPROP", target.name.text); emit("POP"); return; }
+      if (ts.isPropertyAccessExpression(target)) { expr(target.expression); emit("DUP"); emit(getOp(target.name.text), target.name.text); emit(step); emit(setOp(target.name.text), target.name.text); emit("POP"); return; }
       fail(target, "unsupported ++/-- target");
     }
     function bindStackTop(nameNode) { // a value is on the stack; store into the binding (decl/for-of/destructure)
@@ -197,7 +206,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const base = n.expression;
         if (isAccess(base)) walk(base); else expr(base);
         if (n.questionDotToken) { emit("DUP"); emit("ISNULLISH"); const cont = label("occ"); emit("JMPF", cont); emit("POP"); emit("PUSH", undefined); emit("JMP", end); mark(cont); }
-        if (ts.isPropertyAccessExpression(n)) emit("GETPROP", n.name.text);
+        if (ts.isPropertyAccessExpression(n)) emit(getOp(n.name.text), n.name.text);
         else if (ts.isElementAccessExpression(n)) { expr(n.argumentExpression); emit("INDEX"); }
         else if (ts.isCallExpression(n)) { n.arguments.forEach((a) => expr(a)); emit("CALLV", n.arguments.length); }
       };
@@ -223,6 +232,17 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const inst = tempSlot(); emit("NEWOBJ"); emit("STORE", inst);
         emit("LOAD", inst); emit("PUSH", chain.map((c) => c.name)); emit("SETPROP", "__class__"); emit("POP"); // tag for instanceof (base..derived)
         for (const cls of chain) for (const m of cls.methods) { const info = cls.compiled[m.name]; emit("LOAD", inst); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.thisId ? ["L", inst] : provide(id)))); emit("SETPROP", m.name); emit("POP"); } // derived overrides base
+        const accs = new Map(); // name -> { get?: {cls,info}, set?: {cls,info} }, derived overriding base
+        for (const cls of chain) for (const a of cls.accessors) { const e = accs.get(a.name) || {}; e[a.kind] = { cls, info: cls.compiled[`${a.kind} ${a.name}`] }; accs.set(a.name, e); }
+        if (accs.size) {                                            // build the instance's __accessors__ table (closures capture this)
+          const tbl = tempSlot(); emit("NEWOBJ"); emit("STORE", tbl);
+          for (const [aname, e] of accs) {
+            const ent = tempSlot(); emit("NEWOBJ"); emit("STORE", ent);
+            for (const kind of ["get", "set"]) { const s = e[kind]; if (!s) continue; emit("LOAD", ent); emit("MAKECLOSURE", s.info.prog, s.info.freeIds.map((id) => (id === s.cls.thisId ? ["L", inst] : provide(id)))); emit("SETPROP", kind); emit("POP"); }
+            emit("LOAD", tbl); emit("LOAD", ent); emit("SETPROP", aname); emit("POP");
+          }
+          emit("LOAD", inst); emit("LOAD", tbl); emit("SETPROP", "__accessors__"); emit("POP");
+        }
         const args = node.arguments || [];
         if (rec.ctor) { const info = rec.compiled.__ctor__; emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === rec.thisId ? ["L", inst] : provide(id)))); args.forEach((a) => expr(a)); emit("CALLV", args.length); emit("POP"); }
         else if (rec.superName) fail(node, "a derived class needs an explicit constructor");
@@ -260,7 +280,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const op = BINOP[k]; if (!op) fail(node, "unsupported operator");
         expr(node.left); expr(node.right); emit("BIN", op); return true;
       }
-      if (ts.isPropertyAccessExpression(node)) { expr(node.expression); emit("GETPROP", node.name.text); return true; }
+      if (ts.isPropertyAccessExpression(node)) { expr(node.expression); emit(getOp(node.name.text), node.name.text); return true; }
       if (ts.isElementAccessExpression(node)) { expr(node.expression); expr(node.argumentExpression); emit("INDEX"); return true; }
       if (ts.isObjectLiteralExpression(node)) {
         emit("NEWOBJ");
