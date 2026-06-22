@@ -99,6 +99,37 @@ function outer(xs) {
   return out;
 }`, "outer", [[3, -1, 5]]);
 
+check("class: constructor, fields, methods, this, new",
+`class Counter {
+  constructor(start) { this.n = start; }
+  inc() { this.n = this.n + 1; }
+  value() { return this.n; }
+}
+function go() { const c = new Counter(10); c.inc(); c.inc(); c.inc(); return c.value(); }`, "go", []);
+
+check("class: method using a higher-order method + this",
+`class Cart {
+  constructor(items) { this.items = items; }
+  total() { return this.items.reduce((a, it) => a + it.price * it.qty, 0); }
+}
+function go() { return new Cart([{ price: 10, qty: 2 }, { price: 5, qty: 3 }]).total(); }`, "go", []);
+
+check("class: method calling another method + string method",
+`class Greeter {
+  constructor(name) { this.name = name; }
+  greeting() { return "Hi " + this.name; }
+  shout() { return this.greeting().toUpperCase() + "!"; }
+}
+function go() { return new Greeter("ann").shout(); }`, "go", []);
+
+check("class with field defaults (no explicit constructor)",
+`class Box {
+  width = 4;
+  height = 5;
+  area() { return this.width * this.height; }
+}
+function go() { return new Box().area(); }`, "go", []);
+
 console.log(`\nResult: ${pass ? "all PASS" : "FAILURES"} — Waso compiles real JS and matches Node's own`);
 console.log(`execution across templates, default params, for-of, array/object literals,`);
 console.log(`destructuring (incl. nested), nested function declarations, and closures.`);

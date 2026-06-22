@@ -25,7 +25,7 @@ const BINOP = {
 const COMPOUND = new Map([
   [ts.SyntaxKind.PlusEqualsToken, "+"], [ts.SyntaxKind.MinusEqualsToken, "-"], [ts.SyntaxKind.AsteriskEqualsToken, "*"],
 ]);
-const isFnLike = (n) => ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n);
+const isFnLike = (n) => ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n) || ts.isMethodDeclaration(n) || ts.isConstructorDeclaration(n);
 const HOF = new Set(["map", "filter", "forEach", "reduce"]); // callback is a Waso closure -> inline-compiled
 const PLAIN_METHODS = new Set(["slice", "indexOf", "lastIndexOf", "includes", "join", "concat", "toUpperCase",
   "toLowerCase", "split", "trim", "trimStart", "trimEnd", "charAt", "charCodeAt", "substring", "substr", "repeat",
@@ -75,14 +75,34 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.ES2020, true);
   const topFns = new Map();
   for (const s of sf.statements) if (ts.isFunctionDeclaration(s) && s.name) topFns.set(s.name.text, s);
+  // Classes: an instance is an object whose method properties are closures
+  // capturing `this`; the constructor (with field inits prepended) runs at `new`.
+  const classes = new Map();
+  let thisCounter = -1;
+  for (const s of sf.statements) if (ts.isClassDeclaration(s) && s.name) {
+    if (s.heritageClauses) throw new Error("waso-tsc: class inheritance (extends) not supported yet: " + s.name.text);
+    const fields = [], methods = []; let ctor = null;
+    for (const mem of s.members) {
+      if (ts.isPropertyDeclaration(mem) && mem.initializer && ts.isIdentifier(mem.name)) fields.push({ name: mem.name.text, init: mem.initializer });
+      else if (ts.isMethodDeclaration(mem) && ts.isIdentifier(mem.name)) methods.push({ name: mem.name.text, node: mem });
+      else if (ts.isConstructorDeclaration(mem) && mem.body) ctor = mem;
+    }
+    classes.set(s.name.text, { thisId: thisCounter--, fields, methods, ctor });
+  }
   const resourceSet = new Set(resources);
   const { bindingOf, bindingsByFn, boxed } = resolveBindings(sf);
   const out = {};
   let gen = 0;
   const lineColOf = (node) => { const lc = sf.getLineAndCharacterOfPosition(node.getStart(sf)); return { file, line: lc.line + 1, col: lc.character + 1, text: node.getText(sf).replace(/\s+/g, " ").slice(0, 32) }; };
   const compileTop = (name) => { if (name in out) return; out[name] = null; out[name] = compileFn(topFns.get(name), name); };
+  const compileClass = (cname) => {
+    const rec = classes.get(cname); if (rec.compiled) return rec; rec.compiled = {};
+    for (const m of rec.methods) { const prog = `${cname}#${m.name}`; const c = compileFn(m.node, prog, { thisId: rec.thisId }); out[prog] = c; rec.compiled[m.name] = { prog, freeIds: c.freeIds }; }
+    if (rec.ctor) { const prog = `${cname}#constructor`; const c = compileFn(rec.ctor, prog, { thisId: rec.thisId, fieldInits: rec.fields }); out[prog] = c; rec.compiled.__ctor__ = { prog, freeIds: c.freeIds }; }
+    return rec;
+  };
 
-  function compileFn(node, name) {
+  function compileFn(node, name, opts = {}) {
     const ids = bindingsByFn.get(node);
     const slotOf = new Map(); ids.forEach((id, i) => slotOf.set(id, i));
     let topSlot = ids.length; const tempSlot = () => topSlot++;
@@ -108,6 +128,22 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (boxed.has(id)) { if (slotOf.has(id)) emit("LOAD", slotOf.get(id)); else emit("LOADENV", capture(id)); valThunk(); emit("SETPROP", "v"); emit("POP"); return; }
       valThunk(); emit("STORE", slotOf.get(id));
     }
+    function assignTo(target, valThunk) {      // target = e (returns nothing; statement-shaped)
+      if (ts.isIdentifier(target)) { writeUse(target, valThunk); return; }
+      if (ts.isPropertyAccessExpression(target)) { expr(target.expression); valThunk(); emit("SETPROP", target.name.text); emit("POP"); return; }
+      if (ts.isElementAccessExpression(target)) { expr(target.expression); expr(target.argumentExpression); valThunk(); emit("SETINDEX"); return; }
+      fail(target, "unsupported assignment target");
+    }
+    function compoundTo(target, op, rhs) {     // target op= rhs
+      if (ts.isIdentifier(target)) { writeUse(target, () => { readUse(target); expr(rhs); emit("BIN", op); }); return; }
+      if (ts.isPropertyAccessExpression(target)) { expr(target.expression); emit("DUP"); emit("GETPROP", target.name.text); expr(rhs); emit("BIN", op); emit("SETPROP", target.name.text); emit("POP"); return; }
+      fail(target, "unsupported compound-assignment target");
+    }
+    function incDec(target, op) {              // target++ / target-- / ++target
+      if (ts.isIdentifier(target)) { writeUse(target, () => { readUse(target); emit("PUSH", 1); emit("BIN", op); }); return; }
+      if (ts.isPropertyAccessExpression(target)) { expr(target.expression); emit("DUP"); emit("GETPROP", target.name.text); emit("PUSH", 1); emit("BIN", op); emit("SETPROP", target.name.text); emit("POP"); return; }
+      fail(target, "unsupported ++/-- target");
+    }
     function bindStackTop(nameNode) { // a value is on the stack; store into the binding (decl/for-of/destructure)
       const id = bindingOf.get(nameNode);
       if (boxed.has(id)) { const t = tempSlot(); emit("STORE", t); emit("NEWOBJ"); emit("LOAD", t); emit("SETPROP", "v"); emit("STORE", slotOf.get(id)); }
@@ -128,6 +164,17 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isTemplateExpression(node)) { emit("PUSH", node.head.text); for (const span of node.templateSpans) { expr(span.expression); emit("BIN", "+"); emit("PUSH", span.literal.text); emit("BIN", "+"); } return true; }
       if (node.kind === ts.SyntaxKind.TrueKeyword) { emit("PUSH", true); return true; }
       if (node.kind === ts.SyntaxKind.FalseKeyword) { emit("PUSH", false); return true; }
+      if (node.kind === ts.SyntaxKind.ThisKeyword) { if (opts.thisId == null) fail(node, "`this` outside a method"); emit("LOADENV", capture(opts.thisId)); return true; }
+      if (ts.isNewExpression(node)) {
+        if (!ts.isIdentifier(node.expression) || !classes.has(node.expression.text)) fail(node, "unsupported `new`");
+        const rec = compileClass(node.expression.text);
+        const inst = tempSlot(); emit("NEWOBJ"); emit("STORE", inst);
+        for (const m of rec.methods) { const info = rec.compiled[m.name]; emit("LOAD", inst); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === rec.thisId ? ["L", inst] : provide(id)))); emit("SETPROP", m.name); emit("POP"); }
+        const args = node.arguments || [];
+        if (rec.ctor) { const info = rec.compiled.__ctor__; emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === rec.thisId ? ["L", inst] : provide(id)))); args.forEach((a) => expr(a)); emit("CALLV", args.length); emit("POP"); }
+        else for (const f of rec.fields) { emit("LOAD", inst); expr(f.init); emit("SETPROP", f.name); emit("POP"); }
+        emit("LOAD", inst); return true;
+      }
       if (ts.isIdentifier(node)) { readUse(node); return true; }
       if (ts.isAwaitExpression(node)) { expr(node.expression); emit("AWAIT"); return true; }
       if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) { closureOf(node); return true; }
@@ -135,14 +182,14 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isPrefixUnaryExpression(node)) {
         if (node.operator === ts.SyntaxKind.ExclamationToken) { expr(node.operand); emit("NOT"); return true; }
         if (node.operator === ts.SyntaxKind.MinusToken) { emit("PUSH", 0); expr(node.operand); emit("BIN", "-"); return true; }
-        if (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken) { const op = node.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-"; writeUse(node.operand, () => { readUse(node.operand); emit("PUSH", 1); emit("BIN", op); }); return false; }
+        if (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken) { incDec(node.operand, node.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-"); return false; }
         fail(node, "unsupported unary");
       }
-      if (ts.isPostfixUnaryExpression(node)) { const op = node.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-"; writeUse(node.operand, () => { readUse(node.operand); emit("PUSH", 1); emit("BIN", op); }); return false; }
+      if (ts.isPostfixUnaryExpression(node)) { incDec(node.operand, node.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-"); return false; }
       if (ts.isBinaryExpression(node)) {
         const k = node.operatorToken.kind;
-        if (k === ts.SyntaxKind.EqualsToken) { if (!ts.isIdentifier(node.left)) fail(node, "can only assign to a variable"); writeUse(node.left, () => expr(node.right)); return false; }
-        if (COMPOUND.has(k)) { const op = COMPOUND.get(k); writeUse(node.left, () => { readUse(node.left); expr(node.right); emit("BIN", op); }); return false; }
+        if (k === ts.SyntaxKind.EqualsToken) { assignTo(node.left, () => expr(node.right)); return false; }
+        if (COMPOUND.has(k)) { compoundTo(node.left, COMPOUND.get(k), node.right); return false; }
         if (k === ts.SyntaxKind.AmpersandAmpersandToken) { expr(node.left); emit("DUP"); const end = label("and"); emit("JMPF", end); emit("POP"); expr(node.right); mark(end); return true; }
         if (k === ts.SyntaxKind.BarBarToken) { expr(node.left); emit("DUP"); const rhs = label("or"), end = label("oend"); emit("JMPF", rhs); emit("JMP", end); mark(rhs); emit("POP"); expr(node.right); mark(end); return true; }
         const op = BINOP[k]; if (!op) fail(node, "unsupported operator");
@@ -243,6 +290,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     // --- prologue: default params, box captured params, hoist nested fn decls
     for (const p of node.parameters) if (p.initializer && ts.isIdentifier(p.name)) { const s = slotOf.get(bindingOf.get(p.name)); const skip = label("dflt"); emit("LOAD", s); emit("PUSH", undefined); emit("BIN", "==="); emit("JMPF", skip); expr(p.initializer); emit("STORE", s); mark(skip); }
     for (const p of node.parameters) if (ts.isIdentifier(p.name) && boxed.has(bindingOf.get(p.name))) { const s = slotOf.get(bindingOf.get(p.name)); emit("NEWOBJ"); emit("LOAD", s); emit("SETPROP", "v"); emit("STORE", s); }
+    if (opts.fieldInits) for (const f of opts.fieldInits) { emit("LOADENV", capture(opts.thisId)); expr(f.init); emit("SETPROP", f.name); emit("POP"); } // class field initializers, with `this` bound
     const hoist = []; const findFnDecls = (n) => { if (ts.isFunctionExpression(n) || ts.isArrowFunction(n)) return; if (ts.isFunctionDeclaration(n) && n !== node) { hoist.push(n); return; } ts.forEachChild(n, findFnDecls); };
     if (node.body) ts.forEachChild(node.body, findFnDecls);
     for (const fd of hoist) { const childName = `${name}$${gen++}`; const child = compileFn(fd, childName); out[childName] = child; emit("MAKECLOSURE", childName, child.freeIds.map(provide)); bindStackTop(fd.name); }

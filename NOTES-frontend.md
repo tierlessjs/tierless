@@ -99,8 +99,20 @@ nested-destructuring-in-for-of+default+compound). All match.
 - probe-realts.mjs now checks 9 real-JS snippets === Node's eval, incl.
   map/filter/reduce, chained string methods, throw caught locally, and throw
   propagating across a call frame.
-Still TODO for arbitrary files: classes/new/this, real Promise + async stdlib,
-spread/rest, switch, for-in, finally, block-scoped shadowing, generators.
+## #4 step 6 (done — classes)
+Classes: `class`/`new`/`this`, fields (defaults + ctor-set), methods, constructor.
+An instance is an object whose method properties are closures capturing `this`
+(synthetic thisId per class, provided as the closure's first capture at `new`);
+so `obj.method()` works via the existing GETPROP+CALLV path, and methods can call
+each other via this.m(). Field initializers run in the constructor prologue (with
+`this` bound); a class with no constructor inits fields inline at `new`. Added
+property/element assignment (obj.p = v / arr[i] = v via new SETINDEX op),
+compound (this.x += y), and ++/-- on properties. Verified vs Node's eval:
+counter (ctor/fields/methods/this), cart (method using reduce + this), greeter
+(method calling method + string method), box (field defaults, no ctor). All match.
+Still TODO for arbitrary files: class inheritance (extends/super), getters/
+setters/static, real Promise + async stdlib, spread/rest, switch, for-in,
+finally, block-scoped shadowing, generators.
 
 ## Don't forget
 - **Source maps**: NJS captured the stack but deferred line/file metadata. Our
