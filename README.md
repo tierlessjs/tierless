@@ -41,7 +41,8 @@ ratio                          : ~978x smaller
 | `npm run wasm:2p` | `waso-wasm-2p-*.mjs` | the full stack: the linear-memory slice crosses a real pipe between two processes |
 | `npm run policy` | `waso-policy.mjs` | migrate-vs-fetch cost model with real measured sizes (§6) |
 | `npm run bench:hn` | `bench-hn.mjs` | **HN waterfall benchmark**: REST round trips vs continuation migration (`--real` for wall-clock) |
-| `npm run bench:sweep` | `bench-sweep.mjs` | the benchmark as a **scale curve** over thread size and RTT (writes `bench-sweep.csv`) |
+| `npm run bench:sweep` | `bench-sweep.mjs` | the HN benchmark as a **scale curve** over thread size and RTT (writes `bench-sweep.csv`) |
+| `npm run bench:conduit` | `bench-conduit.mjs` | **Conduit feed benchmark**: REST over-fetch vs server-side assembly (the bandwidth win) |
 
 ### The benchmark (`npm run bench:hn`)
 
@@ -90,6 +91,28 @@ stays **2, flat**. So Waso's win vs naive grows without bound, and it holds
 ~depth/2 even against the optimal client — and the gap widens as RTT rises,
 since Waso's cost is ~constant in round trips while both client strategies
 scale linearly with the network.
+
+### A second benchmark — Conduit (`npm run bench:conduit`)
+
+HN proves the **latency/round-trip** win on a deep waterfall (bytes were equal).
+The RealWorld/Conduit home feed proves a different one — **bandwidth/over-fetch**.
+The feed is filtered by a predicate the public API doesn't support, so a REST
+client must drag every article body to the client to filter and join locally,
+plus an N+1 round trip per article for its author. Waso runs the same assembly
+on the server and ships back only the small projected feed:
+
+```
+  strategy               round trips    bytes      latency
+  REST (over-fetch)       202 rt     4.08 MB    10504ms
+  Waso (migrate)            2 rt     11.3 KB      504ms
+       -> 362x less data, 21x faster, identical result
+```
+
+A bespoke server endpoint could also avoid the over-fetch — but that's new
+boilerplate for every filter you didn't anticipate (the design doc's §2). Waso
+runs the filter inline because it's already where the data is. Together the two
+benchmarks cover both axes of the value: HN = round trips/latency on sequential
+depth; Conduit = bandwidth on fan-out filtering + joins.
 
 ## How it works
 

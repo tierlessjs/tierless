@@ -13,7 +13,8 @@
     "wasm:2p": "node build-wasm.mjs && node waso-wasm-2p-client.mjs",
     "policy": "node build-wasm.mjs && node waso-policy.mjs",
     "bench:hn": "node bench-hn.mjs",
-    "bench:sweep": "node bench-sweep.mjs"
+    "bench:sweep": "node bench-sweep.mjs",
+    "bench:conduit": "node bench-conduit.mjs"
   },
   "dependencies": {
     "typescript": "^5.9.3",

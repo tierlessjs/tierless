@@ -206,6 +206,8 @@ export function run(tier, frames, host) {
       case "POP":    f.stack.pop(); f.ip++; break;
       case "NEWARR": f.stack.push([]); f.ip++; break;
       case "ARRPUSH": { const v = f.stack.pop(); const a = d(f.stack.pop()); a.push(v); f.ip++; break; }
+      case "NEWOBJ": f.stack.push({}); f.ip++; break;
+      case "SETPROP": { const v = f.stack.pop(); const o = d(f.stack.pop()); o[ins[1]] = v; f.stack.push(o); f.ip++; break; }
       case "GETPROP": { const o = d(f.stack.pop()); f.stack.push(o[ins[1]]); f.ip++; break; }
       case "INDEX":  { const i = f.stack.pop(); const a = d(f.stack.pop()); f.stack.push(a[i]); f.ip++; break; }
       case "BIN":    { const b = f.stack.pop(); const a = f.stack.pop(); f.stack.push(binop(ins[1], a, b)); f.ip++; break; }

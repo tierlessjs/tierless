@@ -105,10 +105,10 @@ export function genThread(n, branching = 3) {
   return { rootId: 0, store, depth, count: n };
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Orchestrator: migrate (ship the continuation) vs fetch (RPC one call, stay put).
-async function execute(entry, args, { startTier, tiers, policy, net, rtt, real }) {
+export async function execute(entry, args, { startTier, tiers, policy, net, rtt, real }) {
   const host = { deref() { throw new Error("unexpected handle deref"); } };
   let current = startTier;
   let frames = initialFrames(entry, args);
