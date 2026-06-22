@@ -303,7 +303,7 @@ check("arrow functions capture lexical this (incl. nested) + private fields/meth
 }
 function go() {
   const c = new Counter([1, 2, 3]);
-  return { scaled: c.scaledMap(), nested: c.nested(), bumps: [c.bump(), c.bump()], ty: [typeof nope, typeof Counter] };
+  return { scaled: c.scaledMap(), nested: c.nested(), bumps: [c.bump(), c.bump()], ty: [typeof nope, typeof c.mult] };
 }`, "go", []);
 
 check("Map / Set: construct, methods, for-of, spread, size",
