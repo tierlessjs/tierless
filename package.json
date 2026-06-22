@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Waso prototype — tierless continuation migration (design doc spike)",
   "scripts": {
+    "test": "node test.mjs",
     "spike": "node waso-spike.mjs",
     "2p": "node waso-2p-client.mjs",
     "build:wasm": "node build-wasm.mjs",
