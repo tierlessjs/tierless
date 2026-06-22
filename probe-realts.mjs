@@ -266,6 +266,32 @@ function go() {
   return { first, ret, done, log, c0, c1, c2 };
 }`, "go", []);
 
+check("stdlib globals: Math / Object / JSON / Array / Number / parseInt",
+`function go() {
+  const nums = [3, 1, 4, 1, 5];
+  return {
+    max: Math.max(...nums), min: Math.min(...nums), floor: Math.floor(2.9), abs: Math.abs(-3),
+    keys: Object.keys({ a: 1, b: 2 }), values: Object.values({ a: 1, b: 2 }),
+    merged: Object.assign({ a: 1 }, { b: 2 }),
+    json: JSON.parse(JSON.stringify({ x: [1, 2], y: "z" })),
+    isArr: [Array.isArray(nums), Array.isArray("no")], from: Array.from(nums),
+    isInt: [Number.isInteger(5), Number.isInteger(5.5)],
+    parsed: [parseInt("42px"), parseFloat("3.14"), isNaN(NaN), isFinite(9)],
+    coerce: [Number("7") + 1, String(42) + "!", Boolean("")],
+  };
+}`, "go", []);
+
+check("array higher-order: find / findIndex / some / every (early-terminating)",
+`function go() {
+  const a = [1, 2, 3, 4, 5];
+  return {
+    find: a.find((x) => x > 3), findIndex: a.findIndex((x) => x > 3),
+    some: a.some((x) => x === 4), someN: a.some((x) => x > 9),
+    every: a.every((x) => x > 0), everyN: a.every((x) => x > 2),
+    flat: [1, [2, 3], [4, [5]]].flat(),
+  };
+}`, "go", []);
+
 check("destructuring defaults + rest (object & array, nested, for-of)",
 `function go() {
   const { a = 5, b = 2, ...restO } = { a: 10, c: 3, d: 4 };

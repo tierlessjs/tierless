@@ -22,7 +22,7 @@
 //
 // Locals: 0=minAge, 1=rows, 2=matched, 3=i, 4=row
 
-import { encodeGraph, decodeGraph } from "./waso-heap.mjs";
+import { encodeGraph, decodeGraph, GLOBALS } from "./waso-heap.mjs";
 
 export const L = { minAge: 0, rows: 1, matched: 2, i: 3, row: 4 };
 
@@ -292,6 +292,8 @@ export function run(tier, frames, host) {
       case "TYPEOF": f.stack.push(typeof f.stack.pop()); f.ip++; break;
       case "BITNOT": f.stack.push(~f.stack.pop()); f.ip++; break;
       case "TOBIG":  f.stack.push(BigInt(f.stack.pop())); f.ip++; break;     // BigInt(x)
+      case "GLOBAL": f.stack.push(GLOBALS[ins[1]]); f.ip++; break;                                                // host stdlib global (Math/JSON/Object/...)
+      case "CALLG": { const argc = ins[2]; const args = []; for (let k = 0; k < argc; k++) args.unshift(f.stack.pop()); f.stack.push(GLOBALS[ins[1]](...args)); f.ip++; break; } // parseInt/Number/... bare call
       case "CLSGET": f.stack.push(tier.statics && tier.statics.get(ins[1])); f.ip++; break;                       // class-object registry (per tier)
       case "CLSPUT": (tier.statics || (tier.statics = new Map())).set(ins[1], f.stack[f.stack.length - 1]); f.ip++; break; // peek + cache, leave on stack
       case "INC":    { const v = f.stack.pop(); f.stack.push(typeof v === "bigint" ? v + 1n : v + 1); f.ip++; break; } // ++ (type-aware: 1n for bigint)

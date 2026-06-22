@@ -31,11 +31,13 @@ const COMPOUND = new Map([
 const isFnLike = (n) => ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n) || ts.isMethodDeclaration(n) || ts.isConstructorDeclaration(n) || ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n);
 const isAccess = (n) => ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n) || ts.isCallExpression(n);
 const isChainRoot = (n) => ts.isOptionalChain(n) && !(n.parent && isAccess(n.parent) && n.parent.expression === n && ts.isOptionalChain(n.parent));
-const HOF = new Set(["map", "filter", "forEach", "reduce"]); // callback is a Waso closure -> inline-compiled
+const HOF = new Set(["map", "filter", "forEach", "reduce", "find", "findIndex", "some", "every"]); // callback is a Waso closure -> inline-compiled
+const GLOBAL_OBJS = new Set(["Math", "JSON", "Object", "Array", "Number", "String", "Boolean", "console", "Date"]); // host stdlib (match waso-heap GLOBALS)
+const GLOBAL_CALLS = new Set(["parseInt", "parseFloat", "isNaN", "isFinite", "Number", "String", "Boolean"]); // callable globals
 const PLAIN_METHODS = new Set(["slice", "indexOf", "lastIndexOf", "includes", "join", "concat", "toUpperCase",
   "toLowerCase", "split", "trim", "trimStart", "trimEnd", "charAt", "charCodeAt", "substring", "substr", "repeat",
   "padStart", "padEnd", "startsWith", "endsWith", "replace", "replaceAll", "toFixed", "at",
-  "test", "exec", "match", "matchAll", "search", "reverse", "fill", "toString", "valueOf"]); // host intrinsics (incl. regex)
+  "test", "exec", "match", "matchAll", "search", "reverse", "fill", "toString", "valueOf", "flat"]); // host intrinsics (incl. regex)
 const patternIds = (name, out) => {
   if (ts.isIdentifier(name)) out.push(name);
   else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name))
@@ -216,6 +218,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (id == null) {
         if (topFns.has(idNode.text)) { compileTop(idNode.text); emit("MAKECLOSURE", idNode.text, [], generatorFns.has(idNode.text)); return; }
         if (classes.has(idNode.text)) { classObject(idNode.text); return; }  // bare `ClassName` -> the class object
+        if (GLOBAL_OBJS.has(idNode.text)) { emit("GLOBAL", idNode.text); return; } // bare `Math`/`JSON`/... -> host global
         if (idNode.text === "undefined") { emit("PUSH", undefined); return; }
         if (idNode.text === "NaN") { emit("PUSH", NaN); return; }
         if (idNode.text === "Infinity") { emit("PUSH", Infinity); return; }
@@ -389,24 +392,33 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       fail(node, "unsupported expression");
     }
 
-    function hof(objNode, kind, args) {                         // inline-compile map/filter/forEach/reduce
+    function hof(objNode, kind, args) {                         // inline-compile map/filter/forEach/reduce/find/findIndex/some/every
       const src = tempSlot(), fn = tempSlot(), i = tempSlot();
       expr(objNode); emit("STORE", src);
       expr(args[0]); emit("STORE", fn);
-      let acc = null, outv = null;
+      let acc = null, outv = null, res = null;
       if (kind === "reduce") { if (args.length < 2) fail(objNode, "reduce needs an initial value"); acc = tempSlot(); expr(args[1]); emit("STORE", acc); }
-      else if (kind !== "forEach") { outv = tempSlot(); emit("NEWARR"); emit("STORE", outv); }
+      else if (kind === "map" || kind === "filter") { outv = tempSlot(); emit("NEWARR"); emit("STORE", outv); }
+      else if (kind === "find") { res = tempSlot(); emit("PUSH", undefined); emit("STORE", res); }
+      else if (kind === "findIndex") { res = tempSlot(); emit("PUSH", -1); emit("STORE", res); }
+      else if (kind === "some" || kind === "every") { res = tempSlot(); emit("PUSH", kind === "every"); emit("STORE", res); }
       emit("PUSH", 0); emit("STORE", i);
       const loop = label("hof"), end = label("hofend"); mark(loop);
       emit("LOAD", i); emit("LOAD", src); emit("GETPROP", "length"); emit("BIN", "<"); emit("JMPF", end);
       const elemThenIndex = () => { emit("LOAD", src); emit("LOAD", i); emit("INDEX"); emit("LOAD", i); };
-      if (kind === "map") { emit("LOAD", outv); emit("LOAD", fn); elemThenIndex(); emit("CALLV", 2); emit("ARRPUSH"); }
-      else if (kind === "filter") { const skip = label("flt"); emit("LOAD", fn); elemThenIndex(); emit("CALLV", 2); emit("JMPF", skip); emit("LOAD", outv); emit("LOAD", src); emit("LOAD", i); emit("INDEX"); emit("ARRPUSH"); mark(skip); }
-      else if (kind === "forEach") { emit("LOAD", fn); elemThenIndex(); emit("CALLV", 2); emit("POP"); }
+      const callCb = () => { emit("LOAD", fn); elemThenIndex(); emit("CALLV", 2); };
+      const elem = () => { emit("LOAD", src); emit("LOAD", i); emit("INDEX"); };
+      if (kind === "map") { emit("LOAD", outv); callCb(); emit("ARRPUSH"); }
+      else if (kind === "filter") { const skip = label("flt"); callCb(); emit("JMPF", skip); emit("LOAD", outv); elem(); emit("ARRPUSH"); mark(skip); }
+      else if (kind === "forEach") { callCb(); emit("POP"); }
       else if (kind === "reduce") { emit("LOAD", fn); emit("LOAD", acc); elemThenIndex(); emit("CALLV", 3); emit("STORE", acc); }
+      else if (kind === "find") { const skip = label("fnd"); callCb(); emit("JMPF", skip); elem(); emit("STORE", res); emit("JMP", end); mark(skip); }
+      else if (kind === "findIndex") { const skip = label("fni"); callCb(); emit("JMPF", skip); emit("LOAD", i); emit("STORE", res); emit("JMP", end); mark(skip); }
+      else if (kind === "some") { const skip = label("sm"); callCb(); emit("JMPF", skip); emit("PUSH", true); emit("STORE", res); emit("JMP", end); mark(skip); }
+      else if (kind === "every") { const skip = label("ev"); callCb(); emit("NOT"); emit("JMPF", skip); emit("PUSH", false); emit("STORE", res); emit("JMP", end); mark(skip); }
       emit("LOAD", i); emit("PUSH", 1); emit("BIN", "+"); emit("STORE", i); emit("JMP", loop); mark(end);
       if (kind === "forEach") return false;
-      emit("LOAD", kind === "reduce" ? acc : outv); return true;
+      emit("LOAD", kind === "reduce" ? acc : outv != null ? outv : res); return true;
     }
 
     function superCall(supProg, supThisId, args) {
@@ -433,6 +445,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const resName = `${callee.expression.getText(sf)}.${callee.name.text}`;
         if (resourceSet.has(resName)) { node.arguments.forEach((a) => expr(a)); emit("RES", resName, node.arguments.length); return true; }
         const m = callee.name.text;
+        if (ts.isIdentifier(callee.expression) && bindingOf.get(callee.expression) == null && GLOBAL_OBJS.has(callee.expression.text)) { emit("GLOBAL", callee.expression.text); node.arguments.forEach((a) => expr(a)); emit("CALLM", m, node.arguments.length); return true; } // Math.max / Object.keys / JSON.stringify / Array.isArray ...
         if ((m === "next" || m === "return" || m === "throw") && node.arguments.length <= 1) { expr(callee.expression); node.arguments[0] ? expr(node.arguments[0]) : emit("PUSH", undefined); emit(m === "next" ? "GENNEXT" : m === "return" ? "GENRET" : "GENTHROW"); return true; } // it.next/return/throw(v)
         if (m === "push") { expr(callee.expression); expr(node.arguments[0]); emit("ARRPUSH"); return false; }
         if (HOF.has(m)) return hof(callee.expression, m, node.arguments);
@@ -441,6 +454,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       }
       if (ts.isIdentifier(callee) && bindingOf.get(callee) == null && !topFns.has(callee.text) && resourceSet.has(callee.text)) { node.arguments.forEach((a) => expr(a)); emit("RES", callee.text, node.arguments.length); return true; }
       if (ts.isIdentifier(callee) && callee.text === "BigInt" && bindingOf.get(callee) == null && !topFns.has(callee.text)) { expr(node.arguments[0]); emit("TOBIG"); return true; } // BigInt(x) conversion
+      if (ts.isIdentifier(callee) && bindingOf.get(callee) == null && !topFns.has(callee.text) && GLOBAL_CALLS.has(callee.text)) { node.arguments.forEach((a) => expr(a)); emit("CALLG", callee.text, node.arguments.length); return true; } // parseInt/Number/String/... bare call
       return closureCall(callee, node.arguments);
     }
     function closureCall(callee, args) {
