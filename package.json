@@ -9,7 +9,8 @@
     "2p": "node waso-2p-client.mjs",
     "build:wasm": "node build-wasm.mjs",
     "wasm": "node build-wasm.mjs && node waso-wasm.mjs",
-    "wasm:2p": "node build-wasm.mjs && node waso-wasm-2p-client.mjs"
+    "wasm:2p": "node build-wasm.mjs && node waso-wasm-2p-client.mjs",
+    "policy": "node build-wasm.mjs && node waso-policy.mjs"
   },
   "dependencies": {
     "typescript": "^5.9.3",

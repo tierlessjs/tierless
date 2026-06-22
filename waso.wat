@@ -86,6 +86,7 @@
           (br $L)))
         (if (i32.eq (local.get $op) (i32.const 9)) (then     ;; NEWARR
           (local.set $p (i32.load (i32.const 8)))
+          (if (i32.ge_u (local.get $p) (i32.const 1048576)) (then (unreachable))) ;; small-heap overflow
           (i32.store (local.get $p) (i32.const 0))
           (i32.store (i32.const 8) (i32.add (local.get $p) (i32.const 4)))
           (call $push (local.get $p)) (call $advance) (br $L)))
@@ -93,6 +94,7 @@
           (local.set $y (call $pop)) (local.set $p (call $pop))
           (local.set $len (i32.load (local.get $p)))
           (local.set $t (i32.load (i32.const 8)))
+          (if (i32.ge_u (local.get $t) (i32.const 1048576)) (then (unreachable))) ;; small-heap overflow
           (i32.store (local.get $t) (local.get $y))
           (i32.store (i32.const 8) (i32.add (local.get $t) (i32.const 4)))
           (i32.store (local.get $p) (i32.add (local.get $len) (i32.const 1)))
