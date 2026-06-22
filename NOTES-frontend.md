@@ -28,6 +28,16 @@ prefetch. i.e. the model has been stable for ~20 years; that's reassuring.
   So: reuse async semantics for the boundary + local suspend, but the
   transportable continuation is still ours to build (CPS-to-data), same as NJS.
 
+## #3 result (done — probe-async.mjs)
+Modeled `await` as a suspension point (AWAIT op): a call returns an awaitable
+descriptor, AWAIT suspends, the host resolves it async, then resumes. Proven:
+the async program runs on the runtime AND runs end-to-end through
+serialize/deserialize at every await (~316 B continuation) — i.e. an
+await-suspended continuation IS serializable/migratable, the exact thing native
+async can't do. So for #4 the boundary shape is `await`, and the transform's job
+is to emit our AWAIT (+ serializable descriptor) at each suspension, not to rely
+on the engine's async state. Same suspension also resolves a remote handle fetch.
+
 ## Don't forget
 - **Source maps**: NJS captured the stack but deferred line/file metadata. Our
   §10.6. Design it into the transform from the start, don't bolt on.

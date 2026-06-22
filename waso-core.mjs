@@ -128,9 +128,12 @@ export function serializeContinuation(cont, sourceTier) {
     return { fn: f.fn, ip: f.ip, nl: f.locals.length, ns: f.stack.length, l0, s0 };
   });
   let pending = null;
-  if (cont.pending) {
+  if (cont.pending && cont.pending.name !== undefined) {        // resource boundary
     const a0 = roots.length; for (const x of cont.pending.args) roots.push(x);
     pending = { name: cont.pending.name, a0, argc: cont.pending.args.length };
+  } else if (cont.pending && "await" in cont.pending) {         // await boundary
+    const w0 = roots.length; roots.push(cont.pending.await);
+    pending = { awaitRoot: w0 };
   }
   return { frames, pending, graph: encodeGraph(roots, { tier: sourceTier, threshold: HANDLE_THRESHOLD }) };
 }
@@ -142,9 +145,11 @@ export function deserializeContinuation(wire) {
     locals: vals.slice(f.l0, f.l0 + f.nl),
     stack: vals.slice(f.s0, f.s0 + f.ns),
   }));
-  const pending = wire.pending
-    ? { name: wire.pending.name, args: vals.slice(wire.pending.a0, wire.pending.a0 + wire.pending.argc) }
-    : null;
+  let pending = null;
+  if (wire.pending && wire.pending.name !== undefined)
+    pending = { name: wire.pending.name, args: vals.slice(wire.pending.a0, wire.pending.a0 + wire.pending.argc) };
+  else if (wire.pending && wire.pending.awaitRoot !== undefined)
+    pending = { await: vals[wire.pending.awaitRoot] };
   return { frames, pending };
 }
 
@@ -204,6 +209,14 @@ export function run(tier, frames, host) {
         if (tier.has(ins[1])) { f.stack.push(tier.resources[ins[1]](args)); f.ip++; break; }
         f.ip++; // resume point is AFTER this RES; pending resource runs on arrival
         throw new Suspend(frames, { name: ins[1], args });
+      }
+      case "AWAIT": {
+        // Suspend on an awaitable value; the host resolves it (possibly async)
+        // and resumes with the result. Same capture as RES — so unlike native
+        // async, an await-suspended continuation is serializable.
+        const awaitable = f.stack.pop();
+        f.ip++; // resume AFTER the AWAIT, with the resolved value pushed
+        throw new Suspend(frames, { await: awaitable });
       }
       default: throw new Error("bad op " + ins[0]);
     }

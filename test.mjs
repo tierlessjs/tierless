@@ -14,6 +14,7 @@ const cases = [
   { file: "bench-conduit.mjs",       needs: ["less data", "identical feeds? YES"] },
   { file: "probe-heap.mjs",          needs: ["Section B: all PASS"] },
   { file: "probe-fetch.mjs",         needs: ["all PASS — a migrated continuation"] },
+  { file: "probe-async.mjs",         needs: ["all PASS — await is just a suspension"] },
 ];
 
 // Build the wasm once up front.
