@@ -15,6 +15,7 @@ const cases = [
   { file: "probe-heap.mjs",          needs: ["Section B: all PASS"] },
   { file: "probe-fetch.mjs",         needs: ["all PASS — a migrated continuation"] },
   { file: "probe-async.mjs",         needs: ["all PASS — await is just a suspension"] },
+  { file: "waso-fetch-2p-client.mjs", needs: ["On-demand (big data crossed only on deref)? YES"] },
 ];
 
 // Build the wasm once up front.

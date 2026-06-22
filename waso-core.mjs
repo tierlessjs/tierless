@@ -172,6 +172,14 @@ export class Suspend {
   constructor(frames, pending) { this.frames = frames; this.pending = pending; }
 }
 
+// Returned by host.deref when a remote handle isn't resident: the interpreter
+// turns it into a suspension (a deref-miss is an await on the fetch). The host
+// fetches it (async), caches it, and re-runs — so the deref ops below are
+// written to touch the stack only AFTER the deref succeeds (re-runnable).
+export class Miss {
+  constructor(handle) { this.handle = handle; }
+}
+
 function binop(op, a, b) {
   switch (op) {
     case "+": return (typeof a === "string" || typeof b === "string") ? String(a) + String(b) : a + b;
@@ -183,7 +191,12 @@ function binop(op, a, b) {
 }
 
 export function run(tier, frames, host) {
-  const d = (x) => (isHandle(x) ? host.deref(x) : x);
+  const d = (x) => {
+    if (!isHandle(x)) return x;
+    const r = host.deref(x);
+    if (r instanceof Miss) throw new Suspend(frames, { fetch: r.handle }); // deref-miss -> suspend
+    return r;
+  };
   while (true) {
     const f = frames[frames.length - 1];
     const ins = PROGRAM[f.fn].code[f.ip];
@@ -193,11 +206,12 @@ export function run(tier, frames, host) {
       case "STORE":  f.locals[ins[1]] = f.stack.pop(); f.ip++; break;
       case "POP":    f.stack.pop(); f.ip++; break;
       case "NEWARR": f.stack.push([]); f.ip++; break;
-      case "ARRPUSH": { const v = f.stack.pop(); const a = d(f.stack.pop()); a.push(v); f.ip++; break; }
+      // deref ops peek-then-deref so a deref-miss leaves the stack/ip untouched (re-runnable)
+      case "ARRPUSH": { const a = d(f.stack[f.stack.length - 2]); const v = f.stack[f.stack.length - 1]; f.stack.length -= 2; a.push(v); f.ip++; break; }
       case "NEWOBJ": f.stack.push({}); f.ip++; break;
-      case "SETPROP": { const v = f.stack.pop(); const o = d(f.stack.pop()); o[ins[1]] = v; f.stack.push(o); f.ip++; break; }
-      case "GETPROP": { const o = d(f.stack.pop()); f.stack.push(o[ins[1]]); f.ip++; break; }
-      case "INDEX":  { const i = f.stack.pop(); const a = d(f.stack.pop()); f.stack.push(a[i]); f.ip++; break; }
+      case "SETPROP": { const o = d(f.stack[f.stack.length - 2]); const v = f.stack[f.stack.length - 1]; f.stack.length -= 2; o[ins[1]] = v; f.stack.push(o); f.ip++; break; }
+      case "GETPROP": { const o = d(f.stack[f.stack.length - 1]); f.stack.pop(); f.stack.push(o[ins[1]]); f.ip++; break; }
+      case "INDEX":  { const a = d(f.stack[f.stack.length - 2]); const i = f.stack[f.stack.length - 1]; f.stack.length -= 2; f.stack.push(a[i]); f.ip++; break; }
       case "BIN":    { const b = f.stack.pop(); const a = f.stack.pop(); f.stack.push(binop(ins[1], a, b)); f.ip++; break; }
       case "JMP":    f.ip = ins[1]; break;
       case "JMPF":   { const c = f.stack.pop(); f.ip = c ? f.ip + 1 : ins[1]; break; }

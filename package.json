@@ -14,7 +14,8 @@
     "policy": "node build-wasm.mjs && node waso-policy.mjs",
     "bench:hn": "node bench-hn.mjs",
     "bench:sweep": "node bench-sweep.mjs",
-    "bench:conduit": "node bench-conduit.mjs"
+    "bench:conduit": "node bench-conduit.mjs",
+    "fetch:2p": "node waso-fetch-2p-client.mjs"
   },
   "dependencies": {
     "typescript": "^5.9.3",
