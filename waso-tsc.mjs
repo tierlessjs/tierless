@@ -34,7 +34,7 @@ const isChainRoot = (n) => ts.isOptionalChain(n) && !(n.parent && isAccess(n.par
 const HOF = new Set(["map", "filter", "forEach", "reduce", "find", "findIndex", "some", "every"]); // callback is a Waso closure -> inline-compiled
 const GLOBAL_OBJS = new Set(["Math", "JSON", "Object", "Array", "Number", "String", "Boolean", "console", "Date", "Symbol"]); // host stdlib (match waso-heap GLOBALS)
 const GLOBAL_CALLS = new Set(["parseInt", "parseFloat", "isNaN", "isFinite", "Number", "String", "Boolean", "Symbol"]); // callable globals
-const CTOR_GLOBALS = new Set(["Map", "Set", "WeakMap", "WeakSet", "Date", "Error", "RegExp"]); // host constructors via `new` (match waso-heap CTORS)
+const CTOR_GLOBALS = new Set(["Map", "Set", "WeakMap", "WeakSet", "Date", "Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError", "URIError", "RegExp"]); // host constructors via `new` (match waso-heap CTORS)
 const ERROR_CTORS = new Set(["Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError", "URIError"]); // extendable host error bases
 const BUILTIN_CTORS = new Set(["Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError", "URIError", "Array", "Map", "Set", "WeakMap", "WeakSet", "Date", "RegExp", "Object", "Number", "String", "Boolean", "Promise"]); // valid `instanceof` RHS (match HOSTCTORS in waso-core)
 const PLAIN_METHODS = new Set(["slice", "indexOf", "lastIndexOf", "includes", "join", "concat", "toUpperCase",
@@ -430,6 +430,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (node.kind === ts.SyntaxKind.ThisKeyword) { if (isArrow) { if (opts.thisId == null) { emit("PUSH", undefined); return true; } emit("LOADENV", capture(opts.thisId)); return true; } emit("LOADTHIS", opts.thisId != null ? capture(opts.thisId) : -1); return true; } // arrow: lexical; else dynamic receiver, home this as fallback
       if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.NewKeyword) { if (opts.ctorOf) classObject(opts.ctorOf); else emit("PUSH", undefined); return true; } // new.target: the class in a ctor, else undefined
       if (ts.isNewExpression(node)) {
+        if (ts.isIdentifier(node.expression) && node.expression.text === "Proxy" && bindingOf.get(node.expression) == null) { const a = node.arguments || []; expr(a[0]); expr(a[1]); emit("NEWPROXY"); return true; } // new Proxy(target, handler)
         if (ts.isIdentifier(node.expression) && bindingOf.get(node.expression) == null && CTOR_GLOBALS.has(node.expression.text)) { const a = node.arguments || []; a.forEach((x) => expr(x)); emit("CTORG", node.expression.text, a.length); return true; } // new Map/Set/Date/...
         const cname = ts.isIdentifier(node.expression) ? classNameOf(node.expression) : null;
         if (!cname) fail(node, "unsupported `new`");
@@ -503,6 +504,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
           fail(node, "instanceof needs a class or built-in constructor");
         }
         const op = BINOP[k]; if (!op) fail(node, "unsupported operator");
+        if (op === "in") { expr(node.left); expr(node.right); emit("HASKEY"); return true; } // `k in o`, proxy-aware (has trap)
         expr(node.left); expr(node.right); emit("BIN", op); return true;
       }
       if (ts.isPropertyAccessExpression(node) && node.expression.kind === ts.SyntaxKind.SuperKeyword) { if (!opts.superName) fail(node, "super outside a derived class"); return superProp(node.name.text); } // super.x
@@ -629,6 +631,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         if (resourceSet.has(resName)) { node.arguments.forEach((a) => expr(a)); emit("RES", resName, node.arguments.length); return true; }
         const m = callee.name.text;
         if (ts.isIdentifier(callee.expression) && callee.expression.text === "JSON" && m === "stringify" && bindingOf.get(callee.expression) == null) { const a = node.arguments; a[0] ? expr(a[0]) : emit("PUSH", undefined); a[1] ? expr(a[1]) : emit("PUSH", undefined); a[2] ? expr(a[2]) : emit("PUSH", undefined); emit("JSONSTR"); return true; } // skip Waso closures (functions) like JS does
+        if (ts.isIdentifier(callee.expression) && callee.expression.text === "Object" && m === "keys" && node.arguments.length === 1 && bindingOf.get(callee.expression) == null) { expr(node.arguments[0]); emit("KEYS"); return true; } // proxy-aware (ownKeys trap)
         if (ts.isIdentifier(callee.expression) && bindingOf.get(callee.expression) == null && GLOBAL_OBJS.has(callee.expression.text)) { emit("GLOBAL", callee.expression.text); hostMethod(m, node.arguments); return true; } // Math.max / Object.keys / JSON.stringify / Array.isArray ...
         if ((m === "next" || m === "return" || m === "throw") && node.arguments.length <= 1) { expr(callee.expression); node.arguments[0] ? expr(node.arguments[0]) : emit("PUSH", undefined); emit(m === "next" ? "GENNEXT" : m === "return" ? "GENRET" : "GENTHROW"); return true; } // it.next/return/throw(v)
         if (m === "push") { expr(callee.expression); expr(node.arguments[0]); emit("ARRPUSH"); return false; }

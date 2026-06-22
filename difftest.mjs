@@ -222,6 +222,18 @@ d("Object.defineProperty getter", "function go(){ const o={}; Object.definePrope
 d("property enumeration order mixed keys", "function go(){ const o={}; o.b=1; o[2]=2; o.a=3; o[1]=4; return Object.keys(o); }");
 d("getOwnPropertyDescriptor", "function go(){ const o={x:5}; const d=Object.getOwnPropertyDescriptor(o,'x'); return [d.value,d.writable,d.enumerable]; }");
 
+console.log("— Proxy (metaprogramming) —");
+d("proxy get trap with default", "function go(){ const p=new Proxy({a:1},{get(t,k){return k in t?t[k]:'def';}}); return [p.a,p.zzz]; }");
+d("proxy set trap intercepts", "function go(){ const log=[]; const p=new Proxy({},{set(t,k,v){log.push(k+'='+v);t[k]=v;return true;}}); p.x=5; p.y=9; return [log,p.x,p.y]; }");
+d("proxy has trap", "function go(){ const p=new Proxy({a:1},{has(t,k){return k[0]==='_'||k in t;}}); return ['a' in p,'_x' in p,'b' in p]; }");
+d("proxy deleteProperty trap", "function go(){ const log=[]; const p=new Proxy({a:1,b:2},{deleteProperty(t,k){log.push(k);delete t[k];return true;}}); delete p.a; return [log,'a' in p,'b' in p]; }");
+d("proxy ownKeys via for-in and Object.keys", "function go(){ const p=new Proxy({a:1,b:2,c:3},{ownKeys(t){return Object.keys(t).filter(k=>k!=='b');}}); const fi=[]; for(const k in p)fi.push(k); return [fi,Object.keys(p)]; }");
+d("proxy computed get", "function go(){ const p=new Proxy({},{get(t,k){return 'V:'+k;}}); const key='dyn'; return [p[key],p.foo]; }");
+d("proxy method synthesized by get", "function go(){ const p=new Proxy({n:10},{get(t,k){return k==='dbl'?()=>t.n*2:t[k];}}); return [p.n,p.dbl()]; }");
+d("proxy reactive increment", "function go(){ let writes=0; const p=new Proxy({count:0},{set(t,k,v){writes++;t[k]=v;return true;}}); p.count++; p.count+=10; return [p.count,writes]; }");
+d("proxy default passthrough (empty handler)", "function go(){ const p=new Proxy({a:1},{}); p.b=2; return [p.a,p.b,'a' in p,Object.keys(p)]; }");
+d("proxy validation throws on bad set", "function go(){ const p=new Proxy({age:0},{set(t,k,v){if(k==='age'&&v<0)throw new RangeError('neg');t[k]=v;return true;}}); let err='ok'; try{p.age=-1;}catch(e){err=e instanceof RangeError?'range':'other';} p.age=5; return [err,p.age]; }");
+
 console.log("— closures & control flow extras —");
 d("try/finally return value in loop", "function go(){ function f(){for(let i=0;i<3;i++){try{if(i===2)return i;}finally{}}return -1;} return f(); }");
 d("labeled block break", "function go(){ let r=[]; block:{ r.push(1); if(r.length)break block; r.push(2); } return r; }");

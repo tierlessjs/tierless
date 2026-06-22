@@ -275,6 +275,17 @@ export function run(tier, frames, host) {
     return undefined;
   };
   const callClosure = (cl, args, thisVal) => { if (cl.bound) { args = cl.bargs.concat(args); thisVal = cl.bthis; cl = cl.target; } return run(tier, [{ fn: cl.fn, ip: 0, locals: args.slice(), stack: [], env: cl.env, handlers: [], thisVal }], host).value; }; // run a non-suspending closure to completion (for synchronous drains)
+  // Proxy: a wrapper carries a non-enumerable __proxy__ = { target, handler }. Every
+  // property op checks proxyOf first; a present trap (a Waso closure on the handler)
+  // is driven synchronously, else the operation reflects onto the target. Traps run
+  // to completion (no mid-trap migration) — fine for reactivity/validation handlers.
+  const proxyOf = (o) => (o != null && typeof o === "object" ? o.__proxy__ : undefined);
+  const trapOf = (px, name) => { const t = px.handler != null && px.handler[name]; return isClosure(t) ? t : null; };
+  const proxyGet = (px, key, recv) => { const g = trapOf(px, "get"); return g ? callClosure(g, [px.target, key, recv]) : px.target[key]; };
+  const proxySet = (px, key, val, recv) => { const s = trapOf(px, "set"); if (s) callClosure(s, [px.target, key, val, recv]); else px.target[key] = val; };
+  const proxyHas = (px, key) => { const h = trapOf(px, "has"); return h ? !!callClosure(h, [px.target, key]) : key in px.target; };
+  const proxyDelete = (px, key) => { const dd = trapOf(px, "deleteProperty"); return dd ? !!callClosure(dd, [px.target, key]) : delete px.target[key]; };
+  const proxyKeys = (px) => { const k = trapOf(px, "ownKeys"); return k ? callClosure(k, [px.target]) : Object.keys(px.target); };
   // fn.call(thisArg, ...a) / fn.apply(thisArg, aArr) / fn.bind(thisArg, ...partial)
   const fnProto = (cl, which, args) => (which === "bind" ? bindClosure(cl, args[0], args.slice(1)) : enter(cl, which === "apply" ? (args[1] != null ? args[1].slice() : []) : args.slice(1), args[0]));
   // Bridge a Waso closure into a real host function so host methods that take a
@@ -367,9 +378,11 @@ export function run(tier, frames, host) {
       case "ISAB": { const o = d(f.stack.pop()); const C = HOSTCTORS[ins[1]]; f.stack.push((!!C && o instanceof C) || !!(o && typeof o === "object" && Array.isArray(o.__class__) && o.__class__.includes(ins[1]))); f.ip++; break; } // instanceof a built-in (host error/Array/Map/...) — native for host objects, __class__ chain for Waso instances (e.g. `extends Error`)
 
       case "ISNULLISH": { const v = f.stack.pop(); f.stack.push(v === null || v === undefined); f.ip++; break; }
-      case "KEYS":   f.stack.push(Object.keys(d(f.stack.pop()))); f.ip++; break;            // for-in
-      case "DELPROP": { const o = d(f.stack.pop()); f.stack.push(delete o[ins[1]]); f.ip++; break; }
-      case "DELINDEX": { const k = f.stack.pop(); const o = d(f.stack.pop()); f.stack.push(delete o[k]); f.ip++; break; }
+      case "KEYS":   { const o = d(f.stack.pop()); const px = proxyOf(o); f.stack.push(px ? proxyKeys(px) : Object.keys(o)); f.ip++; break; } // for-in / Object.keys
+      case "DELPROP": { const o = d(f.stack.pop()); const px = proxyOf(o); f.stack.push(px ? proxyDelete(px, ins[1]) : delete o[ins[1]]); f.ip++; break; }
+      case "DELINDEX": { const k = f.stack.pop(); const o = d(f.stack.pop()); const px = proxyOf(o); f.stack.push(px ? proxyDelete(px, k) : delete o[k]); f.ip++; break; }
+      case "NEWPROXY": { const handler = f.stack.pop(); const target = d(f.stack.pop()); const p = {}; Object.defineProperty(p, "__proxy__", { value: { target, handler }, enumerable: false, writable: true, configurable: true }); f.stack.push(p); f.ip++; break; } // new Proxy(target, handler)
+      case "HASKEY": { const o = d(f.stack.pop()); const k = f.stack.pop(); const px = proxyOf(o); f.stack.push(px ? proxyHas(px, k) : k in o); f.ip++; break; } // `k in o`, proxy-aware
       case "NEWARR": f.stack.push([]); f.ip++; break;
       case "ISARRAY": f.stack.push(Array.isArray(d(f.stack.pop()))); f.ip++; break;
       case "JSONSTR": {                                         // JSON.stringify that drops Waso closures & class objects (JS omits functions)
@@ -382,25 +395,29 @@ export function run(tier, frames, host) {
       // deref ops peek-then-deref so a deref-miss leaves the stack/ip untouched (re-runnable)
       case "ARRPUSH": { const a = d(f.stack[f.stack.length - 2]); const v = f.stack[f.stack.length - 1]; f.stack.length -= 2; a.push(v); f.ip++; break; }
       case "NEWOBJ": f.stack.push({}); f.ip++; break;
-      case "SETPROP": { const o = d(f.stack[f.stack.length - 2]); const v = f.stack[f.stack.length - 1]; f.stack.length -= 2; o[ins[1]] = v; f.stack.push(o); f.ip++; break; }
-      case "GETPROP": { const o = d(f.stack[f.stack.length - 1]); f.stack.pop(); f.stack.push(o[ins[1]]); f.ip++; break; }
+      case "SETPROP": { const o = d(f.stack[f.stack.length - 2]); const v = f.stack[f.stack.length - 1]; f.stack.length -= 2; const px = proxyOf(o); if (px) { proxySet(px, ins[1], v, o); f.stack.push(o); f.ip++; break; } o[ins[1]] = v; f.stack.push(o); f.ip++; break; }
+      case "GETPROP": { const o = d(f.stack[f.stack.length - 1]); f.stack.pop(); const px = proxyOf(o); f.stack.push(px ? proxyGet(px, ins[1], o) : o[ins[1]]); f.ip++; break; }
       case "GETPROPA": {                                       // accessor-aware read: call the getter as a frame, else plain
         const o = d(f.stack[f.stack.length - 1]);
+        const px = proxyOf(o);
         const acc = o != null && o.__accessors__ && o.__accessors__[ins[1]];
         f.stack.pop(); f.ip++;
+        if (px) { f.stack.push(proxyGet(px, ins[1], o)); break; }
         if (acc && acc.get) { frames.push({ fn: acc.get.fn, ip: 0, locals: [], stack: [], env: acc.get.env, handlers: [] }); break; } // getter RET lands the value on this frame
         f.stack.push(o[ins[1]]); break;
       }
       case "SETPROPA": {                                       // accessor-aware write: call the setter(v) as a frame, else plain
         const v = f.stack[f.stack.length - 1]; const o = d(f.stack[f.stack.length - 2]);
+        const px = proxyOf(o);
         const acc = o != null && o.__accessors__ && o.__accessors__[ins[1]];
         f.stack.length -= 2; f.ip++;
+        if (px) { proxySet(px, ins[1], v, o); f.stack.push(o); break; }
         if (acc && acc.set) { frames.push({ fn: acc.set.fn, ip: 0, locals: [v], stack: [], env: acc.set.env, handlers: [] }); break; } // setter RETs undefined into this frame (the SETPROP value contract)
         if (acc && acc.get) { f.stack.push(o); break; } // getter-only accessor: a write is a no-op (non-strict), not a junk own property
         o[ins[1]] = v; f.stack.push(o); break;
       }
-      case "INDEX":  { const a = d(f.stack[f.stack.length - 2]); const i = f.stack[f.stack.length - 1]; f.stack.length -= 2; const acc = a != null && a.__accessors__ && a.__accessors__[i]; if (acc && acc.get) { f.ip++; frames.push({ fn: acc.get.fn, ip: 0, locals: [], stack: [], env: acc.get.env, handlers: [] }); break; } f.stack.push(a[i]); f.ip++; break; } // computed access fires a getter
-      case "SETINDEX": { const a = d(f.stack[f.stack.length - 3]); const i = f.stack[f.stack.length - 2]; const v = f.stack[f.stack.length - 1]; f.stack.length -= 3; const acc = a != null && a.__accessors__ && a.__accessors__[i]; if (acc && acc.set) { f.ip++; frames.push({ fn: acc.set.fn, ip: 0, locals: [v], stack: [], env: acc.set.env, handlers: [] }); break; } a[i] = v; f.ip++; break; }
+      case "INDEX":  { const a = d(f.stack[f.stack.length - 2]); const i = f.stack[f.stack.length - 1]; f.stack.length -= 2; const px = proxyOf(a); if (px) { f.stack.push(proxyGet(px, i, a)); f.ip++; break; } const acc = a != null && a.__accessors__ && a.__accessors__[i]; if (acc && acc.get) { f.ip++; frames.push({ fn: acc.get.fn, ip: 0, locals: [], stack: [], env: acc.get.env, handlers: [] }); break; } f.stack.push(a[i]); f.ip++; break; } // computed access fires a getter
+      case "SETINDEX": { const a = d(f.stack[f.stack.length - 3]); const i = f.stack[f.stack.length - 2]; const v = f.stack[f.stack.length - 1]; f.stack.length -= 3; const px = proxyOf(a); if (px) { proxySet(px, i, v, a); f.ip++; break; } const acc = a != null && a.__accessors__ && a.__accessors__[i]; if (acc && acc.set) { f.ip++; frames.push({ fn: acc.set.fn, ip: 0, locals: [v], stack: [], env: acc.set.env, handlers: [] }); break; } a[i] = v; f.ip++; break; }
       case "SETHIDDEN": { const o = f.stack[f.stack.length - 2]; const v = f.stack[f.stack.length - 1]; f.stack.length -= 2; Object.defineProperty(o, ins[1], { value: v, writable: true, enumerable: false, configurable: true }); f.stack.push(o); f.ip++; break; } // non-enumerable own prop (instance method/tag)
       case "BIN":    { let b = f.stack.pop(); let a = f.stack.pop(); if (COERCING.has(ins[1])) { a = toPrim(a); b = toPrim(b); } f.stack.push(binop(ins[1], a, b)); f.ip++; break; } // ToPrimitive only for coercing ops (not ===/!==/==/!=/&|^ identity-or-int)
       case "JMP":    f.ip = ins[1]; break;
@@ -465,17 +482,17 @@ export function run(tier, frames, host) {
         let args; if (ins[0] === "CALLDYNS") args = f.stack.pop().slice(); else { args = []; for (let k = 0; k < ins[1]; k++) args.unshift(f.stack.pop()); }
         const key = f.stack.pop(); const o = d(f.stack.pop()); f.ip++;
         if (isClosure(o) && (key === "call" || key === "apply" || key === "bind")) { const g = fnProto(o, key, args); if (g !== undefined) f.stack.push(g); break; } // Function.prototype.call/apply/bind on a closure
-        const m = o[key];
+        const pxd = proxyOf(o); const m = pxd ? proxyGet(pxd, key, o) : o[key]; // proxy.method(): get trap supplies the method
         if (isClosure(m)) { const g = enter(m, args, o); if (g !== undefined) f.stack.push(g); break; } // this = receiver
-        f.stack.push(m.apply(o, hostArgs(args))); break;        // host method (arr[Symbol.iterator](), etc.)
+        f.stack.push(m.apply(pxd ? pxd.target : o, hostArgs(args))); break;        // host method (arr[Symbol.iterator](), etc.)
       }
       case "CALLMETHOD": case "CALLMETHODS": {                   // obj.m(args): dispatch user-closure method vs host method
         let args; if (ins[0] === "CALLMETHODS") args = f.stack.pop().slice(); else { args = []; for (let k = 0; k < ins[2]; k++) args.unshift(f.stack.pop()); }
         const o = d(f.stack.pop()); f.ip++;
         if (isClosure(o) && (ins[1] === "call" || ins[1] === "apply" || ins[1] === "bind")) { const g = fnProto(o, ins[1], args); if (g !== undefined) f.stack.push(g); break; } // closure.call/apply/bind
-        const m = o[ins[1]];
+        const pxm = proxyOf(o); const m = pxm ? proxyGet(pxm, ins[1], o) : o[ins[1]]; // proxy.method(): get trap supplies the method
         if (isClosure(m)) { const g = enter(m, args, o); if (g !== undefined) f.stack.push(g); break; } // user method: this = receiver (call-site bound)
-        f.stack.push(m.apply(o, hostArgs(args))); break;                  // host method (Map.set, Set.add, ...)
+        f.stack.push(m.apply(pxm ? pxm.target : o, hostArgs(args))); break;                  // host method (Map.set, Set.add, ...)
       }
       case "PUSHTRY": (f.handlers || (f.handlers = [])).push({ ip: ins[1], sp: f.stack.length }); f.ip++; break;
       case "POPTRY":  f.handlers.pop(); f.ip++; break;
@@ -570,8 +587,13 @@ export function run(tier, frames, host) {
     } catch (e) {
       // Control-flow signals propagate; a real host runtime error (TypeError from
       // `1n+1`, calling undefined, etc.) becomes a Waso throw catchable by user try/catch.
-      if (e instanceof Suspend || e instanceof Yielded || e instanceof Miss || e instanceof WasoUncaught) throw e;
-      doThrow(e);
+      if (e instanceof Suspend || e instanceof Yielded || e instanceof Miss) throw e;
+      // A WasoUncaught surfacing here came from a nested synchronous run (proxy trap,
+      // toString/valueOf coercion, ...): reroute it into THIS frame's handlers so the
+      // caller's try/catch sees it. Only a genuine top-level uncaught (outer frames
+      // already exhausted) escapes.
+      if (e instanceof WasoUncaught) { if (frames.length === 0) throw e; doThrow(e.value); }
+      else doThrow(e);
     }
   }
 }
