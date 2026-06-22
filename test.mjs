@@ -17,6 +17,7 @@ const cases = [
   { file: "probe-async.mjs",         needs: ["all PASS — await is just a suspension"] },
   { file: "waso-fetch-2p-client.mjs", needs: ["On-demand (big data crossed only on deref)? YES"] },
   { file: "probe-frontend.mjs",      needs: ["all PASS — closures"] },
+  { file: "waso-app-2p-client.mjs",  needs: ["Real TS migrated across processes and computed correctly? YES"] },
 ];
 
 // Build the wasm once up front.
