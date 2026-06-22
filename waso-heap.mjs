@@ -52,7 +52,7 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024 } = {})
       return { k: "r", id };
     }
     const id = objs.length; idOf.set(v, id);              // reserve id BEFORE recursing (cycle-safe)
-    if (Array.isArray(v)) { const slot = { k: "a", e: [] }; objs.push(slot); slot.e = v.map(enc); return { k: "r", id }; }
+    if (Array.isArray(v)) { const slot = { k: "a", e: [] }; objs.push(slot); for (let i = 0; i < v.length; i++) slot.e.push(enc(v[i])); return { k: "r", id }; } // by index: holes -> undefined
     const slot = { k: "o", f: {} }; objs.push(slot);
     for (const key of Object.keys(v)) slot.f[key] = enc(v[key]);
     return { k: "r", id };

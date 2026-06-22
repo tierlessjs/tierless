@@ -245,7 +245,7 @@ export function run(tier, frames, host) {
         const callee = f.stack.pop();
         if (!isClosure(callee)) throw new Error("CALLV on non-closure");
         f.ip++; // caller resumes after the CALLV
-        frames.push({ fn: callee.fn, ip: 0, locals: padLocals(args, PROGRAM[callee.fn].nlocals), stack: [], env: callee.env, handlers: [] });
+        frames.push({ fn: callee.fn, ip: 0, locals: args, stack: [], env: callee.env, handlers: [] }); // no padding: a missing param LOADs as undefined; rest gathering needs exact args
         break;
       }
       case "CALLVS": {                                         // call a closure with a spread args array: ["CALLVS"]
@@ -253,9 +253,10 @@ export function run(tier, frames, host) {
         const callee = f.stack.pop();
         if (!isClosure(callee)) throw new Error("CALLVS on non-closure");
         f.ip++;
-        frames.push({ fn: callee.fn, ip: 0, locals: padLocals(argsArr, PROGRAM[callee.fn].nlocals), stack: [], env: callee.env, handlers: [] });
+        frames.push({ fn: callee.fn, ip: 0, locals: argsArr.slice(), stack: [], env: callee.env, handlers: [] });
         break;
       }
+      case "GATHERREST": { const r = ins[1]; const rest = f.locals.slice(r); f.locals.length = r; f.locals[r] = rest; f.ip++; break; } // rest param: gather extra args into an array
       case "APPENDALL": { const src = f.stack.pop(); const tgt = f.stack[f.stack.length - 1]; for (const e of src) tgt.push(e); f.ip++; break; } // array spread
       case "ASSIGNALL": { const src = f.stack.pop(); Object.assign(f.stack[f.stack.length - 1], src); f.ip++; break; }                         // object spread
       case "CALLM": {                                          // call a host method: ["CALLM", name, argc] (stdlib intrinsics)
@@ -313,7 +314,7 @@ export function padLocals(args, n) {
 }
 
 export function initialFrames(entry, args) {
-  return [{ fn: entry, ip: 0, locals: padLocals(args, PROGRAM[entry].nlocals), stack: [], env: [], handlers: [] }];
+  return [{ fn: entry, ip: 0, locals: args.slice(), stack: [], env: [], handlers: [] }];
 }
 
 // ---------------------------------------------------------------------------

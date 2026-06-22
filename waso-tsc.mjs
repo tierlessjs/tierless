@@ -337,7 +337,8 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       fail(node, "unsupported statement");
     }
 
-    // --- prologue: default params, box captured params, hoist nested fn decls
+    // --- prologue: rest param, default params, box captured params, fields, hoist nested fn decls
+    for (const p of node.parameters) if (p.dotDotDotToken && ts.isIdentifier(p.name)) emit("GATHERREST", slotOf.get(bindingOf.get(p.name)));
     for (const p of node.parameters) if (p.initializer && ts.isIdentifier(p.name)) { const s = slotOf.get(bindingOf.get(p.name)); const skip = label("dflt"); emit("LOAD", s); emit("PUSH", undefined); emit("BIN", "==="); emit("JMPF", skip); expr(p.initializer); emit("STORE", s); mark(skip); }
     for (const p of node.parameters) if (ts.isIdentifier(p.name) && boxed.has(bindingOf.get(p.name))) { const s = slotOf.get(bindingOf.get(p.name)); emit("NEWOBJ"); emit("LOAD", s); emit("SETPROP", "v"); emit("STORE", s); }
     if (opts.fieldInits) for (const f of opts.fieldInits) { emit("LOADENV", capture(opts.thisId)); expr(f.init); emit("SETPROP", f.name); emit("POP"); } // class field initializers, with `this` bound

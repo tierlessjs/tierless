@@ -185,6 +185,14 @@ function go() {
   ];
 }`, "go", []);
 
+check("rest parameters + spread call into them",
+`function sum(first, ...rest) {
+  let s = first;
+  for (const x of rest) { s += x; }
+  return s;
+}
+function go() { const more = [4, 5]; return [sum(1), sum(1, 2, 3), sum(10, 20), sum(1, ...more, 6)]; }`, "go", []);
+
 check("spread: array, object, and call",
 `function add3(a, b, c) { return a + b + c; }
 function go() {
