@@ -36,7 +36,7 @@ const send = (obj) => { parentToChild += writeFrame(child.stdin, obj); };
 
 // Strict ping-pong: send a frame, await the child's reply.
 let resolveNext = null;
-readFrames(child.stdout, (msg, len) => {
+readFrames(child.stdout, (msg, _bin, len) => {
   childToParent += len;
   biggestFrameToClient = Math.max(biggestFrameToClient, len);
   const r = resolveNext; resolveNext = null; r && r(msg);
