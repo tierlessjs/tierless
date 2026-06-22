@@ -76,8 +76,24 @@ const r = await runViaWire("task");
 check(`closure was serialized as part of the continuation at the await`, r.sawClosureOnWire);
 check(`after migrating mid-await, the closure still works (got ${r.value}, expected 105)`, r.value === 105);
 
-console.log(`\nResult: ${pass ? "all PASS" : "FAILURES"} — real TS closures compile to the JS IR, and a`);
-console.log(`closure survives a serialization boundary mid-await (env as data, code by reference).`);
-console.log(`Next for #4: broaden the TS subset (loops/objects already in), then mutable captured`);
-console.log(`vars and the source-map metadata; async needs no colored functions here.`);
+// ---- Section D: mutable captured variable shared across closures -----------
+console.log("\n--- D. shared mutable capture (boxed cell) surviving migration ---");
+loadModule(PROGRAM, `
+  function makeCounter() { let n = 0; const inc = () => { n = n + 1; }; const get = () => n; return { inc, get }; }
+  function main() { const c = makeCounter(); c.inc(); c.inc(); return c.get(); }
+`, { entry: "main" });
+const local = run({ id: "t" }, initialFrames("main", []), { deref: (x) => x });
+check(`two closures share & mutate a captured 'let' (got ${local.value}, expected 2)`, local.value === 2);
+
+loadModule(PROGRAM, `
+  function makeCounter() { let n = 0; const inc = () => { n = n + 1; }; const get = () => n; return { inc, get }; }
+  function task() { const c = makeCounter(); await ext(); c.inc(); c.inc(); return c.get(); }
+`, { entry: "task", resources: ["ext"] });
+const shared = await runViaWire("task");
+check(`the shared cell survives migration: inc/inc after resume still reach get (got ${shared.value}, expected 2)`, shared.value === 2);
+
+console.log(`\nResult: ${pass ? "all PASS" : "FAILURES"} — real TS closures compile to the JS IR; a closure`);
+console.log(`survives a serialization boundary mid-await; and a mutable variable shared by two`);
+console.log(`closures stays shared across migration (boxed cell + identity-preserving wire format).`);
+console.log(`Next for #4: broader control flow/subset, then source-map metadata through the transform.`);
 if (!pass) process.exitCode = 1;

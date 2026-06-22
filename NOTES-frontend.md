@@ -55,6 +55,16 @@ TODO next: mutable captured vars (currently env is by-value snapshot — fine fo
 read; shared mutation across a closure boundary is the open case), broader
 control flow, and source-map metadata (line/file through the transform).
 
+## #4 step 2 (done — mutable captured variables)
+Added assignment (`x = e`), `++`/`--`, and BOXING: a variable that is captured by
+a nested closure AND assigned is stored in a shared cell {v} (analyzeBoxing finds
+them). Reads/writes go through the cell; closures capture the cell by reference.
+Because the wire format preserves object identity, the cell stays ONE node, so
+two closures sharing a mutable `let` remain shared across a migration. Proven
+with makeCounter: inc/inc/get = 2 locally AND after serialize-at-await.
+Remaining: broader control flow/subset; lexical shadowing (boxing is by name,
+not by binding — known limitation); source-map metadata.
+
 ## Don't forget
 - **Source maps**: NJS captured the stack but deferred line/file metadata. Our
   §10.6. Design it into the transform from the start, don't bolt on.

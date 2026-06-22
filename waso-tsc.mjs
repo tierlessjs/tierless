@@ -1,16 +1,14 @@
-// Waso — TypeScript -> JS-IR frontend (#4, step 1: closures + await).
+// Waso — TypeScript -> JS-IR frontend (#4: closures + await + mutable captures).
 //
-// Unlike the toy wasm-IR compiler (waso-compile.mjs), this targets the de-risked
-// JS interpreter (waso-core) and lowers the genuinely hard things for "real TS":
-//   - functions calling functions (CALLV over first-class closures)
-//   - closures: an arrow/function expression captures its free variables; we do
-//     closure conversion, emitting MAKECLOSURE with a capture spec and LOADENV
-//     for captured reads. A top-level function reference is a closure with no
-//     captures.
-//   - `await expr` lowers to (expr; AWAIT) — async is just a suspension point,
-//     so there are no colored functions: any function may suspend.
-// Resource calls (a known namespace like `db.x(...)` or a bare `ext(...)`) lower
-// to RES. We parse a subset with the TS compiler API; we do not typecheck.
+// Targets the de-risked JS interpreter (waso-core). Lowers the hard parts of
+// "real TS": first-class closures (closure conversion), `await` as a suspension,
+// and — new here — MUTABLE CAPTURED VARIABLES. A variable that is both captured
+// by a nested closure and assigned is "boxed": stored in a shared cell (a heap
+// object {v}). All readers/writers go through the cell, so mutations are shared;
+// and because the wire format preserves object identity, the sharing survives a
+// migration (the cell is one node, referenced by every closure that captured it).
+//
+// We parse a subset with the TS compiler API; we do not typecheck.
 
 import ts from "typescript";
 
@@ -20,28 +18,66 @@ const BINOP = {
   [ts.SyntaxKind.GreaterThanToken]: ">", [ts.SyntaxKind.GreaterThanEqualsToken]: ">=",
   [ts.SyntaxKind.EqualsEqualsEqualsToken]: "===", [ts.SyntaxKind.ExclamationEqualsEqualsToken]: "!==",
 };
+const isFnLike = (n) => ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n);
+
+// Decide which variable names need boxing: captured by a nested function AND
+// assigned somewhere. (Names only; lexical shadowing is not modeled — a known
+// subset limitation.)
+function analyzeBoxing(sf) {
+  const assigned = new Set(), captured = new Set();
+  const declaredNames = (fn) => {
+    const s = new Set();
+    fn.parameters.forEach((p) => ts.isIdentifier(p.name) && s.add(p.name.text));
+    const collect = (n) => { if (isFnLike(n)) return; if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name)) s.add(n.name.text); ts.forEachChild(n, collect); };
+    if (fn.body) collect(fn.body);
+    return s;
+  };
+  const isPropName = (node) => {
+    const p = node.parent;
+    return p && ((ts.isPropertyAccessExpression(p) && p.name === node) || (ts.isPropertyAssignment(p) && p.name === node)
+      || (ts.isParameter(p) && p.name === node) || (ts.isVariableDeclaration(p) && p.name === node) || (isFnLike(p) && p.name === node));
+  };
+  const isWrite = (node) => {
+    const p = node.parent;
+    if (!p) return false;
+    if (ts.isBinaryExpression(p) && p.left === node && p.operatorToken.kind === ts.SyntaxKind.EqualsToken) return true;
+    if ((ts.isPostfixUnaryExpression(p) || ts.isPrefixUnaryExpression(p)) && p.operand === node) return true;
+    return false;
+  };
+  const scopes = [];
+  const walk = (node) => {
+    const fn = isFnLike(node);
+    if (fn) scopes.push(declaredNames(node));
+    if (ts.isIdentifier(node) && !isPropName(node)) {
+      const name = node.text;
+      if (isWrite(node)) assigned.add(name);
+      let at = -1;
+      for (let i = scopes.length - 1; i >= 0; i--) if (scopes[i].has(name)) { at = i; break; }
+      if (at >= 0 && at < scopes.length - 1) captured.add(name); // declared in an ANCESTOR function
+    }
+    ts.forEachChild(node, walk);
+    if (fn) scopes.pop();
+  };
+  walk(sf);
+  return new Set([...captured].filter((n) => assigned.has(n)));
+}
 
 export function compileModule(source, { resources = [], entry = "main" } = {}) {
   const sf = ts.createSourceFile("app.ts", source, ts.ScriptTarget.ES2020, true);
   const topFns = new Map();
   for (const s of sf.statements) if (ts.isFunctionDeclaration(s) && s.name) topFns.set(s.name.text, s);
   const resourceSet = new Set(resources);
-  const out = {};       // PROGRAM fragment: fnName -> { nlocals, code }
+  const boxed = analyzeBoxing(sf);
+  const out = {};
   let gen = 0;
 
-  function assemble(list) {
+  const assemble = (list) => {
     const labels = {}, code = [];
     for (const l of list) (typeof l === "string") ? (labels[l] = code.length) : code.push(l);
     for (const ins of code) if ((ins[0] === "JMP" || ins[0] === "JMPF") && typeof ins[1] === "string") ins[1] = labels[ins[1]];
     return code;
-  }
-
-  function compileTop(name) {
-    if (name in out) return;
-    out[name] = null; // reservation guard against recursion
-    const c = compileFn(topFns.get(name), name);
-    out[name] = { nlocals: c.nlocals, code: c.code };
-  }
+  };
+  const compileTop = (name) => { if (name in out) return; out[name] = null; const c = compileFn(topFns.get(name), name); out[name] = { nlocals: c.nlocals, code: c.code }; };
 
   function compileFn(node, name) {
     const locals = new Map();
@@ -49,46 +85,74 @@ export function compileModule(source, { resources = [], entry = "main" } = {}) {
     for (const p of node.parameters) localIdx(p.name.text);
     const envIdx = new Map(); const envNames = [];
     const capture = (n) => { if (!envIdx.has(n)) { envIdx.set(n, envNames.length); envNames.push(n); } return envIdx.get(n); };
-
     const asm = []; let lab = 0;
     const emit = (...x) => asm.push(x);
     const mark = (l) => asm.push(l);
     const label = (s) => `${s}_${gen}_${lab++}`;
     const fail = (nd, m) => { throw new Error(`waso-tsc: ${m}: \`${nd.getText(sf)}\``); };
 
-    function useName(n) {
-      if (locals.has(n)) { emit("LOAD", locals.get(n)); return; }
-      if (topFns.has(n)) { compileTop(n); emit("MAKECLOSURE", n, []); return; } // top-level fn ref = closure
-      emit("LOADENV", capture(n)); // free variable -> captured from enclosing scope
+    // Box captured params at entry: wrap the incoming value into a cell {v}.
+    const entryBoxing = [];
+    for (const p of node.parameters) if (boxed.has(p.name.text)) {
+      const s = localIdx(p.name.text);
+      entryBoxing.push(["NEWOBJ"], ["LOAD", s], ["SETPROP", "v"], ["STORE", s]);
+    }
+
+    // Emit a read of a variable (boxed -> through the cell's .v).
+    function readName(n) {
+      if (locals.has(n)) { emit("LOAD", locals.get(n)); if (boxed.has(n)) emit("GETPROP", "v"); return; }
+      if (topFns.has(n)) { compileTop(n); emit("MAKECLOSURE", n, []); return; }
+      const i = capture(n); emit("LOADENV", i); if (boxed.has(n)) emit("GETPROP", "v"); // free var
+    }
+    // Emit a write `name = <value already-emitting via valThunk>`.
+    function writeName(n, valThunk) {
+      if (boxed.has(n)) {                                   // store into the shared cell
+        if (locals.has(n)) emit("LOAD", locals.get(n)); else emit("LOADENV", capture(n));
+        valThunk(); emit("SETPROP", "v"); emit("POP");
+        return;
+      }
+      valThunk(); emit("STORE", locals.has(n) ? locals.get(n) : localIdx(n)); // plain local
     }
 
     function closureOf(fnNode) {
       const childName = `${name}$${gen++}`;
       const child = compileFn(fnNode, childName);
       out[childName] = { nlocals: child.nlocals, code: child.code };
-      const caps = child.freeVars.map((fv) =>
-        locals.has(fv) ? ["L", locals.get(fv)] : ["E", capture(fv)]);  // provide each free var from here
+      const caps = child.freeVars.map((fv) => locals.has(fv) ? ["L", locals.get(fv)] : ["E", capture(fv)]);
       emit("MAKECLOSURE", childName, caps);
     }
 
-    // Returns true if the expression leaves exactly one value on the stack.
-    function expr(node) {
+    function expr(node) {                                   // returns true if it leaves one value
       if (ts.isParenthesizedExpression(node)) return expr(node.expression);
       if (ts.isNumericLiteral(node)) { emit("PUSH", Number(node.text)); return true; }
-      if (ts.isStringLiteral(node) || node.kind === ts.SyntaxKind.FirstTemplateToken) { emit("PUSH", node.text); return true; }
-      if (ts.isIdentifier(node)) { useName(node.text); return true; }
-      if (ts.isAwaitExpression(node)) { if (!expr(node.expression)) fail(node, "await of nothing"); emit("AWAIT"); return true; }
+      if (ts.isStringLiteral(node)) { emit("PUSH", node.text); return true; }
+      if (ts.isIdentifier(node)) { readName(node.text); return true; }
+      if (ts.isAwaitExpression(node)) { expr(node.expression); emit("AWAIT"); return true; }
       if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) { closureOf(node); return true; }
+      if (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) {
+        if (node.operator !== ts.SyntaxKind.PlusPlusToken && node.operator !== ts.SyntaxKind.MinusMinusToken) fail(node, "unsupported unary");
+        const op = node.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-";
+        writeName(node.operand.text, () => { readName(node.operand.text); emit("PUSH", 1); emit("BIN", op); });
+        return false;                                       // used as a statement / for-incrementor
+      }
       if (ts.isBinaryExpression(node)) {
-        const op = BINOP[node.operatorToken.kind];
-        if (!op) fail(node, "unsupported operator");
+        if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+          if (!ts.isIdentifier(node.left)) fail(node, "can only assign to a variable");
+          writeName(node.left.text, () => expr(node.right));
+          return false;
+        }
+        const op = BINOP[node.operatorToken.kind]; if (!op) fail(node, "unsupported operator");
         expr(node.left); expr(node.right); emit("BIN", op); return true;
       }
       if (ts.isPropertyAccessExpression(node)) { expr(node.expression); emit("GETPROP", node.name.text); return true; }
       if (ts.isElementAccessExpression(node)) { expr(node.expression); expr(node.argumentExpression); emit("INDEX"); return true; }
       if (ts.isObjectLiteralExpression(node)) {
         emit("NEWOBJ");
-        for (const p of node.properties) { if (!ts.isPropertyAssignment(p)) fail(p, "only simple properties"); expr(p.initializer); emit("SETPROP", p.name.text); }
+        for (const p of node.properties) {
+          if (ts.isPropertyAssignment(p)) { expr(p.initializer); emit("SETPROP", p.name.text); }
+          else if (ts.isShorthandPropertyAssignment(p)) { readName(p.name.text); emit("SETPROP", p.name.text); }
+          else fail(p, "unsupported property");
+        }
         return true;
       }
       if (ts.isArrayLiteralExpression(node)) { if (node.elements.length) fail(node, "only empty array literals"); emit("NEWARR"); return true; }
@@ -101,16 +165,19 @@ export function compileModule(source, { resources = [], entry = "main" } = {}) {
       const resName = ts.isPropertyAccessExpression(callee) ? `${callee.expression.getText(sf)}.${callee.name.text}`
         : ts.isIdentifier(callee) ? callee.text : null;
       if (resName && resourceSet.has(resName)) { node.arguments.forEach(expr); emit("RES", resName, node.arguments.length); return true; }
-      if (ts.isPropertyAccessExpression(callee) && callee.name.text === "push") { // arr.push(v)
-        expr(callee.expression); if (node.arguments.length !== 1) fail(node, "push expects 1 arg"); expr(node.arguments[0]); emit("ARRPUSH"); return false;
-      }
-      expr(callee); node.arguments.forEach(expr); emit("CALLV", node.arguments.length); return true; // closure call
+      if (ts.isPropertyAccessExpression(callee) && callee.name.text === "push") { expr(callee.expression); expr(node.arguments[0]); emit("ARRPUSH"); return false; }
+      expr(callee); node.arguments.forEach(expr); emit("CALLV", node.arguments.length); return true; // closure or method (property holding a closure)
     }
 
     function stmt(node) {
       if (ts.isBlock(node)) return node.statements.forEach(stmt);
       if (ts.isVariableStatement(node)) {
-        for (const d of node.declarationList.declarations) { if (!d.initializer) fail(d, "needs initializer"); expr(d.initializer); emit("STORE", localIdx(d.name.text)); }
+        for (const d of node.declarationList.declarations) {
+          if (!d.initializer) fail(d, "needs initializer");
+          const n = d.name.text;
+          if (boxed.has(n)) { const s = localIdx(n); emit("NEWOBJ"); expr(d.initializer); emit("SETPROP", "v"); emit("STORE", s); } // cell {v: init}
+          else { expr(d.initializer); emit("STORE", localIdx(n)); }
+        }
         return;
       }
       if (ts.isExpressionStatement(node)) { if (expr(node.expression)) emit("POP"); return; }
@@ -133,17 +200,16 @@ export function compileModule(source, { resources = [], entry = "main" } = {}) {
     }
 
     if (node.body && ts.isBlock(node.body)) node.body.statements.forEach(stmt);
-    else { expr(node.body); emit("RET"); }                    // arrow with an expression body
+    else { expr(node.body); emit("RET"); }
     const last = asm[asm.length - 1];
     if (!(Array.isArray(last) && last[0] === "RET")) { emit("PUSH", 0); emit("RET"); }
-    return { nlocals: locals.size, code: assemble(asm), freeVars: envNames };
+    return { nlocals: locals.size, code: assemble([...entryBoxing, ...asm]), freeVars: envNames };
   }
 
   compileTop(entry);
   return out;
 }
 
-// Register a compiled module into a PROGRAM object.
 export function loadModule(PROGRAM, source, opts) {
   const frag = compileModule(source, opts);
   for (const [k, v] of Object.entries(frag)) PROGRAM[k] = v;
