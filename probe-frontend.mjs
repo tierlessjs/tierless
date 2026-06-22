@@ -7,7 +7,7 @@
 // its code by reference. That's the #4 thesis in miniature.
 
 import { PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation, initialFrames, isClosure } from "./waso-core.mjs";
-import { loadModule } from "./waso-tsc.mjs";
+import { loadModule, describeContinuation } from "./waso-tsc.mjs";
 
 let pass = true;
 const check = (name, cond) => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}`); pass &&= cond; };
@@ -92,8 +92,62 @@ loadModule(PROGRAM, `
 const shared = await runViaWire("task");
 check(`the shared cell survives migration: inc/inc after resume still reach get (got ${shared.value}, expected 2)`, shared.value === 2);
 
-console.log(`\nResult: ${pass ? "all PASS" : "FAILURES"} — real TS closures compile to the JS IR; a closure`);
-console.log(`survives a serialization boundary mid-await; and a mutable variable shared by two`);
-console.log(`closures stays shared across migration (boxed cell + identity-preserving wire format).`);
-console.log(`Next for #4: broader control flow/subset, then source-map metadata through the transform.`);
+// ---- Section E: lexical shadowing (binding-keyed, not name-keyed) ----------
+console.log("\n--- E. shadowing: same name, different bindings ---");
+loadModule(PROGRAM, `
+  function add100(n) { return n + 100; }     // n is a plain param (NOT boxed)
+  function outer() {
+    let n = 1;                               // a DIFFERENT n, captured + mutated -> boxed
+    const inc = () => { n = n + 10; };
+    inc();
+    return n + add100(5);                    // 11 + 105 = 116
+  }
+`, { entry: "outer" });
+const sh = run({ id: "t" }, initialFrames("outer", []), { deref: (x) => x });
+check(`outer's boxed n and add100's plain n don't collide (got ${sh.value}, expected 116)`, sh.value === 116);
+
+// ---- Section F: broadened control flow vs plain JS -------------------------
+console.log("\n--- F. while / break / continue / && / ?: / += ---");
+const SRC = `function compute(limit) {
+  let sum = 0; let i = 0;
+  while (i < limit) {
+    if (i === 5) { i = i + 1; continue; }
+    sum += i;
+    if (sum > 20) { break; }
+    i = i + 1;
+  }
+  const flag = (limit > 3) && (sum > 0);
+  return flag ? sum : -1;
+}`;
+loadModule(PROGRAM, SRC, { entry: "compute" });
+function computeJS(limit) { let sum = 0, i = 0; while (i < limit) { if (i === 5) { i = i + 1; continue; } sum += i; if (sum > 20) break; i = i + 1; } const flag = (limit > 3) && (sum > 0); return flag ? sum : -1; }
+let okF = true;
+for (const lim of [0, 3, 8, 100]) {
+  const got = run({ id: "t" }, initialFrames("compute", [lim]), { deref: (x) => x }).value;
+  if (got !== computeJS(lim)) { okF = false; console.log(`    compute(${lim}) = ${got}, JS = ${computeJS(lim)}`); }
+}
+check("compute() matches plain JS across inputs (while/break/continue/&&/?:/+=)", okF);
+
+// ---- Section G: source maps — a continuation as a TS stack trace -----------
+console.log("\n--- G. source map: continuation -> TS stack trace ---");
+loadModule(PROGRAM, `
+  function fetchThing() { return ext(); }
+  function step() { return await fetchThing(); }
+  function task() { const a = step(); return a; }
+`, { entry: "task", resources: ["ext"] });
+
+let trace = null;
+{
+  let frames = initialFrames("task", []);
+  try { run(tier, frames, { deref: (x) => x }); }
+  catch (e) { if (e instanceof Suspend) trace = describeContinuation(PROGRAM, e.frames); else throw e; }
+}
+console.log("  suspended continuation maps to:");
+for (const fr of trace || []) console.log(`    #${fr.depth} ${fr.fn.padEnd(6)} ${fr.loc ? `${fr.loc.file}:${fr.loc.line}  \`${fr.loc.text}\`` : "(no source)"}`);
+check("continuation has a TS-level frame for `step` with a real line", !!(trace && trace.find((f) => f.fn === "step" && f.loc && f.loc.line)));
+check("the deepest frame points at the await/fetch line", !!(trace && trace[trace.length - 1].loc && /ext|fetchThing/.test(trace[trace.length - 1].loc.text)));
+
+console.log(`\nResult: ${pass ? "all PASS" : "FAILURES"} — closures, mutable shared captures (migration-safe),`);
+console.log(`lexical shadowing, while/break/continue/&&/||/?:/+=, and source-mapped continuations`);
+console.log(`(a serialized continuation prints as a TS stack trace).`);
 if (!pass) process.exitCode = 1;

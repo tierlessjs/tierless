@@ -213,6 +213,8 @@ export function run(tier, frames, host) {
       case "LOAD":   f.stack.push(f.locals[ins[1]]); f.ip++; break;
       case "STORE":  f.locals[ins[1]] = f.stack.pop(); f.ip++; break;
       case "POP":    f.stack.pop(); f.ip++; break;
+      case "DUP":    f.stack.push(f.stack[f.stack.length - 1]); f.ip++; break;
+      case "NOT":    f.stack.push(!f.stack.pop()); f.ip++; break;
       case "NEWARR": f.stack.push([]); f.ip++; break;
       // deref ops peek-then-deref so a deref-miss leaves the stack/ip untouched (re-runnable)
       case "ARRPUSH": { const a = d(f.stack[f.stack.length - 2]); const v = f.stack[f.stack.length - 1]; f.stack.length -= 2; a.push(v); f.ip++; break; }

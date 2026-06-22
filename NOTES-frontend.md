@@ -65,6 +65,19 @@ with makeCounter: inc/inc/get = 2 locally AND after serialize-at-await.
 Remaining: broader control flow/subset; lexical shadowing (boxing is by name,
 not by binding — known limitation); source-map metadata.
 
+## #4 step 3 (done — binding-keyed scoping, control flow, source maps)
+- Rewrote scoping to be BINDING-keyed (resolveBindings assigns each declaration
+  a unique id; uses resolve to it). Lexical shadowing now correct: two `n`s in
+  different scopes are distinct bindings; boxing is per-binding, not per-name.
+- Control flow: while, break/continue (loop label stack), &&/|| (short-circuit
+  via DUP), ternary, unary !/-, += -= *=, true/false. Added DUP/NOT to waso-core.
+- Source maps: every emitted instruction records its TS line/col/text; a
+  serialized continuation maps back to a TS stack trace (describeContinuation).
+  Demo prints `#1 task app.ts:4 step()` / `#0 step app.ts:3 await fetchThing()`.
+Remaining subset gaps: block-scoped shadowing within ONE function (function-
+scoped only), nested function *declarations* (arrows/exprs ok), classes,
+destructuring, spread, template strings, try/catch, real Promise/stdlib.
+
 ## Don't forget
 - **Source maps**: NJS captured the stack but deferred line/file metadata. Our
   §10.6. Design it into the transform from the start, don't bolt on.
