@@ -61,9 +61,13 @@ function resolveBindings(sf) {
   const scopes = [];                          // { kind:"fn"|"block", names:Map, fnNode }
   const curFn = () => { for (let i = scopes.length - 1; i >= 0; i--) if (scopes[i].kind === "fn") return scopes[i].fnNode; return null; };
   const declareIn = (scope, nameNode) => { const id = next++; scope.names.set(nameNode.text, id); bindingOf.set(nameNode, id); declFn.set(id, scope.fnNode); if (!bindingsByFn.has(scope.fnNode)) bindingsByFn.set(scope.fnNode, []); bindingsByFn.get(scope.fnNode).push(id); return id; };
+  const reserveSlot = (scope) => { const id = next++; declFn.set(id, scope.fnNode); if (!bindingsByFn.has(scope.fnNode)) bindingsByFn.set(scope.fnNode, []); bindingsByFn.get(scope.fnNode).push(id); }; // a positional slot with no name (a destructuring param's raw arg)
   // function-scoped names: params + `var`s + nested function-declaration names (don't descend into nested fns)
   const hoistFn = (fnNode, scope) => {
-    fnNode.parameters.forEach((p) => { const ids = []; patternIds(p.name, ids); ids.forEach((nm) => declareIn(scope, nm)); });
+    // One slot PER PARAMETER POSITION first (calling convention: arg i -> slot i), so a
+    // destructuring param's raw arg keeps slot i and its inner names get later slots.
+    fnNode.parameters.forEach((p) => { if (ts.isIdentifier(p.name)) declareIn(scope, p.name); else reserveSlot(scope); });
+    fnNode.parameters.forEach((p) => { if (!ts.isIdentifier(p.name)) { const ids = []; patternIds(p.name, ids); ids.forEach((nm) => declareIn(scope, nm)); } });
     const rec = (n) => {
       if (n !== fnNode && isFnLike(n)) { if (ts.isFunctionDeclaration(n) && n.name) forceBox.add(declareIn(scope, n.name)); return; } // nested fn decl name -> live binding (recursion + capture timing)
       const isVarList = (l) => l && ts.isVariableDeclarationList(l) && !isLexical(l.flags);
@@ -591,6 +595,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     for (const p of node.parameters) if (p.dotDotDotToken && ts.isIdentifier(p.name)) emit("GATHERREST", slotOf.get(bindingOf.get(p.name)));
     for (const p of node.parameters) if (p.initializer && ts.isIdentifier(p.name)) { const s = slotOf.get(bindingOf.get(p.name)); const skip = label("dflt"); emit("LOAD", s); emit("PUSH", undefined); emit("BIN", "==="); emit("JMPF", skip); expr(p.initializer); emit("STORE", s); mark(skip); }
     for (const p of node.parameters) if (ts.isIdentifier(p.name) && boxed.has(bindingOf.get(p.name))) { const s = slotOf.get(bindingOf.get(p.name)); emit("NEWOBJ"); emit("LOAD", s); emit("SETPROP", "v"); emit("STORE", s); }
+    node.parameters.forEach((p, i) => { if (ts.isObjectBindingPattern(p.name) || ts.isArrayBindingPattern(p.name)) { if (p.initializer) { const skip = label("pd"); emit("LOAD", i); emit("PUSH", undefined); emit("BIN", "==="); emit("JMPF", skip); expr(p.initializer); emit("STORE", i); mark(skip); } bindPattern(p.name, i); } }); // destructuring params: raw arg at slot i (= position)
     if (opts.fieldInits) for (const f of opts.fieldInits) { emit("LOADENV", capture(opts.thisId)); expr(f.init); emit("SETPROP", f.name); emit("POP"); } // class field initializers, with `this` bound
     // Pre-create empty cells for nested fn decls (boxed) so they're live bindings
     // before their lexical definition (recursion + capture timing). Filled below.

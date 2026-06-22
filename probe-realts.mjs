@@ -292,6 +292,15 @@ check("array higher-order: find / findIndex / some / every (early-terminating)",
   };
 }`, "go", []);
 
+check("destructuring parameters (object/array, mixed, nested, defaults, capture)",
+`function pt({ x, y }) { return x + y; }
+function mix(a, [b, c], { d }) { return a + b + c + d; }
+function opts({ scale = 2, offset = 0 } = {}) { return (n) => n * scale + offset; }
+function nested({ p: { q } }) { return q; }
+function go() {
+  return [pt({ x: 3, y: 4 }), mix(1, [2, 3], { d: 4 }), opts()(10), opts({ scale: 3 })(10), opts({ scale: 3, offset: 1 })(10), nested({ p: { q: 9 } })];
+}`, "go", []);
+
 check("arrow functions capture lexical this (incl. nested) + private fields/methods",
 `class Counter {
   #count = 0;                                   // private field
