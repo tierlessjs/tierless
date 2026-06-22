@@ -78,6 +78,19 @@ Remaining subset gaps: block-scoped shadowing within ONE function (function-
 scoped only), nested function *declarations* (arrows/exprs ok), classes,
 destructuring, spread, template strings, try/catch, real Promise/stdlib.
 
+## #4 step 4 (done — breadth, verified vs Node's eval)
+Added: template literals, array literals with elements, for-of (incl. nested
+destructuring patterns), default parameters, nested function declarations
+(hoisted as local closures), object/array destructuring in declarations,
+== / != (mapped to ===/!==), synthetic temp slots for loop/destructure scratch.
+probe-realts.mjs compiles 5 real JS snippets and checks Waso's output EQUALS
+Node's own eval (templates+defaults+for-of+nested fn; array-lit+ternary+while+
+break/continue; destructuring+template; closures-in-array+higher-order;
+nested-destructuring-in-for-of+default+compound). All match.
+Still TODO for real files: classes, try/catch/throw (needs interpreter
+exception unwinding), spread, array higher-order builtins (.map/.filter — need
+stdlib), real Promise, switch, block-scoped shadowing, for-in.
+
 ## Don't forget
 - **Source maps**: NJS captured the stack but deferred line/file metadata. Our
   §10.6. Design it into the transform from the start, don't bolt on.
