@@ -341,6 +341,35 @@ Representational caveats (intrinsic to the model): `typeof ClassName` is "object
 (the reified class object), not "function"; a mutable static shared ACROSS tiers is
 §5 handle/coherence territory (per-tier class object), not a plain migrating field.
 
+## #4 step 20 (done — cleared the deferrals + a conformance suite)
+Closed essentially every remaining deferral and added a general-purpose conformance
+suite (the bar for a framework: not "the frontend parses X" but "a live computation
+using X freezes to bytes, ships, and thaws correctly").
+- async-INSIDE-a-generator frontier CLOSED via the splice model: a generator
+  advances by splicing its frames onto the MAIN stack beneath a boundary frame
+  (YIELD unwinds to it, or throws Yielded when driven recursively by .return/
+  .throw/spread; RET past it completes). A Suspend (await of a real resource inside
+  a generator) now captures the whole flattened stack -> it migrates. Proven: a
+  `for await` over an `async function*` awaiting a resource each step round-trips
+  the continuation 3x and resumes correctly (probe-frontend K, conformance).
+- ++/-- fixed as EXPRESSION values (postfix old / prefix new; props/elements);
+  unary + (numeric coercion). Was a pre-existing silent bug.
+- arguments (snapshot, nested-arrow capture); tagged templates (+ String.raw);
+  object literals with methods/getters/setters/generator methods (this-bound,
+  data enumerable); local class declarations (unique names, no collisions, capture,
+  instanceof, extends); IMPLICIT constructors (super(...args)+field inits — removes
+  "inheritance needs an explicit ctor"); destructuring ASSIGNMENT ([a,b]=.., {x}=..,
+  defaults/rest/nested); new.target.
+- Still deferred (intentional boundary): computed method names `[e](){}` (main use
+  is Symbol.iterator -> needs Symbol, a separate track); `with` (forbidden in
+  strict/module mode — correctly rejected); module-level (top-level) variable
+  bindings (the entry is a function — no module-init phase).
+- conformance.mjs: PART 1 fidelity (Waso === Node across the whole language), PART 2
+  continuation (the SAME programs frozen to bytes & resumed at every `await ckpt()`
+  checkpoint, with closures/boxed cells/Maps/Sets/class instances/generators/cyclic
+  graphs/live handlers alive across the wire). 56 checks; max continuation 682 B.
+  This is the reusable template for any other language that targets the IR.
+
 ## Don't forget
 - **Source maps**: NJS captured the stack but deferred line/file metadata. Our
   §10.6. Design it into the transform from the start, don't bolt on.

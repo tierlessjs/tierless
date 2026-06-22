@@ -19,6 +19,7 @@ const cases = [
   { file: "probe-frontend.mjs",      needs: ["all PASS — closures"] },
   { file: "waso-app-2p-client.mjs",  needs: ["Real TS migrated across processes and computed correctly? YES"] },
   { file: "probe-realts.mjs",        needs: ["all PASS — Waso compiles real JS"] },
+  { file: "conformance.mjs",         needs: ["Result: ALL PASS"] },
 ];
 
 // Build the wasm once up front.

@@ -43,6 +43,7 @@ ratio                          : ~978x smaller
 | `npm run bench:hn` | `bench-hn.mjs` | **HN waterfall benchmark**: REST round trips vs continuation migration (`--real` for wall-clock) |
 | `npm run bench:sweep` | `bench-sweep.mjs` | the HN benchmark as a **scale curve** over thread size and RTT (writes `bench-sweep.csv`) |
 | `npm run bench:conduit` | `bench-conduit.mjs` | **Conduit feed benchmark**: REST over-fetch vs server-side assembly (the bandwidth win) |
+| `node conformance.mjs` | `conformance.mjs` | **conformance suite**: full-language fidelity vs Node, AND survival of every feature across a serialize/resume continuation migration |
 
 ### Two execution paths (by design)
 

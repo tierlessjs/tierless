@@ -268,7 +268,30 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isIdentifier(target)) { writeUse(target, valThunk); return; }
       if (ts.isPropertyAccessExpression(target)) { expr(target.expression); valThunk(); emit(setOp(target.name.text), target.name.text); emit("POP"); return; }
       if (ts.isElementAccessExpression(target)) { expr(target.expression); expr(target.argumentExpression); valThunk(); emit("SETINDEX"); return; }
+      if (ts.isArrayLiteralExpression(target) || ts.isObjectLiteralExpression(target)) { const t = tempSlot(); valThunk(); emit("STORE", t); destructureAssign(target, t); return; } // [a,b]=.. / ({x,y}=..)
+      if (ts.isParenthesizedExpression(target)) { assignTo(target.expression, valThunk); return; }
       fail(target, "unsupported assignment target");
+    }
+    function destrElem(target, def, getVal) {  // assign getVal() (with default if === undefined) to a possibly-nested target
+      const val = () => { getVal(); if (def) { emit("DUP"); emit("PUSH", undefined); emit("BIN", "==="); const skip = label("dd"); emit("JMPF", skip); emit("POP"); expr(def); mark(skip); } };
+      if (ts.isArrayLiteralExpression(target) || ts.isObjectLiteralExpression(target)) { const t = tempSlot(); val(); emit("STORE", t); destructureAssign(target, t); }
+      else assignTo(target, val);
+    }
+    function destructureAssign(pat, srcSlot) {  // destructuring ASSIGNMENT into existing targets (vars/props)
+      if (ts.isArrayLiteralExpression(pat)) {
+        pat.elements.forEach((el, i) => {
+          if (ts.isOmittedExpression(el)) return;
+          if (ts.isSpreadElement(el)) { assignTo(el.expression, () => { emit("LOAD", srcSlot); emit("PUSH", i); emit("CALLM", "slice", 1); }); return; }
+          const def = ts.isBinaryExpression(el) && el.operatorToken.kind === ts.SyntaxKind.EqualsToken ? el.right : null;
+          destrElem(def ? el.left : el, def, () => { emit("LOAD", srcSlot); emit("PUSH", i); emit("INDEX"); });
+        });
+        return;
+      }
+      for (const p of pat.properties) {
+        if (ts.isShorthandPropertyAssignment(p)) { destrElem(p.name, p.objectAssignmentInitializer || null, () => { emit("LOAD", srcSlot); emit("GETPROP", p.name.text); }); }
+        else if (ts.isPropertyAssignment(p)) { const def = ts.isBinaryExpression(p.initializer) && p.initializer.operatorToken.kind === ts.SyntaxKind.EqualsToken ? p.initializer.right : null; destrElem(def ? p.initializer.left : p.initializer, def, () => { emit("LOAD", srcSlot); emit("GETPROP", p.name.text); }); }
+        else fail(p, "unsupported destructuring-assignment property");
+      }
     }
     function compoundTo(target, op, rhs) {     // target op= rhs
       if (ts.isIdentifier(target)) { writeUse(target, () => { readUse(target); expr(rhs); emit("BIN", op); }); return; }
