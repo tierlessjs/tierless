@@ -142,6 +142,11 @@ await ta("async/await chains (plain values)", `async function dbl(x){return x*2;
 await ta("Promise.all / resolve / reject+catch", `async function go(){const xs=await Promise.all([Promise.resolve(1),2,Promise.resolve(3)]);let caught="ok";try{await Promise.reject("boom");}catch(e){caught=e;}return {sum:xs.reduce((a,b)=>a+b,0),caught};}`);
 await ta("async generator + for await (plain)", `async function* nums(n){for(let i=0;i<n;i++){const v=await Promise.resolve(i);yield v*10;}} async function go(){const o=[];for await(const x of nums(4))o.push(x);return o;}`);
 
+section("symbols, custom iterables, computed names");
+t("Symbol: unique / for / keyFor / typeof / as key", `function go(){const a=Symbol("x"),b=Symbol("x");const o={};o[a]=1;o[b]=2;return {uniq:a!==b,same:a===a,ty:typeof a,desc:a.description,forEq:Symbol.for("k")===Symbol.for("k"),keyFor:Symbol.keyFor(Symbol.for("z")),val:o[a],syms:Object.getOwnPropertySymbols(o).length};}`);
+t("custom iterable via [Symbol.iterator] (object + class)", `const proto={};function range(a,b){return {[Symbol.iterator](){let i=a;return {next(){return i<b?{value:i++,done:false}:{value:undefined,done:true};}};}};} class Evens{constructor(n){this.n=n;}*[Symbol.iterator](){for(let i=0;i<this.n;i++)yield i*2;}} function go(){const o=[];for(const x of range(1,4))o.push(x);return {forOf:o,spread:[...range(5,7)],gen:[...new Evens(4)]};}`);
+t("computed property + method + Symbol-keyed method", `function go(){const k="dyn";const sym=Symbol("s");const o={[k+"1"]:1,[k](){return 2;},[sym](){return 3;}};return {a:o.dyn1,b:o.dyn(),c:o[sym]()};}`);
+
 section("bigint, regex, tagged templates");
 t("BigInt arithmetic + compare + typeof", `function go(){const a=9007199254740993n;return {sum:(a+1n).toString(),pow:(2n**64n).toString(),div:(7n/2n).toString(),cmp:[1n===1n,1n==1,2n>1n],ty:typeof a};}`);
 t("regex test/match/replace", `function go(){return {has:/\\d+/.test("a12b"),m:"a1b2c3".match(/\\d/g),rep:"hello".replace(/l/g,"L")};}`);
@@ -172,6 +177,8 @@ await (async () => {
   await w("loop state + accumulator across many checkpoints", `async function go(){let s=0;for(let i=0;i<5;i++){s=await ckpt(s+i);}return s;}`, "go", [], 5);
   await w("Promise.all of resources resolved concurrently across the wire", `async function go(){const xs=await Promise.all([ckpt(1),ckpt(2),ckpt(3)]);return xs.reduce((a,b)=>a+b,0);}`);
   await w("destructuring + Map + closure all live across one await", `async function go(){const m=new Map([["k",[1,2,3]]]);const {k:[first,...tail]}=Object.fromEntries?{k:m.get("k")}:{k:m.get("k")};const f=x=>x+first;const y=await ckpt(10);return [f(y),tail];}`);
+  await w("custom iterable consumed across checkpoints (iterator state migrates)", `async function go(){const it={i:0,n:3,[Symbol.iterator](){return this;},next(){return this.i<this.n?{value:this.i++,done:false}:{value:undefined,done:true};}};const out=[];for(const x of it){out.push(await ckpt(x*10));}return out;}`, "go", [], 3);
+  await w("symbol-keyed state + Symbol value survive the wire", `async function go(){const s=Symbol("id");const o={[s]:1};await ckpt(0);o[s]+=await ckpt(41);return [o[s],typeof s,s.description];}`);
 })();
 
 console.log(`\n${"=".repeat(64)}`);

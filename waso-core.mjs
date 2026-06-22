@@ -257,6 +257,7 @@ export function run(tier, frames, host) {
     g.frames = null;                                          // now live on the main stack (YIELD saves them back)
   };
   const makeGen = (callee, args) => ({ __gen__: true, frames: [{ fn: callee.fn, ip: 0, locals: args, stack: [], env: callee.env, handlers: [] }], done: false, started: false });
+  const callClosure = (cl, args) => run(tier, [{ fn: cl.fn, ip: 0, locals: args.slice(), stack: [], env: cl.env, handlers: [] }], host).value; // run a non-suspending closure to completion (for synchronous drains)
   // Unwind a generator's own frames to its nearest handler, seeding the thrown
   // value (for .throw()/.return() injection). Returns false if nothing caught it.
   const unwindToHandler = (gframes, v) => {
@@ -385,7 +386,15 @@ export function run(tier, frames, host) {
         break;
       }
       case "GATHERREST": { const r = ins[1]; const rest = f.locals.slice(r); f.locals.length = r; f.locals[r] = rest; f.ip++; break; } // rest param: gather extra args into an array
-      case "APPENDALL": { const src = f.stack.pop(); const tgt = f.stack[f.stack.length - 1]; if (isGenerator(src)) { while (true) { const r = genAdvance(src, undefined); if (r.done) break; tgt.push(r.value); } } else for (const e of src) tgt.push(e); f.ip++; break; } // array/generator spread
+      case "APPENDALL": {                                       // spread: array / generator / host-iterable / user [Symbol.iterator]
+        const src = f.stack.pop(); const tgt = f.stack[f.stack.length - 1];
+        let it = src; const sIt = src != null && src[Symbol.iterator];
+        if (isClosure(sIt)) it = sIt.gen ? makeGen(sIt, []) : callClosure(sIt, []); // user [Symbol.iterator]() -> iterator
+        if (isGenerator(it)) { while (true) { const r = genAdvance(it, undefined); if (r.done) break; tgt.push(r.value); } }
+        else if (it != null && isClosure(it.next)) { while (true) { const r = callClosure(it.next, []); if (r.done) break; tgt.push(r.value); } } // user iterator object
+        else for (const e of it) tgt.push(e); // array / host-iterable
+        f.ip++; break;
+      }
       case "ASSIGNALL": { const src = f.stack.pop(); Object.assign(f.stack[f.stack.length - 1], src); f.ip++; break; }                         // object spread
       case "CALLM": {                                          // call a host method: ["CALLM", name, argc] (stdlib intrinsics)
         const argc = ins[2];
@@ -441,13 +450,16 @@ export function run(tier, frames, host) {
         if (b.mode === "obj") c.stack.push({ value: v, done: false }); else { c.stack.push(v); c.stack.push(false); }
         break;
       }
-      case "ITER": {                                            // normalize for-of source: array / generator / our iterator / host-iterable (Map/Set/string)
-        const v = d(f.stack.pop());
-        if (Array.isArray(v)) f.stack.push({ __it__: "arr", a: v, i: 0 });
-        else if (v !== null && (isGenerator(v) || (typeof v === "object" && v.__it__))) f.stack.push(v);
-        else if (v !== null && v !== undefined && typeof v[Symbol.iterator] === "function") f.stack.push({ __it__: "arr", a: Array.from(v), i: 0 }); // Map/Set/string -> drain to array
-        else f.stack.push(v);
-        f.ip++; break;
+      case "ITER": {                                            // normalize a for-of source -> something GENNEXT can drive
+        const v = d(f.stack.pop()); f.ip++;
+        if (Array.isArray(v)) { f.stack.push({ __it__: "arr", a: v, i: 0 }); break; }
+        if (v !== null && (isGenerator(v) || (typeof v === "object" && (v.__it__ || isClosure(v.next))))) { f.stack.push(v); break; } // generator / our iterator / user iterator object
+        if (v !== null && v !== undefined) {
+          const itf = v[Symbol.iterator];
+          if (isClosure(itf)) { frames.push({ fn: itf.fn, ip: 0, locals: [], stack: [], env: itf.env, handlers: [] }); break; } // user [Symbol.iterator]() -> iterator object lands on the stack
+          if (typeof itf === "function") { f.stack.push({ __it__: "arr", a: Array.from(v), i: 0 }); break; } // host iterable (Map/Set/string)
+        }
+        f.stack.push(v); break;                                 // not iterable -> GENNEXT errors
       }
       case "ITERNEXT": {                                        // -> push value, then done (bool)
         const it = f.stack.pop(); f.ip++;

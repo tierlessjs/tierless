@@ -93,6 +93,7 @@ function resolveBindings(sf) {
   const walk = (node) => {
     if (node == null) return;
     if (isFnLike(node)) {
+      if (node.name && ts.isComputedPropertyName(node.name)) walk(node.name.expression); // computed method/accessor key resolves in the ENCLOSING scope
       const scope = { kind: "fn", names: new Map(), fnNode: node }; scopes.push(scope);
       if (!bindingsByFn.has(node)) bindingsByFn.set(node, []);
       hoistFn(node, scope);
@@ -133,10 +134,11 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   const collectClass = (s) => {
     const isStatic = (mem) => (mem.modifiers || []).some((m) => m.kind === ts.SyntaxKind.StaticKeyword);
     const named = (n) => (n && (ts.isIdentifier(n) || ts.isPrivateIdentifier(n)) ? n.text : null); // `#x` private fields/methods -> "#x" key
-    const fields = [], methods = [], accessors = [], sfields = [], smethods = [], saccessors = []; let ctor = null;
+    const fields = [], methods = [], accessors = [], sfields = [], smethods = [], saccessors = [], cmethods = []; let ctor = null;
     for (const mem of s.members) {
       const st = isStatic(mem), nm = named(mem.name);
-      if (ts.isPropertyDeclaration(mem) && mem.initializer && nm) (st ? sfields : fields).push({ name: nm, init: mem.initializer });
+      if (ts.isMethodDeclaration(mem) && !nm && mem.name && ts.isComputedPropertyName(mem.name)) cmethods.push({ keyExpr: mem.name.expression, node: mem, static: st }); // [k](){} / [Symbol.iterator](){}
+      else if (ts.isPropertyDeclaration(mem) && mem.initializer && nm) (st ? sfields : fields).push({ name: nm, init: mem.initializer });
       else if (ts.isMethodDeclaration(mem) && nm) (st ? smethods : methods).push({ name: nm, node: mem });
       else if (ts.isGetAccessorDeclaration(mem) && nm) { (st ? saccessors : accessors).push({ name: nm, kind: "get", node: mem }); accessorNames.add(nm); }
       else if (ts.isSetAccessorDeclaration(mem) && nm) { (st ? saccessors : accessors).push({ name: nm, kind: "set", node: mem }); accessorNames.add(nm); }
@@ -144,7 +146,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     }
     const extendsId = (s.heritageClauses || []).filter((h) => h.token === ts.SyntaxKind.ExtendsKeyword).flatMap((h) => h.types).map((t) => t.expression).find((e) => ts.isIdentifier(e)) || null;
     const uname = s.parent === sf ? s.name.text : `${s.name.text}$c${classUid++}`; // top-level keeps its name; local gets a unique one (no collisions)
-    classes.set(uname, { name: uname, thisId: thisCounter--, staticThisId: thisCounter--, fields, methods, accessors, sfields, smethods, saccessors, ctor, superName: null, _ext: extendsId });
+    classes.set(uname, { name: uname, thisId: thisCounter--, staticThisId: thisCounter--, fields, methods, accessors, sfields, smethods, saccessors, cmethods, ctor, superName: null, _ext: extendsId });
     if (s.name && bindingOf.has(s.name)) classOfBinding.set(bindingOf.get(s.name), uname);
   };
   { const w = (n) => { if (ts.isClassDeclaration(n) && n.name) collectClass(n); ts.forEachChild(n, w); }; w(sf); } // classes ANYWHERE (top-level + local)
@@ -177,6 +179,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       }
       emit("LOAD", co); emit("LOAD", tbl); emit("SETPROP", "__accessors__"); emit("POP");
     }
+    for (const cls of chain) for (const m of cls.cmethods) if (m.static) { emit("LOAD", co); expr(m.keyExpr); emit("MAKECLOSURE", m.compiled.prog, m.compiled.freeIds.map((id) => (id === cls.staticThisId ? ["L", co] : provide(id))), m.compiled.gen); emit("SETINDEX"); }
     emit("LOAD", co); emit("CLSPUT", cname); emit("RET");           // cache & return
     mark(ready); emit("RET");                                       // cached value already on stack
   };
@@ -201,6 +204,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     const so = { thisId: rec.staticThisId, superName: rec.superName }; // static `this` = the class object
     for (const m of rec.smethods) { const prog = `${cname}#static ${m.name}`; const c = compileFn(m.node, prog, so); out[prog] = c; rec.compiled[`static ${m.name}`] = { prog, freeIds: c.freeIds }; }
     for (const a of rec.saccessors) { const prog = `${cname}#static ${a.kind} ${a.name}`; const c = compileFn(a.node, prog, so); out[prog] = c; rec.compiled[`static ${a.kind} ${a.name}`] = { prog, freeIds: c.freeIds }; }
+    rec.cmethods.forEach((m, i) => { const prog = `${cname}#computed${i}`; const c = compileFn(m.node, prog, m.static ? so : o); out[prog] = c; m.compiled = { prog, freeIds: c.freeIds, gen: !!m.node.asteriskToken }; }); // computed-name methods (key built at construction)
     return rec;
   };
 
@@ -296,6 +300,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     function compoundTo(target, op, rhs) {     // target op= rhs
       if (ts.isIdentifier(target)) { writeUse(target, () => { readUse(target); expr(rhs); emit("BIN", op); }); return; }
       if (ts.isPropertyAccessExpression(target)) { expr(target.expression); emit("DUP"); emit(getOp(target.name.text), target.name.text); expr(rhs); emit("BIN", op); emit(setOp(target.name.text), target.name.text); emit("POP"); return; }
+      if (ts.isElementAccessExpression(target)) { const a = tempSlot(), k = tempSlot(), t = tempSlot(); expr(target.expression); emit("STORE", a); expr(target.argumentExpression); emit("STORE", k); emit("LOAD", a); emit("LOAD", k); emit("INDEX"); expr(rhs); emit("BIN", op); emit("STORE", t); emit("LOAD", a); emit("LOAD", k); emit("LOAD", t); emit("SETINDEX"); return; } // arr[i] op= rhs / o[sym] op= rhs
       fail(target, "unsupported compound-assignment target");
     }
     function incDec(target, op, post) {        // x++ / ++x / x-- / --x — leaves the result (old if postfix, new if prefix). INC/DEC are type-aware (1 vs 1n)
@@ -396,6 +401,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
           }
           emit("LOAD", inst); emit("LOAD", tbl); emit("SETHIDDEN", "__accessors__"); emit("POP");
         }
+        for (const cls of chain) for (const m of cls.cmethods) if (!m.static) { emit("LOAD", inst); expr(m.keyExpr); emit("MAKECLOSURE", m.compiled.prog, m.compiled.freeIds.map((id) => (id === cls.thisId ? ["L", inst] : provide(id))), m.compiled.gen); emit("SETINDEX"); } // inst[computedKey] = method
         const args = node.arguments || []; // every class has a constructor now (explicit or synthesized)
         const info = rec.compiled.__ctor__; emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === rec.thisId ? ["L", inst] : provide(id)))); args.forEach((a) => expr(a)); emit("CALLV", args.length); emit("POP");
         emit("LOAD", inst); return true;
@@ -466,6 +472,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const accs = new Map();
         for (const p of node.properties) {
           if (ts.isSpreadAssignment(p)) { emit("LOAD", o); expr(p.expression); emit("ASSIGNALL"); emit("POP"); }
+          else if (ts.isMethodDeclaration(p) && ts.isComputedPropertyName(p.name)) { emit("LOAD", o); expr(p.name.expression); mk(p); emit("SETINDEX"); } // { [k](){} } / { [Symbol.iterator](){} }
           else if (ts.isMethodDeclaration(p) && !ts.isComputedPropertyName(p.name)) { emit("LOAD", o); mk(p); emit("SETPROP", p.name.text); emit("POP"); }
           else if (ts.isGetAccessorDeclaration(p) && !ts.isComputedPropertyName(p.name)) { const e = accs.get(p.name.text) || {}; e.get = p; accs.set(p.name.text, e); }
           else if (ts.isSetAccessorDeclaration(p) && !ts.isComputedPropertyName(p.name)) { const e = accs.get(p.name.text) || {}; e.set = p; accs.set(p.name.text, e); }
@@ -658,18 +665,18 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         cf.push({ loop: true, brk: end, cont: step, name: lbl }); stmt(node.statement); cf.pop();
         mark(step); emit("LOAD", idx); emit("PUSH", 1); emit("BIN", "+"); emit("STORE", idx); emit("JMP", loop); mark(end); return;
       }
-      if (ts.isForOfStatement(node)) {                            // iterator protocol: arrays AND generators/iterators
+      if (ts.isForOfStatement(node)) {                            // full iterator protocol: arrays / generators / Map/Set/string / user [Symbol.iterator]
         const lbl = takeLabel(); const iter = tempSlot();
         expr(node.expression); emit("ITER"); emit("STORE", iter);
         const loop = label("loop"), body = label("body"), step = label("step"), end = label("end"); mark(loop);
-        emit("LOAD", iter); emit("ITERNEXT");                     // -> value, done
-        emit("JMPF", body); emit("POP"); emit("JMP", end);        // done -> drop value, exit
-        mark(body);                                               // stack: [value]
+        emit("LOAD", iter); emit("PUSH", undefined); emit("GENNEXT"); // -> { value, done }
+        emit("DUP"); emit("GETPROP", "done"); emit("JMPF", body); emit("POP"); emit("JMP", end); // done -> drop result, exit
+        mark(body); emit("GETPROP", "value");                     // stack: [value]
         if (node.awaitModifier) emit("AWAIT");                    // `for await`: await each value (identity for a plain value)
         const decl = node.initializer.declarations[0];
         if (ts.isIdentifier(decl.name)) bindStackTop(decl.name); else { const t = tempSlot(); emit("STORE", t); bindPattern(decl.name, t); }
         cf.push({ loop: true, brk: end, cont: step, name: lbl }); stmt(node.statement); cf.pop();
-        mark(step); emit("JMP", loop); mark(end); return;         // ITERNEXT advances the iterator
+        mark(step); emit("JMP", loop); mark(end); return;
       }
       if (ts.isBreakStatement(node)) { const i = node.label ? targetForLabel(node.label.text, "break") : targetFor("break"); if (i < 0) fail(node, "break has no target"); unwind(i); emit("JMP", cf[i].brk); return; }
       if (ts.isContinueStatement(node)) { const i = node.label ? targetForLabel(node.label.text, "continue") : targetFor("continue"); if (i < 0) fail(node, "continue has no target"); unwind(i); emit("JMP", cf[i].cont); return; }

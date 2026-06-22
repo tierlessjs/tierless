@@ -79,6 +79,10 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024 } = {})
       slot.f[key] = enc(v[key]);
       if (!desc.enumerable) (slot.h || (slot.h = {}))[key] = 1;  // remember which keys to restore as non-enumerable
     }
+    for (const sym of Object.getOwnPropertySymbols(v)) {         // symbol-keyed properties (o[Symbol(...)] = ...)
+      const desc = Object.getOwnPropertyDescriptor(v, sym); if (!("value" in desc)) continue;
+      (slot.sf || (slot.sf = [])).push([enc(sym), enc(v[sym]), desc.enumerable ? 1 : 0]);
+    }
     return { k: "r", id };
   }
 
@@ -90,7 +94,7 @@ export function decodeGraph({ roots, objs }) {
   const dec = (n) => (n.k === "u" ? undefined : n.k === "big" ? BigInt(n.v) : n.k === "glob" ? GLOBALS[n.name] : n.k === "symw" ? Symbol[n.name] : n.k === "symf" ? Symbol.for(n.key) : n.k === "p" ? n.v : built[n.id]);
   objs.forEach((s, i) => {
     if (s.k === "a") for (const n of s.e) built[i].push(dec(n));
-    else if (s.k === "o") for (const key in s.f) { const val = dec(s.f[key]); if (s.h && s.h[key]) Object.defineProperty(built[i], key, { value: val, writable: true, enumerable: false, configurable: true }); else built[i][key] = val; }
+    else if (s.k === "o") { for (const key in s.f) { const val = dec(s.f[key]); if (s.h && s.h[key]) Object.defineProperty(built[i], key, { value: val, writable: true, enumerable: false, configurable: true }); else built[i][key] = val; } if (s.sf) for (const [kn, vn, en] of s.sf) { const key = dec(kn), val = dec(vn); if (en) built[i][key] = val; else Object.defineProperty(built[i], key, { value: val, writable: true, enumerable: false, configurable: true }); } }
     else if (s.k === "map") for (const [kn, vn] of s.e) built[i].set(dec(kn), dec(vn));
     else if (s.k === "set") for (const vn of s.e) built[i].add(dec(vn));
     // k:"H" -> built[i] is already the handle object
