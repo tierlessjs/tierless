@@ -42,39 +42,58 @@ const patternIds = (name, out) => {
     for (const el of name.elements) if (ts.isBindingElement(el) && el.name) patternIds(el.name, out);
 };
 
-// Assign every binding a unique id (handles shadowing); find which need boxing.
+// Assign every binding a unique id with proper LEXICAL scoping: let/const/class are
+// block-scoped, var/params/function-declarations are function-scoped. So two
+// same-named block-locals in one function (e.g. `for (const v ...) {}` twice) are
+// distinct bindings. A binding gets a slot in its OWNING function's frame; capture
+// = used from a deeper function than the one that owns it. Finds which need boxing.
 function resolveBindings(sf) {
   let next = 1;
   const bindingOf = new Map(), declFn = new Map(), bindingsByFn = new Map();
   const captured = new Set(), assigned = new Set(), forceBox = new Set();
-  const declNames = (fn) => {
-    const out = [];
-    fn.parameters.forEach((p) => patternIds(p.name, out));
-    const collect = (n) => {
-      if (ts.isFunctionDeclaration(n) && n.name) { out.push(n.name); return; }    // nested fn decl name (hoisted)
-      if (ts.isFunctionExpression(n) || ts.isArrowFunction(n)) return;
-      if (ts.isVariableDeclaration(n)) patternIds(n.name, out);
-      ts.forEachChild(n, collect);
-    };
-    if (fn.body) collect(fn.body);
-    return out;
-  };
   const isPropName = (node) => { const p = node.parent; return p && ((ts.isPropertyAccessExpression(p) && p.name === node) || (ts.isPropertyAssignment(p) && p.name === node) || (ts.isParameter(p) && p.name === node) || (ts.isVariableDeclaration(p) && p.name === node) || (ts.isBindingElement(p) && p.name === node) || (isFnLike(p) && p.name === node)); };
   const isWrite = (node) => { const p = node.parent; if (!p) return false; if (ts.isBinaryExpression(p) && p.left === node && (p.operatorToken.kind === ts.SyntaxKind.EqualsToken || COMPOUND.has(p.operatorToken.kind))) return true; if ((ts.isPostfixUnaryExpression(p) || ts.isPrefixUnaryExpression(p)) && p.operand === node) return true; return false; };
-  const scopes = [];
+  const isLexical = (flags) => !!(flags & (ts.NodeFlags.Let | ts.NodeFlags.Const));
+
+  const scopes = [];                          // { kind:"fn"|"block", names:Map, fnNode }
+  const curFn = () => { for (let i = scopes.length - 1; i >= 0; i--) if (scopes[i].kind === "fn") return scopes[i].fnNode; return null; };
+  const declareIn = (scope, nameNode) => { const id = next++; scope.names.set(nameNode.text, id); bindingOf.set(nameNode, id); declFn.set(id, scope.fnNode); if (!bindingsByFn.has(scope.fnNode)) bindingsByFn.set(scope.fnNode, []); bindingsByFn.get(scope.fnNode).push(id); return id; };
+  // function-scoped names: params + `var`s + nested function-declaration names (don't descend into nested fns)
+  const hoistFn = (fnNode, scope) => {
+    fnNode.parameters.forEach((p) => { const ids = []; patternIds(p.name, ids); ids.forEach((nm) => declareIn(scope, nm)); });
+    const rec = (n) => {
+      if (n !== fnNode && isFnLike(n)) { if (ts.isFunctionDeclaration(n) && n.name) forceBox.add(declareIn(scope, n.name)); return; } // nested fn decl name -> live binding (recursion + capture timing)
+      const isVarList = (l) => l && ts.isVariableDeclarationList(l) && !isLexical(l.flags);
+      if (ts.isVariableStatement(n) && isVarList(n.declarationList)) for (const d of n.declarationList.declarations) { const ids = []; patternIds(d.name, ids); ids.forEach((nm) => declareIn(scope, nm)); }
+      if ((ts.isForStatement(n) || ts.isForInStatement(n) || ts.isForOfStatement(n)) && isVarList(n.initializer)) for (const d of n.initializer.declarations) { const ids = []; patternIds(d.name, ids); ids.forEach((nm) => declareIn(scope, nm)); }
+      ts.forEachChild(n, rec);
+    };
+    if (fnNode.body) rec(fnNode.body);
+  };
+  // block-scoped names declared directly in a block: let/const + class (functions are hoisted to the fn scope)
+  const hoistBlock = (statements, scope) => { for (const st of statements) { if (ts.isVariableStatement(st) && isLexical(st.declarationList.flags)) for (const d of st.declarationList.declarations) { const ids = []; patternIds(d.name, ids); ids.forEach((nm) => declareIn(scope, nm)); } else if (ts.isClassDeclaration(st) && st.name) declareIn(scope, st.name); } };
+  const headerLets = (init, scope) => { if (init && ts.isVariableDeclarationList(init) && isLexical(init.flags)) for (const d of init.declarations) { const ids = []; patternIds(d.name, ids); ids.forEach((nm) => declareIn(scope, nm)); } };
+
   const walk = (node) => {
-    const fn = isFnLike(node);
-    if (fn) { const scope = { names: new Map() }; scopes.push(scope); const ids = []; for (const nameNode of declNames(node)) { const id = next++; scope.names.set(nameNode.text, id); bindingOf.set(nameNode, id); declFn.set(id, node); ids.push(id); } bindingsByFn.set(node, ids); }
-    if (ts.isFunctionDeclaration(node) && node.name && bindingOf.has(node.name)) forceBox.add(bindingOf.get(node.name)); // nested fn decl name -> live binding (capture timing + recursion)
+    if (node == null) return;
+    if (isFnLike(node)) {
+      const scope = { kind: "fn", names: new Map(), fnNode: node }; scopes.push(scope);
+      if (!bindingsByFn.has(node)) bindingsByFn.set(node, []);
+      hoistFn(node, scope);
+      node.parameters.forEach((p) => p.initializer && walk(p.initializer)); // default-param exprs resolve in the fn scope
+      walk(node.body);
+      scopes.pop(); return;
+    }
+    if (ts.isBlock(node)) { const s = { kind: "block", names: new Map(), fnNode: curFn() }; scopes.push(s); hoistBlock(node.statements, s); node.statements.forEach(walk); scopes.pop(); return; }
+    if (ts.isForStatement(node) || ts.isForInStatement(node) || ts.isForOfStatement(node)) { const s = { kind: "block", names: new Map(), fnNode: curFn() }; scopes.push(s); headerLets(node.initializer, s); ts.forEachChild(node, walk); scopes.pop(); return; }
+    if (ts.isCatchClause(node)) { const s = { kind: "block", names: new Map(), fnNode: curFn() }; scopes.push(s); if (node.variableDeclaration) { const ids = []; patternIds(node.variableDeclaration.name, ids); ids.forEach((nm) => declareIn(s, nm)); } ts.forEachChild(node, walk); scopes.pop(); return; }
     if (ts.isIdentifier(node) && !isPropName(node)) {
-      let id = null, at = -1;
-      for (let i = scopes.length - 1; i >= 0; i--) if (scopes[i].names.has(node.text)) { id = scopes[i].names.get(node.text); at = i; break; }
-      if (id != null) { bindingOf.set(node, id); if (isWrite(node)) assigned.add(id); if (at < scopes.length - 1) captured.add(id); }
+      for (let i = scopes.length - 1; i >= 0; i--) if (scopes[i].names.has(node.text)) { const id = scopes[i].names.get(node.text); bindingOf.set(node, id); if (isWrite(node)) assigned.add(id); if (scopes[i].fnNode !== curFn()) captured.add(id); return; }
+      return;
     }
     ts.forEachChild(node, walk);
-    if (fn) scopes.pop();
   };
-  walk(sf);
+  sf.statements.forEach(walk);
   const boxed = new Set([...captured].filter((id) => assigned.has(id)));
   for (const id of forceBox) boxed.add(id);
   return { bindingOf, declFn, bindingsByFn, boxed };
@@ -489,12 +508,17 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isDoStatement(node)) { const lbl = takeLabel(); const loop = label("loop"), step = label("step"), end = label("end"); mark(loop); cf.push({ loop: true, brk: end, cont: step, name: lbl }); stmt(node.statement); cf.pop(); mark(step); expr(node.expression); emit("JMPF", end); emit("JMP", loop); mark(end); return; }
       if (ts.isForStatement(node)) {
         const lbl = takeLabel();
-        if (node.initializer && ts.isVariableDeclarationList(node.initializer)) for (const d of node.initializer.declarations) declOne(d);
-        else if (node.initializer) { if (expr(node.initializer)) emit("POP"); }
+        let perIter = []; // boxed `let` loop vars -> a fresh cell each iteration (closures capture per-iteration values)
+        if (node.initializer && ts.isVariableDeclarationList(node.initializer)) {
+          for (const d of node.initializer.declarations) declOne(d);
+          for (const d of node.initializer.declarations) if (ts.isIdentifier(d.name)) { const id = bindingOf.get(d.name); if (boxed.has(id)) perIter.push(slotOf.get(id)); }
+        } else if (node.initializer) { if (expr(node.initializer)) emit("POP"); }
         const loop = label("loop"), step = label("step"), end = label("end"); mark(loop);
         if (node.condition) { expr(node.condition); emit("JMPF", end); }
         cf.push({ loop: true, brk: end, cont: step, name: lbl }); stmt(node.statement); cf.pop();
-        mark(step); if (node.incrementor) { if (expr(node.incrementor)) emit("POP"); } emit("JMP", loop); mark(end); return;
+        mark(step);
+        for (const s of perIter) { emit("NEWOBJ"); emit("LOAD", s); emit("GETPROP", "v"); emit("SETPROP", "v"); emit("STORE", s); } // per-iteration env: copy cell AFTER body, BEFORE incrementor
+        if (node.incrementor) { if (expr(node.incrementor)) emit("POP"); } emit("JMP", loop); mark(end); return;
       }
       if (ts.isForInStatement(node)) {
         const lbl = takeLabel(); const iter = tempSlot(), idx = tempSlot();

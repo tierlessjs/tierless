@@ -279,11 +279,24 @@ local case (await of plain/resolved values) works; cross-tier migration of an
 *outer* continuation that merely *holds* a paused generator also works (§J). It's
 mid-generator host-suspension specifically that's unbuilt.
 
-## Next real gap (surfaced building generators): BLOCK SCOPING
-Scoping is function-scoped, so two same-named block-locals in one function collide
-(`for (const v of a){} for (const v of b){}` — all reads resolve to the last `v`).
-Common in real code; the most impactful remaining correctness gap. Fix = proper
-lexical (per-block) scopes in resolveBindings, not a frontend lowering tweak.
+## #4 step 18 (done — block scoping + per-iteration let)
+Rewrote resolveBindings to be properly LEXICAL:
+- `let`/`const`/`class` are block-scoped (each Block / for-header / catch-clause
+  pushes a scope); `var`/params/function-declarations are function-scoped (hoisted).
+  Each declaration still gets a unique id + a flat slot in its OWNING function's
+  frame, so compileFn is UNCHANGED — only resolution (which id an identifier maps
+  to) became lexical. Capture = used from a deeper function than the one that owns
+  the binding (compare scope.fnNode to the current function).
+  Fixes the big one: two same-named block-locals in a function (`for (const v of
+  a){} for (const v of b){}`) are now distinct — the first loop no longer reads the
+  second's slot. Plus nested shadowing and if/else block lets.
+- per-iteration `let` in C-style `for`: a boxed loop var gets a FRESH cell each
+  iteration (copy current cell AFTER the body, BEFORE the incrementor — the spec's
+  CreatePerIterationEnvironment), so `for (let i...) fns.push(()=>i)` captures
+  [0,1,2] not [3,3,3]. (for-of/for-in already got a fresh cell per iteration via
+  bindStackTop.) continue routes through the copy; nested loops compose.
+Verified vs eval: sibling/nested/shadowing blocks; per-iteration capture simple +
+nested + with-continue.
 
 ## Don't forget
 - **Source maps**: NJS captured the stack but deferred line/file metadata. Our

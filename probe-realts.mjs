@@ -266,6 +266,29 @@ function go() {
   return { first, ret, done, log, c0, c1, c2 };
 }`, "go", []);
 
+check("block scoping: same name in sibling/nested blocks, shadowing",
+`function go() {
+  const out = [];
+  for (const v of [1, 2, 3]) { out.push(v); }   // two loops reuse \`v\`
+  for (const v of [10, 20]) { out.push(v); }
+  let x = 1;
+  { let x = 2; out.push(x); { let x = 3; out.push(x); } out.push(x); }
+  out.push(x);
+  if (out.length > 0) { let t = "a"; out.push(t); } else { let t = "b"; out.push(t); }
+  return out;
+}`, "go", []);
+
+check("per-iteration let binding: closures capture each iteration's value",
+`function go() {
+  const fns = [];
+  for (let i = 0; i < 3; i++) { fns.push(() => i); }              // [0,1,2], not [3,3,3]
+  const nested = [];
+  for (let i = 0; i < 2; i++) { for (let j = 0; j < 2; j++) { nested.push(() => i * 10 + j); } }
+  const withSkip = [];
+  for (let i = 0; i < 4; i++) { if (i === 1) { continue; } withSkip.push(() => i); }
+  return { simple: fns.map((f) => f()), nested: nested.map((f) => f()), withSkip: withSkip.map((f) => f()) };
+}`, "go", []);
+
 check("for-in + computed object keys + delete",
 `function go(o) {
   const out = {};
