@@ -169,6 +169,24 @@ beyond lowering:
 Known limits unchanged: inheritance requires explicit constructors; derived field
 inits run at ctor entry (before super); boxing/scoping is function-scoped.
 
+## #4 step 13 (done — BigInt; deferred-feature build-out 1 of 4)
+First of the four deferred features (sequenced: BigInt -> getters/setters ->
+static -> generators; risk-ascending, each builds a primitive the next reuses).
+BigInt is nearly free on the JS path because the native engine does the
+arithmetic (incl. correct TypeError-on-mixing, integer-division, `**`):
+- frontend: `123n` literal (ts.isBigIntLiteral; hex/oct/bin via BigInt(text)),
+  and `BigInt(x)` conversion (TOBIG op).
+- type-aware `++`/`--`: new INC/DEC ops pick `1n` vs `1` by operand type (a plain
+  `PUSH 1; BIN +` mixed BigInt with Number and threw, as it should).
+- fixed a latent bug while here: `==`/`!=` were mapped to `===`/`!==`. Now real
+  loose equality (binop ==/!=), so `1n == 1` is true and `1n === 1` is false.
+- codec: BigInt isn't JSON-safe, so encodeGraph emits `{k:"big", v: str}` /
+  decodeGraph rebuilds via BigInt(str) — a BigInt now survives a migration
+  (probe-heap). This establishes the "add a value kind to the codec" pattern that
+  the migrating-generator work (step 4c) reuses for frame-stacks.
+Verified vs Node's eval (probe-realts: 25-digit factorial, 2n**64n, 7n/2n=3n,
+bitwise, mixed-type compare, typeof, BigInt()). All match.
+
 ## Don't forget
 - **Source maps**: NJS captured the stack but deferred line/file metadata. Our
   §10.6. Design it into the transform from the start, don't bolt on.

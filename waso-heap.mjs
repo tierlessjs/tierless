@@ -42,6 +42,7 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024 } = {})
 
   function enc(v) {
     if (v === undefined) return { k: "u" };
+    if (typeof v === "bigint") return { k: "big", v: v.toString() };   // BigInt isn't JSON-safe
     if (v === null || typeof v !== "object") return { k: "p", v };
     if (idOf.has(v)) return { k: "r", id: idOf.get(v) };
     if (isHandle(v)) { const id = objs.length; idOf.set(v, id); objs.push({ k: "H", h: v }); return { k: "r", id }; }
@@ -63,7 +64,7 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024 } = {})
 
 export function decodeGraph({ roots, objs }) {
   const built = objs.map((s) => (s.k === "a" ? [] : s.k === "o" ? {} : s.h)); // pre-create for cycles/sharing
-  const dec = (n) => (n.k === "u" ? undefined : n.k === "p" ? n.v : built[n.id]);
+  const dec = (n) => (n.k === "u" ? undefined : n.k === "big" ? BigInt(n.v) : n.k === "p" ? n.v : built[n.id]);
   objs.forEach((s, i) => {
     if (s.k === "a") for (const n of s.e) built[i].push(dec(n));
     else if (s.k === "o") for (const key in s.f) built[i][key] = dec(s.f[key]);

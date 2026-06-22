@@ -85,6 +85,10 @@ check("small graph (50 nodes) -> shipped whole and fully traversable", count(sma
 // 4) undefined survives
 check("undefined local survives the round trip", roundtrip([undefined])[0] === undefined);
 
+// 5) BigInt survives (not JSON-safe natively; codec encodes it as a string)
+const [bi] = roundtrip([{ n: 9007199254740993n, arr: [1n, 2n] }]);
+check("BigInt survives the round trip (exact, > MAX_SAFE_INTEGER)", bi.n === 9007199254740993n && bi.arr[1] === 2n);
+
 console.log(`\nSection B: ${pass ? "all PASS" : "FAILURES"} — identity, cycles, big-vs-small all handled at the codec level.`);
 console.log(`Remaining for the heap de-risk: wire this codec into the runtime, and build`);
 console.log(`real cross-tier fetch so a handle can be dereferenced on the other process.`);

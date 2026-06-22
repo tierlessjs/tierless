@@ -202,6 +202,7 @@ function binop(op, a, b) {
     case "-": return a - b; case "*": return a * b; case "/": return a / b; case "%": return a % b; case "**": return a ** b;
     case "<": return a < b; case "<=": return a <= b; case ">": return a > b; case ">=": return a >= b;
     case "===": return a === b; case "!==": return a !== b;
+    case "==": return a == b; case "!=": return a != b;
     case "in": return a in b;
     case "&": return a & b; case "|": return a | b; case "^": return a ^ b;
     case "<<": return a << b; case ">>": return a >> b; case ">>>": return a >>> b;
@@ -236,6 +237,9 @@ export function run(tier, frames, host) {
       case "NOT":    f.stack.push(!f.stack.pop()); f.ip++; break;
       case "TYPEOF": f.stack.push(typeof f.stack.pop()); f.ip++; break;
       case "BITNOT": f.stack.push(~f.stack.pop()); f.ip++; break;
+      case "TOBIG":  f.stack.push(BigInt(f.stack.pop())); f.ip++; break;     // BigInt(x)
+      case "INC":    { const v = f.stack.pop(); f.stack.push(typeof v === "bigint" ? v + 1n : v + 1); f.ip++; break; } // ++ (type-aware: 1n for bigint)
+      case "DEC":    { const v = f.stack.pop(); f.stack.push(typeof v === "bigint" ? v - 1n : v - 1); f.ip++; break; }
       case "ISA": { const o = d(f.stack.pop()); f.stack.push(!!(o && typeof o === "object" && Array.isArray(o.__class__) && o.__class__.includes(ins[1]))); f.ip++; break; } // instanceof
 
       case "ISNULLISH": { const v = f.stack.pop(); f.stack.push(v === null || v === undefined); f.ip++; break; }

@@ -10,6 +10,7 @@ import { PROGRAM, run, initialFrames } from "./waso-core.mjs";
 import { loadModule } from "./waso-tsc.mjs";
 
 let pass = true;
+const J = (x) => JSON.stringify(x, (k, v) => (typeof v === "bigint" ? "B:" + v.toString() : v)); // BigInt isn't JSON-safe
 function check(name, src, entry, args) {
   let got, ref, err = null;
   try {
@@ -17,9 +18,9 @@ function check(name, src, entry, args) {
     got = run({ id: "t" }, initialFrames(entry, args), { deref: (x) => x }).value;
     ref = new Function(src + "\n;return " + entry + ";")()(...args); // Node's own execution
   } catch (e) { err = e; }
-  const ok = !err && JSON.stringify(got) === JSON.stringify(ref);
+  const ok = !err && J(got) === J(ref);
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}`);
-  if (!ok) { pass = false; if (err) console.log(`        error: ${err.message}`); else console.log(`        waso=${JSON.stringify(got)}  node=${JSON.stringify(ref)}`); }
+  if (!ok) { pass = false; if (err) console.log(`        error: ${err.message}`); else console.log(`        waso=${J(got)}  node=${J(ref)}`); }
 }
 
 console.log("Probe: compile real JS, compare Waso output to Node's eval\n");
@@ -235,6 +236,24 @@ check("return value computed before finally mutates it",
   return { r, n };
 }`, "go", []);
 
+check("BigInt: literals, arithmetic, division-truncates, **, compare, typeof, BigInt()",
+`function go() {
+  const a = 9007199254740993n;        // > Number.MAX_SAFE_INTEGER, exact in BigInt
+  const b = a + 1n;
+  const fact = (n) => { let p = 1n; for (let i = 1n; i <= n; i++) { p *= i; } return p; };
+  return {
+    sum: (a + b).toString(),
+    div: (7n / 2n).toString(),         // truncates to 3n
+    pow: (2n ** 64n).toString(),
+    mod: (10n % 3n).toString(),
+    bits: ((255n & 0x0fn) | (1n << 8n)).toString(),
+    cmp: [1n < 2n, 2n === 2n, 1n == 1, 1n === 1],
+    ty: typeof a,
+    conv: (BigInt(42) + 8n).toString(),
+    big: fact(25n).toString(),
+  };
+}`, "go", []);
+
 check("regex: test / match / replace",
 `function go(s) {
   const re = /[a-z]+/g;
@@ -325,9 +344,9 @@ async function checkAsync(name, src, entry, args) {
     got = run({ id: "t" }, initialFrames(entry, args), { deref: (x) => x }).value;
     ref = await new Function(src + "\n;return " + entry + ";")()(...args);
   } catch (e) { err = e; }
-  const ok = !err && JSON.stringify(got) === JSON.stringify(ref);
+  const ok = !err && J(got) === J(ref);
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}`);
-  if (!ok) { pass = false; if (err) console.log(`        error: ${err.message}`); else console.log(`        waso=${JSON.stringify(got)}  node=${JSON.stringify(ref)}`); }
+  if (!ok) { pass = false; if (err) console.log(`        error: ${err.message}`); else console.log(`        waso=${J(got)}  node=${J(ref)}`); }
 }
 
 await checkAsync("async/await between functions (no Promise object)",

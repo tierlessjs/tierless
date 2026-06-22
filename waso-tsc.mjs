@@ -20,7 +20,7 @@ const BINOP = {
   [ts.SyntaxKind.LessThanToken]: "<", [ts.SyntaxKind.LessThanEqualsToken]: "<=",
   [ts.SyntaxKind.GreaterThanToken]: ">", [ts.SyntaxKind.GreaterThanEqualsToken]: ">=",
   [ts.SyntaxKind.EqualsEqualsEqualsToken]: "===", [ts.SyntaxKind.ExclamationEqualsEqualsToken]: "!==",
-  [ts.SyntaxKind.EqualsEqualsToken]: "===", [ts.SyntaxKind.ExclamationEqualsToken]: "!==",
+  [ts.SyntaxKind.EqualsEqualsToken]: "==", [ts.SyntaxKind.ExclamationEqualsToken]: "!=",
   [ts.SyntaxKind.InKeyword]: "in",
   [ts.SyntaxKind.AmpersandToken]: "&", [ts.SyntaxKind.BarToken]: "|", [ts.SyntaxKind.CaretToken]: "^",
   [ts.SyntaxKind.LessThanLessThanToken]: "<<", [ts.SyntaxKind.GreaterThanGreaterThanToken]: ">>", [ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken]: ">>>",
@@ -35,7 +35,7 @@ const HOF = new Set(["map", "filter", "forEach", "reduce"]); // callback is a Wa
 const PLAIN_METHODS = new Set(["slice", "indexOf", "lastIndexOf", "includes", "join", "concat", "toUpperCase",
   "toLowerCase", "split", "trim", "trimStart", "trimEnd", "charAt", "charCodeAt", "substring", "substr", "repeat",
   "padStart", "padEnd", "startsWith", "endsWith", "replace", "replaceAll", "toFixed", "at",
-  "test", "exec", "match", "matchAll", "search", "reverse", "fill"]); // host intrinsics (incl. regex)
+  "test", "exec", "match", "matchAll", "search", "reverse", "fill", "toString", "valueOf"]); // host intrinsics (incl. regex)
 const patternIds = (name, out) => {
   if (ts.isIdentifier(name)) out.push(name);
   else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name))
@@ -173,9 +173,10 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isPropertyAccessExpression(target)) { expr(target.expression); emit("DUP"); emit("GETPROP", target.name.text); expr(rhs); emit("BIN", op); emit("SETPROP", target.name.text); emit("POP"); return; }
       fail(target, "unsupported compound-assignment target");
     }
-    function incDec(target, op) {              // target++ / target-- / ++target
-      if (ts.isIdentifier(target)) { writeUse(target, () => { readUse(target); emit("PUSH", 1); emit("BIN", op); }); return; }
-      if (ts.isPropertyAccessExpression(target)) { expr(target.expression); emit("DUP"); emit("GETPROP", target.name.text); emit("PUSH", 1); emit("BIN", op); emit("SETPROP", target.name.text); emit("POP"); return; }
+    function incDec(target, op) {              // target++ / target-- / ++target  (type-aware: INC/DEC pick 1 vs 1n)
+      const step = op === "+" ? "INC" : "DEC";
+      if (ts.isIdentifier(target)) { writeUse(target, () => { readUse(target); emit(step); }); return; }
+      if (ts.isPropertyAccessExpression(target)) { expr(target.expression); emit("DUP"); emit("GETPROP", target.name.text); emit(step); emit("SETPROP", target.name.text); emit("POP"); return; }
       fail(target, "unsupported ++/-- target");
     }
     function bindStackTop(nameNode) { // a value is on the stack; store into the binding (decl/for-of/destructure)
@@ -208,6 +209,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isParenthesizedExpression(node)) return expr(node.expression);
       if (isAccess(node) && isChainRoot(node)) return optChain(node);
       if (ts.isNumericLiteral(node)) { emit("PUSH", Number(node.text)); return true; }
+      if (ts.isBigIntLiteral(node)) { emit("PUSH", BigInt(node.text.slice(0, -1))); return true; } // `123n` -> 123n (hex/oct/bin too)
       if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) { emit("PUSH", node.text); return true; }
       if (ts.isTemplateExpression(node)) { emit("PUSH", node.head.text); for (const span of node.templateSpans) { expr(span.expression); emit("BIN", "+"); emit("PUSH", span.literal.text); emit("BIN", "+"); } return true; }
       if (node.kind === ts.SyntaxKind.TrueKeyword) { emit("PUSH", true); return true; }
@@ -334,6 +336,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         return closureCall(callee, node.arguments); // user method (closure property)
       }
       if (ts.isIdentifier(callee) && bindingOf.get(callee) == null && !topFns.has(callee.text) && resourceSet.has(callee.text)) { node.arguments.forEach((a) => expr(a)); emit("RES", callee.text, node.arguments.length); return true; }
+      if (ts.isIdentifier(callee) && callee.text === "BigInt" && bindingOf.get(callee) == null && !topFns.has(callee.text)) { expr(node.arguments[0]); emit("TOBIG"); return true; } // BigInt(x) conversion
       return closureCall(callee, node.arguments);
     }
     function closureCall(callee, args) {
