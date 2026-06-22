@@ -12,6 +12,7 @@ const cases = [
   { file: "bench-hn.mjs",            needs: ["2 rt", "identical 254-node threads? YES"] },
   { file: "bench-sweep.mjs",         needs: ["Correctness across all sizes: YES"] },
   { file: "bench-conduit.mjs",       needs: ["less data", "identical feeds? YES"] },
+  { file: "probe-heap.mjs",          needs: ["Section B: all PASS"] },
 ];
 
 // Build the wasm once up front.
