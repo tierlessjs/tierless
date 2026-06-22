@@ -325,8 +325,9 @@ export function run(tier, frames, host) {
         if (acc && acc.set) { frames.push({ fn: acc.set.fn, ip: 0, locals: [v], stack: [], env: acc.set.env, handlers: [] }); break; } // setter RETs undefined into this frame (the SETPROP value contract)
         o[ins[1]] = v; f.stack.push(o); break;
       }
-      case "INDEX":  { const a = d(f.stack[f.stack.length - 2]); const i = f.stack[f.stack.length - 1]; f.stack.length -= 2; f.stack.push(a[i]); f.ip++; break; }
-      case "SETINDEX": { const a = d(f.stack[f.stack.length - 3]); const i = f.stack[f.stack.length - 2]; const v = f.stack[f.stack.length - 1]; f.stack.length -= 3; a[i] = v; f.ip++; break; }
+      case "INDEX":  { const a = d(f.stack[f.stack.length - 2]); const i = f.stack[f.stack.length - 1]; f.stack.length -= 2; const acc = a != null && a.__accessors__ && a.__accessors__[i]; if (acc && acc.get) { f.ip++; frames.push({ fn: acc.get.fn, ip: 0, locals: [], stack: [], env: acc.get.env, handlers: [] }); break; } f.stack.push(a[i]); f.ip++; break; } // computed access fires a getter
+      case "SETINDEX": { const a = d(f.stack[f.stack.length - 3]); const i = f.stack[f.stack.length - 2]; const v = f.stack[f.stack.length - 1]; f.stack.length -= 3; const acc = a != null && a.__accessors__ && a.__accessors__[i]; if (acc && acc.set) { f.ip++; frames.push({ fn: acc.set.fn, ip: 0, locals: [v], stack: [], env: acc.set.env, handlers: [] }); break; } a[i] = v; f.ip++; break; }
+      case "SETHIDDEN": { const o = f.stack[f.stack.length - 2]; const v = f.stack[f.stack.length - 1]; f.stack.length -= 2; Object.defineProperty(o, ins[1], { value: v, writable: true, enumerable: false, configurable: true }); f.stack.push(o); f.ip++; break; } // non-enumerable own prop (instance method/tag)
       case "BIN":    { const b = f.stack.pop(); const a = f.stack.pop(); f.stack.push(binop(ins[1], a, b)); f.ip++; break; }
       case "JMP":    f.ip = ins[1]; break;
       case "JMPF":   { const c = f.stack.pop(); f.ip = c ? f.ip + 1 : ins[1]; break; }

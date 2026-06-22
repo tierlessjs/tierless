@@ -67,7 +67,12 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024 } = {})
     if (v instanceof Set) { const slot = { k: "set", e: [] }; objs.push(slot); for (const sv of v) slot.e.push(enc(sv)); return { k: "r", id }; }
     if (Array.isArray(v)) { const slot = { k: "a", e: [] }; objs.push(slot); for (let i = 0; i < v.length; i++) slot.e.push(enc(v[i])); return { k: "r", id }; } // by index: holes -> undefined
     const slot = { k: "o", f: {} }; objs.push(slot);
-    for (const key of Object.keys(v)) slot.f[key] = enc(v[key]);
+    for (const key of Object.getOwnPropertyNames(v)) {           // include non-enumerable (instance methods/tags) so behavior survives the wire
+      const desc = Object.getOwnPropertyDescriptor(v, key);
+      if (!("value" in desc)) continue;                          // skip host getters/setters (not our data)
+      slot.f[key] = enc(v[key]);
+      if (!desc.enumerable) (slot.h || (slot.h = {}))[key] = 1;  // remember which keys to restore as non-enumerable
+    }
     return { k: "r", id };
   }
 
@@ -79,7 +84,7 @@ export function decodeGraph({ roots, objs }) {
   const dec = (n) => (n.k === "u" ? undefined : n.k === "big" ? BigInt(n.v) : n.k === "glob" ? GLOBALS[n.name] : n.k === "p" ? n.v : built[n.id]);
   objs.forEach((s, i) => {
     if (s.k === "a") for (const n of s.e) built[i].push(dec(n));
-    else if (s.k === "o") for (const key in s.f) built[i][key] = dec(s.f[key]);
+    else if (s.k === "o") for (const key in s.f) { const val = dec(s.f[key]); if (s.h && s.h[key]) Object.defineProperty(built[i], key, { value: val, writable: true, enumerable: false, configurable: true }); else built[i][key] = val; }
     else if (s.k === "map") for (const [kn, vn] of s.e) built[i].set(dec(kn), dec(vn));
     else if (s.k === "set") for (const vn of s.e) built[i].add(dec(vn));
     // k:"H" -> built[i] is already the handle object

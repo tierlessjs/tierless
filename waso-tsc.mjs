@@ -320,8 +320,8 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const rec = compileClass(node.expression.text);
         const chain = []; for (let c = rec; c; c = c.superName ? compileClass(c.superName) : null) chain.unshift(c); // base-first
         const inst = tempSlot(); emit("NEWOBJ"); emit("STORE", inst);
-        emit("LOAD", inst); emit("PUSH", chain.map((c) => c.name)); emit("SETPROP", "__class__"); emit("POP"); // tag for instanceof (base..derived)
-        for (const cls of chain) for (const m of cls.methods) { const info = cls.compiled[m.name]; emit("LOAD", inst); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.thisId ? ["L", inst] : provide(id))), !!m.node.asteriskToken); emit("SETPROP", m.name); emit("POP"); } // derived overrides base
+        emit("LOAD", inst); emit("PUSH", chain.map((c) => c.name)); emit("SETHIDDEN", "__class__"); emit("POP"); // non-enumerable: JSON/for-in/keys see only data fields
+        for (const cls of chain) for (const m of cls.methods) { const info = cls.compiled[m.name]; emit("LOAD", inst); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.thisId ? ["L", inst] : provide(id))), !!m.node.asteriskToken); emit("SETHIDDEN", m.name); emit("POP"); } // methods non-enumerable (derived overrides base)
         const accs = new Map(); // name -> { get?: {cls,info}, set?: {cls,info} }, derived overriding base
         for (const cls of chain) for (const a of cls.accessors) { const e = accs.get(a.name) || {}; e[a.kind] = { cls, info: cls.compiled[`${a.kind} ${a.name}`] }; accs.set(a.name, e); }
         if (accs.size) {                                            // build the instance's __accessors__ table (closures capture this)
@@ -331,7 +331,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
             for (const kind of ["get", "set"]) { const s = e[kind]; if (!s) continue; emit("LOAD", ent); emit("MAKECLOSURE", s.info.prog, s.info.freeIds.map((id) => (id === s.cls.thisId ? ["L", inst] : provide(id)))); emit("SETPROP", kind); emit("POP"); }
             emit("LOAD", tbl); emit("LOAD", ent); emit("SETPROP", aname); emit("POP");
           }
-          emit("LOAD", inst); emit("LOAD", tbl); emit("SETPROP", "__accessors__"); emit("POP");
+          emit("LOAD", inst); emit("LOAD", tbl); emit("SETHIDDEN", "__accessors__"); emit("POP");
         }
         const args = node.arguments || [];
         if (rec.ctor) { const info = rec.compiled.__ctor__; emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === rec.thisId ? ["L", inst] : provide(id)))); args.forEach((a) => expr(a)); emit("CALLV", args.length); emit("POP"); }

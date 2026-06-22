@@ -292,6 +292,23 @@ check("array higher-order: find / findIndex / some / every (early-terminating)",
   };
 }`, "go", []);
 
+check("instances enumerate like JS: JSON/keys/for-in see data only; computed access fires accessors",
+`class Account {
+  constructor(owner, balance) { this.owner = owner; this.balance = balance; }
+  get summary() { return this.owner + ":" + this.balance; }
+  set summary(v) { this.owner = v; }
+  deposit(n) { this.balance += n; return this.balance; }
+}
+function go() {
+  const a = new Account("ann", 100);
+  a.deposit(50);
+  const keys = []; for (const k in a) { keys.push(k); }
+  const dynKey = "summary";
+  const viaIndex = a[dynKey];        // computed access fires the getter
+  a[dynKey] = "bob";                 // computed access fires the setter
+  return { json: JSON.stringify(a), keys, objKeys: Object.keys(a), viaIndex, owner: a.owner, bal: a.balance };
+}`, "go", []);
+
 check("destructuring parameters (object/array, mixed, nested, defaults, capture)",
 `function pt({ x, y }) { return x + y; }
 function mix(a, [b, c], { d }) { return a + b + c + d; }
