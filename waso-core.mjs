@@ -255,7 +255,18 @@ export function run(tier, frames, host) {
     if (g.started) g.frames[g.frames.length - 1].stack.push(sendVal); // resume: the sent value IS the yield expression's value
     g.started = true;
     try { const r = run(tier, g.frames, host); g.done = true; return { value: r.value, done: true }; }
-    catch (e) { if (e instanceof Yielded) return { value: e.value, done: false }; throw e; } // Suspend/Miss propagate (mid-gen migration)
+    catch (e) {
+      if (e instanceof Yielded) return { value: e.value, done: false };
+      // A genuine async resource / remote-handle deref awaited INSIDE a generator
+      // suspends to the host mid-iteration. Resuming that needs the generator's
+      // inner frames composed with the outer continuation (one flattened stack) —
+      // the documented frontier. Fail loudly instead of corrupting the outer
+      // continuation. (Local awaits of plain/resolved values resolve inline and
+      // never reach here; an outer continuation that merely HOLDS a paused
+      // generator migrates fine — see probe-frontend §J.)
+      if (e instanceof Suspend) { g.done = true; throw new WasoUncaught("waso: cannot suspend to the host (await of a genuine async resource / remote handle) INSIDE a generator mid-iteration — resolve it outside the generator"); }
+      throw e;
+    }
   };
   // it.return(v): complete the generator, running any active finally blocks. Inject
   // a sentinel that the finally machinery propagates back out (carrying v); a finally
