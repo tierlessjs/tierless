@@ -116,13 +116,14 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     let superName = null;
     for (const h of s.heritageClauses || []) if (h.token === ts.SyntaxKind.ExtendsKeyword && ts.isIdentifier(h.types[0].expression)) superName = h.types[0].expression.text;
     const isStatic = (mem) => (mem.modifiers || []).some((m) => m.kind === ts.SyntaxKind.StaticKeyword);
+    const named = (n) => (n && (ts.isIdentifier(n) || ts.isPrivateIdentifier(n)) ? n.text : null); // `#x` private fields/methods -> "#x" key
     const fields = [], methods = [], accessors = [], sfields = [], smethods = [], saccessors = []; let ctor = null;
     for (const mem of s.members) {
-      const st = isStatic(mem);
-      if (ts.isPropertyDeclaration(mem) && mem.initializer && ts.isIdentifier(mem.name)) (st ? sfields : fields).push({ name: mem.name.text, init: mem.initializer });
-      else if (ts.isMethodDeclaration(mem) && ts.isIdentifier(mem.name)) (st ? smethods : methods).push({ name: mem.name.text, node: mem });
-      else if (ts.isGetAccessorDeclaration(mem) && ts.isIdentifier(mem.name)) { (st ? saccessors : accessors).push({ name: mem.name.text, kind: "get", node: mem }); accessorNames.add(mem.name.text); }
-      else if (ts.isSetAccessorDeclaration(mem) && ts.isIdentifier(mem.name)) { (st ? saccessors : accessors).push({ name: mem.name.text, kind: "set", node: mem }); accessorNames.add(mem.name.text); }
+      const st = isStatic(mem), nm = named(mem.name);
+      if (ts.isPropertyDeclaration(mem) && mem.initializer && nm) (st ? sfields : fields).push({ name: nm, init: mem.initializer });
+      else if (ts.isMethodDeclaration(mem) && nm) (st ? smethods : methods).push({ name: nm, node: mem });
+      else if (ts.isGetAccessorDeclaration(mem) && nm) { (st ? saccessors : accessors).push({ name: nm, kind: "get", node: mem }); accessorNames.add(nm); }
+      else if (ts.isSetAccessorDeclaration(mem) && nm) { (st ? saccessors : accessors).push({ name: nm, kind: "set", node: mem }); accessorNames.add(nm); }
       else if (ts.isConstructorDeclaration(mem) && mem.body) ctor = mem;
     }
     classes.set(s.name.text, { name: s.name.text, thisId: thisCounter--, staticThisId: thisCounter--, fields, methods, accessors, sfields, smethods, saccessors, ctor, superName });
@@ -214,6 +215,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     // classes compile (so static-method freeIds are known), avoiding the re-entrancy
     // when a static method references its own class mid-compile.
     function classObject(cname) { compileClass(cname); neededBuilders.add(cname); emit("MAKECLOSURE", `%${cname}`, []); emit("CALLV", 0); return true; }
+    const unresolvedId = (n) => bindingOf.get(n) == null && !topFns.has(n.text) && !classes.has(n.text) && !GLOBAL_OBJS.has(n.text) && !GLOBAL_CALLS.has(n.text) && !CTOR_GLOBALS.has(n.text) && !["undefined", "NaN", "Infinity"].includes(n.text);
     function readUse(idNode) {
       const id = bindingOf.get(idNode);
       if (id == null) {
@@ -281,7 +283,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       }
       fail(pattern, "unsupported binding pattern");
     }
-    function closureOf(fnNode) { const childName = `${name}$${gen++}`; const child = compileFn(fnNode, childName); out[childName] = child; emit("MAKECLOSURE", childName, child.freeIds.map(provide), !!fnNode.asteriskToken); }
+    function closureOf(fnNode) { const childName = `${name}$${gen++}`; const child = compileFn(fnNode, childName, ts.isArrowFunction(fnNode) ? { thisId: opts.thisId, superName: opts.superName } : {}); out[childName] = child; emit("MAKECLOSURE", childName, child.freeIds.map(provide), !!fnNode.asteriskToken); } // arrows capture lexical this/super
 
     function optChain(node) {                                   // `?.` chain with short-circuit to the chain end
       const end = label("oc");
@@ -307,7 +309,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (node.kind === ts.SyntaxKind.TrueKeyword) { emit("PUSH", true); return true; }
       if (node.kind === ts.SyntaxKind.FalseKeyword) { emit("PUSH", false); return true; }
       if (node.kind === ts.SyntaxKind.NullKeyword) { emit("PUSH", null); return true; }
-      if (node.kind === ts.SyntaxKind.ThisKeyword) { if (opts.thisId == null) fail(node, "`this` outside a method"); emit("LOADENV", capture(opts.thisId)); return true; }
+      if (node.kind === ts.SyntaxKind.ThisKeyword) { if (opts.thisId == null) { emit("PUSH", undefined); return true; } emit("LOADENV", capture(opts.thisId)); return true; } // module/regular-fn `this` is undefined (strict)
       if (ts.isNewExpression(node)) {
         if (ts.isIdentifier(node.expression) && bindingOf.get(node.expression) == null && CTOR_GLOBALS.has(node.expression.text)) { const a = node.arguments || []; a.forEach((x) => expr(x)); emit("CTORG", node.expression.text, a.length); return true; } // new Map/Set/Date/...
         if (!ts.isIdentifier(node.expression) || !classes.has(node.expression.text)) fail(node, "unsupported `new`");
@@ -347,7 +349,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         }
         node.expression ? expr(node.expression) : emit("PUSH", undefined); emit("YIELD"); return true; // YIELD leaves the sent value as the expr's value
       }
-      if (ts.isTypeOfExpression(node)) { expr(node.expression); emit("TYPEOF"); return true; }
+      if (ts.isTypeOfExpression(node)) { if (ts.isIdentifier(node.expression) && unresolvedId(node.expression)) { emit("PUSH", undefined); } else expr(node.expression); emit("TYPEOF"); return true; } // typeof undeclared -> "undefined"
       if (ts.isVoidExpression(node)) { expr(node.expression); emit("POP"); emit("PUSH", undefined); return true; }
       if (ts.isRegularExpressionLiteral(node)) { const m = node.text.match(/^\/(.*)\/([a-z]*)$/s); emit("PUSH", new RegExp(m[1], m[2])); return true; }
       if (ts.isDeleteExpression(node)) { const t = node.expression; if (ts.isPropertyAccessExpression(t)) { expr(t.expression); emit("DELPROP", t.name.text); } else if (ts.isElementAccessExpression(t)) { expr(t.expression); expr(t.argumentExpression); emit("DELINDEX"); } else fail(node, "unsupported delete"); return true; }

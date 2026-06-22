@@ -292,6 +292,20 @@ check("array higher-order: find / findIndex / some / every (early-terminating)",
   };
 }`, "go", []);
 
+check("arrow functions capture lexical this (incl. nested) + private fields/methods",
+`class Counter {
+  #count = 0;                                   // private field
+  #step() { return 2; }                         // private method
+  constructor(items) { this.items = items; this.mult = 10; }
+  scaledMap() { return this.items.map((x) => x * this.mult); }   // arrow sees this.mult
+  nested() { const f = () => () => this.mult + 1; return f()(); } // nested arrows
+  bump() { this.#count += this.#step(); return this.#count; }
+}
+function go() {
+  const c = new Counter([1, 2, 3]);
+  return { scaled: c.scaledMap(), nested: c.nested(), bumps: [c.bump(), c.bump()], ty: [typeof nope, typeof Counter] };
+}`, "go", []);
+
 check("Map / Set: construct, methods, for-of, spread, size",
 `function go() {
   const m = new Map([["a", 1], ["b", 2]]);
