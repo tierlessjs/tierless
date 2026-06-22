@@ -192,6 +192,10 @@ export class WasoUncaught { constructor(value) { this.value = value; } }
 // through the graph codec (code travels by reference, env by value).
 export function isClosure(x) { return x !== null && typeof x === "object" && x.__waso_closure__ === true; }
 
+// Wrap a payload as a genuine async value: `await` of it suspends to the host
+// (which resolves `payload`). Plain values awaited inline (identity).
+export function awaitable(payload) { return { __waso_async__: true, payload }; }
+
 function binop(op, a, b) {
   switch (op) {
     case "+": return (typeof a === "string" || typeof b === "string") ? String(a) + String(b) : a + b;
@@ -208,6 +212,14 @@ export function run(tier, frames, host) {
     const r = host.deref(x);
     if (r instanceof Miss) throw new Suspend(frames, { fetch: r.handle }); // deref-miss -> suspend
     return r;
+  };
+  const doThrow = (v) => {                                    // unwind frames to the nearest handler
+    while (true) {
+      const cur = frames[frames.length - 1];
+      if (cur.handlers && cur.handlers.length) { const h = cur.handlers.pop(); cur.stack.length = h.sp; cur.stack.push(v); cur.ip = h.ip; return; }
+      frames.pop();
+      if (frames.length === 0) throw new WasoUncaught(v);
+    }
   };
   while (true) {
     const f = frames[frames.length - 1];
@@ -269,16 +281,6 @@ export function run(tier, frames, host) {
       }
       case "PUSHTRY": (f.handlers || (f.handlers = [])).push({ ip: ins[1], sp: f.stack.length }); f.ip++; break;
       case "POPTRY":  f.handlers.pop(); f.ip++; break;
-      case "THROW": {
-        const v = f.stack.pop();
-        while (true) {                                         // unwind frames to the nearest handler
-          const cur = frames[frames.length - 1];
-          if (cur.handlers && cur.handlers.length) { const h = cur.handlers.pop(); cur.stack.length = h.sp; cur.stack.push(v); cur.ip = h.ip; break; }
-          frames.pop();
-          if (frames.length === 0) throw new WasoUncaught(v);
-        }
-        break;
-      }
       case "RET": {
         const v = f.stack.pop();
         frames.pop();
@@ -295,13 +297,18 @@ export function run(tier, frames, host) {
         throw new Suspend(frames, { name: ins[1], args });
       }
       case "AWAIT": {
-        // Suspend on an awaitable value; the host resolves it (possibly async)
-        // and resumes with the result. Same capture as RES — so unlike native
-        // async, an await-suspended continuation is serializable.
-        const awaitable = f.stack.pop();
-        f.ip++; // resume AFTER the AWAIT, with the resolved value pushed
-        throw new Suspend(frames, { await: awaitable });
+        // `await` is a suspension point. A plain value resolves to itself (no
+        // host round-trip) — so async between user functions, Promise.resolve,
+        // and Promise.all of resolved values are free; only a genuine async
+        // value (marked __waso_async__) suspends to the host, and a rejected
+        // promise throws via the exception machinery.
+        const v = f.stack[f.stack.length - 1];
+        if (v !== null && typeof v === "object" && v.__waso_reject__) { f.stack.pop(); doThrow(v.value); break; }
+        if (v !== null && typeof v === "object" && v.__waso_async__) { f.stack.pop(); f.ip++; throw new Suspend(frames, { await: v.payload }); }
+        f.ip++; break; // plain value: identity
       }
+      case "MKREJECT": { f.stack.push({ __waso_reject__: true, value: f.stack.pop() }); f.ip++; break; } // Promise.reject(e)
+      case "THROW": { doThrow(f.stack.pop()); break; }
       default: throw new Error("bad op " + ins[0]);
     }
   }

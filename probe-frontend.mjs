@@ -6,7 +6,7 @@
 // serialization boundary MID-AWAIT — its captured environment travels as data,
 // its code by reference. That's the #4 thesis in miniature.
 
-import { PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation, initialFrames, isClosure } from "./waso-core.mjs";
+import { PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation, initialFrames, isClosure, awaitable } from "./waso-core.mjs";
 import { loadModule, describeContinuation } from "./waso-tsc.mjs";
 
 let pass = true;
@@ -44,7 +44,7 @@ loadModule(PROGRAM, `
   }
 `, { entry: "task", resources: ["ext"] });
 
-const tier = { id: "t", has: (n) => n === "ext", resources: { ext: () => ({ op: "ext" }) } };
+const tier = { id: "t", has: (n) => n === "ext", resources: { ext: () => awaitable({ op: "ext" }) } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const resolve = async (d) => { await sleep(2); return d.op === "ext" ? 5 : 0; };
 

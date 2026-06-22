@@ -265,8 +265,25 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === sup.thisId ? ["E", capture(opts.thisId)] : provide(id))));
       args.forEach((a) => expr(a)); emit("CALLV", args.length); return true;
     }
+    function promiseAll(arrNode) {                              // await each element sequentially -> array
+      const src = tempSlot(), out = tempSlot(), i = tempSlot();
+      expr(arrNode); emit("STORE", src); emit("NEWARR"); emit("STORE", out); emit("PUSH", 0); emit("STORE", i);
+      const loop = label("pa"), end = label("paend"); mark(loop);
+      emit("LOAD", i); emit("LOAD", src); emit("GETPROP", "length"); emit("BIN", "<"); emit("JMPF", end);
+      emit("LOAD", out); emit("LOAD", src); emit("LOAD", i); emit("INDEX"); emit("AWAIT"); emit("ARRPUSH");
+      emit("LOAD", i); emit("PUSH", 1); emit("BIN", "+"); emit("STORE", i); emit("JMP", loop); mark(end);
+      emit("LOAD", out); return true;
+    }
     function call(node) {
       const callee = node.expression;
+      if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === "Promise" && bindingOf.get(callee.expression) == null) {
+        const m = callee.name.text, a = node.arguments;
+        if (m === "resolve") { a[0] ? expr(a[0]) : emit("PUSH", undefined); return true; }   // identity
+        if (m === "reject") { expr(a[0]); emit("MKREJECT"); return true; }
+        if (m === "all") return promiseAll(a[0]);
+        if (m === "race") { expr(a[0]); emit("PUSH", 0); emit("INDEX"); emit("AWAIT"); return true; } // sequential: first element
+        fail(node, "unsupported Promise." + m);
+      }
       if (callee.kind === ts.SyntaxKind.SuperKeyword) { if (!opts.superName) fail(node, "super outside a derived class"); return superCall("__ctor__", null, node.arguments); }
       if (ts.isPropertyAccessExpression(callee) && callee.expression.kind === ts.SyntaxKind.SuperKeyword) { if (!opts.superName) fail(node, "super outside a derived class"); return superCall(callee.name.text, null, node.arguments); }
       if (ts.isPropertyAccessExpression(callee)) {

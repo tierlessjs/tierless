@@ -9,7 +9,7 @@
 // the transform (NOTES-frontend.md), and the same mechanism is what lets a
 // cross-process handle fetch resume a synchronous interpreter.
 
-import { PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation, contBytes, initialFrames, Tier } from "./waso-core.mjs";
+import { PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation, contBytes, initialFrames, Tier, awaitable } from "./waso-core.mjs";
 
 // async function loadUser(id) {
 //   const u = await db.fetchUser(id);          // RES returns a descriptor; AWAIT suspends
@@ -40,8 +40,8 @@ async function resolve(desc) {
 }
 
 const tier = new Tier("server", {
-  "db.fetchUser":  ([id]) => ({ op: "fetchUser", id }),   // returns an awaitable descriptor
-  "db.fetchPosts": ([id]) => ({ op: "fetchPosts", id }),
+  "db.fetchUser":  ([id]) => awaitable({ op: "fetchUser", id }),   // genuine async value -> AWAIT suspends
+  "db.fetchPosts": ([id]) => awaitable({ op: "fetchPosts", id }),
 });
 
 // Async orchestrator. `roundtrip` serializes the continuation at EVERY await and

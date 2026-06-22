@@ -216,6 +216,40 @@ function go() {
   return { arr, obj, sum: add3(...args) };
 }`, "go", []);
 
+// Async snippets: no genuine async resource, so Waso runs them synchronously
+// (await of a plain value = identity); Node runs them as real Promises, so we
+// await its result and compare the resolved values.
+async function checkAsync(name, src, entry, args) {
+  let got, ref, err = null;
+  try {
+    loadModule(PROGRAM, src, { entry });
+    got = run({ id: "t" }, initialFrames(entry, args), { deref: (x) => x }).value;
+    ref = await new Function(src + "\n;return " + entry + ";")()(...args);
+  } catch (e) { err = e; }
+  const ok = !err && JSON.stringify(got) === JSON.stringify(ref);
+  console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}`);
+  if (!ok) { pass = false; if (err) console.log(`        error: ${err.message}`); else console.log(`        waso=${JSON.stringify(got)}  node=${JSON.stringify(ref)}`); }
+}
+
+await checkAsync("async/await between functions (no Promise object)",
+`async function double(x) { return x * 2; }
+async function go() { const a = await double(5); const b = await double(a); return a + b; }`, "go", []);
+
+await checkAsync("Promise.resolve + Promise.all + reduce",
+`async function go() {
+  const xs = await Promise.all([Promise.resolve(1), Promise.resolve(2), 3]);
+  return xs.reduce((a, b) => a + b, 0);
+}`, "go", []);
+
+await checkAsync("Promise.reject caught via try/catch around await",
+`async function risky(fail) { if (fail) { return Promise.reject({ code: "X" }); } return "ok"; }
+async function go() {
+  let r1, r2;
+  try { r1 = await risky(false); } catch (e) { r1 = "caught:" + e.code; }
+  try { r2 = await risky(true); } catch (e) { r2 = "caught:" + e.code; }
+  return [r1, r2];
+}`, "go", []);
+
 console.log(`\nResult: ${pass ? "all PASS" : "FAILURES"} — Waso compiles real JS and matches Node's own`);
 console.log(`execution across templates, default params, for-of, array/object literals,`);
 console.log(`destructuring (incl. nested), nested function declarations, and closures.`);
