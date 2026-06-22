@@ -238,6 +238,8 @@ export function run(tier, frames, host) {
       case "TYPEOF": f.stack.push(typeof f.stack.pop()); f.ip++; break;
       case "BITNOT": f.stack.push(~f.stack.pop()); f.ip++; break;
       case "TOBIG":  f.stack.push(BigInt(f.stack.pop())); f.ip++; break;     // BigInt(x)
+      case "CLSGET": f.stack.push(tier.statics && tier.statics.get(ins[1])); f.ip++; break;                       // class-object registry (per tier)
+      case "CLSPUT": (tier.statics || (tier.statics = new Map())).set(ins[1], f.stack[f.stack.length - 1]); f.ip++; break; // peek + cache, leave on stack
       case "INC":    { const v = f.stack.pop(); f.stack.push(typeof v === "bigint" ? v + 1n : v + 1); f.ip++; break; } // ++ (type-aware: 1n for bigint)
       case "DEC":    { const v = f.stack.pop(); f.stack.push(typeof v === "bigint" ? v - 1n : v - 1); f.ip++; break; }
       case "ISA": { const o = d(f.stack.pop()); f.stack.push(!!(o && typeof o === "object" && Array.isArray(o.__class__) && o.__class__.includes(ins[1]))); f.ip++; break; } // instanceof

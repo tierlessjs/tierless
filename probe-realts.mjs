@@ -179,6 +179,35 @@ check("getter override through inheritance (derived wins)",
 class Circle extends Shape { constructor(n) { super(n); } get label() { return "circle:" + this.n; } }
 function go() { return [new Shape("a").label, new Circle("b").label]; }`, "go", []);
 
+check("static members: methods, fields, mutation, static this, factory",
+`class Counter {
+  static total = 0;
+  static unit = "n";
+  static bump(by) { Counter.total += by; return Counter.tag(Counter.total); }   // mutates a static field
+  static tag(v) { return v + this.unit; }                                       // static this = class object
+  static make(start) { const c = new Counter(); c.v = start; return c; }        // factory
+}
+function go() {
+  const a = Counter.bump(3);
+  const b = Counter.bump(4);
+  const made = Counter.make(10);
+  return { a, b, total: Counter.total, unit: Counter.unit, made: made.v };
+}`, "go", []);
+
+check("static inheritance: derived sees base statics, override wins",
+`class Base { static kind() { return "base"; } static shared() { return "S"; } }
+class Mid extends Base { static kind() { return "mid"; } }
+class Leaf extends Mid {}
+function go() { return [Base.kind(), Mid.kind(), Leaf.kind(), Leaf.shared()]; }`, "go", []);
+
+check("static getter/setter on the class object",
+`class Config {
+  static _level = 1;
+  static get level() { return Config._level; }
+  static set level(v) { Config._level = v < 0 ? 0 : v; }
+}
+function go() { const a = Config.level; Config.level = -5; const b = Config.level; Config.level = 9; return [a, b, Config.level]; }`, "go", []);
+
 check("for-in + computed object keys + delete",
 `function go(o) {
   const out = {};

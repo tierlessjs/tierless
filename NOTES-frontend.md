@@ -209,6 +209,28 @@ even those fall through to a plain field when the receiver has no such accessor.
 Verified vs eval (probe-realts): get/set pair (Temp °C/°F), read-only getter
 (Rect.area), compound-through-accessor, getter override via inheritance.
 
+## #4 step 15 (done — static members; deferred build-out 3 of 4)
+Reified the class as a runtime object (statics live on it):
+- a 0-arg builder fn `%ClassName` builds-or-returns the singleton, cached per
+  tier (CLSGET/CLSPUT on tier.statics). Bare `ClassName` -> `MAKECLOSURE %Name []
+  ; CALLV 0`. Builders are generated AFTER all classes compile (fixpoint over
+  field-init class refs), so a static method referencing its own class mid-compile
+  doesn't hit a half-populated table. Emitted as raw IR via a new compileFn
+  `emitBody` hook so static-field inits reuse expr().
+- static methods (this = the class object, distinct staticThisId), static fields
+  (init runs code), static get/set (reuse the __accessors__ machinery on the class
+  object), base-first inheritance (derived overrides base).
+- as predicted, this reused the getter muscle ("a reference that runs code") and
+  the codec is untouched on the happy path.
+Boundary (consistent with the design analysis): the class object is per-tier, so
+within a tier statics are a true singleton (mutation works); across a migration
+each tier rebuilds — i.e. class objects travel by reference and re-bind per tier,
+like closures/fn-names. Mutable *shared/inherited* static state is therefore §5
+handle/coherence territory, not a plain migrating field (derived statics are a
+copy of base, not prototype-shared — diverges from JS only in that one case).
+Verified vs eval: static method+field+mutation+static-this+factory; 3-level static
+inheritance with override; static getter/setter.
+
 ## Don't forget
 - **Source maps**: NJS captured the stack but deferred line/file metadata. Our
   §10.6. Design it into the transform from the start, don't bolt on.

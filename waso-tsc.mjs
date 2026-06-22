@@ -92,21 +92,50 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   for (const s of sf.statements) if (ts.isClassDeclaration(s) && s.name) {
     let superName = null;
     for (const h of s.heritageClauses || []) if (h.token === ts.SyntaxKind.ExtendsKeyword && ts.isIdentifier(h.types[0].expression)) superName = h.types[0].expression.text;
-    const fields = [], methods = [], accessors = []; let ctor = null;
+    const isStatic = (mem) => (mem.modifiers || []).some((m) => m.kind === ts.SyntaxKind.StaticKeyword);
+    const fields = [], methods = [], accessors = [], sfields = [], smethods = [], saccessors = []; let ctor = null;
     for (const mem of s.members) {
-      if (ts.isPropertyDeclaration(mem) && mem.initializer && ts.isIdentifier(mem.name)) fields.push({ name: mem.name.text, init: mem.initializer });
-      else if (ts.isMethodDeclaration(mem) && ts.isIdentifier(mem.name)) methods.push({ name: mem.name.text, node: mem });
-      else if (ts.isGetAccessorDeclaration(mem) && ts.isIdentifier(mem.name)) { accessors.push({ name: mem.name.text, kind: "get", node: mem }); accessorNames.add(mem.name.text); }
-      else if (ts.isSetAccessorDeclaration(mem) && ts.isIdentifier(mem.name)) { accessors.push({ name: mem.name.text, kind: "set", node: mem }); accessorNames.add(mem.name.text); }
+      const st = isStatic(mem);
+      if (ts.isPropertyDeclaration(mem) && mem.initializer && ts.isIdentifier(mem.name)) (st ? sfields : fields).push({ name: mem.name.text, init: mem.initializer });
+      else if (ts.isMethodDeclaration(mem) && ts.isIdentifier(mem.name)) (st ? smethods : methods).push({ name: mem.name.text, node: mem });
+      else if (ts.isGetAccessorDeclaration(mem) && ts.isIdentifier(mem.name)) { (st ? saccessors : accessors).push({ name: mem.name.text, kind: "get", node: mem }); accessorNames.add(mem.name.text); }
+      else if (ts.isSetAccessorDeclaration(mem) && ts.isIdentifier(mem.name)) { (st ? saccessors : accessors).push({ name: mem.name.text, kind: "set", node: mem }); accessorNames.add(mem.name.text); }
       else if (ts.isConstructorDeclaration(mem) && mem.body) ctor = mem;
     }
-    classes.set(s.name.text, { name: s.name.text, thisId: thisCounter--, fields, methods, accessors, ctor, superName });
+    classes.set(s.name.text, { name: s.name.text, thisId: thisCounter--, staticThisId: thisCounter--, fields, methods, accessors, sfields, smethods, saccessors, ctor, superName });
   }
   const resourceSet = new Set(resources);
   const { bindingOf, bindingsByFn, boxed } = resolveBindings(sf);
   const out = {};
   let gen = 0;
-  const lineColOf = (node) => { const lc = sf.getLineAndCharacterOfPosition(node.getStart(sf)); return { file, line: lc.line + 1, col: lc.character + 1, text: node.getText(sf).replace(/\s+/g, " ").slice(0, 32) }; };
+  const neededBuilders = new Set();   // classes whose class-object builder (%Name) must be generated
+  const lineColOf = (node) => { if (!node || !node.getStart) return null; const lc = sf.getLineAndCharacterOfPosition(node.getStart(sf)); return { file, line: lc.line + 1, col: lc.character + 1, text: node.getText(sf).replace(/\s+/g, " ").slice(0, 32) }; };
+  // The class object: a singleton (statics live on it), built-or-returned by a
+  // 0-arg builder fn, cached per tier (CLSGET/CLSPUT). Emitted as raw IR via
+  // compileFn's emitBody hook so static-field initializers reuse expr().
+  const buildClassObjectBody = (cname, { emit, expr, tempSlot, label, mark, provide }) => {
+    const rec = compileClass(cname);
+    const chain = []; for (let c = rec; c; c = c.superName ? compileClass(c.superName) : null) chain.unshift(c); // base-first; derived overrides
+    const ready = label("clsr");
+    emit("CLSGET", cname); emit("DUP"); emit("ISNULLISH"); emit("JMPF", ready); emit("POP"); // cached -> return it
+    const co = tempSlot(); emit("NEWOBJ"); emit("STORE", co);
+    emit("LOAD", co); emit("PUSH", chain.map((c) => c.name)); emit("SETPROP", "__class__"); emit("POP");
+    for (const cls of chain) for (const m of cls.smethods) { const info = cls.compiled[`static ${m.name}`]; emit("LOAD", co); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.staticThisId ? ["L", co] : provide(id)))); emit("SETPROP", m.name); emit("POP"); }
+    for (const cls of chain) for (const fld of cls.sfields) { emit("LOAD", co); expr(fld.init); emit("SETPROP", fld.name); emit("POP"); } // init runs code
+    const accs = new Map();
+    for (const cls of chain) for (const a of cls.saccessors) { const e = accs.get(a.name) || {}; e[a.kind] = { cls, info: cls.compiled[`static ${a.kind} ${a.name}`] }; accs.set(a.name, e); }
+    if (accs.size) {
+      const tbl = tempSlot(); emit("NEWOBJ"); emit("STORE", tbl);
+      for (const [aname, e] of accs) {
+        const ent = tempSlot(); emit("NEWOBJ"); emit("STORE", ent);
+        for (const kind of ["get", "set"]) { const s = e[kind]; if (!s) continue; emit("LOAD", ent); emit("MAKECLOSURE", s.info.prog, s.info.freeIds.map((id) => (id === s.cls.staticThisId ? ["L", co] : provide(id)))); emit("SETPROP", kind); emit("POP"); }
+        emit("LOAD", tbl); emit("LOAD", ent); emit("SETPROP", aname); emit("POP");
+      }
+      emit("LOAD", co); emit("LOAD", tbl); emit("SETPROP", "__accessors__"); emit("POP");
+    }
+    emit("LOAD", co); emit("CLSPUT", cname); emit("RET");           // cache & return
+    mark(ready); emit("RET");                                       // cached value already on stack
+  };
   const compileTop = (name) => { if (name in out) return; out[name] = null; out[name] = compileFn(topFns.get(name), name); };
   const compileClass = (cname) => {
     const rec = classes.get(cname); if (rec.compiled) return rec;
@@ -115,12 +144,15 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     const o = { thisId: rec.thisId, superName: rec.superName };
     for (const m of rec.methods) { const prog = `${cname}#${m.name}`; const c = compileFn(m.node, prog, o); out[prog] = c; rec.compiled[m.name] = { prog, freeIds: c.freeIds }; }
     for (const a of rec.accessors) { const prog = `${cname}#${a.kind} ${a.name}`; const c = compileFn(a.node, prog, o); out[prog] = c; rec.compiled[`${a.kind} ${a.name}`] = { prog, freeIds: c.freeIds }; }
+    const so = { thisId: rec.staticThisId, superName: rec.superName }; // static `this` = the class object
+    for (const m of rec.smethods) { const prog = `${cname}#static ${m.name}`; const c = compileFn(m.node, prog, so); out[prog] = c; rec.compiled[`static ${m.name}`] = { prog, freeIds: c.freeIds }; }
+    for (const a of rec.saccessors) { const prog = `${cname}#static ${a.kind} ${a.name}`; const c = compileFn(a.node, prog, so); out[prog] = c; rec.compiled[`static ${a.kind} ${a.name}`] = { prog, freeIds: c.freeIds }; }
     if (rec.ctor) { const prog = `${cname}#constructor`; const c = compileFn(rec.ctor, prog, { ...o, fieldInits: rec.fields }); out[prog] = c; rec.compiled.__ctor__ = { prog, freeIds: c.freeIds }; }
     return rec;
   };
 
   function compileFn(node, name, opts = {}) {
-    const ids = bindingsByFn.get(node);
+    const ids = bindingsByFn.get(node) || []; // synthetic builders (emitBody) have no bindings
     const slotOf = new Map(); ids.forEach((id, i) => slotOf.set(id, i));
     let topSlot = ids.length; const tempSlot = () => topSlot++;
     const envIdx = new Map(); const envIds = [];
@@ -154,10 +186,16 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     }
     const assemble = () => { const labels = {}, code = []; for (const l of asm) (typeof l === "string") ? (labels[l] = code.length) : code.push(l); for (const ins of code) if ((ins[0] === "JMP" || ins[0] === "JMPF" || ins[0] === "PUSHTRY") && typeof ins[1] === "string") ins[1] = labels[ins[1]]; return { code, pos: code.map((ins) => posMap.get(ins) || null) }; };
 
+    // Bare `ClassName` -> call its class-object builder (`%ClassName`), a 0-arg
+    // top-level fn that builds-or-returns the cached singleton. Generated AFTER all
+    // classes compile (so static-method freeIds are known), avoiding the re-entrancy
+    // when a static method references its own class mid-compile.
+    function classObject(cname) { compileClass(cname); neededBuilders.add(cname); emit("MAKECLOSURE", `%${cname}`, []); emit("CALLV", 0); return true; }
     function readUse(idNode) {
       const id = bindingOf.get(idNode);
       if (id == null) {
         if (topFns.has(idNode.text)) { compileTop(idNode.text); emit("MAKECLOSURE", idNode.text, []); return; }
+        if (classes.has(idNode.text)) { classObject(idNode.text); return; }  // bare `ClassName` -> the class object
         if (idNode.text === "undefined") { emit("PUSH", undefined); return; }
         if (idNode.text === "NaN") { emit("PUSH", NaN); return; }
         if (idNode.text === "Infinity") { emit("PUSH", Infinity); return; }
@@ -472,6 +510,8 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       fail(node, "unsupported statement");
     }
 
+    if (opts.emitBody) { opts.emitBody({ emit, expr, tempSlot, label, mark, provide }); const { code, pos } = assemble(); return { nlocals: topSlot, code, pos, freeIds: envIds }; } // synthetic class-object builder
+
     // --- prologue: rest param, default params, box captured params, fields, hoist nested fn decls
     for (const p of node.parameters) if (p.dotDotDotToken && ts.isIdentifier(p.name)) emit("GATHERREST", slotOf.get(bindingOf.get(p.name)));
     for (const p of node.parameters) if (p.initializer && ts.isIdentifier(p.name)) { const s = slotOf.get(bindingOf.get(p.name)); const skip = label("dflt"); emit("LOAD", s); emit("PUSH", undefined); emit("BIN", "==="); emit("JMPF", skip); expr(p.initializer); emit("STORE", s); mark(skip); }
@@ -492,6 +532,15 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   }
 
   compileTop(entry);
+  // Generate class-object builders now that every class is fully compiled (so
+  // static-method freeIds are known). Fixpoint: a field init may reference more classes.
+  const builtBuilders = new Set();
+  while ([...neededBuilders].some((c) => !builtBuilders.has(c))) {
+    for (const cname of [...neededBuilders]) {
+      if (builtBuilders.has(cname)) continue; builtBuilders.add(cname);
+      out[`%${cname}`] = compileFn({ parameters: [] }, `%${cname}`, { emitBody: (ctx) => buildClassObjectBody(cname, ctx) });
+    }
+  }
   const frag = {};
   for (const [k, v] of Object.entries(out)) frag[k] = { nlocals: v.nlocals, code: v.code, pos: v.pos };
   return frag;
