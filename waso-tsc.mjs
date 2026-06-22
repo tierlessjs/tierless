@@ -26,6 +26,8 @@ const COMPOUND = new Map([
   [ts.SyntaxKind.PlusEqualsToken, "+"], [ts.SyntaxKind.MinusEqualsToken, "-"], [ts.SyntaxKind.AsteriskEqualsToken, "*"],
 ]);
 const isFnLike = (n) => ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n) || ts.isMethodDeclaration(n) || ts.isConstructorDeclaration(n);
+const isAccess = (n) => ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n) || ts.isCallExpression(n);
+const isChainRoot = (n) => ts.isOptionalChain(n) && !(n.parent && isAccess(n.parent) && n.parent.expression === n && ts.isOptionalChain(n.parent));
 const HOF = new Set(["map", "filter", "forEach", "reduce"]); // callback is a Waso closure -> inline-compiled
 const PLAIN_METHODS = new Set(["slice", "indexOf", "lastIndexOf", "includes", "join", "concat", "toUpperCase",
   "toLowerCase", "split", "trim", "trimStart", "trimEnd", "charAt", "charCodeAt", "substring", "substr", "repeat",
@@ -162,9 +164,23 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     }
     function closureOf(fnNode) { const childName = `${name}$${gen++}`; const child = compileFn(fnNode, childName); out[childName] = child; emit("MAKECLOSURE", childName, child.freeIds.map(provide)); }
 
+    function optChain(node) {                                   // `?.` chain with short-circuit to the chain end
+      const end = label("oc");
+      const walk = (n) => {
+        const base = n.expression;
+        if (isAccess(base)) walk(base); else expr(base);
+        if (n.questionDotToken) { emit("DUP"); emit("ISNULLISH"); const cont = label("occ"); emit("JMPF", cont); emit("POP"); emit("PUSH", undefined); emit("JMP", end); mark(cont); }
+        if (ts.isPropertyAccessExpression(n)) emit("GETPROP", n.name.text);
+        else if (ts.isElementAccessExpression(n)) { expr(n.argumentExpression); emit("INDEX"); }
+        else if (ts.isCallExpression(n)) { n.arguments.forEach((a) => expr(a)); emit("CALLV", n.arguments.length); }
+      };
+      walk(node); mark(end); return true;
+    }
+
     function expr(node) { const save = here; here = node; try { return exprInner(node); } finally { here = save; } }
     function exprInner(node) {
       if (ts.isParenthesizedExpression(node)) return expr(node.expression);
+      if (isAccess(node) && isChainRoot(node)) return optChain(node);
       if (ts.isNumericLiteral(node)) { emit("PUSH", Number(node.text)); return true; }
       if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) { emit("PUSH", node.text); return true; }
       if (ts.isTemplateExpression(node)) { emit("PUSH", node.head.text); for (const span of node.templateSpans) { expr(span.expression); emit("BIN", "+"); emit("PUSH", span.literal.text); emit("BIN", "+"); } return true; }
@@ -210,8 +226,8 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       }
       if (ts.isPropertyAccessExpression(node)) { expr(node.expression); emit("GETPROP", node.name.text); return true; }
       if (ts.isElementAccessExpression(node)) { expr(node.expression); expr(node.argumentExpression); emit("INDEX"); return true; }
-      if (ts.isObjectLiteralExpression(node)) { emit("NEWOBJ"); for (const p of node.properties) { if (ts.isPropertyAssignment(p)) { expr(p.initializer); emit("SETPROP", p.name.text); } else if (ts.isShorthandPropertyAssignment(p)) { readUse(p.name); emit("SETPROP", p.name.text); } else fail(p, "unsupported property"); } return true; }
-      if (ts.isArrayLiteralExpression(node)) { emit("NEWARR"); for (const el of node.elements) { emit("DUP"); expr(el); emit("ARRPUSH"); } return true; }
+      if (ts.isObjectLiteralExpression(node)) { emit("NEWOBJ"); for (const p of node.properties) { if (ts.isSpreadAssignment(p)) { expr(p.expression); emit("ASSIGNALL"); } else if (ts.isPropertyAssignment(p)) { expr(p.initializer); emit("SETPROP", p.name.text); } else if (ts.isShorthandPropertyAssignment(p)) { readUse(p.name); emit("SETPROP", p.name.text); } else fail(p, "unsupported property"); } return true; }
+      if (ts.isArrayLiteralExpression(node)) { emit("NEWARR"); for (const el of node.elements) { if (ts.isSpreadElement(el)) { expr(el.expression); emit("APPENDALL"); } else { emit("DUP"); expr(el); emit("ARRPUSH"); } } return true; }
       if (ts.isCallExpression(node)) return call(node);
       fail(node, "unsupported expression");
     }
@@ -245,10 +261,19 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         if (m === "push") { expr(callee.expression); expr(node.arguments[0]); emit("ARRPUSH"); return false; }
         if (HOF.has(m)) return hof(callee.expression, m, node.arguments);
         if (PLAIN_METHODS.has(m)) { expr(callee.expression); node.arguments.forEach((a) => expr(a)); emit("CALLM", m, node.arguments.length); return true; }
-        expr(callee); node.arguments.forEach((a) => expr(a)); emit("CALLV", node.arguments.length); return true; // user method (closure property)
+        return closureCall(callee, node.arguments); // user method (closure property)
       }
       if (ts.isIdentifier(callee) && bindingOf.get(callee) == null && !topFns.has(callee.text) && resourceSet.has(callee.text)) { node.arguments.forEach((a) => expr(a)); emit("RES", callee.text, node.arguments.length); return true; }
-      expr(callee); node.arguments.forEach((a) => expr(a)); emit("CALLV", node.arguments.length); return true;
+      return closureCall(callee, node.arguments);
+    }
+    function closureCall(callee, args) {
+      expr(callee);
+      if (args.some((a) => ts.isSpreadElement(a))) { // variadic: build an args array, then CALLVS
+        emit("NEWARR");
+        for (const a of args) { if (ts.isSpreadElement(a)) { expr(a.expression); emit("APPENDALL"); } else { emit("DUP"); expr(a); emit("ARRPUSH"); } }
+        emit("CALLVS");
+      } else { args.forEach((a) => expr(a)); emit("CALLV", args.length); }
+      return true;
     }
 
     function declOne(d) {

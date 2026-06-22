@@ -248,6 +248,16 @@ export function run(tier, frames, host) {
         frames.push({ fn: callee.fn, ip: 0, locals: padLocals(args, PROGRAM[callee.fn].nlocals), stack: [], env: callee.env, handlers: [] });
         break;
       }
+      case "CALLVS": {                                         // call a closure with a spread args array: ["CALLVS"]
+        const argsArr = f.stack.pop();
+        const callee = f.stack.pop();
+        if (!isClosure(callee)) throw new Error("CALLVS on non-closure");
+        f.ip++;
+        frames.push({ fn: callee.fn, ip: 0, locals: padLocals(argsArr, PROGRAM[callee.fn].nlocals), stack: [], env: callee.env, handlers: [] });
+        break;
+      }
+      case "APPENDALL": { const src = f.stack.pop(); const tgt = f.stack[f.stack.length - 1]; for (const e of src) tgt.push(e); f.ip++; break; } // array spread
+      case "ASSIGNALL": { const src = f.stack.pop(); Object.assign(f.stack[f.stack.length - 1], src); f.ip++; break; }                         // object spread
       case "CALLM": {                                          // call a host method: ["CALLM", name, argc] (stdlib intrinsics)
         const argc = ins[2];
         const args = [];

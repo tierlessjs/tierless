@@ -173,6 +173,29 @@ check("exponent ** + void + switch break",
   return out;
 }`, "go", []);
 
+check("optional chaining ?. (property, index, call) with short-circuit",
+`function read(o) {
+  return [o?.a?.b ?? "none", o?.list?.[0], o?.fn?.(3)];
+}
+function go() {
+  return [
+    read({ a: { b: 5 }, list: [9], fn: (x) => x * 2 }),
+    read({ a: null }),
+    read(null),
+  ];
+}`, "go", []);
+
+check("spread: array, object, and call",
+`function add3(a, b, c) { return a + b + c; }
+function go() {
+  const xs = [1, 2];
+  const arr = [0, ...xs, 3];
+  const base = { a: 1, b: 2 };
+  const obj = { ...base, b: 20, c: 30 };
+  const args = [4, 5, 6];
+  return { arr, obj, sum: add3(...args) };
+}`, "go", []);
+
 console.log(`\nResult: ${pass ? "all PASS" : "FAILURES"} — Waso compiles real JS and matches Node's own`);
 console.log(`execution across templates, default params, for-of, array/object literals,`);
 console.log(`destructuring (incl. nested), nested function declarations, and closures.`);
