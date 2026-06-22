@@ -169,6 +169,39 @@ d("static block / static init order", "function go(){ class C{static a=1;static 
 d("chained array transforms", "function go(){ return [1,2,3,4,5,6].filter(x=>x%2===0).map(x=>x*x).reduce((a,b)=>a+b,0); }");
 d("spread call with computed args", "function go(){ const f=(...xs)=>xs.reduce((a,b)=>a+b,0); const arr=[1,2,3]; return f(...arr,4,...[5,6]); }");
 
+console.log("— string & number built-ins —");
+d("string codePointAt/normalize/at", "function go(){ return ['abc'.at(-1),'A'.codePointAt(0),'café'.length,'x'.padEnd(3,'.')]; }");
+d("replaceAll with string and fn", "function go(){ return ['a.b.c'.replaceAll('.','-'),'a1b2'.replace(/\\d/g,d=>'['+d+']')]; }");
+d("matchAll iteration", "function go(){ const out=[]; for(const m of 'a1b2'.matchAll(/([a-z])(\\d)/g))out.push(m[1]+m[2]); return out; }");
+d("split with limit and regex", "function go(){ return ['a,b,c,d'.split(',',2),'a1b2c'.split(/\\d/)]; }");
+d("number toExponential/toPrecision", "function go(){ return [(12345).toExponential(2),(3.14159).toPrecision(3),(255).toString(16)]; }");
+d("Math extras", "function go(){ return [Math.trunc(-4.7),Math.sign(-3),Math.cbrt(27),Math.hypot(3,4),Math.log2(8),Math.max()]; }");
+d("Number parsing & predicates", "function go(){ return [Number('0x10'),Number(''),Number('  12 '),Number.isNaN(NaN),Number.isFinite(Infinity),Number.parseInt('3.9')]; }");
+d("numeric literals: hex/oct/bin/sep", "function go(){ return [0xff,0o17,0b1010,1_000_000,1e3,0.5e-1]; }");
+
+console.log("— typeof exhaustive —");
+d("typeof all types", "function go(){ return [typeof 1,typeof 'x',typeof true,typeof undefined,typeof null,typeof {},typeof [],typeof function(){},typeof Symbol(),typeof 1n]; }");
+d("typeof of arrow and class", "function go(){ class C{} const f=()=>1; return [typeof f,typeof C]; }");
+
+console.log("— iterable destructuring & spread —");
+d("destructure from Set", "function go(){ const [a,b]=new Set([9,8,7]); return [a,b]; }");
+d("destructure from generator", "function go(){ function* g(){yield 1;yield 2;yield 3;} const [a,...rest]=g(); return [a,rest]; }");
+d("spread Map into array of entries", "function go(){ const m=new Map([['x',1],['y',2]]); const o={}; for(const [k,v] of m)o[k]=v; return o; }");
+d("destructure with defaults from short array", "function go(){ const [a=1,b=2,c=3]=[10,undefined]; return [a,b,c]; }");
+
+console.log("— generator edge cases —");
+d("generator try/finally on return", "function go(){ const log=[]; function* g(){try{yield 1;yield 2;}finally{log.push('f');}} const it=g(); it.next(); it.return(99); return [it.next().done,log]; }");
+d("generator delegating yield* return value", "function go(){ function* inner(){yield 1;return 'R';} function* outer(){const r=yield* inner();yield r;} return [...outer()]; }");
+d("infinite generator with take", "function go(){ function* nats(){let i=0;while(true)yield i++;} const it=nats(); const out=[]; for(let i=0;i<4;i++)out.push(it.next().value); return out; }");
+d("generator as object method via this", "function go(){ const o={data:[5,6,7],*items(){for(const x of this.data)yield x*2;}}; return [...o.items()]; }");
+
+console.log("— closures & control flow extras —");
+d("try/finally return value in loop", "function go(){ function f(){for(let i=0;i<3;i++){try{if(i===2)return i;}finally{}}return -1;} return f(); }");
+d("labeled block break", "function go(){ let r=[]; block:{ r.push(1); if(r.length)break block; r.push(2); } return r; }");
+d("comma in for-update", "function go(){ const out=[]; for(let i=0,j=10;i<3;i++,j--)out.push(i+'-'+j); return out; }");
+d("conditional chain assoc", "function go(){ const f=n=>n>0?'pos':n<0?'neg':'zero'; return [f(5),f(-5),f(0)]; }");
+d("exponent right associative", "function go(){ return [2**3**2,(2**3)**2]; }");
+
 console.log(`\n${"=".repeat(64)}`);
 console.log(`${fail === 0 ? "NO DIVERGENCES" : fail + " DIVERGENCES"} — ${pass}/${pass + fail + caveat} matched Node` + (caveat ? `, ${caveat} documented caveat${caveat > 1 ? "s" : ""}` : "") + (fail ? `\nDivergent: ${fails.join(", ")}` : ""));
 if (fail) process.exitCode = 1;

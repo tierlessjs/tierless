@@ -179,6 +179,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     emit("CLSGET", cname); emit("DUP"); emit("ISNULLISH"); emit("JMPF", ready); emit("POP"); // cached -> return it
     const co = tempSlot(); emit("NEWOBJ"); emit("STORE", co);
     emit("LOAD", co); emit("PUSH", chain.map((c) => c.name)); emit("SETPROP", "__class__"); emit("POP");
+    emit("LOAD", co); emit("PUSH", true); emit("SETHIDDEN", "__classobj__"); emit("POP"); // marks the class object (callable) so `typeof ClassName` is "function" while instances stay "object"
     emit("LOAD", co); emit("CLSPUT", cname); emit("POP"); // cache BEFORE static methods/inits so a self-reference (e.g. `static b = C.a+1`) resolves to the in-progress object instead of re-entering the builder
     for (const cls of chain) for (const m of cls.smethods) { const info = cls.compiled[`static ${m.name}`]; emit("LOAD", co); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.staticThisId ? ["L", co] : provide(id))), !!m.node.asteriskToken); emit("SETPROP", m.name); emit("POP"); }
     for (const cls of chain) for (const fld of cls.sfields) { emit("LOAD", co); expr(fld.init); emit("SETPROP", fld.name); emit("POP"); } // init runs code
@@ -330,6 +331,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     }
     function destructureAssign(pat, srcSlot) {  // destructuring ASSIGNMENT into existing targets (vars/props)
       if (ts.isArrayLiteralExpression(pat)) {
+        emit("LOAD", srcSlot); emit("TOARRAY"); emit("STORE", srcSlot); // iterator-protocol destructuring for non-array iterables
         pat.elements.forEach((el, i) => {
           if (ts.isOmittedExpression(el)) return;
           if (ts.isSpreadElement(el)) { assignTo(el.expression, () => { emit("LOAD", srcSlot); emit("PUSH", i); emit("CALLM", "slice", 1); }); return; }
@@ -374,6 +376,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         return;
       }
       if (ts.isArrayBindingPattern(pattern)) {
+        emit("LOAD", srcSlot); emit("TOARRAY"); emit("STORE", srcSlot); // array destructuring consumes the iterator protocol (Set/generator/custom iterable)
         pattern.elements.forEach((el, i) => {
           if (ts.isOmittedExpression(el)) return;
           if (el.dotDotDotToken) { emit("LOAD", srcSlot); emit("PUSH", i); emit("CALLM", "slice", 1); bindStackTop(el.name); return; } // [...rest]

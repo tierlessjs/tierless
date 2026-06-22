@@ -349,7 +349,7 @@ export function run(tier, frames, host) {
       case "POP":    f.stack.pop(); f.ip++; break;
       case "DUP":    f.stack.push(f.stack[f.stack.length - 1]); f.ip++; break;
       case "NOT":    f.stack.push(!f.stack.pop()); f.ip++; break;
-      case "TYPEOF": f.stack.push(typeof f.stack.pop()); f.ip++; break;
+      case "TYPEOF": { const v = f.stack.pop(); f.stack.push(isClosure(v) || (v != null && typeof v === "object" && v.__classobj__) ? "function" : typeof v); f.ip++; break; } // Waso closures AND class objects (callable) report as "function" (instances stay "object")
       case "BITNOT": f.stack.push(~f.stack.pop()); f.ip++; break;
       case "NEG":    f.stack.push(-f.stack.pop()); f.ip++; break;     // unary minus (correct -0 and BigInt negation)
       case "TOBIG":  f.stack.push(BigInt(f.stack.pop())); f.ip++; break;     // BigInt(x)
@@ -430,6 +430,17 @@ export function run(tier, frames, host) {
         else if (it != null && isClosure(it.next)) { while (true) { const r = callClosure(it.next, []); if (r.done) break; tgt.push(r.value); } } // user iterator object
         else for (const e of it) tgt.push(e); // array / host-iterable
         f.ip++; break;
+      }
+      case "TOARRAY": {                                         // array destructuring uses the iterator protocol: materialize any iterable (Set/generator/custom) to an array; arrays pass through untouched (holes preserved)
+        const v = f.stack[f.stack.length - 1];
+        if (Array.isArray(v)) { f.ip++; break; }
+        f.stack.pop(); const tgt = [];
+        let it = v; const sIt = v != null && v[Symbol.iterator];
+        if (isClosure(sIt)) it = sIt.gen ? makeGen(sIt, []) : callClosure(sIt, []);
+        if (isGenerator(it)) { while (true) { const r = genAdvance(it, undefined); if (r.done) break; tgt.push(r.value); } }
+        else if (it != null && isClosure(it.next)) { while (true) { const r = callClosure(it.next, []); if (r.done) break; tgt.push(r.value); } }
+        else for (const e of it) tgt.push(e);
+        f.stack.push(tgt); f.ip++; break;
       }
       case "ASSIGNALL": { const src = f.stack.pop(); Object.assign(f.stack[f.stack.length - 1], src); f.ip++; break; }                         // object spread
       case "CALLM": {                                          // call a host method: ["CALLM", name, argc] (stdlib intrinsics)
