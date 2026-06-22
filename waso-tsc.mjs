@@ -120,7 +120,9 @@ function resolveBindings(sf) {
   }
   sf.statements.forEach(walk);
   scopes.pop();
-  const boxed = new Set([...captured].filter((id) => assigned.has(id) && !moduleBindings.has(id)));
+  // Box every captured binding (cell shared by reference): handles mutation AND
+  // capture-before-initialization (recursive `const f = () => f()`, mutual recursion).
+  const boxed = new Set([...captured].filter((id) => !moduleBindings.has(id)));
   for (const id of forceBox) boxed.add(id);
   return { bindingOf, declFn, bindingsByFn, boxed, usesArguments, moduleBindings };
 }
@@ -339,9 +341,9 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       return true;
     }
     function bindStackTop(nameNode) { // a value is on the stack; store into the binding (decl/for-of/destructure)
-      const id = bindingOf.get(nameNode);
+      const id = bindingOf.get(nameNode), fresh = arguments[1]; // fresh: a NEW cell (loop/catch per-iteration capture) vs filling the pre-created one
       if (moduleBindings.has(id)) { emit("MSET", moduleBindings.get(id)); }
-      else if (boxed.has(id)) { const t = tempSlot(); emit("STORE", t); emit("NEWOBJ"); emit("LOAD", t); emit("SETPROP", "v"); emit("STORE", slotOf.get(id)); }
+      else if (boxed.has(id)) { if (fresh) { const t = tempSlot(); emit("STORE", t); emit("NEWOBJ"); emit("LOAD", t); emit("SETPROP", "v"); emit("STORE", slotOf.get(id)); } else { const t = tempSlot(); emit("STORE", t); emit("LOAD", slotOf.get(id)); emit("LOAD", t); emit("SETPROP", "v"); emit("POP"); } }
       else emit("STORE", slotOf.get(id));
     }
     function bindOne(el, pushRaw) {              // raw value -> apply default (if value===undefined) -> bind name/pattern
@@ -354,7 +356,8 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isObjectBindingPattern(pattern)) {
         const bound = [];
         for (const el of pattern.elements) {
-          if (el.dotDotDotToken) { const t = tempSlot(); emit("NEWOBJ"); emit("LOAD", srcSlot); emit("ASSIGNALL"); emit("STORE", t); for (const k of bound) { emit("LOAD", t); emit("DELPROP", k); emit("POP"); } emit("LOAD", t); bindStackTop(el.name); continue; } // {...rest}
+          if (el.dotDotDotToken) { const t = tempSlot(); emit("NEWOBJ"); emit("LOAD", srcSlot); emit("ASSIGNALL"); emit("STORE", t); for (const k of bound) if (k != null) { emit("LOAD", t); emit("DELPROP", k); emit("POP"); } emit("LOAD", t); bindStackTop(el.name); continue; } // {...rest}
+          if (el.propertyName && ts.isComputedPropertyName(el.propertyName)) { bound.push(null); bindOne(el, () => { emit("LOAD", srcSlot); expr(el.propertyName.expression); emit("INDEX"); }); continue; } // { [k]: v } / { [sym]: v }
           const key = (el.propertyName || el.name).text; bound.push(key);
           bindOne(el, () => { emit("LOAD", srcSlot); emit("GETPROP", key); });
         }
@@ -456,7 +459,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isPrefixUnaryExpression(node)) {
         if (node.operator === ts.SyntaxKind.ExclamationToken) { expr(node.operand); emit("NOT"); return true; }
         if (node.operator === ts.SyntaxKind.TildeToken) { expr(node.operand); emit("BITNOT"); return true; }
-        if (node.operator === ts.SyntaxKind.MinusToken) { emit("PUSH", 0); expr(node.operand); emit("BIN", "-"); return true; }
+        if (node.operator === ts.SyntaxKind.MinusToken) { expr(node.operand); emit("NEG"); return true; } // -x (correct -0, BigInt)
         if (node.operator === ts.SyntaxKind.PlusToken) { expr(node.operand); emit("PUSH", 1); emit("BIN", "*"); return true; } // unary + (numeric coercion)
         if (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken) return incDec(node.operand, node.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-", false); // ++x: new value
         fail(node, "unsupported unary");
@@ -601,7 +604,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
 
     function declOne(d) {
       const init = () => (d.initializer ? expr(d.initializer) : emit("PUSH", undefined)); // `let x;` -> undefined
-      if (ts.isIdentifier(d.name)) { const id = bindingOf.get(d.name); if (moduleBindings.has(id)) { init(); emit("MSET", moduleBindings.get(id)); } else if (boxed.has(id)) { emit("NEWOBJ"); init(); emit("SETPROP", "v"); emit("STORE", slotOf.get(id)); } else { init(); emit("STORE", slotOf.get(id)); } return; }
+      if (ts.isIdentifier(d.name)) { const id = bindingOf.get(d.name); if (moduleBindings.has(id)) { init(); emit("MSET", moduleBindings.get(id)); } else if (boxed.has(id)) { emit("LOAD", slotOf.get(id)); init(); emit("SETPROP", "v"); emit("POP"); } else { init(); emit("STORE", slotOf.get(id)); } return; } // fill the pre-created cell
       if (!d.initializer) fail(d, "destructuring needs an initializer");
       const t = tempSlot(); expr(d.initializer); emit("STORE", t); bindPattern(d.name, t); // destructuring (module-level pattern targets resolve via writeUse->MSET)
     }
@@ -610,11 +613,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     function stmtInner(node) {
       if (ts.isBlock(node)) return node.statements.forEach(stmt);
       if (ts.isClassDeclaration(node)) return; // local class decl: collected up-front, built lazily on first `new`/reference
-      if (ts.isFunctionDeclaration(node)) { // nested fn decl: fill the pre-created cell with the closure
-        const childName = `${name}$${gen++}`; const child = compileFn(node, childName); out[childName] = child;
-        emit("LOAD", slotOf.get(bindingOf.get(node.name))); emit("MAKECLOSURE", childName, child.freeIds.map(provide), !!node.asteriskToken); emit("SETPROP", "v"); emit("POP");
-        return;
-      }
+      if (ts.isFunctionDeclaration(node)) return; // nested fn decls are HOISTED: created+filled in the prologue (callable before their textual position)
       if (ts.isVariableStatement(node)) { for (const d of node.declarationList.declarations) declOne(d); return; }
       if (ts.isExpressionStatement(node)) { if (expr(node.expression)) emit("POP"); return; }
       if (ts.isSwitchStatement(node)) {
@@ -640,7 +639,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
           cf.push({ tryPop: true }); stmt(node.tryBlock); cf.pop();   // handler live only in the try body
           emit("POPTRY"); emit("JMP", done);
           mark(cat);
-          if (cc.variableDeclaration && ts.isIdentifier(cc.variableDeclaration.name)) bindStackTop(cc.variableDeclaration.name);
+          if (cc.variableDeclaration && ts.isIdentifier(cc.variableDeclaration.name)) bindStackTop(cc.variableDeclaration.name, true);
           else emit("POP");
           stmt(cc.block);                                            // catch body: handler already gone
           mark(done);
@@ -670,10 +669,11 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isDoStatement(node)) { const lbl = takeLabel(); const loop = label("loop"), step = label("step"), end = label("end"); mark(loop); cf.push({ loop: true, brk: end, cont: step, name: lbl }); stmt(node.statement); cf.pop(); mark(step); expr(node.expression); emit("JMPF", end); emit("JMP", loop); mark(end); return; }
       if (ts.isForStatement(node)) {
         const lbl = takeLabel();
-        let perIter = []; // boxed `let` loop vars -> a fresh cell each iteration (closures capture per-iteration values)
+        let perIter = []; // boxed let/const loop vars -> a fresh cell each iteration (closures capture per-iteration values); NOT var (one shared binding)
         if (node.initializer && ts.isVariableDeclarationList(node.initializer)) {
+          const lexical = !!(node.initializer.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const));
           for (const d of node.initializer.declarations) declOne(d);
-          for (const d of node.initializer.declarations) if (ts.isIdentifier(d.name)) { const id = bindingOf.get(d.name); if (boxed.has(id)) perIter.push(slotOf.get(id)); }
+          if (lexical) for (const d of node.initializer.declarations) if (ts.isIdentifier(d.name)) { const id = bindingOf.get(d.name); if (boxed.has(id)) perIter.push(slotOf.get(id)); }
         } else if (node.initializer) { if (expr(node.initializer)) emit("POP"); }
         const loop = label("loop"), step = label("step"), end = label("end"); mark(loop);
         if (node.condition) { expr(node.condition); emit("JMPF", end); }
@@ -688,7 +688,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const loop = label("loop"), step = label("step"), end = label("end"); mark(loop);
         emit("LOAD", idx); emit("LOAD", iter); emit("GETPROP", "length"); emit("BIN", "<"); emit("JMPF", end);
         const decl = node.initializer.declarations[0];
-        emit("LOAD", iter); emit("LOAD", idx); emit("INDEX"); bindStackTop(decl.name);
+        emit("LOAD", iter); emit("LOAD", idx); emit("INDEX"); bindStackTop(decl.name, true);
         cf.push({ loop: true, brk: end, cont: step, name: lbl }); stmt(node.statement); cf.pop();
         mark(step); emit("LOAD", idx); emit("PUSH", 1); emit("BIN", "+"); emit("STORE", idx); emit("JMP", loop); mark(end); return;
       }
@@ -701,7 +701,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         mark(body); emit("GETPROP", "value");                     // stack: [value]
         if (node.awaitModifier) emit("AWAIT");                    // `for await`: await each value (identity for a plain value)
         const decl = node.initializer.declarations[0];
-        if (ts.isIdentifier(decl.name)) bindStackTop(decl.name); else { const t = tempSlot(); emit("STORE", t); bindPattern(decl.name, t); }
+        if (ts.isIdentifier(decl.name)) bindStackTop(decl.name, true); else { const t = tempSlot(); emit("STORE", t); bindPattern(decl.name, t); }
         cf.push({ loop: true, brk: end, cont: step, name: lbl }); stmt(node.statement); cf.pop();
         mark(step); emit("JMP", loop); mark(end); return;
       }
@@ -713,17 +713,21 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     if (opts.emitBody) { opts.emitBody({ emit, expr, stmt, tempSlot, label, mark, provide, capture }); const { code, pos } = assemble(); return { nlocals: topSlot, code, pos, freeIds: envIds }; } // synthetic class-object builder / module-init
 
     // --- prologue: rest param, default params, box captured params, fields, hoist nested fn decls
-    if (usesArguments.has(node)) { emit("ARGUMENTS"); emit("STORE", slotOf.get(usesArguments.get(node))); } // snapshot passed args before defaults/rest mutate locals
+    let argsTemp = null; if (usesArguments.has(node)) { argsTemp = tempSlot(); emit("ARGUMENTS"); emit("STORE", argsTemp); } // snapshot passed args FIRST (before pre-create/defaults mutate locals); installed below
     for (const p of node.parameters) if (p.dotDotDotToken && ts.isIdentifier(p.name)) emit("GATHERREST", slotOf.get(bindingOf.get(p.name)));
     for (const p of node.parameters) if (p.initializer && ts.isIdentifier(p.name)) { const s = slotOf.get(bindingOf.get(p.name)); const skip = label("dflt"); emit("LOAD", s); emit("PUSH", undefined); emit("BIN", "==="); emit("JMPF", skip); expr(p.initializer); emit("STORE", s); mark(skip); }
+    const paramIds = new Set(); for (const p of node.parameters) if (ts.isIdentifier(p.name)) paramIds.add(bindingOf.get(p.name));
     for (const p of node.parameters) if (ts.isIdentifier(p.name) && boxed.has(bindingOf.get(p.name))) { const s = slotOf.get(bindingOf.get(p.name)); emit("NEWOBJ"); emit("LOAD", s); emit("SETPROP", "v"); emit("STORE", s); }
+    // Pre-create empty cells for every boxed function-scoped local (not params) so a
+    // hoisted function / forward reference captures the SAME cell the later declaration fills.
+    for (const id of ids) if (boxed.has(id) && slotOf.has(id) && !paramIds.has(id)) { emit("NEWOBJ"); emit("STORE", slotOf.get(id)); }
+    if (argsTemp != null) { const aid = usesArguments.get(node), s = slotOf.get(aid); if (boxed.has(aid)) { emit("LOAD", s); emit("LOAD", argsTemp); emit("SETPROP", "v"); emit("POP"); } else { emit("LOAD", argsTemp); emit("STORE", s); } } // install `arguments` (into its cell if boxed)
     node.parameters.forEach((p, i) => { if (ts.isObjectBindingPattern(p.name) || ts.isArrayBindingPattern(p.name)) { if (p.initializer) { const skip = label("pd"); emit("LOAD", i); emit("PUSH", undefined); emit("BIN", "==="); emit("JMPF", skip); expr(p.initializer); emit("STORE", i); mark(skip); } bindPattern(p.name, i); } }); // destructuring params: raw arg at slot i (= position)
     if (opts.fieldInits) for (const f of opts.fieldInits) { emit("LOADENV", capture(opts.thisId)); expr(f.init); emit("SETPROP", f.name); emit("POP"); } // class field initializers, with `this` bound
-    // Pre-create empty cells for nested fn decls (boxed) so they're live bindings
-    // before their lexical definition (recursion + capture timing). Filled below.
+    // Nested function declarations are HOISTED: cells pre-created above; fill the closures now (callable before their textual position; mutual recursion via shared cells).
     const findFnDecls = (n, acc) => { if (ts.isFunctionExpression(n) || ts.isArrowFunction(n)) return; if (ts.isFunctionDeclaration(n) && n !== node) { acc.push(n); return; } ts.forEachChild(n, (c) => findFnDecls(c, acc)); };
     const fnDecls = []; if (node.body) ts.forEachChild(node.body, (c) => findFnDecls(c, fnDecls));
-    for (const fd of fnDecls) { emit("NEWOBJ"); emit("STORE", slotOf.get(bindingOf.get(fd.name))); }
+    for (const fd of fnDecls) { const childName = `${name}$${gen++}`; const child = compileFn(fd, childName); out[childName] = child; emit("LOAD", slotOf.get(bindingOf.get(fd.name))); emit("MAKECLOSURE", childName, child.freeIds.map(provide), !!fd.asteriskToken); emit("SETPROP", "v"); emit("POP"); }
 
     if (node.body && ts.isBlock(node.body)) node.body.statements.forEach(stmt);
     else { expr(node.body); emit("RET"); }

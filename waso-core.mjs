@@ -310,6 +310,7 @@ export function run(tier, frames, host) {
   while (true) {
     const f = frames[frames.length - 1];
     const ins = PROGRAM[f.fn].code[f.ip];
+    try {
     switch (ins[0]) {
       case "PUSH":   f.stack.push(ins[1]); f.ip++; break;
       case "LOAD":   f.stack.push(f.locals[ins[1]]); f.ip++; break;
@@ -319,6 +320,7 @@ export function run(tier, frames, host) {
       case "NOT":    f.stack.push(!f.stack.pop()); f.ip++; break;
       case "TYPEOF": f.stack.push(typeof f.stack.pop()); f.ip++; break;
       case "BITNOT": f.stack.push(~f.stack.pop()); f.ip++; break;
+      case "NEG":    f.stack.push(-f.stack.pop()); f.ip++; break;     // unary minus (correct -0 and BigInt negation)
       case "TOBIG":  f.stack.push(BigInt(f.stack.pop())); f.ip++; break;     // BigInt(x)
       case "ARGUMENTS": f.stack.push(Array.prototype.slice.call(f.locals)); f.ip++; break;                          // `arguments`: snapshot the passed args (strict)
       case "MGET": f.stack.push(tier.module ? tier.module.get(ins[1]) : undefined); f.ip++; break;                  // module-level binding (per-tier)
@@ -503,6 +505,12 @@ export function run(tier, frames, host) {
       case "MKREJECT": { f.stack.push({ __waso_reject__: true, value: f.stack.pop() }); f.ip++; break; } // Promise.reject(e)
       case "THROW": { doThrow(f.stack.pop()); break; }
       default: throw new Error("bad op " + ins[0]);
+    }
+    } catch (e) {
+      // Control-flow signals propagate; a real host runtime error (TypeError from
+      // `1n+1`, calling undefined, etc.) becomes a Waso throw catchable by user try/catch.
+      if (e instanceof Suspend || e instanceof Yielded || e instanceof Miss || e instanceof WasoUncaught) throw e;
+      doThrow(e);
     }
   }
 }
