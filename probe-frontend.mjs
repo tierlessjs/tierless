@@ -219,8 +219,42 @@ const gen = await runViaWire("task"); // serializes/deserializes the continuatio
 check(`generator state survived the wire and kept counting (got ${JSON.stringify(gen.value)}, expected [0,5,1,2])`,
   JSON.stringify(gen.value) === JSON.stringify([0, 5, 1, 2]));
 
+// ---- Section K: an async generator awaits a resource MID-ITERATION and migrates ---
+// The deepest case: a `for await` over an `async function*` whose body awaits a
+// genuine server resource each step. The continuation — outer loop + the generator's
+// own frames spliced beneath it — migrates through the wire at every await and
+// resumes correctly on the other tier. Two suspension scopes (yield + await) and a
+// full serialization boundary, composed.
+console.log("\n--- K. async generator awaits a resource mid-iteration, across migrations ---");
+loadModule(PROGRAM, `
+  async function* pages(n) { for (let i = 0; i < n; i++) { const row = await ext(i); yield row; } }
+  async function task() { const out = []; for await (const r of pages(3)) { out.push(r); } return out; }
+`, { entry: "task", resources: ["ext"] });
+let agMigrations = 0;
+async function runAsyncGen() {
+  let frames = initialFrames("task", []); const host = { deref: (x) => x };
+  while (true) {
+    let res;
+    try { res = run(tier, frames, host); }
+    catch (e) {
+      if (!(e instanceof Suspend) || !("await" in e.pending)) throw e;
+      agMigrations++;
+      const wire = serializeContinuation({ frames: e.frames, pending: e.pending }, tier); // cross the wire MID-GENERATOR
+      const got = deserializeContinuation(JSON.parse(JSON.stringify(wire)));
+      const value = await resolve(got.pending.await);
+      got.frames[got.frames.length - 1].stack.push("row#" + value);
+      frames = got.frames; continue;
+    }
+    return res.value;
+  }
+}
+const ag = await runAsyncGen();
+check(`async-gen result correct after migrating mid-iteration (got ${JSON.stringify(ag)})`, JSON.stringify(ag) === JSON.stringify(["row#5", "row#5", "row#5"]));
+check(`it actually crossed the wire INSIDE the generator each step (${agMigrations} migrations)`, agMigrations === 3);
+
 console.log(`\nResult: ${pass ? "all PASS" : "FAILURES"} — closures, mutable shared captures (migration-safe),`);
 console.log(`lexical shadowing, while/break/continue/&&/||/?:/+=, source-mapped continuations,`);
 console.log(`a try/catch handler that survives migration mid-await, a getter that migrates`);
-console.log(`mid property-access, and a paused generator that migrates (neither possible in native JS).`);
+console.log(`mid property-access, a paused generator that migrates, AND an async generator that`);
+console.log(`awaits a resource mid-iteration across migrations (none possible in native JS).`);
 if (!pass) process.exitCode = 1;

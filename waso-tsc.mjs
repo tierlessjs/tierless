@@ -250,11 +250,14 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isPropertyAccessExpression(target)) { expr(target.expression); emit("DUP"); emit(getOp(target.name.text), target.name.text); expr(rhs); emit("BIN", op); emit(setOp(target.name.text), target.name.text); emit("POP"); return; }
       fail(target, "unsupported compound-assignment target");
     }
-    function incDec(target, op) {              // target++ / target-- / ++target  (type-aware: INC/DEC pick 1 vs 1n)
-      const step = op === "+" ? "INC" : "DEC";
-      if (ts.isIdentifier(target)) { writeUse(target, () => { readUse(target); emit(step); }); return; }
-      if (ts.isPropertyAccessExpression(target)) { expr(target.expression); emit("DUP"); emit(getOp(target.name.text), target.name.text); emit(step); emit(setOp(target.name.text), target.name.text); emit("POP"); return; }
-      fail(target, "unsupported ++/-- target");
+    function incDec(target, op, post) {        // x++ / ++x / x-- / --x — leaves the result (old if postfix, new if prefix). INC/DEC are type-aware (1 vs 1n)
+      const step = op === "+" ? "INC" : "DEC"; const t = tempSlot();
+      if (ts.isIdentifier(target)) { readUse(target); emit("STORE", t); writeUse(target, () => { emit("LOAD", t); emit(step); }); }
+      else if (ts.isPropertyAccessExpression(target)) { expr(target.expression); emit("DUP"); emit(getOp(target.name.text), target.name.text); emit("STORE", t); emit("LOAD", t); emit(step); emit(setOp(target.name.text), target.name.text); emit("POP"); }
+      else if (ts.isElementAccessExpression(target)) { expr(target.expression); emit("DUP"); expr(target.argumentExpression); emit("DUP"); const k = tempSlot(); emit("STORE", k); emit("INDEX"); emit("STORE", t); emit("LOAD", k); emit("LOAD", t); emit(step); emit("SETINDEX"); }
+      else fail(target, "unsupported ++/-- target");
+      if (post) emit("LOAD", t); else { emit("LOAD", t); emit(step); } // value of the expression
+      return true;
     }
     function bindStackTop(nameNode) { // a value is on the stack; store into the binding (decl/for-of/destructure)
       const id = bindingOf.get(nameNode);
@@ -363,10 +366,11 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         if (node.operator === ts.SyntaxKind.ExclamationToken) { expr(node.operand); emit("NOT"); return true; }
         if (node.operator === ts.SyntaxKind.TildeToken) { expr(node.operand); emit("BITNOT"); return true; }
         if (node.operator === ts.SyntaxKind.MinusToken) { emit("PUSH", 0); expr(node.operand); emit("BIN", "-"); return true; }
-        if (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken) { incDec(node.operand, node.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-"); return false; }
+        if (node.operator === ts.SyntaxKind.PlusToken) { expr(node.operand); emit("PUSH", 1); emit("BIN", "*"); return true; } // unary + (numeric coercion)
+        if (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken) return incDec(node.operand, node.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-", false); // ++x: new value
         fail(node, "unsupported unary");
       }
-      if (ts.isPostfixUnaryExpression(node)) { incDec(node.operand, node.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-"); return false; }
+      if (ts.isPostfixUnaryExpression(node)) return incDec(node.operand, node.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-", true); // x++: old value
       if (ts.isBinaryExpression(node)) {
         const k = node.operatorToken.kind;
         if (k === ts.SyntaxKind.EqualsToken) { assignTo(node.left, () => expr(node.right)); return false; }

@@ -292,6 +292,20 @@ check("array higher-order: find / findIndex / some / every (early-terminating)",
   };
 }`, "go", []);
 
+check("++ / -- as expression values (postfix old / prefix new), props, elements, unary +/-",
+`function go() {
+  let i = 5;
+  const post = i++;        // 5, i now 6
+  const pre = ++i;         // 7, i now 7
+  const o = { n: 10 };
+  const op = o.n++;        // 10, o.n now 11
+  const a = [1, 2, 3];
+  const ae = a[1]--;       // 2, a[1] now 1
+  const acc = [];
+  let j = 0; while (j < 3) { acc.push(j++); }   // [0,1,2]
+  return { post, pre, i, op, on: o.n, ae, a1: a[1], acc, coerce: [+"5", +"3.14", -"-2"] };
+}`, "go", []);
+
 check("instances enumerate like JS: JSON/keys/for-in see data only; computed access fires accessors",
 `class Account {
   constructor(owner, balance) { this.owner = owner; this.balance = balance; }

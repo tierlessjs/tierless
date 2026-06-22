@@ -127,7 +127,8 @@ export function serializeContinuation(cont, sourceTier) {
     const l0 = roots.length; for (const x of f.locals) roots.push(x);
     const s0 = roots.length; for (const x of f.stack) roots.push(x);
     const e0 = roots.length; for (const x of env) roots.push(x);      // closure env travels too
-    return { fn: f.fn, ip: f.ip, nl: f.locals.length, ns: f.stack.length, ne: env.length, l0, s0, e0, handlers: (f.handlers || []).map((h) => ({ ip: h.ip, sp: h.sp })) };
+    let gb; if (f.gb) { gb = roots.length; roots.push(f.gb); }        // generator boundary: ship the genObj by ref (identity-shared with the `it` local)
+    return { fn: f.fn, ip: f.ip, nl: f.locals.length, ns: f.stack.length, ne: env.length, l0, s0, e0, gb, mode: f.mode, handlers: (f.handlers || []).map((h) => ({ ip: h.ip, sp: h.sp })) };
   });
   let pending = null;
   if (cont.pending && cont.pending.name !== undefined) {        // resource boundary
@@ -152,6 +153,7 @@ export function deserializeContinuation(wire) {
     stack: vals.slice(f.s0, f.s0 + f.ns),
     env: vals.slice(f.e0, f.e0 + f.ne),
     handlers: (f.handlers || []).map((h) => ({ ip: h.ip, sp: h.sp })),
+    ...(f.gb !== undefined ? { gb: vals[f.gb], mode: f.mode } : {}),  // restore generator boundary (same genObj instance as `it`)
   }));
   let pending = null;
   if (wire.pending && wire.pending.name !== undefined)
@@ -237,9 +239,22 @@ export function run(tier, frames, host) {
     while (true) {
       const cur = frames[frames.length - 1];
       if (cur.handlers && cur.handlers.length) { const h = cur.handlers.pop(); cur.stack.length = h.sp; cur.stack.push(v); cur.ip = h.ip; return; }
+      if (cur.gb) cur.gb.done = true;                         // exception propagating past a generator boundary -> that generator is done
       frames.pop();
       if (frames.length === 0) throw new WasoUncaught(v);
     }
+  };
+  // Splice a generator's frames onto the MAIN stack, beneath a boundary frame, and
+  // let the main loop drive it. YIELD unwinds to the boundary; RET past it completes
+  // the generator; a Suspend (await INSIDE the generator) captures the whole
+  // flattened stack — so mid-generator host suspension migrates like anything else.
+  const spliceGen = (g, sendVal, mode) => {
+    const consumer = frames[frames.length - 1];
+    if (g.done) { if (mode === "obj") consumer.stack.push({ value: undefined, done: true }); else { consumer.stack.push(undefined); consumer.stack.push(true); } return; }
+    if (g.started) g.frames[g.frames.length - 1].stack.push(sendVal); else g.started = true; // resume value of the paused yield
+    frames.push({ gb: g, mode, fn: null, ip: 0, locals: [], stack: [], env: [], handlers: [] }); // boundary
+    for (const fr of g.frames) frames.push(fr);
+    g.frames = null;                                          // now live on the main stack (YIELD saves them back)
   };
   const makeGen = (callee, args) => ({ __gen__: true, frames: [{ fn: callee.fn, ip: 0, locals: args, stack: [], env: callee.env, handlers: [] }], done: false, started: false });
   // Unwind a generator's own frames to its nearest handler, seeding the thrown
@@ -392,7 +407,9 @@ export function run(tier, frames, host) {
         const v = f.stack.pop();
         frames.pop();
         if (frames.length === 0) return { type: "done", value: v };
-        frames[frames.length - 1].stack.push(v);             // return into the caller
+        const below = frames[frames.length - 1];
+        if (below.gb) { const g = below.gb; g.done = true; frames.pop(); const c = frames[frames.length - 1]; if (below.mode === "obj") c.stack.push({ value: v, done: true }); else { c.stack.push(v); c.stack.push(true); } break; } // generator ran to completion
+        below.stack.push(v);                                 // return into the caller
         break;
       }
       case "RES": {
@@ -414,7 +431,15 @@ export function run(tier, frames, host) {
         if (v !== null && typeof v === "object" && v.__waso_async__) { f.stack.pop(); f.ip++; throw new Suspend(frames, { await: v.payload }); }
         f.ip++; break; // plain value: identity
       }
-      case "YIELD":  { const v = f.stack.pop(); f.ip++; throw new Yielded(v); }   // pause this generator; resume pushes the sent value
+      case "YIELD": {                                           // pause the generator
+        const v = f.stack.pop(); f.ip++;
+        let bi = -1; for (let k = frames.length - 1; k >= 0; k--) if (frames[k].gb) { bi = k; break; }
+        if (bi < 0) throw new Yielded(v);                      // recursive driver (genReturn/genThrow/genAdvance) — caught there
+        const b = frames[bi]; b.gb.frames = frames.slice(bi + 1); frames.length = bi; // splice path: save frames, hand value to the consumer
+        const c = frames[frames.length - 1];
+        if (b.mode === "obj") c.stack.push({ value: v, done: false }); else { c.stack.push(v); c.stack.push(false); }
+        break;
+      }
       case "ITER": {                                            // normalize for-of source: array / generator / our iterator / host-iterable (Map/Set/string)
         const v = d(f.stack.pop());
         if (Array.isArray(v)) f.stack.push({ __it__: "arr", a: v, i: 0 });
@@ -424,15 +449,15 @@ export function run(tier, frames, host) {
         f.ip++; break;
       }
       case "ITERNEXT": {                                        // -> push value, then done (bool)
-        const it = f.stack.pop();
-        if (it && it.__it__ === "arr") { if (it.i < it.a.length) { f.stack.push(it.a[it.i++]); f.stack.push(false); } else { f.stack.push(undefined); f.stack.push(true); } f.ip++; break; }
-        if (isGenerator(it)) { const r = genAdvance(it, undefined); f.stack.push(r.value); f.stack.push(r.done); f.ip++; break; }
+        const it = f.stack.pop(); f.ip++;
+        if (it && it.__it__ === "arr") { if (it.i < it.a.length) { f.stack.push(it.a[it.i++]); f.stack.push(false); } else { f.stack.push(undefined); f.stack.push(true); } break; }
+        if (isGenerator(it)) { spliceGen(it, undefined, "pair"); break; } // drive the generator on the main stack
         throw new Error("not iterable");
       }
       case "GENNEXT": {                                         // it.next(sendVal) -> { value, done } (or an ordinary .next() method call)
         const sendVal = f.stack.pop(); const o = d(f.stack.pop()); f.ip++;
         if (o && o.__it__ === "arr") { f.stack.push(o.i < o.a.length ? { value: o.a[o.i++], done: false } : { value: undefined, done: true }); break; } // array iterator ignores the sent value
-        if (isGenerator(o)) { const r = genAdvance(o, sendVal); f.stack.push({ value: r.value, done: r.done }); break; }
+        if (isGenerator(o)) { spliceGen(o, sendVal, "obj"); break; } // drive the generator on the main stack
         const m = o && o.next;
         if (isClosure(m)) { frames.push({ fn: m.fn, ip: 0, locals: [sendVal], stack: [], env: m.env, handlers: [] }); break; } // user iterator object
         f.stack.push(o.next(sendVal)); break;                   // host method
