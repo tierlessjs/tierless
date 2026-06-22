@@ -35,6 +35,8 @@ const HOF = new Set(["map", "filter", "forEach", "reduce", "find", "findIndex", 
 const GLOBAL_OBJS = new Set(["Math", "JSON", "Object", "Array", "Number", "String", "Boolean", "console", "Date", "Symbol"]); // host stdlib (match waso-heap GLOBALS)
 const GLOBAL_CALLS = new Set(["parseInt", "parseFloat", "isNaN", "isFinite", "Number", "String", "Boolean", "Symbol"]); // callable globals
 const CTOR_GLOBALS = new Set(["Map", "Set", "WeakMap", "WeakSet", "Date", "Error", "RegExp"]); // host constructors via `new` (match waso-heap CTORS)
+const ERROR_CTORS = new Set(["Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError", "URIError"]); // extendable host error bases
+const BUILTIN_CTORS = new Set(["Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError", "URIError", "Array", "Map", "Set", "WeakMap", "WeakSet", "Date", "RegExp", "Object", "Number", "String", "Boolean", "Promise"]); // valid `instanceof` RHS (match HOSTCTORS in waso-core)
 const PLAIN_METHODS = new Set(["slice", "indexOf", "lastIndexOf", "includes", "join", "concat", "toUpperCase",
   "toLowerCase", "split", "trim", "trimStart", "trimEnd", "charAt", "charCodeAt", "substring", "substr", "repeat",
   "padStart", "padEnd", "startsWith", "endsWith", "replace", "replaceAll", "toFixed", "at",
@@ -162,7 +164,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   };
   { const w = (n) => { if (ts.isClassDeclaration(n) && n.name) collectClass(n); ts.forEachChild(n, w); }; w(sf); } // classes ANYWHERE (top-level + local)
   const classNameOf = (idNode) => { const b = bindingOf.get(idNode); if (b != null && classOfBinding.has(b)) return classOfBinding.get(b); if (classes.has(idNode.text)) return idNode.text; return null; };
-  for (const rec of classes.values()) { const e = rec._ext; if (e) rec.superName = (bindingOf.has(e) && classOfBinding.has(bindingOf.get(e))) ? classOfBinding.get(bindingOf.get(e)) : (classes.has(e.text) ? e.text : null); } // resolve supers (local or top-level)
+  for (const rec of classes.values()) { const e = rec._ext; if (!e) continue; const userSuper = (bindingOf.has(e) && classOfBinding.has(bindingOf.get(e))) ? classOfBinding.get(bindingOf.get(e)) : (classes.has(e.text) ? e.text : null); if (userSuper) rec.superName = userSuper; else if (bindingOf.get(e) == null && ERROR_CTORS.has(e.text)) rec.hostSuper = e.text; } // resolve supers: user class, else a host error base (extends Error/TypeError/...)
   const out = {};
   let gen = 0;
   const neededBuilders = new Set();   // classes whose class-object builder (%Name) must be generated
@@ -177,6 +179,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     emit("CLSGET", cname); emit("DUP"); emit("ISNULLISH"); emit("JMPF", ready); emit("POP"); // cached -> return it
     const co = tempSlot(); emit("NEWOBJ"); emit("STORE", co);
     emit("LOAD", co); emit("PUSH", chain.map((c) => c.name)); emit("SETPROP", "__class__"); emit("POP");
+    emit("LOAD", co); emit("CLSPUT", cname); emit("POP"); // cache BEFORE static methods/inits so a self-reference (e.g. `static b = C.a+1`) resolves to the in-progress object instead of re-entering the builder
     for (const cls of chain) for (const m of cls.smethods) { const info = cls.compiled[`static ${m.name}`]; emit("LOAD", co); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.staticThisId ? ["L", co] : provide(id))), !!m.node.asteriskToken); emit("SETPROP", m.name); emit("POP"); }
     for (const cls of chain) for (const fld of cls.sfields) { emit("LOAD", co); expr(fld.init); emit("SETPROP", fld.name); emit("POP"); } // init runs code
     const accs = new Map();
@@ -191,13 +194,14 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       emit("LOAD", co); emit("LOAD", tbl); emit("SETPROP", "__accessors__"); emit("POP");
     }
     for (const cls of chain) for (const m of cls.cmethods) if (m.static) { emit("LOAD", co); expr(m.keyExpr); emit("MAKECLOSURE", m.compiled.prog, m.compiled.freeIds.map((id) => (id === cls.staticThisId ? ["L", co] : provide(id))), m.compiled.gen); emit("SETINDEX"); }
-    emit("LOAD", co); emit("CLSPUT", cname); emit("RET");           // cache & return
+    emit("LOAD", co); emit("RET");                                 // already cached above; return it
     mark(ready); emit("RET");                                       // cached value already on stack
   };
   // Implicit constructor (when a class declares none): super(...args) if derived,
   // then own field inits. So `super()` always has a target and `new` always calls a ctor.
   const buildImplicitCtor = (rec, { emit, expr, provide, capture }) => {
     if (rec.superName) { const sup = classes.get(rec.superName); compileClass(rec.superName); const info = sup.compiled.__ctor__; emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === sup.thisId ? ["E", capture(rec.thisId)] : provide(id)))); emit("ARGUMENTS"); emit("CALLVS"); emit("POP"); }
+    else if (rec.hostSuper) { emit("LOADENV", capture(rec.thisId)); emit("PUSH", rec.hostSuper); emit("SETHIDDEN", "name"); emit("POP"); emit("LOADENV", capture(rec.thisId)); emit("ARGUMENTS"); emit("PUSH", 0); emit("INDEX"); emit("SETHIDDEN", "message"); emit("POP"); } // implicit Error subclass ctor: name + message(args[0])
     for (const f of rec.fields) { emit("LOADENV", capture(rec.thisId)); expr(f.init); emit("SETPROP", f.name); emit("POP"); }
     emit("PUSH", undefined); emit("RET");
   };
@@ -206,7 +210,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     const rec = classes.get(cname); if (rec.compiled) return rec;
     if (rec.superName) compileClass(rec.superName);
     rec.compiled = {};
-    const o = { thisId: rec.thisId, superName: rec.superName };
+    const o = { thisId: rec.thisId, superName: rec.superName, hostSuper: rec.hostSuper };
     const cprog = `${cname}#constructor`; // ctor FIRST so a method body that does `new ThisClass()` finds it mid-compile
     if (rec.ctor) { const c = compileFn(rec.ctor, cprog, { ...o, fieldInits: rec.fields, ctorOf: cname }); out[cprog] = c; rec.compiled.__ctor__ = { prog: cprog, freeIds: c.freeIds }; }
     else { const c = compileFn({ parameters: [] }, cprog, { ...o, ctorOf: cname, emitBody: (ctx) => buildImplicitCtor(rec, ctx) }); out[cprog] = c; rec.compiled.__ctor__ = { prog: cprog, freeIds: c.freeIds }; } // synthesized (this/super available for field inits)
@@ -429,7 +433,9 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const rec = compileClass(cname);
         const chain = []; for (let c = rec; c; c = c.superName ? compileClass(c.superName) : null) chain.unshift(c); // base-first
         const inst = tempSlot(); emit("NEWOBJ"); emit("STORE", inst);
-        emit("LOAD", inst); emit("PUSH", chain.map((c) => c.name)); emit("SETHIDDEN", "__class__"); emit("POP"); // non-enumerable: JSON/for-in/keys see only data fields
+        const hostBase = chain[0].hostSuper; // extends a host Error -> prepend its ancestry so `instanceof Error` holds
+        const classNames = (hostBase ? (hostBase === "Error" ? ["Error"] : ["Error", hostBase]) : []).concat(chain.map((c) => c.name));
+        emit("LOAD", inst); emit("PUSH", classNames); emit("SETHIDDEN", "__class__"); emit("POP"); // non-enumerable: JSON/for-in/keys see only data fields
         for (const cls of chain) for (const m of cls.methods) { const info = cls.compiled[m.name]; emit("LOAD", inst); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.thisId ? ["L", inst] : provide(id))), !!m.node.asteriskToken); emit("SETHIDDEN", m.name); emit("POP"); } // methods non-enumerable (derived overrides base)
         const accs = new Map(); // name -> { get?: {cls,info}, set?: {cls,info} }, derived overriding base
         for (const cls of chain) for (const a of cls.accessors) { const e = accs.get(a.name) || {}; e[a.kind] = { cls, info: cls.compiled[`${a.kind} ${a.name}`] }; accs.set(a.name, e); }
@@ -487,7 +493,12 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         if (k === ts.SyntaxKind.AmpersandAmpersandEqualsToken) { logicalAssignExpr(node.left, "&&", node.right); return true; }
         if (k === ts.SyntaxKind.BarBarEqualsToken) { logicalAssignExpr(node.left, "||", node.right); return true; }
         if (k === ts.SyntaxKind.QuestionQuestionEqualsToken) { logicalAssignExpr(node.left, "??", node.right); return true; }
-        if (k === ts.SyntaxKind.InstanceOfKeyword) { const cn = ts.isIdentifier(node.right) ? classNameOf(node.right) : null; if (!cn) fail(node, "instanceof needs a class name"); expr(node.left); emit("ISA", cn); return true; }
+        if (k === ts.SyntaxKind.InstanceOfKeyword) {
+          const cn = ts.isIdentifier(node.right) ? classNameOf(node.right) : null;
+          if (cn) { expr(node.left); emit("ISA", cn); return true; } // user class
+          if (ts.isIdentifier(node.right) && bindingOf.get(node.right) == null && BUILTIN_CTORS.has(node.right.text)) { expr(node.left); emit("ISAB", node.right.text); return true; } // Error/TypeError/Array/Map/...
+          fail(node, "instanceof needs a class or built-in constructor");
+        }
         const op = BINOP[k]; if (!op) fail(node, "unsupported operator");
         expr(node.left); expr(node.right); emit("BIN", op); return true;
       }
@@ -564,6 +575,12 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       emit("LOAD", kind === "reduce" ? acc : outv != null ? outv : res); return true;
     }
 
+    function superHostCall(args) {                 // super(msg) when extending a host Error: set message (+ default name), like Error.call(this, msg)
+      const t = capture(opts.thisId);
+      emit("LOADENV", t); emit("PUSH", opts.hostSuper); emit("SETHIDDEN", "name"); emit("POP"); // non-enum default (overridable via this.name=)
+      if (args.length) { emit("LOADENV", t); expr(args[0]); emit("SETHIDDEN", "message"); emit("POP"); } // Error message: own, non-enumerable (invisible to JSON/keys)
+      emit("PUSH", undefined); return true;
+    }
     function superCall(supProg, supThisId, args) {
       const sup = classes.get(opts.superName); compileClass(opts.superName);
       const info = supProg === "__ctor__" ? sup.compiled.__ctor__ : sup.compiled[supProg];
@@ -592,7 +609,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         if (m === "race") { expr(a[0]); emit("PUSH", 0); emit("INDEX"); emit("AWAIT"); return true; } // sequential: first element
         fail(node, "unsupported Promise." + m);
       }
-      if (callee.kind === ts.SyntaxKind.SuperKeyword) { if (!opts.superName) fail(node, "super outside a derived class"); return superCall("__ctor__", null, node.arguments); }
+      if (callee.kind === ts.SyntaxKind.SuperKeyword) { if (opts.hostSuper) return superHostCall(node.arguments); if (!opts.superName) fail(node, "super outside a derived class"); return superCall("__ctor__", null, node.arguments); }
       if (ts.isPropertyAccessExpression(callee) && callee.expression.kind === ts.SyntaxKind.SuperKeyword) { if (!opts.superName) fail(node, "super outside a derived class"); return superCall(callee.name.text, null, node.arguments); }
       if (ts.isPropertyAccessExpression(callee)) {
         const resName = `${callee.expression.getText(sf)}.${callee.name.text}`;

@@ -124,6 +124,51 @@ d("bigint mixed throws", "function go(){ try{ return 1n+1; }catch(e){return 'thr
 d("bigint division truncates", "function go(){ return [(7n/2n).toString(),(-7n/2n).toString()]; }");
 d("number edge", "function go(){ return [Number.MAX_SAFE_INTEGER,Number.isInteger(5.0),(0.1+0.2).toFixed(2),Math.round(2.5),Math.round(-2.5)]; }");
 
+console.log("— array built-ins —");
+d("sort with comparator", "function go(){ return [3,1,2,10].sort((a,b)=>a-b); }");
+d("sort default lexicographic", "function go(){ return [10,2,1,20].sort(); }");
+d("splice removes and inserts", "function go(){ const a=[1,2,3,4,5]; const r=a.splice(1,2,'a','b'); return [a,r]; }");
+d("flatMap", "function go(){ return [1,2,3].flatMap(x=>[x,x*10]); }");
+d("flat depth", "function go(){ return [1,[2,[3,[4]]]].flat(2); }");
+d("findLast/findLastIndex", "function go(){ return [[1,2,3,4].findLast(x=>x%2===1),[1,2,3,4].findLastIndex(x=>x%2===1)]; }");
+d("reduceRight", "function go(){ return ['a','b','c'].reduceRight((acc,x)=>acc+x,''); }");
+d("fill and copyWithin", "function go(){ return [[1,2,3,4].fill(0,1,3),[1,2,3,4,5].copyWithin(0,3)]; }");
+d("Array.of and Array.from iterable", "function go(){ return [Array.of(1,2,3),Array.from('ab'),Array.from({length:3},(_, i)=>i)]; }");
+d("array indexOf with NaN and includes", "function go(){ return [[NaN].indexOf(NaN),[NaN].includes(NaN),[1,2].at(-1)]; }");
+d("concat spreads arrays not values", "function go(){ return [1].concat([2,3],4,[5]); }");
+d("array every/some short circuit", "function go(){ let c=0; const r=[1,2,3,4].some(x=>{c++;return x>2;}); return [r,c]; }");
+d("join with nested and nullish", "function go(){ return [1,null,2,undefined,3].join('-'); }");
+
+console.log("— object built-ins —");
+d("Object.entries/values/fromEntries", "function go(){ const o={a:1,b:2}; const e=Object.entries(o); return [e,Object.values(o),Object.fromEntries(e.map(([k,v])=>[k,v*2]))]; }");
+d("Object.assign merges", "function go(){ return Object.assign({a:1},{b:2},{a:9,c:3}); }");
+d("Object.keys order numeric then insertion", "function go(){ const o={b:1,2:1,a:1,1:1}; return Object.keys(o); }");
+d("Object.freeze prevents write", "function go(){ const o=Object.freeze({a:1}); try{o.a=2;}catch(e){} return [o.a,Object.isFrozen(o)]; }");
+d("Object.getOwnPropertyNames includes non-enum", "function go(){ const o={a:1}; Object.defineProperty(o,'h',{value:2,enumerable:false}); return [Object.keys(o),Object.getOwnPropertyNames(o).sort()]; }");
+d("hasOwnProperty vs in", "function go(){ const o={a:1}; return [o.hasOwnProperty('a'),o.hasOwnProperty('toString'),'toString' in o]; }");
+d("Object.create with null proto", "function go(){ const o=Object.create(null); o.x=1; return [o.x,Object.keys(o)]; }");
+
+console.log("— error semantics —");
+d("Error message and name", "function go(){ const e=new Error('boom'); return [e.message,e.name,e instanceof Error]; }");
+d("custom error subclass", "function go(){ class MyErr extends Error{constructor(m){super(m);this.name='MyErr';}} try{throw new MyErr('x');}catch(e){return [e.message,e.name,e instanceof Error,e instanceof MyErr];} }");
+d("TypeError instanceof Error", "function go(){ try{ null.foo; }catch(e){ return [e instanceof TypeError, e instanceof Error]; } }");
+d("throw and catch preserves identity", "function go(){ const o={code:42}; try{throw o;}catch(e){return e===o;} }");
+d("re-throw in catch", "function go(){ function f(){try{throw 'a';}catch(e){throw e+'b';}} try{f();}catch(e){return e;} }");
+
+console.log("— optional chaining & nullish —");
+d("optional chain short circuits", "function go(){ const o={a:{b:null}}; return [o?.a?.b?.c, o?.x?.y, o?.a?.b ?? 'def']; }");
+d("optional call", "function go(){ const o={f(){return 1;}}; return [o.f?.(), o.g?.()]; }");
+d("optional element access", "function go(){ const o=null; const a=[1,2]; return [o?.[0], a?.[1]]; }");
+d("nullish assignment", "function go(){ const o={a:null,b:2}; o.a??=5; o.b??=9; return [o.a,o.b]; }");
+
+console.log("— closures, this, misc —");
+d("IIFE returning object methods sharing state", "function go(){ const m=(()=>{let n=0;return {inc(){return ++n;},dec(){return --n;}};})(); m.inc();m.inc(); return [m.inc(),m.dec()]; }");
+d("getter using other getter", "function go(){ const o={r:5,get area(){return this.r*this.r*3;},get desc(){return 'A='+this.area;}}; return o.desc; }");
+d("class private field and method", "function go(){ class C{#x=10;#double(){return this.#x*2;}val(){return this.#double();}} return new C().val(); }");
+d("static block / static init order", "function go(){ class C{static a=1;static b=C.a+1;} return [C.a,C.b]; }");
+d("chained array transforms", "function go(){ return [1,2,3,4,5,6].filter(x=>x%2===0).map(x=>x*x).reduce((a,b)=>a+b,0); }");
+d("spread call with computed args", "function go(){ const f=(...xs)=>xs.reduce((a,b)=>a+b,0); const arr=[1,2,3]; return f(...arr,4,...[5,6]); }");
+
 console.log(`\n${"=".repeat(64)}`);
 console.log(`${fail === 0 ? "NO DIVERGENCES" : fail + " DIVERGENCES"} — ${pass}/${pass + fail + caveat} matched Node` + (caveat ? `, ${caveat} documented caveat${caveat > 1 ? "s" : ""}` : "") + (fail ? `\nDivergent: ${fails.join(", ")}` : ""));
 if (fail) process.exitCode = 1;

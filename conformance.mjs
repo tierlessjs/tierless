@@ -187,6 +187,8 @@ await (async () => {
 
   section("control flow & handlers across the wire");
   await w("try/catch handler survives, catches post-resume throw", `async function go(){try{const y=await ckpt(5);throw y+1;}catch(e){return"caught:"+e;}}`);
+  await w("custom Error subclass survives wire, instanceof still holds", `class AppErr extends Error{constructor(m,c){super(m);this.name='AppErr';this.code=c;}} async function go(){const e=new AppErr('boom',42);await ckpt(0);return [e.message,e.name,e.code,e instanceof Error,e instanceof AppErr];}`);
+  await w("error thrown across a checkpoint, caught by type", `class NotFound extends Error{} async function go(){try{await ckpt(0);throw new NotFound('missing');}catch(e){return [e instanceof Error,e instanceof NotFound,e.message];}}`);
   await w("finally runs after a migration", `async function go(){const log=[];try{await ckpt(0);log.push("body");}finally{log.push("fin");}return log;}`);
   await w("loop state + accumulator across many checkpoints", `async function go(){let s=0;for(let i=0;i<5;i++){s=await ckpt(s+i);}return s;}`, "go", [], 5);
   await w("Promise.all of resources resolved concurrently across the wire", `async function go(){const xs=await Promise.all([ckpt(1),ckpt(2),ckpt(3)]);return xs.reduce((a,b)=>a+b,0);}`);
