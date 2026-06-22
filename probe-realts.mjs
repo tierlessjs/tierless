@@ -208,6 +208,29 @@ check("static getter/setter on the class object",
 }
 function go() { const a = Config.level; Config.level = -5; const b = Config.level; Config.level = 9; return [a, b, Config.level]; }`, "go", []);
 
+check("generators: yield, for-of consumption, return value, two-way next()",
+`function* range(a, b) { for (let i = a; i < b; i++) { yield i; } return "done"; }
+function* fib(n) { let x = 0, y = 1; for (let i = 0; i < n; i++) { yield x; const t = x + y; x = y; y = t; } }
+function go() {
+  const out = [];
+  for (const a of range(1, 5)) { out.push(a); }   // for-of drives the generator
+  const fibs = [];
+  for (const b of fib(8)) { fibs.push(b); }
+  // explicit next(): two-way (a sent value becomes the yield expression's value)
+  function* echo() { const a = yield "first"; const b = yield a; return b; }
+  const it = echo();
+  const r0 = it.next();          // { value: "first", done: false }
+  const r1 = it.next("X");       // a -> "X"; yields "X"
+  const r2 = it.next("Y");       // b -> "Y"; returns "Y"
+  return { out, fibs, r0, r1, r2 };
+}`, "go", []);
+
+check("generators: yield* delegation + spread-via-for-of into array",
+`function* inner() { yield 1; yield 2; return 99; }
+function* outer() { yield 0; const r = yield* inner(); yield r; yield 3; }
+function collect(it) { const out = []; for (const v of it) { out.push(v); } return out; }
+function go() { return collect(outer()); }`, "go", []);
+
 check("for-in + computed object keys + delete",
 `function go(o) {
   const out = {};

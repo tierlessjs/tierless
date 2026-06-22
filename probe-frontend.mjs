@@ -198,8 +198,29 @@ const g = runMigrating("task");
 check(`the suspended frame was the getter itself (paused mid-access)`, g.migratedInsideGetter);
 check(`getter resumes on the other tier and the access completes (got ${g.value}, expected 3)`, g.value === 3);
 
+// ---- Section J: a half-consumed GENERATOR survives a migration -------------
+// A generator's state is ordinary continuation frames (plain data), so a paused,
+// partly-consumed generator rides the wire as part of the continuation and keeps
+// yielding correctly on the other tier. Native JS generators are engine-internal
+// and cannot be serialized at all.
+console.log("\n--- J. a paused generator survives a migration mid-await ---");
+loadModule(PROGRAM, `
+  function* counter() { let i = 0; while (true) { yield i; i = i + 1; } }   // infinite, stateful
+  function task() {
+    const it = counter();
+    const a = it.next().value;     // 0  (consume one before migrating)
+    const x = await ext();         // suspend & migrate — the paused generator is a local
+    const b = it.next().value;     // 1  (generator resumes AFTER the wire)
+    const c = it.next().value;     // 2
+    return [a, x, b, c];
+  }
+`, { entry: "task", resources: ["ext"] });
+const gen = await runViaWire("task"); // serializes/deserializes the continuation (incl. the generator) at the await
+check(`generator state survived the wire and kept counting (got ${JSON.stringify(gen.value)}, expected [0,5,1,2])`,
+  JSON.stringify(gen.value) === JSON.stringify([0, 5, 1, 2]));
+
 console.log(`\nResult: ${pass ? "all PASS" : "FAILURES"} — closures, mutable shared captures (migration-safe),`);
 console.log(`lexical shadowing, while/break/continue/&&/||/?:/+=, source-mapped continuations,`);
-console.log(`a try/catch handler that survives migration mid-await, and a getter that`);
-console.log(`migrates mid property-access (which native JS getters cannot do).`);
+console.log(`a try/catch handler that survives migration mid-await, a getter that migrates`);
+console.log(`mid property-access, and a paused generator that migrates (neither possible in native JS).`);
 if (!pass) process.exitCode = 1;

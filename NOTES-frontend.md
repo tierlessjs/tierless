@@ -231,6 +231,39 @@ copy of base, not prototype-shared — diverges from JS only in that one case).
 Verified vs eval: static method+field+mutation+static-this+factory; 3-level static
 inheritance with override; static getter/setter.
 
+## #4 step 16 (done — generators; deferred build-out 4 of 4)
+Generators, the on-thesis one: a generator's state IS our continuation frame, so
+`yield` is cheap and the payoff (migration) falls out.
+- `yield` = YIELD op: a LOCAL/bounded suspension (throws Yielded out of the sub-run
+  driving the generator), distinct from Suspend (whole-program migrate). `yield e`
+  leaves the sent value as the expression's value; two-way `next(v)` works.
+- a generator object is an iterator wrapping its OWN paused frame stack
+  ({ __gen__, frames, done, started }). `gen()` -> GENMAKE builds it (top-level
+  `function*` and nested `function*` decls; via the closure so env/`this` ride
+  along). genAdvance drives it (a recursive run() on its frames to the next yield
+  or completion).
+- 4b iterator protocol: for-of now lowers to ITER/ITERNEXT and consumes arrays AND
+  generators uniformly; `it.next(v)` -> GENNEXT (falls back to a plain `.next()`
+  method call for non-generators); `yield*` delegates (drives an inner iterator,
+  result = its return value; sent values not forwarded — noted).
+- 4c migration (the headline): a generator's frames are plain data, so a paused,
+  half-consumed generator rides the graph codec UNCHANGED as part of the
+  continuation and keeps yielding on the other tier (probe-frontend §J:
+  counter() consumed to 0, migrated mid-await, resumes 1,2). Native JS generators
+  are engine-internal and cannot serialize at all — same suspend-but-not-serialize
+  gap as async.
+Verified vs eval (probe-realts): range/fib via for-of, two-way echo via next(),
+yield* delegation with return value.
+Deferred tail (4d, noted): generator METHODS (`*m()` — needs call-site knowledge
+of the receiver's class), `.return()`/`.throw()` + finally-on-abandon, async
+generators (`for await`), spread `[...gen()]` (APPENDALL assumes a host-iterable).
+
+## Next real gap (surfaced building generators): BLOCK SCOPING
+Scoping is function-scoped, so two same-named block-locals in one function collide
+(`for (const v of a){} for (const v of b){}` — all reads resolve to the last `v`).
+Common in real code; the most impactful remaining correctness gap. Fix = proper
+lexical (per-block) scopes in resolveBindings, not a frontend lowering tweak.
+
 ## Don't forget
 - **Source maps**: NJS captured the stack but deferred line/file metadata. Our
   §10.6. Design it into the transform from the start, don't bolt on.

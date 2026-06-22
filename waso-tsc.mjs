@@ -83,7 +83,8 @@ function resolveBindings(sf) {
 export function compileModule(source, { resources = [], entry = "main", file = "app.ts" } = {}) {
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.ES2020, true);
   const topFns = new Map();
-  for (const s of sf.statements) if (ts.isFunctionDeclaration(s) && s.name) topFns.set(s.name.text, s);
+  const generatorFns = new Set();   // top-level `function*` names -> a call makes an iterator, not a normal call
+  for (const s of sf.statements) if (ts.isFunctionDeclaration(s) && s.name) { topFns.set(s.name.text, s); if (s.asteriskToken) generatorFns.add(s.name.text); }
   // Classes: an instance is an object whose method properties are closures
   // capturing `this`; the constructor (with field inits prepended) runs at `new`.
   const classes = new Map();
@@ -106,6 +107,9 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   }
   const resourceSet = new Set(resources);
   const { bindingOf, bindingsByFn, boxed } = resolveBindings(sf);
+  const generatorBindings = new Set();   // nested `function*` decls -> a call on that binding makes an iterator
+  const markGens = (n) => { if ((ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n)) && n.asteriskToken && n.name && bindingOf.has(n.name)) generatorBindings.add(bindingOf.get(n.name)); ts.forEachChild(n, markGens); };
+  markGens(sf);
   const out = {};
   let gen = 0;
   const neededBuilders = new Set();   // classes whose class-object builder (%Name) must be generated
@@ -289,6 +293,16 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       }
       if (ts.isIdentifier(node)) { readUse(node); return true; }
       if (ts.isAwaitExpression(node)) { expr(node.expression); emit("AWAIT"); return true; }
+      if (ts.isYieldExpression(node)) {
+        if (node.asteriskToken) {                                 // yield* E: drive E's iterator, yielding each; result = E's return value
+          const it = tempSlot(); expr(node.expression); emit("ITER"); emit("STORE", it);
+          const loop = label("ys"), body = label("ysb"), end = label("yse"); mark(loop);
+          emit("LOAD", it); emit("ITERNEXT"); emit("JMPF", body); emit("JMP", end);  // done -> return value stays on stack
+          mark(body); emit("YIELD"); emit("POP"); emit("JMP", loop);                 // yield value; drop the sent value (not forwarded)
+          mark(end); return true;
+        }
+        node.expression ? expr(node.expression) : emit("PUSH", undefined); emit("YIELD"); return true; // YIELD leaves the sent value as the expr's value
+      }
       if (ts.isTypeOfExpression(node)) { expr(node.expression); emit("TYPEOF"); return true; }
       if (ts.isVoidExpression(node)) { expr(node.expression); emit("POP"); emit("PUSH", undefined); return true; }
       if (ts.isRegularExpressionLiteral(node)) { const m = node.text.match(/^\/(.*)\/([a-z]*)$/s); emit("PUSH", new RegExp(m[1], m[2])); return true; }
@@ -388,6 +402,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const resName = `${callee.expression.getText(sf)}.${callee.name.text}`;
         if (resourceSet.has(resName)) { node.arguments.forEach((a) => expr(a)); emit("RES", resName, node.arguments.length); return true; }
         const m = callee.name.text;
+        if (m === "next" && node.arguments.length <= 1) { expr(callee.expression); node.arguments[0] ? expr(node.arguments[0]) : emit("PUSH", undefined); emit("GENNEXT"); return true; } // it.next(v)
         if (m === "push") { expr(callee.expression); expr(node.arguments[0]); emit("ARRPUSH"); return false; }
         if (HOF.has(m)) return hof(callee.expression, m, node.arguments);
         if (PLAIN_METHODS.has(m)) { expr(callee.expression); node.arguments.forEach((a) => expr(a)); emit("CALLM", m, node.arguments.length); return true; }
@@ -395,6 +410,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       }
       if (ts.isIdentifier(callee) && bindingOf.get(callee) == null && !topFns.has(callee.text) && resourceSet.has(callee.text)) { node.arguments.forEach((a) => expr(a)); emit("RES", callee.text, node.arguments.length); return true; }
       if (ts.isIdentifier(callee) && callee.text === "BigInt" && bindingOf.get(callee) == null && !topFns.has(callee.text)) { expr(node.arguments[0]); emit("TOBIG"); return true; } // BigInt(x) conversion
+      if (ts.isIdentifier(callee)) { const bid = bindingOf.get(callee); if ((bid == null && generatorFns.has(callee.text)) || (bid != null && generatorBindings.has(bid))) { readUse(callee); node.arguments.forEach((a) => expr(a)); emit("GENMAKE", node.arguments.length); return true; } } // gen() -> iterator (top-level or nested function*)
       return closureCall(callee, node.arguments);
     }
     function closureCall(callee, args) {
@@ -494,16 +510,17 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         cf.push({ loop: true, brk: end, cont: step, name: lbl }); stmt(node.statement); cf.pop();
         mark(step); emit("LOAD", idx); emit("PUSH", 1); emit("BIN", "+"); emit("STORE", idx); emit("JMP", loop); mark(end); return;
       }
-      if (ts.isForOfStatement(node)) {
-        const lbl = takeLabel(); const iter = tempSlot(), idx = tempSlot();
-        expr(node.expression); emit("STORE", iter); emit("PUSH", 0); emit("STORE", idx);
-        const loop = label("loop"), step = label("step"), end = label("end"); mark(loop);
-        emit("LOAD", idx); emit("LOAD", iter); emit("GETPROP", "length"); emit("BIN", "<"); emit("JMPF", end);
+      if (ts.isForOfStatement(node)) {                            // iterator protocol: arrays AND generators/iterators
+        const lbl = takeLabel(); const iter = tempSlot();
+        expr(node.expression); emit("ITER"); emit("STORE", iter);
+        const loop = label("loop"), body = label("body"), step = label("step"), end = label("end"); mark(loop);
+        emit("LOAD", iter); emit("ITERNEXT");                     // -> value, done
+        emit("JMPF", body); emit("POP"); emit("JMP", end);        // done -> drop value, exit
+        mark(body);                                               // stack: [value]
         const decl = node.initializer.declarations[0];
-        emit("LOAD", iter); emit("LOAD", idx); emit("INDEX");
         if (ts.isIdentifier(decl.name)) bindStackTop(decl.name); else { const t = tempSlot(); emit("STORE", t); bindPattern(decl.name, t); }
         cf.push({ loop: true, brk: end, cont: step, name: lbl }); stmt(node.statement); cf.pop();
-        mark(step); emit("LOAD", idx); emit("PUSH", 1); emit("BIN", "+"); emit("STORE", idx); emit("JMP", loop); mark(end); return;
+        mark(step); emit("JMP", loop); mark(end); return;         // ITERNEXT advances the iterator
       }
       if (ts.isBreakStatement(node)) { const i = node.label ? targetForLabel(node.label.text, "break") : targetFor("break"); if (i < 0) fail(node, "break has no target"); unwind(i); emit("JMP", cf[i].brk); return; }
       if (ts.isContinueStatement(node)) { const i = node.label ? targetForLabel(node.label.text, "continue") : targetFor("continue"); if (i < 0) fail(node, "continue has no target"); unwind(i); emit("JMP", cf[i].cont); return; }

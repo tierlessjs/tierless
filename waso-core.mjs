@@ -187,6 +187,16 @@ export class Miss {
 // Thrown out of run() when a Waso `throw` unwinds past all frames (uncaught).
 export class WasoUncaught { constructor(value) { this.value = value; } }
 
+// A `yield` suspends ONLY the generator's own frame stack (a local, bounded
+// suspension), unwinding out of the sub-run() that drives the generator — not the
+// whole interpreter. Distinct from Suspend (which migrates the entire program).
+export class Yielded { constructor(value) { this.value = value; } }
+
+// A generator object: an iterator wrapping its own paused frame stack. Because the
+// frames are ordinary continuation frames, a half-consumed generator is itself
+// serializable/migratable (frame-stack codec) — native JS generators are not.
+export function isGenerator(x) { return x !== null && typeof x === "object" && x.__gen__ === true; }
+
 // A first-class closure: a code pointer (fn name) + a captured environment. The
 // env is plain data, so a closure — and a continuation holding one — serializes
 // through the graph codec (code travels by reference, env by value).
@@ -224,6 +234,15 @@ export function run(tier, frames, host) {
       frames.pop();
       if (frames.length === 0) throw new WasoUncaught(v);
     }
+  };
+  // Drive a generator's own frame stack to the next yield (a recursive run on its
+  // frames; YIELD unwinds back here) or to completion (RET past its base frame).
+  const genAdvance = (g, sendVal) => {
+    if (g.done) return { value: undefined, done: true };
+    if (g.started) g.frames[g.frames.length - 1].stack.push(sendVal); // resume: the sent value IS the yield expression's value
+    g.started = true;
+    try { const r = run(tier, g.frames, host); g.done = true; return { value: r.value, done: true }; }
+    catch (e) { if (e instanceof Yielded) return { value: e.value, done: false }; throw e; } // Suspend/Miss propagate (mid-gen migration)
   };
   while (true) {
     const f = frames[frames.length - 1];
@@ -335,6 +354,28 @@ export function run(tier, frames, host) {
         if (v !== null && typeof v === "object" && v.__waso_reject__) { f.stack.pop(); doThrow(v.value); break; }
         if (v !== null && typeof v === "object" && v.__waso_async__) { f.stack.pop(); f.ip++; throw new Suspend(frames, { await: v.payload }); }
         f.ip++; break; // plain value: identity
+      }
+      case "YIELD":  { const v = f.stack.pop(); f.ip++; throw new Yielded(v); }   // pause this generator; resume pushes the sent value
+      case "GENMAKE": {                                         // gen(args) -> an iterator wrapping a fresh paused frame stack
+        const argc = ins[1]; const args = [];
+        for (let k = 0; k < argc; k++) args.unshift(f.stack.pop());
+        const callee = f.stack.pop();                           // a closure: carries fn + env (env=[] top-level, `this`+captures for a method)
+        f.stack.push({ __gen__: true, frames: [{ fn: callee.fn, ip: 0, locals: args, stack: [], env: callee.env, handlers: [] }], done: false, started: false });
+        f.ip++; break;
+      }
+      case "ITER": { const v = d(f.stack.pop()); f.stack.push(Array.isArray(v) ? { __it__: "arr", a: v, i: 0 } : v); f.ip++; break; } // normalize for-of source
+      case "ITERNEXT": {                                        // -> push value, then done (bool)
+        const it = f.stack.pop();
+        if (it && it.__it__ === "arr") { if (it.i < it.a.length) { f.stack.push(it.a[it.i++]); f.stack.push(false); } else { f.stack.push(undefined); f.stack.push(true); } f.ip++; break; }
+        if (isGenerator(it)) { const r = genAdvance(it, undefined); f.stack.push(r.value); f.stack.push(r.done); f.ip++; break; }
+        throw new Error("not iterable");
+      }
+      case "GENNEXT": {                                         // it.next(sendVal) -> { value, done } (or an ordinary .next() method call)
+        const sendVal = f.stack.pop(); const o = d(f.stack.pop()); f.ip++;
+        if (isGenerator(o)) { const r = genAdvance(o, sendVal); f.stack.push({ value: r.value, done: r.done }); break; }
+        const m = o && o.next;
+        if (isClosure(m)) { frames.push({ fn: m.fn, ip: 0, locals: [sendVal], stack: [], env: m.env, handlers: [] }); break; } // user iterator object
+        f.stack.push(o.next(sendVal)); break;                   // host method
       }
       case "MKREJECT": { f.stack.push({ __waso_reject__: true, value: f.stack.pop() }); f.ip++; break; } // Promise.reject(e)
       case "THROW": { doThrow(f.stack.pop()); break; }
