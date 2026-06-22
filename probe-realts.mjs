@@ -266,6 +266,33 @@ function go() {
   return { first, ret, done, log, c0, c1, c2 };
 }`, "go", []);
 
+check("destructuring defaults + rest (object & array, nested, for-of)",
+`function go() {
+  const { a = 5, b = 2, ...restO } = { a: 10, c: 3, d: 4 };
+  const [x = 1, y = 2, ...restA] = [100, undefined, 7, 8];
+  const { p: { q = 9 } = {} } = { p: {} };
+  const collected = [];
+  for (const { v = -1 } of [{ v: 1 }, {}, { v: 3 }]) { collected.push(v); }
+  return { a, b, restO, x, y, restA, q, collected };
+}`, "go", []);
+
+check("yield* forwards sent values + delegates return value",
+`function* inner() { const a = yield "first"; const b = yield a; return [a, b]; }
+function* outer() { const r = yield* inner(); yield r; }
+function go() {
+  const it = outer();
+  return [it.next().value, it.next("A").value, it.next("B").value, it.next().value, it.next().done];
+}`, "go", []);
+
+check("functions/generators with no explicit return yield undefined (not 0)",
+`function go() {
+  function noReturn() {}
+  function emptyReturn(x) { if (x) { return; } return 5; }
+  function* genNoReturn() { yield 1; }
+  const it = genNoReturn();
+  return [noReturn(), emptyReturn(true), emptyReturn(false), it.next().value, it.next().value, it.next().done];
+}`, "go", []);
+
 check("block scoping: same name in sibling/nested blocks, shadowing",
 `function go() {
   const out = [];

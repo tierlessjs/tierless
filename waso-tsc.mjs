@@ -251,9 +251,30 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (boxed.has(id)) { const t = tempSlot(); emit("STORE", t); emit("NEWOBJ"); emit("LOAD", t); emit("SETPROP", "v"); emit("STORE", slotOf.get(id)); }
       else emit("STORE", slotOf.get(id));
     }
+    function bindOne(el, pushRaw) {              // raw value -> apply default (if value===undefined) -> bind name/pattern
+      pushRaw();
+      if (el.initializer) { emit("DUP"); emit("PUSH", undefined); emit("BIN", "==="); const skip = label("dflt"); emit("JMPF", skip); emit("POP"); expr(el.initializer); mark(skip); }
+      if (ts.isIdentifier(el.name)) bindStackTop(el.name);
+      else { const t = tempSlot(); emit("STORE", t); bindPattern(el.name, t); }
+    }
     function bindPattern(pattern, srcSlot) {
-      if (ts.isObjectBindingPattern(pattern)) { for (const el of pattern.elements) { const key = (el.propertyName || el.name).text; emit("LOAD", srcSlot); emit("GETPROP", key); if (ts.isIdentifier(el.name)) bindStackTop(el.name); else { const t = tempSlot(); emit("STORE", t); bindPattern(el.name, t); } } return; }
-      if (ts.isArrayBindingPattern(pattern)) { pattern.elements.forEach((el, i) => { if (ts.isOmittedExpression(el)) return; emit("LOAD", srcSlot); emit("PUSH", i); emit("INDEX"); if (ts.isIdentifier(el.name)) bindStackTop(el.name); else { const t = tempSlot(); emit("STORE", t); bindPattern(el.name, t); } }); return; }
+      if (ts.isObjectBindingPattern(pattern)) {
+        const bound = [];
+        for (const el of pattern.elements) {
+          if (el.dotDotDotToken) { const t = tempSlot(); emit("NEWOBJ"); emit("LOAD", srcSlot); emit("ASSIGNALL"); emit("STORE", t); for (const k of bound) { emit("LOAD", t); emit("DELPROP", k); emit("POP"); } emit("LOAD", t); bindStackTop(el.name); continue; } // {...rest}
+          const key = (el.propertyName || el.name).text; bound.push(key);
+          bindOne(el, () => { emit("LOAD", srcSlot); emit("GETPROP", key); });
+        }
+        return;
+      }
+      if (ts.isArrayBindingPattern(pattern)) {
+        pattern.elements.forEach((el, i) => {
+          if (ts.isOmittedExpression(el)) return;
+          if (el.dotDotDotToken) { emit("LOAD", srcSlot); emit("PUSH", i); emit("CALLM", "slice", 1); bindStackTop(el.name); return; } // [...rest]
+          bindOne(el, () => { emit("LOAD", srcSlot); emit("PUSH", i); emit("INDEX"); });
+        });
+        return;
+      }
       fail(pattern, "unsupported binding pattern");
     }
     function closureOf(fnNode) { const childName = `${name}$${gen++}`; const child = compileFn(fnNode, childName); out[childName] = child; emit("MAKECLOSURE", childName, child.freeIds.map(provide), !!fnNode.asteriskToken); }
@@ -310,11 +331,13 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isIdentifier(node)) { readUse(node); return true; }
       if (ts.isAwaitExpression(node)) { expr(node.expression); emit("AWAIT"); return true; }
       if (ts.isYieldExpression(node)) {
-        if (node.asteriskToken) {                                 // yield* E: drive E's iterator, yielding each; result = E's return value
-          const it = tempSlot(); expr(node.expression); emit("ITER"); emit("STORE", it);
+        if (node.asteriskToken) {                                 // yield* E: drive E's iterator, forwarding sent values; result = E's return value
+          const it = tempSlot(), sent = tempSlot(); expr(node.expression); emit("ITER"); emit("STORE", it); emit("PUSH", undefined); emit("STORE", sent);
           const loop = label("ys"), body = label("ysb"), end = label("yse"); mark(loop);
-          emit("LOAD", it); emit("ITERNEXT"); emit("JMPF", body); emit("JMP", end);  // done -> return value stays on stack
-          mark(body); emit("YIELD"); emit("POP"); emit("JMP", loop);                 // yield value; drop the sent value (not forwarded)
+          emit("LOAD", it); emit("LOAD", sent); emit("GENNEXT");                      // {value,done} = inner.next(sent)
+          emit("DUP"); emit("GETPROP", "done"); emit("JMPF", body);
+          emit("GETPROP", "value"); emit("JMP", end);                                 // done -> inner's return value
+          mark(body); emit("GETPROP", "value"); emit("YIELD"); emit("STORE", sent); emit("JMP", loop); // yield value; capture sent for next round
           mark(end); return true;
         }
         node.expression ? expr(node.expression) : emit("PUSH", undefined); emit("YIELD"); return true; // YIELD leaves the sent value as the expr's value
@@ -393,15 +416,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === sup.thisId ? ["E", capture(opts.thisId)] : provide(id))));
       args.forEach((a) => expr(a)); emit("CALLV", args.length); return true;
     }
-    function promiseAll(arrNode) {                              // await each element sequentially -> array
-      const src = tempSlot(), out = tempSlot(), i = tempSlot();
-      expr(arrNode); emit("STORE", src); emit("NEWARR"); emit("STORE", out); emit("PUSH", 0); emit("STORE", i);
-      const loop = label("pa"), end = label("paend"); mark(loop);
-      emit("LOAD", i); emit("LOAD", src); emit("GETPROP", "length"); emit("BIN", "<"); emit("JMPF", end);
-      emit("LOAD", out); emit("LOAD", src); emit("LOAD", i); emit("INDEX"); emit("AWAIT"); emit("ARRPUSH");
-      emit("LOAD", i); emit("PUSH", 1); emit("BIN", "+"); emit("STORE", i); emit("JMP", loop); mark(end);
-      emit("LOAD", out); return true;
-    }
+    function promiseAll(arrNode) { expr(arrNode); emit("AWAITALL"); return true; } // resolve all elements CONCURRENTLY (one suspension) -> array
     function call(node) {
       const callee = node.expression;
       if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === "Promise" && bindingOf.get(callee.expression) == null) {
@@ -492,7 +507,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         mark(end); return;
       }
       if (ts.isReturnStatement(node)) {
-        if (!node.expression) { unwind(-1); emit("PUSH", 0); emit("RET"); return; }
+        if (!node.expression) { unwind(-1); emit("PUSH", undefined); emit("RET"); return; } // `return;` -> undefined
         expr(node.expression);
         if (crossedHasFin(-1)) { const t = tempSlot(); emit("STORE", t); unwind(-1); emit("LOAD", t); } // value computed before finally
         else unwind(-1);                                             // only POPTRYs; operand stack untouched
@@ -564,7 +579,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     if (node.body && ts.isBlock(node.body)) node.body.statements.forEach(stmt);
     else { expr(node.body); emit("RET"); }
     const last = asm[asm.length - 1];
-    if (!(Array.isArray(last) && last[0] === "RET")) { emit("PUSH", 0); emit("RET"); }
+    if (!(Array.isArray(last) && last[0] === "RET")) { emit("PUSH", undefined); emit("RET"); } // fall off the end -> undefined
     const { code, pos } = assemble();
     return { nlocals: topSlot, code, pos, freeIds: envIds };
   }

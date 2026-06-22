@@ -136,6 +136,10 @@ export function serializeContinuation(cont, sourceTier) {
   } else if (cont.pending && "await" in cont.pending) {         // await boundary
     const w0 = roots.length; roots.push(cont.pending.await);
     pending = { awaitRoot: w0 };
+  } else if (cont.pending && "awaitAll" in cont.pending) {       // Promise.all boundary (concurrent)
+    const p0 = roots.length; for (const x of cont.pending.awaitAll) roots.push(x);
+    const r0 = roots.length; for (const x of cont.pending.result) roots.push(x);
+    pending = { awaitAllP: p0, awaitAllN: cont.pending.awaitAll.length, awaitAllR: r0, awaitAllRN: cont.pending.result.length, pendingIdx: cont.pending.pendingIdx };
   }
   return { frames, pending, graph: encodeGraph(roots, { tier: sourceTier, threshold: HANDLE_THRESHOLD }) };
 }
@@ -154,6 +158,8 @@ export function deserializeContinuation(wire) {
     pending = { name: wire.pending.name, args: vals.slice(wire.pending.a0, wire.pending.a0 + wire.pending.argc) };
   else if (wire.pending && wire.pending.awaitRoot !== undefined)
     pending = { await: vals[wire.pending.awaitRoot] };
+  else if (wire.pending && wire.pending.awaitAllP !== undefined)
+    pending = { awaitAll: vals.slice(wire.pending.awaitAllP, wire.pending.awaitAllP + wire.pending.awaitAllN), result: vals.slice(wire.pending.awaitAllR, wire.pending.awaitAllR + wire.pending.awaitAllRN), pendingIdx: wire.pending.pendingIdx };
   return { frames, pending };
 }
 
@@ -396,6 +402,7 @@ export function run(tier, frames, host) {
       }
       case "GENNEXT": {                                         // it.next(sendVal) -> { value, done } (or an ordinary .next() method call)
         const sendVal = f.stack.pop(); const o = d(f.stack.pop()); f.ip++;
+        if (o && o.__it__ === "arr") { f.stack.push(o.i < o.a.length ? { value: o.a[o.i++], done: false } : { value: undefined, done: true }); break; } // array iterator ignores the sent value
         if (isGenerator(o)) { const r = genAdvance(o, sendVal); f.stack.push({ value: r.value, done: r.done }); break; }
         const m = o && o.next;
         if (isClosure(m)) { frames.push({ fn: m.fn, ip: 0, locals: [sendVal], stack: [], env: m.env, handlers: [] }); break; } // user iterator object
@@ -412,6 +419,16 @@ export function run(tier, frames, host) {
         if (isGenerator(o)) { let r; try { r = genThrow(o, e); } catch (ex) { if (ex instanceof WasoUncaught) { doThrow(ex.value); break; } throw ex; } f.stack.push({ value: r.value, done: r.done }); break; }
         const m = o && o.throw; if (isClosure(m)) { frames.push({ fn: m.fn, ip: 0, locals: [e], stack: [], env: m.env, handlers: [] }); break; }
         if (o && o.throw) { f.stack.push(o.throw(e)); break; } doThrow(e); break;
+      }
+      case "AWAITALL": {                                        // Promise.all: resolve every element CONCURRENTLY (one suspension)
+        const xs = f.stack[f.stack.length - 1];
+        let rejected = null; for (const x of xs) if (x !== null && typeof x === "object" && x.__waso_reject__) { rejected = x; break; }
+        if (rejected) { f.stack.pop(); doThrow(rejected.value); break; }   // Promise.all rejects on the first rejection
+        f.stack.pop();
+        const result = new Array(xs.length); const payloads = [], pendingIdx = [];
+        for (let i = 0; i < xs.length; i++) { const x = xs[i]; if (x !== null && typeof x === "object" && x.__waso_async__) { pendingIdx.push(i); payloads.push(x.payload); } else result[i] = x; }
+        if (!pendingIdx.length) { f.stack.push(result); f.ip++; break; } // all immediate -> no suspension
+        f.ip++; throw new Suspend(frames, { awaitAll: payloads, result, pendingIdx });
       }
       case "MKREJECT": { f.stack.push({ __waso_reject__: true, value: f.stack.pop() }); f.ip++; break; } // Promise.reject(e)
       case "THROW": { doThrow(f.stack.pop()); break; }

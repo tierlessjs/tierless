@@ -55,17 +55,21 @@ async function runAsync(entry, args, { roundtrip = false } = {}) {
     try { res = run(tier, frames, host); }
     catch (e) {
       if (!(e instanceof Suspend)) throw e;
-      if (!(e.pending && "await" in e.pending)) throw new Error("unexpected non-await suspension");
       awaits++;
-      let f = e.frames, desc = e.pending.await;
+      let f = e.frames, pend = e.pending;
       if (roundtrip) {                                   // <-- cross a serialization boundary at the await
         const wire = serializeContinuation({ frames: e.frames, pending: e.pending }, tier);
         maxWire = Math.max(maxWire, contBytes(wire));
         const got = deserializeContinuation(JSON.parse(JSON.stringify(wire)));
-        f = got.frames; desc = got.pending.await;
+        f = got.frames; pend = got.pending;
       }
-      const value = await resolve(desc);                 // real async work while suspended
-      f[f.length - 1].stack.push(value);
+      if (pend && "awaitAll" in pend) {                  // Promise.all: resolve every pending element CONCURRENTLY
+        const resolved = await Promise.all(pend.awaitAll.map(resolve));
+        const result = pend.result.slice(); pend.pendingIdx.forEach((idx, k) => { result[idx] = resolved[k]; });
+        f[f.length - 1].stack.push(result);
+      } else if (pend && "await" in pend) {
+        f[f.length - 1].stack.push(await resolve(pend.await)); // real async work while suspended
+      } else throw new Error("unexpected non-await suspension");
       frames = f;
       continue;
     }
@@ -87,6 +91,31 @@ const viaWire = await runAsync("loadUser", [7], { roundtrip: true });
 check("the SAME program runs end-to-end through serialize/deserialize at every await",
   JSON.stringify(viaWire.value) === JSON.stringify(plain.value));
 check(`the await-suspended continuation is small and real (${viaWire.maxWire} B on the wire)`, viaWire.maxWire > 0 && viaWire.maxWire < 4096);
+
+// Promise.all resolves its elements CONCURRENTLY (one suspension carrying all the
+// pending awaitables), not one-at-a-time. Proven by max-in-flight (timing-independent).
+const { loadModule } = await import("./waso-tsc.mjs");
+loadModule(PROGRAM, `
+  async function go() { const us = await Promise.all([db.fetchUser(1), db.fetchUser(2), db.fetchUser(3)]); return us.map((u) => u.name); }
+`, { entry: "go", resources: ["db.fetchUser"] });
+let inFlight = 0, maxInFlight = 0;
+async function resolveTracked(desc) { inFlight++; maxInFlight = Math.max(maxInFlight, inFlight); await sleep(5); inFlight--; return { id: desc.id, name: "User#" + desc.id }; }
+async function runConcurrent() {
+  let frames = initialFrames("go", []); const host = { deref: (x) => x };
+  while (true) {
+    let res; try { res = run(tier, frames, host); }
+    catch (e) {
+      if (!(e instanceof Suspend) || !("awaitAll" in e.pending)) throw e;
+      const resolved = await Promise.all(e.pending.awaitAll.map(resolveTracked));
+      const result = e.pending.result.slice(); e.pending.pendingIdx.forEach((idx, k) => { result[idx] = resolved[k]; });
+      e.frames[e.frames.length - 1].stack.push(result); frames = e.frames; continue;
+    }
+    return res.value;
+  }
+}
+const conc = await runConcurrent();
+check(`Promise.all result correct (${JSON.stringify(conc)})`, JSON.stringify(conc) === JSON.stringify(["User#1", "User#2", "User#3"]));
+check(`Promise.all resolved its 3 elements CONCURRENTLY (max in-flight = ${maxInFlight})`, maxInFlight === 3);
 
 // Contrast: native async state is NOT serializable.
 const pausedNative = (async () => { await sleep(10_000); return 42; })(); // a paused async fn === a Promise
