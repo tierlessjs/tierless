@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { compile } from "./waso-compile.mjs";
 import {
-  assemble, makeInstance, setEntryState, capture, restore, Suspend,
+  assemble, makeInstance, setEntryState, capture, restore, Suspend, frameCount,
   dbQueryHandler, makeRenderHandler, fmt, wasmByteLength,
   N, THRESHOLD, MOD, DATASET_BYTES, RESULT, RESOURCES,
 } from "./waso-wasm-core.mjs";
@@ -41,7 +41,7 @@ while (true) {
     if (!(e instanceof Suspend)) throw e;
     const target = current === client ? server : client;
     const wire = capture(current.memory);          // slice live memory
-    migrations.push({ from: current.name, to: target.name, resid: e.resid, bytes: wire.length });
+    migrations.push({ from: current.name, to: target.name, resid: e.resid, bytes: wire.length, frames: frameCount(wire) });
     restore(target.memory, wire);                  // load into other instance
     current = target;
   }
@@ -58,7 +58,7 @@ console.log(`Dataset:  ${N.toLocaleString()} ints in the server's HEAP_BIG = ${f
 
 console.log("Migrations (continuation copied out of one instance's memory into the other's):");
 for (const m of migrations)
-  console.log(`  ${m.from.padEnd(6)} -> ${m.to.padEnd(6)}  forced by ${resName(m.resid).padEnd(14)}  continuation = ${fmt(m.bytes)}`);
+  console.log(`  ${m.from.padEnd(6)} -> ${m.to.padEnd(6)}  forced by ${resName(m.resid).padEnd(14)}  ${m.frames} frame(s), continuation = ${fmt(m.bytes)}`);
 console.log("");
 
 const s2c = migrations.find((m) => m.from === "server" && m.to === "client");

@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { compile } from "./waso-compile.mjs";
 import {
-  assemble, makeInstance, setEntryState, capture, restore, Suspend,
+  assemble, makeInstance, setEntryState, capture, restore, Suspend, frameCount,
   makeRenderHandler, fmt, RESULT, RESOURCES, THRESHOLD, N, MOD, wasmByteLength,
 } from "./waso-wasm-core.mjs";
 import { writeFrame, readFrames } from "./waso-frame.mjs";
@@ -55,7 +55,7 @@ async function main() {
       } catch (e) {
         if (!(e instanceof Suspend)) throw e;
         const slice = capture(client.memory);
-        migrations.push({ from: "client", to: "server", resid: e.resid, bytes: slice.length });
+        migrations.push({ from: "client", to: "server", resid: e.resid, bytes: slice.length, frames: frameCount(slice) });
         send({ type: "resume", resid: e.resid }, slice);
         current = "server";
       }
@@ -65,7 +65,7 @@ async function main() {
       if (msg.type === "done") return finish(msg.value);
       if (msg.type !== "suspend") throw new Error("unexpected " + msg.type);
       meta = msg.meta;
-      migrations.push({ from: "server", to: "client", resid: msg.resid, bytes: bin.length });
+      migrations.push({ from: "server", to: "client", resid: msg.resid, bytes: bin.length, frames: frameCount(bin) });
       restore(client.memory, bin); // load the memory slice into the client instance
       current = "client";
     }
@@ -91,7 +91,7 @@ function report(value) {
 
   console.log("Migrations (linear-memory slices crossing the pipe):");
   for (const m of migrations)
-    console.log(`  ${m.from.padEnd(6)} -> ${m.to.padEnd(6)}  forced by ${resName(m.resid).padEnd(14)}  continuation = ${fmt(m.bytes)}`);
+    console.log(`  ${m.from.padEnd(6)} -> ${m.to.padEnd(6)}  forced by ${resName(m.resid).padEnd(14)}  ${m.frames} frame(s), continuation = ${fmt(m.bytes)}`);
   console.log("");
 
   console.log(`Key claim (§11): the server->client continuation is the live wasm stack,`);

@@ -10,6 +10,13 @@
 declare const db: { query(): number[] };
 declare const DOM: { renderList(items: number[]): number };
 
+// The resource boundary (DOM.renderList) fires INSIDE this nested call, so when
+// execution migrates the continuation must carry BOTH frames (render -> show) —
+// proving multi-frame capture (§4.4 "enough call-stack frame info to resume").
+function show(items: number[]): number {
+  return DOM.renderList(items);        // client resource, one frame deep
+}
+
 function render(threshold: number): number {
   const rows = db.query();              // server resource: a large array
   const matched: number[] = [];
@@ -19,6 +26,5 @@ function render(threshold: number): number {
       matched.push(v);                  // keep only the matches (small)
     }
   }
-  DOM.renderList(matched);              // client resource
-  return matched.length;
+  return show(matched);                 // boundary fires inside show()
 }

@@ -27,18 +27,18 @@ const BINOP = {
 
 export function compile(source, entryName = "render") {
   const sf = ts.createSourceFile("app.ts", source, ts.ScriptTarget.ES2020, true);
-  const fn = sf.statements.find(
-    (s) => ts.isFunctionDeclaration(s) && s.name && s.name.text === entryName
-  );
-  if (!fn) throw new Error(`no function ${entryName} found`);
+  const fns = sf.statements.filter((s) => ts.isFunctionDeclaration(s) && s.name);
+  const entry = fns.find((f) => f.name.text === entryName);
+  if (!entry) throw new Error(`no function ${entryName} found`);
+  const fnNames = new Set(fns.map((f) => f.name.text));
+  const ordered = [entry, ...fns.filter((f) => f !== entry)]; // entry at offset 0
 
   const out = [];
-  const locals = new Map();          // name -> slot
+  let locals = new Map();            // name -> slot, reset per function (= per frame)
   const local = (name) => {
     if (!locals.has(name)) locals.set(name, locals.size);
     return locals.get(name);
   };
-  fn.parameters.forEach((p) => local(p.name.text)); // params first: slots 0..k-1
 
   let labelN = 0;
   const label = (s) => `${s}${labelN++}`;
@@ -98,6 +98,11 @@ export function compile(source, entryName = "render") {
 
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
+      if (ts.isIdentifier(callee) && fnNames.has(callee.text)) {  // user function call
+        node.arguments.forEach((a) => { if (!expr(a)) fail(a, "no value"); });
+        emit("CALL", "fn:" + callee.text, node.arguments.length);
+        return true;
+      }
       if (ts.isPropertyAccessExpression(callee)) {
         const name = `${callee.expression.getText(sf)}.${callee.name.text}`;
         if (name in RESOURCES) {                              // db.query / DOM.renderList
@@ -176,7 +181,14 @@ export function compile(source, entryName = "render") {
     fail(node, "unsupported statement");
   }
 
-  stmt(fn.body);
-  if (out[out.length - 1]?.[0] !== "RET") emit("PUSH", 0), emit("RET"); // implicit return 0
-  return { asm: out, locals: Object.fromEntries(locals) };
+  let entryLocals = null;
+  for (const f of ordered) {
+    mark("fn:" + f.name.text);                 // entry's label resolves to offset 0
+    locals = new Map();                         // fresh frame
+    f.parameters.forEach((p) => local(p.name.text)); // params: slots 0..k-1
+    stmt(f.body);
+    if (out[out.length - 1]?.[0] !== "RET") { emit("PUSH", 0); emit("RET"); } // implicit return 0
+    if (f === entry) entryLocals = Object.fromEntries(locals);
+  }
+  return { asm: out, locals: entryLocals };
 }

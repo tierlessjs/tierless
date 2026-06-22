@@ -7,16 +7,16 @@ import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 // --- memory map (must match waso.wat) --------------------------------------
-export const IP = 0, SP = 4, SMALL_BUMP = 8, RESULT = 12;
-export const LOCALS_BASE = 64, LOCALS_BYTES = 64;     // 16 i32 locals
+export const IP = 0, SP = 4, SMALL_BUMP = 8, RESULT = 12, FP = 16;
 export const OPSTACK_BASE = 512;
 export const BYTECODE_BASE = 4096;
+export const CALL_STACK_BASE = 16384, FRAME_SIZE = 72; // 8B header + 16 i32 locals
 export const HEAP_SMALL_BASE = 65536;
 export const HEAP_BIG_BASE = 1048576;
 
 // --- opcodes / resource ids -------------------------------------------------
 export const OPS = { PUSH:1, LOAD:2, STORE:3, LT:4, GE:5, ADD:6, JMP:7, JMPF:8,
-  NEWARR:9, ARRPUSH:10, ARRLEN:11, ARRGET:12, RES:13, RET:14, POP:15 };
+  NEWARR:9, ARRPUSH:10, ARRLEN:11, ARRGET:12, RES:13, RET:14, POP:15, CALL:16 };
 export const RESOURCES = { "db.query": 0, "DOM.renderList": 1 };
 
 // --- demo dataset parameters (live only on the server) ----------------------
@@ -84,33 +84,48 @@ export function setEntryState(memory, locals0) {
   dv.setInt32(SP, 0, true);
   dv.setInt32(SMALL_BUMP, HEAP_SMALL_BASE, true);
   dv.setInt32(RESULT, 0, true);
-  dv.setInt32(LOCALS_BASE + 0 * 4, locals0, true); // entry param in local 0
+  dv.setInt32(FP, CALL_STACK_BASE, true);            // one frame: the entry call
+  dv.setInt32(CALL_STACK_BASE + 0, -1, true);        // retIP sentinel
+  dv.setInt32(CALL_STACK_BASE + 4, -1, true);        // prevFP = -1 -> no caller
+  dv.setInt32(CALL_STACK_BASE + 8 + 0 * 4, locals0, true); // entry param in local 0
 }
 
 // --- the continuation: a slice of linear memory ----------------------------
-// ctrl(16) + locals(64) + used operand stack + used small heap. NOT bytecode
-// (shared), NOT HEAP_BIG (the dataset). Self-describing: sp and small_bump live
-// inside ctrl, so restore knows the section lengths.
+// ctrl(24) + used operand stack + used call stack (all live frames + their
+// locals) + used small heap. NOT bytecode (shared), NOT HEAP_BIG (the dataset).
+// Self-describing: sp, fp and small_bump live inside ctrl, so restore knows the
+// section lengths. The call-stack section is what makes the continuation
+// multi-frame (§4.4).
 export function capture(memory) {
   const dv = new DataView(memory.buffer);
   const sp = dv.getInt32(SP, true);
+  const fp = dv.getInt32(FP, true);
   const smallBump = dv.getInt32(SMALL_BUMP, true);
   return Buffer.concat([
-    Buffer.from(memory.buffer.slice(0, 16)),
-    Buffer.from(memory.buffer.slice(LOCALS_BASE, LOCALS_BASE + LOCALS_BYTES)),
-    Buffer.from(memory.buffer.slice(OPSTACK_BASE, OPSTACK_BASE + sp * 4)),
-    Buffer.from(memory.buffer.slice(HEAP_SMALL_BASE, smallBump)),
+    Buffer.from(memory.buffer.slice(0, 24)),                                  // control
+    Buffer.from(memory.buffer.slice(OPSTACK_BASE, OPSTACK_BASE + sp * 4)),    // operand stack
+    Buffer.from(memory.buffer.slice(CALL_STACK_BASE, fp + FRAME_SIZE)),       // all live frames
+    Buffer.from(memory.buffer.slice(HEAP_SMALL_BASE, smallBump)),             // small heap
   ]);
+}
+
+// Number of call frames in a captured continuation (evidence of multi-frame
+// capture): the frame pointer in the control header indexes the top frame.
+export function frameCount(wire) {
+  const fp = new DataView(wire.buffer, wire.byteOffset, wire.byteLength).getInt32(FP, true);
+  return (fp - CALL_STACK_BASE) / FRAME_SIZE + 1;
 }
 
 export function restore(memory, wire) {
   const dv = new DataView(wire.buffer, wire.byteOffset, wire.byteLength);
   const sp = dv.getInt32(SP, true);
+  const fp = dv.getInt32(FP, true);
   const mem = new Uint8Array(memory.buffer);
+  const csLen = (fp + FRAME_SIZE) - CALL_STACK_BASE;
   let o = 0;
-  mem.set(wire.subarray(o, o + 16), 0); o += 16;
-  mem.set(wire.subarray(o, o + LOCALS_BYTES), LOCALS_BASE); o += LOCALS_BYTES;
+  mem.set(wire.subarray(o, o + 24), 0); o += 24;
   mem.set(wire.subarray(o, o + sp * 4), OPSTACK_BASE); o += sp * 4;
+  mem.set(wire.subarray(o, o + csLen), CALL_STACK_BASE); o += csLen;
   mem.set(wire.subarray(o), HEAP_SMALL_BASE); // remaining bytes = small heap
 }
 
