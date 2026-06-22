@@ -480,6 +480,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const op = BINOP[k]; if (!op) fail(node, "unsupported operator");
         expr(node.left); expr(node.right); emit("BIN", op); return true;
       }
+      if (ts.isPropertyAccessExpression(node) && node.expression.kind === ts.SyntaxKind.SuperKeyword) { if (!opts.superName) fail(node, "super outside a derived class"); return superProp(node.name.text); } // super.x
       if (ts.isPropertyAccessExpression(node)) { expr(node.expression); emit(getOp(node.name.text), node.name.text); return true; }
       if (ts.isElementAccessExpression(node)) { expr(node.expression); expr(node.argumentExpression); emit("INDEX"); return true; }
       if (ts.isObjectLiteralExpression(node)) {
@@ -559,6 +560,14 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === sup.thisId ? ["E", capture(opts.thisId)] : provide(id))));
       args.forEach((a) => expr(a)); emit("CALLV", args.length); return true;
     }
+    function superProp(name) {                 // super.x — getter call / bound method / inherited data, walking the super chain
+      for (let c = classes.get(opts.superName); c; c = c.superName ? classes.get(c.superName) : null) {
+        compileClass(c.name);
+        if (c.accessors.find((a) => a.name === name && a.kind === "get")) { const info = c.compiled[`get ${name}`]; emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === c.thisId ? ["E", capture(opts.thisId)] : provide(id)))); emit("CALLV", 0); return true; }
+        if (c.methods.find((m) => m.name === name)) { const info = c.compiled[name]; emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === c.thisId ? ["E", capture(opts.thisId)] : provide(id))), !!c.methods.find((m) => m.name === name).node.asteriskToken); return true; }
+      }
+      emit("LOADENV", capture(opts.thisId)); emit("GETPROP", name); return true; // inherited data property
+    }
     function promiseAll(arrNode) { expr(arrNode); emit("AWAITALL"); return true; } // resolve all elements CONCURRENTLY (one suspension) -> array
     const spreadArgs = (args) => { emit("NEWARR"); for (const a of args) { if (ts.isSpreadElement(a)) { expr(a.expression); emit("APPENDALL"); } else { emit("DUP"); expr(a); emit("ARRPUSH"); } } }; // build an args array on the stack
     const hostMethod = (m, args) => { if (args.some((a) => ts.isSpreadElement(a))) { spreadArgs(args); emit("CALLMS", m); } else { args.forEach((a) => expr(a)); emit("CALLM", m, args.length); } }; // object already on stack
@@ -590,6 +599,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (ts.isIdentifier(callee) && bindingOf.get(callee) == null && !topFns.has(callee.text) && resourceSet.has(callee.text)) { node.arguments.forEach((a) => expr(a)); emit("RES", callee.text, node.arguments.length); return true; }
       if (ts.isIdentifier(callee) && callee.text === "BigInt" && bindingOf.get(callee) == null && !topFns.has(callee.text)) { expr(node.arguments[0]); emit("TOBIG"); return true; } // BigInt(x) conversion
       if (ts.isIdentifier(callee) && bindingOf.get(callee) == null && !topFns.has(callee.text) && GLOBAL_CALLS.has(callee.text)) { node.arguments.forEach((a) => expr(a)); emit("CALLG", callee.text, node.arguments.length); return true; } // parseInt/Number/String/... bare call
+      if (ts.isElementAccessExpression(callee)) { expr(callee.expression); expr(callee.argumentExpression); if (node.arguments.some((a) => ts.isSpreadElement(a))) { spreadArgs(node.arguments); emit("CALLDYNS"); } else { node.arguments.forEach((a) => expr(a)); emit("CALLDYN", node.arguments.length); } return true; } // obj[k](...): dynamic dispatch (this = obj)
       return closureCall(callee, node.arguments);
     }
     function closureCall(callee, args) {

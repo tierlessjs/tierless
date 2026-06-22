@@ -258,6 +258,9 @@ export function run(tier, frames, host) {
   };
   const makeGen = (callee, args) => ({ __gen__: true, frames: [{ fn: callee.fn, ip: 0, locals: args, stack: [], env: callee.env, handlers: [] }], done: false, started: false });
   const callClosure = (cl, args) => run(tier, [{ fn: cl.fn, ip: 0, locals: args.slice(), stack: [], env: cl.env, handlers: [] }], host).value; // run a non-suspending closure to completion (for synchronous drains)
+  // Bridge a Waso closure into a real host function so host methods that take a
+  // callback (Array.from mapFn, String.replace fn, Array.sort comparator, ...) work.
+  const hostArgs = (args) => args.map((a) => (isClosure(a) ? (...xs) => callClosure(a, xs) : a));
   // Unwind a generator's own frames to its nearest handler, seeding the thrown
   // value (for .throw()/.return() injection). Returns false if nothing caught it.
   const unwindToHandler = (gframes, v) => {
@@ -326,8 +329,8 @@ export function run(tier, frames, host) {
       case "MGET": f.stack.push(tier.module ? tier.module.get(ins[1]) : undefined); f.ip++; break;                  // module-level binding (per-tier)
       case "MSET": (tier.module || (tier.module = new Map())).set(ins[1], f.stack.pop()); f.ip++; break;
       case "GLOBAL": f.stack.push(GLOBALS[ins[1]]); f.ip++; break;                                                // host stdlib global (Math/JSON/Object/...)
-      case "CALLG": { const argc = ins[2]; const args = []; for (let k = 0; k < argc; k++) args.unshift(f.stack.pop()); f.stack.push(GLOBALS[ins[1]](...args)); f.ip++; break; } // parseInt/Number/... bare call
-      case "CTORG": { const argc = ins[2]; const args = []; for (let k = 0; k < argc; k++) args.unshift(f.stack.pop()); f.stack.push(new CTORS[ins[1]](...args)); f.ip++; break; } // new Map/Set/Date/...
+      case "CALLG": { const argc = ins[2]; const args = []; for (let k = 0; k < argc; k++) args.unshift(f.stack.pop()); f.stack.push(GLOBALS[ins[1]](...hostArgs(args))); f.ip++; break; } // parseInt/Number/... bare call
+      case "CTORG": { const argc = ins[2]; const args = []; for (let k = 0; k < argc; k++) args.unshift(f.stack.pop()); f.stack.push(new CTORS[ins[1]](...hostArgs(args))); f.ip++; break; } // new Map/Set/Date/...
       case "CLSGET": f.stack.push(tier.statics && tier.statics.get(ins[1])); f.ip++; break;                       // class-object registry (per tier)
       case "CLSPUT": (tier.statics || (tier.statics = new Map())).set(ins[1], f.stack[f.stack.length - 1]); f.ip++; break; // peek + cache, leave on stack
       case "INC":    { const v = f.stack.pop(); f.stack.push(typeof v === "bigint" ? v + 1n : v + 1); f.ip++; break; } // ++ (type-aware: 1n for bigint)
@@ -406,15 +409,21 @@ export function run(tier, frames, host) {
         const args = [];
         for (let k = 0; k < argc; k++) args.unshift(f.stack.pop());
         const o = d(f.stack.pop());
-        f.stack.push(o[ins[1]](...args));
+        f.stack.push(o[ins[1]](...hostArgs(args)));
         f.ip++; break;
       }
-      case "CALLMS": { const argsArr = f.stack.pop(); const o = d(f.stack.pop()); f.stack.push(o[ins[1]](...argsArr)); f.ip++; break; } // host method, spread args
+      case "CALLMS": { const argsArr = f.stack.pop(); const o = d(f.stack.pop()); f.stack.push(o[ins[1]](...hostArgs(argsArr))); f.ip++; break; } // host method, spread args
+      case "CALLDYN": case "CALLDYNS": {                       // obj[key](args): dynamic dispatch, this = obj
+        let args; if (ins[0] === "CALLDYNS") args = f.stack.pop().slice(); else { args = []; for (let k = 0; k < ins[1]; k++) args.unshift(f.stack.pop()); }
+        const key = f.stack.pop(); const o = d(f.stack.pop()); const m = o[key]; f.ip++;
+        if (isClosure(m)) { if (m.gen) { f.stack.push(makeGen(m, args)); break; } frames.push({ fn: m.fn, ip: 0, locals: args, stack: [], env: m.env, handlers: [] }); break; }
+        f.stack.push(m.apply(o, hostArgs(args))); break;        // host method (arr[Symbol.iterator](), etc.)
+      }
       case "CALLMETHOD": case "CALLMETHODS": {                   // obj.m(args): dispatch user-closure method vs host method
         let args; if (ins[0] === "CALLMETHODS") args = f.stack.pop().slice(); else { args = []; for (let k = 0; k < ins[2]; k++) args.unshift(f.stack.pop()); }
         const o = d(f.stack.pop()); const m = o[ins[1]]; f.ip++;
         if (isClosure(m)) { if (m.gen) { f.stack.push(makeGen(m, args)); break; } frames.push({ fn: m.fn, ip: 0, locals: args, stack: [], env: m.env, handlers: [] }); break; } // user method (closure captures this)
-        f.stack.push(m.apply(o, args)); break;                  // host method (Map.set, Set.add, ...)
+        f.stack.push(m.apply(o, hostArgs(args))); break;                  // host method (Map.set, Set.add, ...)
       }
       case "PUSHTRY": (f.handlers || (f.handlers = [])).push({ ip: ins[1], sp: f.stack.length }); f.ip++; break;
       case "POPTRY":  f.handlers.pop(); f.ip++; break;
