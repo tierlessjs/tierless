@@ -298,6 +298,49 @@ Rewrote resolveBindings to be properly LEXICAL:
 Verified vs eval: sibling/nested/shadowing blocks; per-iteration capture simple +
 nested + with-continue.
 
+## #4 step 19 (done — "known issues" sweep across all 6 areas)
+A pass over the documented gaps, ordered traps-first. All verified vs Node's eval
+(probe-realts) unless noted; full suite green at each step.
+
+1. Silent correctness bugs (FIXED):
+   - destructuring defaults `{a=5}`/`[a=5]` + rest `{a,...r}`/`[x,...r]` (nested, for-of).
+   - `yield*` forwards sent values into the delegated iterator (+ delegates return).
+   - implicit/empty `return` yields `undefined`, not `0` (void fns; done generators).
+   - `Promise.all` resolves elements CONCURRENTLY (AWAITALL op + awaitAll wire
+     boundary; host resolves together). Proven concurrent (probe-async, max-in-flight=3).
+2. Stdlib reach (FIXED): Math/JSON/Object/Array/Number/String/Boolean/parseInt/
+   parseFloat/isNaN/isFinite/console/Date via a GLOBAL registry shipped BY REFERENCE
+   through the codec; `Global.method(...)`->CALLM/CALLMS, bare `fn(...)`->CALLG.
+   Array HOFs find/findIndex/some/every (early-terminating) + flat. Map/Set
+   (construct via CTORG, methods, for-of via the iterator protocol, codec {k:map|set}).
+   CALLMETHOD dispatches user-closure vs host method at runtime (fixes host methods
+   AND stops user methods named get/set/has being hijacked).
+3. Lowering gaps (FIXED): arrow `this` capture (incl. nested) + regular-fn `this`=
+   undefined; private fields/methods `#x`; `typeof undeclared`->"undefined";
+   destructuring parameters (slot-per-position calling convention).
+4. Model/serialization caveats (FIXED): instance methods/__class__/__accessors__ are
+   non-enumerable (SETHIDDEN), so JSON.stringify/Object.keys/for-in over an instance
+   see only data — matching JS; the codec preserves non-enumerability across the wire.
+   Computed access `obj[k]` fires accessors (INDEX/SETINDEX accessor-aware).
+5. Async-inside-generator (MADE SAFE + documented): a genuine async resource awaited
+   inside a generator mid-iteration now throws a clear error instead of corrupting the
+   outer continuation. Full fix = splice generator frames onto the main stack (one
+   flattened stack so a Suspend captures everything); designed, deferred (large blast
+   radius across the working generator suite — wants a reviewed change).
+6. WASM path (DOCUMENTED): i32-only by design — the linear-memory-continuation proof,
+   not where language coverage lives (README "Two execution paths"). Not a gap.
+
+Still deferred (loud compile errors + reasons), all "just unwritten lowering":
+- LOCAL class declarations (class inside a function) — name-collision/unique-naming
+  work; workaround: hoist to module scope.
+- object-literal getters/setters `{ get x(){} }` — class accessors are supported;
+  object-literal ones need `this`=the-literal binding while it's being built.
+- `arguments` object — rest params cover the common case.
+- tagged templates, computed method names `[e](){}`, `new.target`, `with`.
+Representational caveats (intrinsic to the model): `typeof ClassName` is "object"
+(the reified class object), not "function"; a mutable static shared ACROSS tiers is
+§5 handle/coherence territory (per-tier class object), not a plain migrating field.
+
 ## Don't forget
 - **Source maps**: NJS captured the stack but deferred line/file metadata. Our
   §10.6. Design it into the transform from the start, don't bolt on.

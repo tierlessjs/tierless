@@ -44,6 +44,22 @@ ratio                          : ~978x smaller
 | `npm run bench:sweep` | `bench-sweep.mjs` | the HN benchmark as a **scale curve** over thread size and RTT (writes `bench-sweep.csv`) |
 | `npm run bench:conduit` | `bench-conduit.mjs` | **Conduit feed benchmark**: REST over-fetch vs server-side assembly (the bandwidth win) |
 
+### Two execution paths (by design)
+
+Waso has **two interpreters**, on purpose, with different jobs:
+
+- **The JS path** (`waso-core.mjs` + the `waso-tsc.mjs` frontend) is the **language
+  substrate**: it runs arbitrary JS values and is where all the language coverage
+  lives — closures, classes, generators, async, the heap/identity/migration work,
+  and the fidelity tests vs Node's own `eval` (`probe-realts.mjs`).
+- **The WASM path** (`waso.wat`) is the **minimal proof that the continuation can
+  live in linear memory** — a byte-slice of wasm memory that crosses a real pipe
+  between two processes. It is deliberately **i32-only**: no heap objects, closures,
+  strings, or BigInt. Extending it to the full language is *not* the point; the JS
+  path already demonstrates the language, and the WASM path demonstrates the
+  capture/serialize mechanism in a real linear-memory VM. The two are intentionally
+  separate tracks, not a coverage gap.
+
 ### The benchmark (`npm run bench:hn`)
 
 The Hacker News thread shape is the canonical client-side waterfall: loading a
