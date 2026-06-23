@@ -9,8 +9,8 @@
 // (`#stackmix/runtime/...`, `#stackmix/wasm/...`) remain available but carry no
 // stability guarantee; this barrel is the stable surface.
 
-import { run } from "./runtime/core.mjs";
-import { loadModule, loadProgram, describeContinuation } from "./compiler/tsc.mjs";
+import { run as runInterpreter } from "./runtime/core.mjs";
+import { loadModule, loadProgram as loadProgramCompiler, describeContinuation } from "./compiler/tsc.mjs";
 
 /**
  * Create an isolated runtime: a program registry plus the interpreter and
@@ -27,11 +27,11 @@ export function createRuntime() {
     // Compile a single TypeScript module into this runtime.
     load(source, opts) { return loadModule(program, source, opts); },
     // Compile a multi-file import graph into this runtime.
-    loadProgram(files, opts) { return loadProgram(program, files, opts); },
+    loadProgram(files, opts) { return loadProgramCompiler(program, files, opts); },
     // Install hand-written IR under `name` (no frontend, no wasm).
     define(name, ir) { program[name] = ir; return ir; },
     // Run `frames` on `tier` until they return or suspend at a resource boundary.
-    run(tier, frames, host) { return run(program, tier, frames, host); },
+    run(tier, frames, host) { return runInterpreter(program, tier, frames, host); },
     // A human-readable stack trace (fn + source position per frame).
     describe(frames) { return describeContinuation(program, frames); },
     // Forget all loaded code (mainly for tests reusing one runtime).

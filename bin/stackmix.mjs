@@ -47,9 +47,13 @@ function parse(argv) {
   const args = { _: [], entry: "main", out: null, resources: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--entry") args.entry = argv[++i];
-    else if (a === "--out") args.out = argv[++i];
-    else if (a === "--resources") args.resources = (argv[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const value = () => {
+      if (i + 1 >= argv.length) fail(`missing value for ${a}`);
+      return argv[++i];
+    };
+    if (a === "--entry") args.entry = value();
+    else if (a === "--out") args.out = value();
+    else if (a === "--resources") args.resources = value().split(",").map((s) => s.trim()).filter(Boolean);
     else if (a === "-h" || a === "--help") args.help = true;
     else if (a === "-v" || a === "--version") args.version = true;
     else args._.push(a);
