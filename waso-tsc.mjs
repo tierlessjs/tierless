@@ -14,6 +14,23 @@
 
 import ts from "typescript";
 
+// A ts.Program over an in-memory file set, so the frontend has a real type checker
+// (cross-module symbol resolution for decorator metadata) and can follow imports.
+// noLib keeps it fast — we never read lib.d.ts; builtin types are resolved
+// syntactically, and the checker is only asked to resolve user symbols across modules.
+const PROGRAM_OPTS = { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler, noLib: true, allowJs: true, experimentalDecorators: true, noResolve: false };
+function makeProgram(files) { // files: Map<absolutePath, source>
+  const host = {
+    getSourceFile(name, lang) { const t = files.has(name) ? files.get(name) : ts.sys.readFile(name); return t !== undefined ? ts.createSourceFile(name, t, lang, true) : undefined; },
+    getDefaultLibFileName() { return "/lib.d.ts"; }, writeFile() {}, getCurrentDirectory() { return "/"; },
+    getDirectories(p) { return ts.sys.getDirectories ? ts.sys.getDirectories(p) : []; },
+    getCanonicalFileName(f) { return f; }, useCaseSensitiveFileNames() { return true; }, getNewLine() { return "\n"; },
+    fileExists(name) { return files.has(name) || ts.sys.fileExists(name); },
+    readFile(name) { return files.has(name) ? files.get(name) : ts.sys.readFile(name); },
+  };
+  return ts.createProgram([...files.keys()], PROGRAM_OPTS, host);
+}
+
 const BINOP = {
   [ts.SyntaxKind.PlusToken]: "+", [ts.SyntaxKind.MinusToken]: "-", [ts.SyntaxKind.AsteriskToken]: "*",
   [ts.SyntaxKind.SlashToken]: "/", [ts.SyntaxKind.PercentToken]: "%", [ts.SyntaxKind.AsteriskAsteriskToken]: "**",
@@ -129,8 +146,10 @@ function resolveBindings(sf) {
   return { bindingOf, declFn, bindingsByFn, boxed, usesArguments, moduleBindings };
 }
 
-export function compileModule(source, { resources = [], entry = "main", file = "app.ts" } = {}) {
-  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.ES2020, true);
+export function compileModule(source, { resources = [], entry = "main", file = "/app.ts" } = {}) {
+  const program = makeProgram(new Map([[file, source]]));
+  const checker = program.getTypeChecker();
+  const sf = program.getSourceFile(file);
   const topFns = new Map();
   const generatorFns = new Set();   // top-level `function*` names -> a call makes an iterator, not a normal call
   for (const s of sf.statements) if (ts.isFunctionDeclaration(s) && s.name) { topFns.set(s.name.text, s); if (s.asteriskToken) generatorFns.add(s.name.text); }
