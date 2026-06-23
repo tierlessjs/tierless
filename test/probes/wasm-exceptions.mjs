@@ -56,6 +56,21 @@ const programs = [
     function mid(x) { return deep(x) + 1; }
     function top() { try { return mid(-1); } catch (e) { return e; } }
     function main() { return top(); }`],                                                                // 123
+  ["finally runs on the normal path", `
+    function f() { let log = 0; try { log = 1; } finally { log = log + 10; } return log; }
+    function main() { return f(); }`],                                                                  // 11
+  ["finally runs but the return value was captured first", `
+    function f(x) { try { return x; } finally { x = 99; } }
+    function main() { return f(5); }`],                                                                 // 5
+  ["finally runs on throw, an outer catch recovers", `
+    function f() { let log = 0; try { try { log = 1; throw 0; } finally { log = log + 10; } } catch (e) { log = log + 100; } return log; }
+    function main() { return f(); }`],                                                                  // 1+10+100 = 111
+  ["try / catch / finally together, both branches", `
+    function f(x) { let r = 0; try { if (x < 0) { throw 1; } r = 10; } catch (e) { r = 20; } finally { r = r + 100; } return r; }
+    function main() { return f(-1) * 1000 + f(1); }`],                                                   // 120*1000 + 110
+  ["finally runs when a loop breaks out of the try", `
+    function f() { let log = 0; for (let i = 0; i < 5; i = i + 1) { try { if (i === 2) { break; } log = log + i; } finally { log = log + 10; } } return log; }
+    function main() { return f(); }`],                                                                  // i0:+0+10, i1:+1+10, i2:break+10 -> 31
 ];
 
 function interp(src) {
@@ -79,5 +94,5 @@ for (const [name, src] of programs) {
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}: interpreter ${JSON.stringify(i)} == native ${JSON.stringify(n)}`);
 }
 const ok = results.every(Boolean);
-console.log(`\nResult: ${ok ? "ALL PASS" : "FAILURES"} — the AOT compiler runs try/catch/throw (same-function and across calls) and matches the interpreter`);
+console.log(`\nResult: ${ok ? "ALL PASS" : "FAILURES"} — the AOT compiler runs try/catch/throw and try/finally (same-function and across calls) and matches the interpreter`);
 process.exit(ok ? 0 : 1);
