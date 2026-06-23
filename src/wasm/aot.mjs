@@ -123,7 +123,7 @@ function immediate(x) {
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
 }
 
-const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, GENNEXT: -1, GENRET: -1 };
+const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, GENNEXT: -1, GENRET: -1 };
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" ? -ins[2] : DELTA[ins[0]] ?? 0;
 
 // Labeled asm -> instruction list with JMP/JMPF targets resolved to indices.
@@ -325,6 +325,14 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings) {
         }
         case "SETPROP": case "SETHIDDEN": {    // [obj, val] -> [obj]; obj.key = val (hidden = same store; non-enumerable only matters for reflection)
           h -= 2; const r = m.call("__setprop", [get(scratch(h)), m.i32.const(keyIds.get(ins[1])), get(scratch(h + 1))], I32);
+          stmts.push(m.local.set(scratch(h), r)); h++; break;
+        }
+        case "GETPROPA": {                     // accessor-aware read: fire a getter if obj.__accessors__[key].get exists
+          const v = m.call("__getpropa", [get(scratch(h - 1)), m.i32.const(keyIds.get(ins[1])), m.i32.const(keyIds.get("__accessors__")), m.i32.const(keyIds.get("get"))], I32);
+          stmts.push(m.local.set(scratch(h - 1), v)); break;
+        }
+        case "SETPROPA": {                     // accessor-aware write: fire a setter if obj.__accessors__[key].set exists
+          h -= 2; const r = m.call("__setpropa", [get(scratch(h)), m.i32.const(keyIds.get(ins[1])), get(scratch(h + 1)), m.i32.const(keyIds.get("__accessors__")), m.i32.const(keyIds.get("set"))], I32);
           stmts.push(m.local.set(scratch(h), r)); h++; break;
         }
         case "CALLMETHOD": {                   // recv.name(args): the method closure captured `this`, so call it with env = the method
@@ -599,6 +607,44 @@ function addClassRuntime(m) {
   ], binaryen.none));
 }
 
+// Runtime for getters/setters (added when a program uses GETPROPA/SETPROPA). A
+// class with accessors tags each instance with a hidden __accessors__ object,
+// mapping a property name to a { get, set } pair of closures (each captures the
+// instance). A read/write checks that map and fires the accessor, else falls
+// back to a plain field access.
+function addAccessorRuntime(m, accKey, getKey, setKey) {
+  const I32 = binaryen.i32;
+  const g = (i) => m.local.get(i, I32);
+  const c = (n) => m.i32.const(n);
+  const ld = (off, p) => m.i32.load(off, 4, p);
+  const addr = (i) => m.i32.and(g(i), c(~3));
+  const isTag = (i, tag) => m.i32.and(m.i32.and(g(i), c(1)), m.i32.eq(ld(0, addr(i)), c(tag))); // a pointer to [tag, ...]?
+
+  // __getpropa(obj, propKey, accKey, getKey) -> value.  locals: 4=accMap,5=entry,6=getter
+  m.addFunction("__getpropa", binaryen.createType([I32, I32, I32, I32]), I32, [I32, I32, I32], m.block(null, [
+    m.local.set(4, m.call("__getprop", [g(0), g(2)], I32)),                             // obj.__accessors__
+    m.if(m.i32.eqz(isTag(4, OBJTAG)), m.return(m.call("__getprop", [g(0), g(1)], I32))),
+    m.local.set(5, m.call("__getprop", [g(4), g(1)], I32)),                             // __accessors__[prop] = {get, set}
+    m.if(m.i32.eqz(isTag(5, OBJTAG)), m.return(m.call("__getprop", [g(0), g(1)], I32))),
+    m.local.set(6, m.call("__getprop", [g(5), g(3)], I32)),                             // .get
+    m.if(m.i32.eqz(isTag(6, CLOSTAG)), m.return(m.call("__getprop", [g(0), g(1)], I32))),
+    m.return(m.call_indirect("0", ld(4, addr(6)), [g(6)], binaryen.createType([I32]), I32)), // getter(env = the getter closure)
+  ], binaryen.none));
+
+  // __setpropa(obj, propKey, v, accKey, setKey) -> obj.  locals: 5=accMap,6=entry,7=setter
+  const plain = () => m.block(null, [m.drop(m.call("__setprop", [g(0), g(1), g(2)], I32)), m.return(g(0))], binaryen.none);
+  m.addFunction("__setpropa", binaryen.createType([I32, I32, I32, I32, I32]), I32, [I32, I32, I32], m.block(null, [
+    m.local.set(5, m.call("__getprop", [g(0), g(3)], I32)),
+    m.if(m.i32.eqz(isTag(5, OBJTAG)), plain()),
+    m.local.set(6, m.call("__getprop", [g(5), g(1)], I32)),
+    m.if(m.i32.eqz(isTag(6, OBJTAG)), plain()),
+    m.local.set(7, m.call("__getprop", [g(6), g(4)], I32)),                             // .set
+    m.if(m.i32.eqz(isTag(7, CLOSTAG)), plain()),
+    m.drop(m.call_indirect("0", ld(4, addr(7)), [g(7), g(2)], binaryen.createType([I32, I32]), I32)), // setter(env, v)
+    m.return(g(0)),
+  ], binaryen.none));
+}
+
 // A generator function compiles to two wasm functions. The TRAMPOLINE keeps the
 // original name and is what CALLV calls: it allocates a generator object holding
 // the body's table index and the initial args, and returns it (so no CALLV
@@ -739,16 +785,18 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   // compiled as a trampoline + dispatch body.
   const gens = [...new Set(Object.values(program).flatMap((fn) => fn.code.filter((i) => Array.isArray(i) && i[0] === "MAKECLOSURE" && i[3]).map((i) => i[1])))];
   const usesGenerators = gens.length > 0 || uses("GENNEXT", "YIELD"); // gen runtime + {value, done} objects
+  const usesAccessors = uses("GETPROPA", "SETPROPA");      // getters/setters need the accessor runtime
   const usesConstArray = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "PUSH" && Array.isArray(i[1])));
   const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN") || usesConstArray; // __class__ name lists build arrays
-  const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD") || usesClasses || usesGenerators; // instances, method dispatch, {value,done} results
+  const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA") || usesClasses || usesGenerators; // instances, method dispatch, {value,done} results
   const usesStrings = usesClasses || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA compares class-name strings (__eq)
   if (usesArrays || usesObjects || usesStrings) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow/concat paths
   // Property and method keys are interned to small ints at compile time, so
   // GETPROP/SETPROP/SETHIDDEN/CALLMETHOD are id matches in the object runtime.
   const keyIds = new Map();
-  for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && (i[0] === "GETPROP" || i[0] === "SETPROP" || i[0] === "SETHIDDEN" || i[0] === "CALLMETHOD") && !keyIds.has(i[1])) keyIds.set(i[1], keyIds.size + 1);
+  for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && (i[0] === "GETPROP" || i[0] === "SETPROP" || i[0] === "SETHIDDEN" || i[0] === "CALLMETHOD" || i[0] === "GETPROPA" || i[0] === "SETPROPA") && !keyIds.has(i[1])) keyIds.set(i[1], keyIds.size + 1);
   if (usesGenerators) for (const k of ["value", "done"]) if (!keyIds.has(k)) keyIds.set(k, keyIds.size + 1); // GENNEXT builds {value, done}
+  if (usesAccessors) for (const k of ["__accessors__", "get", "set"]) if (!keyIds.has(k)) keyIds.set(k, keyIds.size + 1); // accessor lookups
   const arity = {}; // each resource is imported with the arity it is called with
   for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && i[0] === "RES") arity[i[1]] = i[2] || 0;
   for (const res of resources) m.addFunctionImport(res, "env", res, binaryen.createType(new Array(arity[res] || 0).fill(binaryen.i32)), binaryen.i32);
@@ -758,7 +806,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   // A generator function adds a second entry — its dispatch body `name$gen`.
   const fnNames = [...Object.keys(program), ...gens.map((g) => g + "$gen")];
   const fnIndex = Object.fromEntries(fnNames.map((n, i) => [n, i]));
-  const usesClosures = fnNames.length > 0 && uses("MAKECLOSURE", "CALLV", "CALLDYN", "CALLMETHOD"); // all call through the function table
+  const usesClosures = fnNames.length > 0 && uses("MAKECLOSURE", "CALLV", "CALLDYN", "CALLMETHOD", "GETPROPA", "SETPROPA"); // all call through the function table
   for (const [name, fn] of Object.entries(program)) {
     if (gens.includes(name)) { emitGenTrampoline(m, name, fn, fnIndex[name + "$gen"]); compileGenBody(m, name + "$gen", fn); } // generator: trampoline + dispatch body
     else compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings);
@@ -767,6 +815,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   if (usesObjects) addObjectRuntime(m);
   if (usesStrings) addStringRuntime(m);
   if (usesClasses) addClassRuntime(m);
+  if (usesAccessors) addAccessorRuntime(m, keyIds.get("__accessors__"), keyIds.get("get"), keyIds.get("set"));
   if (usesGenerators) addGenRuntime(m, keyIds.get("value"), keyIds.get("done"));
   if (usesClosures) {
     m.addTable("0", fnNames.length, fnNames.length, binaryen.funcref);

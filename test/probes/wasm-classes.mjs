@@ -58,6 +58,18 @@ const programs = [
   ["method value through a variable", `
     class Box { constructor(v) { this.v = v; } val() { return this.v + 1; } }
     function main() { const b = new Box(7); const m = b.val; return m(); }`],                         // 8
+  ["getter computes from a field", `
+    class C { constructor() { this._v = 1; } get x() { return this._v * 2; } }
+    function main() { return new C().x; }`],                                                          // 2
+  ["getter + setter round-trip", `
+    class C { constructor() { this._v = 1; } get x() { return this._v * 2; } set x(n) { this._v = n; } }
+    function main() { const c = new C(); c.x = 10; return c.x; }`],                                   // set _v=10, get 20
+  ["a setter mutates through to another getter", `
+    class Temp { constructor(c) { this._c = c; } get celsius() { return this._c; } set celsius(v) { this._c = v + 1; } }
+    function main() { const t = new Temp(0); t.celsius = 24; return t.celsius; }`],                   // 25
+  ["plain fields coexist with accessors", `
+    class C { constructor() { this.n = 5; this._v = 2; } get x() { return this._v * 10; } }
+    function main() { const c = new C(); return c.n + c.x; }`],                                       // 5 + 20 = 25
 ];
 
 function interp(src) {
