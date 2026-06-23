@@ -11,7 +11,7 @@
 
 import {
   Tier, run, Suspend, serializeContinuation, deserializeContinuation, contBytes,
-  initialFrames, isHandle, makeDataset, fmt,
+  initialFrames, makeDataset, fmt,
 } from "./waso-core.mjs";
 
 const N = 100_000;
