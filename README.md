@@ -157,7 +157,7 @@ docs/        architecture, design spec
 
 - [Architecture](./docs/architecture.md) — layout, public API, design rationale
 - [Design](./docs/design.md) — the original spec and open questions
-- [Roadmap](./ROADMAP.md) · [Changelog](./CHANGELOG.md) · [Contributing](./CONTRIBUTING.md)
+- [Roadmap](./ROADMAP.md) · [Contributing](./CONTRIBUTING.md)
 
 ## License
 
