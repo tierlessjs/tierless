@@ -29,6 +29,7 @@ const cases = [
   { file: "test/probes/wasm-handle.mjs",          needs: ["a big object stayed home while the continuation migrated"] },
   { file: "test/probes/wasm-fetch.mjs",           needs: ["the big object crossed only when the migrated program dereferenced its handle"] },
   { file: "test/probes/wasm-ts.mjs",              needs: ["real TypeScript compiled to native wasm, ran, and migrated"] },
+  { file: "test/probes/wasm-diff.mjs",            needs: ["the AOT compiler matches the interpreter (differential oracle)"] },
   { file: "test/probes/frontend.mjs",             needs: ["all PASS — closures"] },
   { file: "examples/hn-thread/client.mjs",        needs: ["Real TS migrated over a WebSocket and computed correctly? YES"] },
   { file: "test/probes/realts.mjs",               needs: ["all PASS — Stackmix compiles real JS"] },
