@@ -24,6 +24,7 @@ const cases = [
   { file: "test/probes/deref.mjs",                needs: ["Result: ALL PASS"] },
   { file: "test/probes/async.mjs",                needs: ["all PASS — await is just a suspension"] },
   { file: "test/probes/asyncify.mjs",             needs: ["compiled-wasm continuation serialized and resumed in a fresh instance"] },
+  { file: "test/probes/wasm-aot.mjs",             needs: ["an IR-compiled continuation serialized and resumed in a fresh instance"] },
   { file: "test/probes/frontend.mjs",             needs: ["all PASS — closures"] },
   { file: "examples/hn-thread/client.mjs",        needs: ["Real TS migrated over a WebSocket and computed correctly? YES"] },
   { file: "test/probes/realts.mjs",               needs: ["all PASS — Stackmix compiles real JS"] },
