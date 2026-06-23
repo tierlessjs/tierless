@@ -451,6 +451,29 @@ ordering, AND that a multi-module program migrates as ONE.
 - Module inits run in **dependency (topological) order** from a master "%moduleinit"
   (each module's init is `%init$<prefix>`); the entry runs after, all per tier.
 
+## #4 step 24 (done — deref-miss re-runnability hardening, from PR #1 review)
+A continuation can reference a remote heap object as a §5 handle; touching it where
+it isn't resident makes `host.deref` return a Miss → the interpreter throws Suspend
+(a deref-miss is an await on the fetch) and RE-RUNS the op from the same ip once the
+value arrives. So every deref-touching op must touch the stack only AFTER the deref
+succeeds, or the re-run sees a corrupted stack (lost args / shifted operands). Many
+ops already did this (peek-then-deref); a PR review (gemini-code-assist) found the
+rest didn't.
+- Made **peek-then-deref** (were pop-then-deref): KEYS, DELPROP, DELINDEX, NEWPROXY,
+  HASKEY, DEFMETA/GETMETA/HASMETA/METAKEYS/DELMETA, ISARRAY, CALLM/CALLMS,
+  CALLDYN/CALLDYNS, CALLMETHOD/CALLMETHODS, ITER, GENNEXT/GENRET/GENTHROW.
+- Added a **missing deref**: BIN (a handle OPERAND now resolves to its value, not the
+  raw wrapper — `'' + handle`, comparisons), ITERNEXT (a remote iterator), AWAITALL
+  (a remote array of promises).
+- `approxExceeds` (waso-heap) was undercounting **Map/Set** (Object.keys(map) is []),
+  so a huge Map/Set shipped INLINE instead of becoming a handle — now traverses
+  entries.
+- **This path is NOT a non-goal** (the README said so; corrected). The invariant is
+  load-bearing and now tested directly: `probe-deref.mjs` makes a handle miss exactly
+  once mid-op, asserts the op suspends, resumes, and keeps its args (11 checks; the
+  test is non-vacuous — it fails against the old pop-then-deref code). Only the live
+  fetch *transport* (cost model in waso-policy.mjs) remains unwired.
+
 ## Public API (waso-tsc.mjs)
 - `loadModule(PROGRAM, source, {entry, resources})` — single module (existing).
 - `loadProgram(PROGRAM, files, {entry, entryFile, resources})` — `files` is
@@ -458,8 +481,9 @@ ordering, AND that a multi-module program migrates as ONE.
 - `compileModule` / `compileProgram` return the frag without mutating a PROGRAM.
 - Test suites (all in `test.mjs`): `difftest.mjs` (vs Node, completeness),
   `conformance.mjs` (fidelity + migration), `decorators.mjs` (vs TS transpile),
-  `multimodule.mjs` (imports + migration). difftest 214/217, conformance 77,
-  decorators 25, multimodule 11.
+  `multimodule.mjs` (imports + migration), `probe-deref.mjs` (deref-miss
+  re-runnability). difftest 214/217, conformance 77, decorators 25, multimodule 11,
+  probe-deref 11.
 
 ## Documented caveats (intentional — affect only buggy/exotic code)
 - **TDZ non-enforcement**: reading a let/const before its decl yields undefined, not

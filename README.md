@@ -206,9 +206,15 @@ conformance.mjs / difftest.mjs / decorators.mjs / multimodule.mjs   the four tes
   or the explicit `shared.*` distributed-object machinery (§5).
 - **Fixed working-heap size.** The small heap is bounded; overflowing it traps
   loudly (rather than corrupting), but there's no GC or realloc.
-- **No cross-process handle *fetch*.** The demos' access patterns never deref a
-  remote handle; that protocol (and the chatty per-element case it enables) is
-  modeled in `waso-policy.mjs` but not implemented as live transport.
+- **Cross-process handle *fetch* — invariant honored, transport not yet wired.**
+  Touching a remote §5 handle makes `host.deref` miss, which the interpreter turns
+  into a suspension (a deref-miss is an await on the fetch) and re-runs the op once
+  the value arrives. Every deref-touching op is **peek-then-deref**, so a miss
+  leaves the stack/ip intact and the re-run is correct — verified directly in
+  `probe-deref.mjs` (a handle miss mid-op suspends, resumes, and keeps its args).
+  The remaining piece is the *live wire transport* that fetches the handle across a
+  channel; its cost model is in `waso-policy.mjs`. (This is a real, supported path,
+  not a non-goal — only the transport is unbuilt.)
 - **No browser; no source maps yet.** Every IR instruction already carries its TS
   position (`describeContinuation`), but portable file/line metadata isn't emitted
   yet (§10.6).

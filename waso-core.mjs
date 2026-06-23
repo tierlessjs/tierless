@@ -385,19 +385,19 @@ export function run(tier, frames, host) {
       case "ISAB": { const o = d(f.stack.pop()); const C = HOSTCTORS[ins[1]]; f.stack.push((!!C && o instanceof C) || !!(o && typeof o === "object" && Array.isArray(o.__class__) && o.__class__.includes(ins[1]))); f.ip++; break; } // instanceof a built-in (host error/Array/Map/...) — native for host objects, __class__ chain for Waso instances (e.g. `extends Error`)
 
       case "ISNULLISH": { const v = f.stack.pop(); f.stack.push(v === null || v === undefined); f.ip++; break; }
-      case "KEYS":   { const o = d(f.stack.pop()); const px = proxyOf(o); f.stack.push(px ? proxyKeys(px) : Object.keys(o)); f.ip++; break; } // for-in / Object.keys
-      case "DELPROP": { const o = d(f.stack.pop()); const px = proxyOf(o); f.stack.push(px ? proxyDelete(px, ins[1]) : delete o[ins[1]]); f.ip++; break; }
-      case "DELINDEX": { const k = f.stack.pop(); const o = d(f.stack.pop()); const px = proxyOf(o); f.stack.push(px ? proxyDelete(px, k) : delete o[k]); f.ip++; break; }
-      case "NEWPROXY": { const handler = f.stack.pop(); const target = d(f.stack.pop()); const p = {}; Object.defineProperty(p, "__proxy__", { value: { target, handler }, enumerable: false, writable: true, configurable: true }); f.stack.push(p); f.ip++; break; } // new Proxy(target, handler)
-      case "HASKEY": { const o = d(f.stack.pop()); const k = f.stack.pop(); const px = proxyOf(o); f.stack.push(px ? proxyHas(px, k) : k in o); f.ip++; break; } // `k in o`, proxy-aware
+      case "KEYS":   { const o = d(f.stack[f.stack.length - 1]); f.stack.pop(); const px = proxyOf(o); f.stack.push(px ? proxyKeys(px) : Object.keys(o)); f.ip++; break; } // for-in / Object.keys (peek-then-deref, re-runnable)
+      case "DELPROP": { const o = d(f.stack[f.stack.length - 1]); f.stack.pop(); const px = proxyOf(o); f.stack.push(px ? proxyDelete(px, ins[1]) : delete o[ins[1]]); f.ip++; break; }
+      case "DELINDEX": { const o = d(f.stack[f.stack.length - 2]); const k = f.stack[f.stack.length - 1]; f.stack.length -= 2; const px = proxyOf(o); f.stack.push(px ? proxyDelete(px, k) : delete o[k]); f.ip++; break; }
+      case "NEWPROXY": { const target = d(f.stack[f.stack.length - 2]); const handler = f.stack[f.stack.length - 1]; f.stack.length -= 2; const p = {}; Object.defineProperty(p, "__proxy__", { value: { target, handler }, enumerable: false, writable: true, configurable: true }); f.stack.push(p); f.ip++; break; } // new Proxy(target, handler)
+      case "HASKEY": { const o = d(f.stack[f.stack.length - 1]); const k = f.stack[f.stack.length - 2]; f.stack.length -= 2; const px = proxyOf(o); f.stack.push(px ? proxyHas(px, k) : k in o); f.ip++; break; } // `k in o`, proxy-aware
       case "REFAPPLY": { const argsArr = f.stack.pop(); const thisArg = f.stack.pop(); const fn = f.stack.pop(); f.ip++; if (isClosure(fn)) { const g = enter(fn, (argsArr || []).slice(), thisArg); if (g !== undefined) f.stack.push(g); break; } f.stack.push(fn.apply(thisArg, hostArgs(argsArr || []))); break; } // Reflect.apply(fn, thisArg, args)
-      case "DEFMETA": { const pk = f.stack.pop(); const target = d(f.stack.pop()); const mv = f.stack.pop(); const mk = f.stack.pop(); defineMeta(mk, mv, target, pk); f.stack.push(undefined); f.ip++; break; } // Reflect.defineMetadata(mk, mv, target, pk?)
-      case "GETMETA": { const pk = f.stack.pop(); const target = d(f.stack.pop()); const mk = f.stack.pop(); const bag = ownMetaBag(target, pk); f.stack.push(bag ? bag.get(mk) : undefined); f.ip++; break; }
-      case "HASMETA": { const pk = f.stack.pop(); const target = d(f.stack.pop()); const mk = f.stack.pop(); const bag = ownMetaBag(target, pk); f.stack.push(!!(bag && bag.has(mk))); f.ip++; break; }
-      case "METAKEYS": { const pk = f.stack.pop(); const target = d(f.stack.pop()); const bag = ownMetaBag(target, pk); f.stack.push(bag ? [...bag.keys()] : []); f.ip++; break; }
-      case "DELMETA": { const pk = f.stack.pop(); const target = d(f.stack.pop()); const mk = f.stack.pop(); const bag = ownMetaBag(target, pk); f.stack.push(!!(bag && bag.delete(mk))); f.ip++; break; }
+      case "DEFMETA": { const target = d(f.stack[f.stack.length - 2]); const pk = f.stack[f.stack.length - 1]; const mv = f.stack[f.stack.length - 3]; const mk = f.stack[f.stack.length - 4]; f.stack.length -= 4; defineMeta(mk, mv, target, pk); f.stack.push(undefined); f.ip++; break; } // Reflect.defineMetadata(mk, mv, target, pk?)
+      case "GETMETA": { const target = d(f.stack[f.stack.length - 2]); const pk = f.stack[f.stack.length - 1]; const mk = f.stack[f.stack.length - 3]; f.stack.length -= 3; const bag = ownMetaBag(target, pk); f.stack.push(bag ? bag.get(mk) : undefined); f.ip++; break; }
+      case "HASMETA": { const target = d(f.stack[f.stack.length - 2]); const pk = f.stack[f.stack.length - 1]; const mk = f.stack[f.stack.length - 3]; f.stack.length -= 3; const bag = ownMetaBag(target, pk); f.stack.push(!!(bag && bag.has(mk))); f.ip++; break; }
+      case "METAKEYS": { const target = d(f.stack[f.stack.length - 2]); const pk = f.stack[f.stack.length - 1]; f.stack.length -= 2; const bag = ownMetaBag(target, pk); f.stack.push(bag ? [...bag.keys()] : []); f.ip++; break; }
+      case "DELMETA": { const target = d(f.stack[f.stack.length - 2]); const pk = f.stack[f.stack.length - 1]; const mk = f.stack[f.stack.length - 3]; f.stack.length -= 3; const bag = ownMetaBag(target, pk); f.stack.push(!!(bag && bag.delete(mk))); f.ip++; break; }
       case "NEWARR": f.stack.push([]); f.ip++; break;
-      case "ISARRAY": f.stack.push(Array.isArray(d(f.stack.pop()))); f.ip++; break;
+      case "ISARRAY": { const v = d(f.stack[f.stack.length - 1]); f.stack.pop(); f.stack.push(Array.isArray(v)); f.ip++; break; }
       case "JSONSTR": {                                         // JSON.stringify that drops Waso closures & class objects (JS omits functions)
         const space = f.stack.pop(); const replacer = f.stack.pop(); const val = f.stack.pop(); f.ip++;
         const isFn = (v) => isClosure(v) || (v != null && typeof v === "object" && v.__classobj__);
@@ -432,7 +432,7 @@ export function run(tier, frames, host) {
       case "INDEX":  { const a = d(f.stack[f.stack.length - 2]); const i = f.stack[f.stack.length - 1]; f.stack.length -= 2; const px = proxyOf(a); if (px) { f.stack.push(proxyGet(px, i, a)); f.ip++; break; } const acc = a != null && a.__accessors__ && a.__accessors__[i]; if (acc && acc.get) { f.ip++; frames.push({ fn: acc.get.fn, ip: 0, locals: [], stack: [], env: acc.get.env, handlers: [] }); break; } f.stack.push(a[i]); f.ip++; break; } // computed access fires a getter
       case "SETINDEX": { const a = d(f.stack[f.stack.length - 3]); const i = f.stack[f.stack.length - 2]; const v = f.stack[f.stack.length - 1]; f.stack.length -= 3; const px = proxyOf(a); if (px) { proxySet(px, i, v, a); f.ip++; break; } const acc = a != null && a.__accessors__ && a.__accessors__[i]; if (acc && acc.set) { f.ip++; frames.push({ fn: acc.set.fn, ip: 0, locals: [v], stack: [], env: acc.set.env, handlers: [] }); break; } a[i] = v; f.ip++; break; }
       case "SETHIDDEN": { const o = f.stack[f.stack.length - 2]; const v = f.stack[f.stack.length - 1]; f.stack.length -= 2; Object.defineProperty(o, ins[1], { value: v, writable: true, enumerable: false, configurable: true }); f.stack.push(o); f.ip++; break; } // non-enumerable own prop (instance method/tag)
-      case "BIN":    { let b = f.stack.pop(); let a = f.stack.pop(); if (COERCING.has(ins[1])) { a = toPrim(a); b = toPrim(b); } f.stack.push(binop(ins[1], a, b)); f.ip++; break; } // ToPrimitive only for coercing ops (not ===/!==/==/!=/&|^ identity-or-int)
+      case "BIN":    { let a = d(f.stack[f.stack.length - 2]); let b = d(f.stack[f.stack.length - 1]); f.stack.length -= 2; if (COERCING.has(ins[1])) { a = toPrim(a); b = toPrim(b); } f.stack.push(binop(ins[1], a, b)); f.ip++; break; } // peek+deref operands (a handle operand resolves to its value); ToPrimitive only for coercing ops (not ===/!==/==/!=/&|^)
       case "JMP":    f.ip = ins[1]; break;
       case "JMPF":   { const c = f.stack.pop(); f.ip = c ? f.ip + 1 : ins[1]; break; }
       case "LOADENV": f.stack.push(f.env[ins[1]]); f.ip++; break;
@@ -484,24 +484,27 @@ export function run(tier, frames, host) {
       case "ASSIGNALL": { const src = f.stack.pop(); Object.assign(f.stack[f.stack.length - 1], src); f.ip++; break; }                         // object spread
       case "CALLM": {                                          // call a host method: ["CALLM", name, argc] (stdlib intrinsics)
         const argc = ins[2];
+        const o = d(f.stack[f.stack.length - argc - 1]);        // deref receiver BEFORE popping args (re-runnable on a deref-miss)
         const args = [];
         for (let k = 0; k < argc; k++) args.unshift(f.stack.pop());
-        const o = d(f.stack.pop());
+        f.stack.pop();                                          // the receiver
         f.stack.push(o[ins[1]](...hostArgs(args)));
         f.ip++; break;
       }
-      case "CALLMS": { const argsArr = f.stack.pop(); const o = d(f.stack.pop()); f.stack.push(o[ins[1]](...hostArgs(argsArr))); f.ip++; break; } // host method, spread args
+      case "CALLMS": { const o = d(f.stack[f.stack.length - 2]); const argsArr = f.stack[f.stack.length - 1]; f.stack.length -= 2; f.stack.push(o[ins[1]](...hostArgs(argsArr))); f.ip++; break; } // host method, spread args
       case "CALLDYN": case "CALLDYNS": {                       // obj[key](args): dynamic dispatch, this = obj
+        const o = d(f.stack[ins[0] === "CALLDYNS" ? f.stack.length - 3 : f.stack.length - ins[1] - 2]); // deref receiver BEFORE popping
         let args; if (ins[0] === "CALLDYNS") args = f.stack.pop().slice(); else { args = []; for (let k = 0; k < ins[1]; k++) args.unshift(f.stack.pop()); }
-        const key = f.stack.pop(); const o = d(f.stack.pop()); f.ip++;
+        const key = f.stack.pop(); f.stack.pop(); f.ip++;       // key, then receiver
         if (isClosure(o) && (key === "call" || key === "apply" || key === "bind")) { const g = fnProto(o, key, args); if (g !== undefined) f.stack.push(g); break; } // Function.prototype.call/apply/bind on a closure
         const pxd = proxyOf(o); const m = pxd ? proxyGet(pxd, key, o) : o[key]; // proxy.method(): get trap supplies the method
         if (isClosure(m)) { const g = enter(m, args, o); if (g !== undefined) f.stack.push(g); break; } // this = receiver
         f.stack.push(m.apply(pxd ? pxd.target : o, hostArgs(args))); break;        // host method (arr[Symbol.iterator](), etc.)
       }
       case "CALLMETHOD": case "CALLMETHODS": {                   // obj.m(args): dispatch user-closure method vs host method
+        const o = d(f.stack[ins[0] === "CALLMETHODS" ? f.stack.length - 2 : f.stack.length - ins[2] - 1]); // deref receiver BEFORE popping
         let args; if (ins[0] === "CALLMETHODS") args = f.stack.pop().slice(); else { args = []; for (let k = 0; k < ins[2]; k++) args.unshift(f.stack.pop()); }
-        const o = d(f.stack.pop()); f.ip++;
+        f.stack.pop(); f.ip++;                                  // the receiver
         if (isClosure(o) && (ins[1] === "call" || ins[1] === "apply" || ins[1] === "bind")) { const g = fnProto(o, ins[1], args); if (g !== undefined) f.stack.push(g); break; } // closure.call/apply/bind
         const pxm = proxyOf(o); const m = pxm ? proxyGet(pxm, ins[1], o) : o[ins[1]]; // proxy.method(): get trap supplies the method
         if (isClosure(m)) { const g = enter(m, args, o); if (g !== undefined) f.stack.push(g); break; } // user method: this = receiver (call-site bound)
@@ -547,7 +550,7 @@ export function run(tier, frames, host) {
         break;
       }
       case "ITER": {                                            // normalize a for-of source -> something GENNEXT can drive
-        const v = d(f.stack.pop()); f.ip++;
+        const v = d(f.stack[f.stack.length - 1]); f.stack.pop(); f.ip++;
         if (Array.isArray(v)) { f.stack.push({ __it__: "arr", a: v, i: 0 }); break; }
         if (v !== null && (isGenerator(v) || (typeof v === "object" && (v.__it__ || isClosure(v.next))))) { f.stack.push(v); break; } // generator / our iterator / user iterator object
         if (v !== null && v !== undefined) {
@@ -558,13 +561,13 @@ export function run(tier, frames, host) {
         f.stack.push(v); break;                                 // not iterable -> GENNEXT errors
       }
       case "ITERNEXT": {                                        // -> push value, then done (bool)
-        const it = f.stack.pop(); f.ip++;
+        const it = d(f.stack[f.stack.length - 1]); f.stack.pop(); f.ip++; // deref: a remote iterator/generator resolves to a drivable one
         if (it && it.__it__ === "arr") { if (it.i < it.a.length) { f.stack.push(it.a[it.i++]); f.stack.push(false); } else { f.stack.push(undefined); f.stack.push(true); } break; }
         if (isGenerator(it)) { spliceGen(it, undefined, "pair"); break; } // drive the generator on the main stack
         throw new Error("not iterable");
       }
       case "GENNEXT": {                                         // it.next(sendVal) -> { value, done } (or an ordinary .next() method call)
-        const sendVal = f.stack.pop(); const o = d(f.stack.pop()); f.ip++;
+        const o = d(f.stack[f.stack.length - 2]); const sendVal = f.stack[f.stack.length - 1]; f.stack.length -= 2; f.ip++;
         if (o && o.__it__ === "arr") { f.stack.push(o.i < o.a.length ? { value: o.a[o.i++], done: false } : { value: undefined, done: true }); break; } // array iterator ignores the sent value
         if (isGenerator(o)) { spliceGen(o, sendVal, "obj"); break; } // drive the generator on the main stack
         const m = o && o.next;
@@ -572,19 +575,19 @@ export function run(tier, frames, host) {
         f.stack.push(o.next(sendVal)); break;                   // host method
       }
       case "GENRET": {                                          // it.return(v) -> { value, done:true }, running finallys
-        const v = f.stack.pop(); const o = d(f.stack.pop()); f.ip++;
+        const o = d(f.stack[f.stack.length - 2]); const v = f.stack[f.stack.length - 1]; f.stack.length -= 2; f.ip++;
         if (isGenerator(o)) { let r; try { r = genReturn(o, v); } catch (e) { if (e instanceof WasoUncaught) { doThrow(e.value); break; } throw e; } f.stack.push({ value: r.value, done: r.done }); break; }
         const m = o && o.return; if (isClosure(m)) { frames.push({ fn: m.fn, ip: 0, locals: [v], stack: [], env: m.env, handlers: [] }); break; }
         f.stack.push(o && o.return ? o.return(v) : { value: v, done: true }); break;
       }
       case "GENTHROW": {                                        // it.throw(e) -> caught in gen (may yield) or propagates to caller
-        const e = f.stack.pop(); const o = d(f.stack.pop()); f.ip++;
+        const o = d(f.stack[f.stack.length - 2]); const e = f.stack[f.stack.length - 1]; f.stack.length -= 2; f.ip++;
         if (isGenerator(o)) { let r; try { r = genThrow(o, e); } catch (ex) { if (ex instanceof WasoUncaught) { doThrow(ex.value); break; } throw ex; } f.stack.push({ value: r.value, done: r.done }); break; }
         const m = o && o.throw; if (isClosure(m)) { frames.push({ fn: m.fn, ip: 0, locals: [e], stack: [], env: m.env, handlers: [] }); break; }
         if (o && o.throw) { f.stack.push(o.throw(e)); break; } doThrow(e); break;
       }
       case "AWAITALL": {                                        // Promise.all: resolve every element CONCURRENTLY (one suspension)
-        const xs = f.stack[f.stack.length - 1];
+        const xs = d(f.stack[f.stack.length - 1]);             // a remote array resolves before we iterate it
         let rejected = null; for (const x of xs) if (x !== null && typeof x === "object" && x.__waso_reject__) { rejected = x; break; }
         if (rejected) { f.stack.pop(); doThrow(rejected.value); break; }   // Promise.all rejects on the first rejection
         f.stack.pop();
