@@ -24,7 +24,7 @@
     "type": "git",
     "url": "git+https://github.com/bfulton/stackmix.git"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "Bright Fulton",
   "main": "./src/index.mjs",
   "types": "./types/index.d.ts",
@@ -47,7 +47,8 @@
     "types",
     "bin",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=18.0.0"

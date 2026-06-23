@@ -1,7 +1,7 @@
 # Stackmix
 
 [![CI](https://github.com/bfulton/stackmix/actions/workflows/ci.yml/badge.svg)](https://github.com/bfulton/stackmix/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](./package.json)
 
 **One program that runs across client and server, with the runtime moving live
@@ -161,4 +161,4 @@ docs/        architecture, design spec
 
 ## License
 
-[MIT](./LICENSE) © Bright Fulton
+[Apache-2.0](./LICENSE) © Bright Fulton

@@ -72,4 +72,4 @@ under Node, plus what you expected. Security issues should follow
 [`SECURITY.md`](./SECURITY.md) instead of a public issue.
 
 By contributing, you agree that your contributions are licensed under the
-project's [MIT License](./LICENSE).
+project's [Apache License 2.0](./LICENSE).
