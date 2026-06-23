@@ -60,5 +60,4 @@ where it goes next. Items are grouped, not strictly ordered; see
   at the interpreter level (design `§8`).
 - **Replay/journaling as the migration mechanism** — replay reconstructs state by
   re-running history, which can't move a *live* mid-call computation across a
-  trust boundary. It's a complementary durability story, not a substitute (see
-  [`docs/prior-art.md`](./docs/prior-art.md#b-replay-from-a-log-the-alternative-we-are-not-using)).
+  trust boundary. It's a complementary durability story, not a substitute.

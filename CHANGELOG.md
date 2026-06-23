@@ -39,9 +39,9 @@ about structure, a stable public API, types, tooling, and documentation.
 
 ### Removed
 - The chronological frontend development log (`NOTES-frontend.md`). Its durable
-  content — the NJS lineage, the "native async is suspend-but-not-serialize"
-  rationale, and the intentional frontend caveats — was folded into
-  `docs/prior-art.md`, `docs/architecture.md`, and `ROADMAP.md`.
+  content — the "native async is suspend-but-not-serialize" rationale and the
+  intentional frontend caveats — was folded into `docs/architecture.md` and
+  `ROADMAP.md`.
 - Demo-specific fixtures (the people/render IR, `makeDataset`) that had leaked
   into the runtime; they now live in `examples/shared/`.
 

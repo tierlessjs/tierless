@@ -150,14 +150,13 @@ examples/    runnable demos (spike, two-process, wasm, hn-thread, handle-fetch, 
 bench/       the HN and Conduit benchmarks
 test/        conformance, differential, decorator, multi-module suites + probes
 templates/   the `stackmix new` scaffold
-docs/        architecture, design spec, prior art
+docs/        architecture, design spec
 ```
 
 ## Documentation
 
 - [Architecture](./docs/architecture.md) — layout, public API, design rationale
 - [Design](./docs/design.md) — the original spec and open questions
-- [Prior art](./docs/prior-art.md) — where Stackmix sits among related systems
 - [Roadmap](./ROADMAP.md) · [Changelog](./CHANGELOG.md) · [Contributing](./CONTRIBUTING.md)
 
 ## License

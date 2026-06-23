@@ -2,8 +2,7 @@
 
 This document explains how Stackmix is put together and why. For the original
 vision and the open research questions, see [`design.md`](./design.md) (the
-spec). For where Stackmix sits among related systems, see
-[`prior-art.md`](./prior-art.md).
+spec).
 
 ## The model in one paragraph
 
@@ -38,7 +37,7 @@ examples/             runnable demos (spike, two-process, wasm, hn-thread, ...)
 bench/                the HN waterfall + Conduit over-fetch benchmarks
 test/                 conformance, differential, decorator, multi-module suites + probes
 templates/basic/      the `stackmix new` scaffold
-docs/                 this document, the design spec, prior art
+docs/                 this document, the design spec
 ```
 
 The load-bearing framework is `src/`. Everything else is evidence that it works

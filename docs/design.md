@@ -199,9 +199,3 @@ Qwik's `$`-optimizer (making closures individually addressable/movable in real J
 - **Measure the serialized continuation size** against the alternative (shipping the full result set). The cursor/filter case should show kilobytes-of-stack vs. megabytes-of-data.
 
 If that size claim holds, the idea has legs and you move to the heap model and the browser substrate. If the continuation is fat, you learn the limits immediately and cheaply.
-
----
-
-## Appendix: naming
-
-Working title **Stackmix** (WASM Stack Oscillator). Naming was deliberately deferred — the consensus from discussion is that the right name follows from what the thing turns out to be once a prototype exists, and that it's the cheapest, most reversible decision in the project. A prior PoC was named "Aesop" with no harm done; the credibility comes from the work, not the name. Tagline candidate that stuck: **"No more tiers."** Note that the in-flight WASM proposal now officially calls its primitive "continuations," so naming Stackmix around continuations-on-wasm would conceptually collide — Stackmix's actual contribution is *serializing and migrating* them across a tier boundary by resource dependency, which is the part nobody else is doing.
