@@ -1,12 +1,12 @@
-// Waso — shared wasm runtime core. Used by the single-process demo
-// (waso-wasm.mjs) and the two-process demo (waso-wasm-2p-*.mjs) so the
-// mechanism can't drift. See waso.wat for the memory map and the design-doc
-// mapping; see waso-compile.mjs for the TypeScript -> bytecode frontend.
+// Stackmix — shared wasm runtime core. Used by the single-process demo
+// (stackmix-wasm.mjs) and the two-process demo (stackmix-wasm-2p-*.mjs) so the
+// mechanism can't drift. See stackmix.wat for the memory map and the design-doc
+// mapping; see stackmix-compile.mjs for the TypeScript -> bytecode frontend.
 
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-// --- memory map (must match waso.wat) --------------------------------------
+// --- memory map (must match stackmix.wat) --------------------------------------
 export const IP = 0, SP = 4, SMALL_BUMP = 8, RESULT = 12, FP = 16;
 export const OPSTACK_BASE = 512;
 export const BYTECODE_BASE = 4096;
@@ -49,8 +49,8 @@ export function assemble(asm) {
   return buf;
 }
 
-// --- wasm module (auto-build from waso.wat if needed) -----------------------
-const WASM_PATH = fileURLToPath(new URL("./waso.wasm", import.meta.url));
+// --- wasm module (auto-build from stackmix.wat if needed) -----------------------
+const WASM_PATH = fileURLToPath(new URL("./stackmix.wasm", import.meta.url));
 let MODULE = null;
 async function getModule() {
   if (!existsSync(WASM_PATH)) await import("./build-wasm.mjs");

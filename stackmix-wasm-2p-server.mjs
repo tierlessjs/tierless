@@ -1,4 +1,4 @@
-// Waso wasm, two-process demo — SERVER tier (child process).
+// Stackmix wasm, two-process demo — SERVER tier (child process).
 //
 // Owns db.query and the large dataset (in its own wasm instance's HEAP_BIG).
 // Receives a continuation as a raw linear-memory slice (the binary attachment
@@ -8,12 +8,12 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { compile } from "./waso-compile.mjs";
+import { compile } from "./stackmix-compile.mjs";
 import {
   assemble, makeInstance, capture, restore, Suspend, dbQueryHandler,
   fmt, RESULT, RESOURCES, DATASET_BYTES, N,
-} from "./waso-wasm-core.mjs";
-import { writeFrame, readFrames } from "./waso-frame.mjs";
+} from "./stackmix-wasm-core.mjs";
+import { writeFrame, readFrames } from "./stackmix-frame.mjs";
 
 const appSrc = readFileSync(fileURLToPath(new URL("./app.ts", import.meta.url)), "utf8");
 const bytecode = assemble(compile(appSrc).asm);

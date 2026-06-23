@@ -1,6 +1,6 @@
-// Waso — TypeScript -> JS-IR frontend (#4).
+// Stackmix — TypeScript -> JS-IR frontend (#4).
 //
-// Targets the de-risked JS interpreter (waso-core). Lowers a growing subset of
+// Targets the de-risked JS interpreter (stackmix-core). Lowers a growing subset of
 // real TS/JS: closures (closure conversion), `await` as a suspension, mutable
 // captured variables (boxing into a shared cell {v}, migration-safe via the
 // identity-preserving wire format), binding-keyed scoping (correct lexical
@@ -48,12 +48,12 @@ const COMPOUND = new Map([
 const isFnLike = (n) => ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n) || ts.isMethodDeclaration(n) || ts.isConstructorDeclaration(n) || ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n);
 const isAccess = (n) => ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n) || ts.isCallExpression(n);
 const isChainRoot = (n) => ts.isOptionalChain(n) && !(n.parent && isAccess(n.parent) && n.parent.expression === n && ts.isOptionalChain(n.parent));
-const HOF = new Set(["map", "filter", "forEach", "reduce", "find", "findIndex", "some", "every"]); // callback is a Waso closure -> inline-compiled
-const GLOBAL_OBJS = new Set(["Math", "JSON", "Object", "Array", "Number", "String", "Boolean", "console", "Date", "Symbol"]); // host stdlib (match waso-heap GLOBALS)
+const HOF = new Set(["map", "filter", "forEach", "reduce", "find", "findIndex", "some", "every"]); // callback is a Stackmix closure -> inline-compiled
+const GLOBAL_OBJS = new Set(["Math", "JSON", "Object", "Array", "Number", "String", "Boolean", "console", "Date", "Symbol"]); // host stdlib (match stackmix-heap GLOBALS)
 const GLOBAL_CALLS = new Set(["parseInt", "parseFloat", "isNaN", "isFinite", "Number", "String", "Boolean", "Symbol"]); // callable globals
-const CTOR_GLOBALS = new Set(["Map", "Set", "WeakMap", "WeakSet", "Date", "Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError", "URIError", "RegExp"]); // host constructors via `new` (match waso-heap CTORS)
+const CTOR_GLOBALS = new Set(["Map", "Set", "WeakMap", "WeakSet", "Date", "Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError", "URIError", "RegExp"]); // host constructors via `new` (match stackmix-heap CTORS)
 const ERROR_CTORS = new Set(["Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError", "URIError"]); // extendable host error bases
-const BUILTIN_CTORS = new Set(["Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError", "URIError", "Array", "Map", "Set", "WeakMap", "WeakSet", "Date", "RegExp", "Object", "Number", "String", "Boolean", "Promise"]); // valid `instanceof` RHS (match HOSTCTORS in waso-core)
+const BUILTIN_CTORS = new Set(["Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError", "URIError", "Array", "Map", "Set", "WeakMap", "WeakSet", "Date", "RegExp", "Object", "Number", "String", "Boolean", "Promise"]); // valid `instanceof` RHS (match HOSTCTORS in stackmix-core)
 const PLAIN_METHODS = new Set(["slice", "indexOf", "lastIndexOf", "includes", "join", "concat", "toUpperCase",
   "toLowerCase", "split", "trim", "trimStart", "trimEnd", "charAt", "charCodeAt", "substring", "substr", "repeat",
   "padStart", "padEnd", "startsWith", "endsWith", "replace", "replaceAll", "toFixed", "at",
@@ -341,7 +341,7 @@ function compileInto(sf, checker, { resources = [], entry = null, prefix = "", o
     const emit = (...x) => { asm.push(x); posMap.set(x, here ? lineColOf(here) : null); };
     const mark = (l) => asm.push(l);
     const label = (s) => `${s}_${gen}_${lab++}`;
-    const fail = (nd, m) => { throw new Error(`waso-tsc: ${m}: \`${nd.getText(sf).slice(0, 40)}\``); };
+    const fail = (nd, m) => { throw new Error(`stackmix-tsc: ${m}: \`${nd.getText(sf).slice(0, 40)}\``); };
     // Accessor-aware property ops only for names that are a get/set SOMEWHERE; every
     // other read/write stays the plain (branchless) op. Falls through to a plain
     // field at runtime when the actual receiver has no such accessor.
@@ -786,7 +786,7 @@ function compileInto(sf, checker, { resources = [], entry = null, prefix = "", o
         const resName = `${callee.expression.getText(sf)}.${callee.name.text}`;
         if (resourceSet.has(resName)) { node.arguments.forEach((a) => expr(a)); emit("RES", resName, node.arguments.length); return true; }
         const m = callee.name.text;
-        if (ts.isIdentifier(callee.expression) && callee.expression.text === "JSON" && m === "stringify" && bindingOf.get(callee.expression) == null) { const a = node.arguments; a[0] ? expr(a[0]) : emit("PUSH", undefined); a[1] ? expr(a[1]) : emit("PUSH", undefined); a[2] ? expr(a[2]) : emit("PUSH", undefined); emit("JSONSTR"); return true; } // skip Waso closures (functions) like JS does
+        if (ts.isIdentifier(callee.expression) && callee.expression.text === "JSON" && m === "stringify" && bindingOf.get(callee.expression) == null) { const a = node.arguments; a[0] ? expr(a[0]) : emit("PUSH", undefined); a[1] ? expr(a[1]) : emit("PUSH", undefined); a[2] ? expr(a[2]) : emit("PUSH", undefined); emit("JSONSTR"); return true; } // skip Stackmix closures (functions) like JS does
         if (ts.isIdentifier(callee.expression) && callee.expression.text === "Object" && m === "keys" && node.arguments.length === 1 && bindingOf.get(callee.expression) == null) { expr(node.arguments[0]); emit("KEYS"); return true; } // proxy-aware (ownKeys trap)
         if (ts.isIdentifier(callee.expression) && callee.expression.text === "Reflect" && bindingOf.get(callee.expression) == null) { const a = node.arguments; // proxy-aware reflection (handlers delegate to these)
           if (m === "get") { expr(a[0]); expr(a[1]); emit("INDEX"); return true; }

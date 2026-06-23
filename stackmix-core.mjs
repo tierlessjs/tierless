@@ -1,8 +1,8 @@
-// Waso — shared core (IR, interpreter, wire format)
+// Stackmix — shared core (IR, interpreter, wire format)
 //
-// Used by both the single-process spike (waso-spike.mjs) and the two-process
-// version (waso-2p-client.mjs / waso-2p-server.mjs) so the mechanism can't
-// drift between them. See waso-spike.mjs's header for the design-doc mapping.
+// Used by both the single-process spike (stackmix-spike.mjs) and the two-process
+// version (stackmix-2p-client.mjs / stackmix-2p-server.mjs) so the mechanism can't
+// drift between them. See stackmix-spike.mjs's header for the design-doc mapping.
 
 // ---------------------------------------------------------------------------
 // IR  (WASM-shaped: a stack machine with explicit, numbered locals)
@@ -22,8 +22,8 @@
 //
 // Locals: 0=minAge, 1=rows, 2=matched, 3=i, 4=row
 
-import { encodeGraph, decodeGraph, GLOBALS, CTORS, isHandle } from "./waso-heap.mjs";
-export { isHandle }; // one source of truth (waso-heap.mjs); re-exported here for callers that import it from core
+import { encodeGraph, decodeGraph, GLOBALS, CTORS, isHandle } from "./stackmix-heap.mjs";
+export { isHandle }; // one source of truth (stackmix-heap.mjs); re-exported here for callers that import it from core
 
 export const L = { minAge: 0, rows: 1, matched: 2, i: 3, row: 4 };
 
@@ -45,7 +45,7 @@ function assemble(asm) {
 }
 
 // NOTE: PROGRAM is a process-wide singleton that loadModule/loadProgram mutate in place,
-// so two independent Waso programs can't coexist in one process, and the base `render` fn
+// so two independent Stackmix programs can't coexist in one process, and the base `render` fn
 // below is always present unless deleted. Callers that load a second, unrelated program
 // must clear it first (`for (const k in PROGRAM) delete PROGRAM[k]`, as the tests do). A
 // per-context program table would lift this; the singleton is a deliberate prototype choice.
@@ -114,12 +114,12 @@ export class Tier {
 }
 
 // ---------------------------------------------------------------------------
-// Wire format — identity-preserving, cycle-safe graph encoding (waso-heap.mjs).
+// Wire format — identity-preserving, cycle-safe graph encoding (stackmix-heap.mjs).
 // All values reachable from the continuation are encoded into one shared table,
 // so object identity and cycles survive the round trip; a subgraph larger than
 // HANDLE_THRESHOLD becomes a §5 handle into the source tier's heap (tier-local,
 // not shipped). See probe-heap.mjs for the failure modes this replaces, and
-// waso-fetch.mjs for dereferencing a handle on the other tier.
+// stackmix-fetch.mjs for dereferencing a handle on the other tier.
 // ---------------------------------------------------------------------------
 
 export function serializeContinuation(cont, sourceTier) {
@@ -196,8 +196,8 @@ export class Miss {
   constructor(handle) { this.handle = handle; }
 }
 
-// Thrown out of run() when a Waso `throw` unwinds past all frames (uncaught).
-export class WasoUncaught { constructor(value) { this.value = value; } }
+// Thrown out of run() when a Stackmix `throw` unwinds past all frames (uncaught).
+export class StackmixUncaught { constructor(value) { this.value = value; } }
 
 // A `yield` suspends ONLY the generator's own frame stack (a local, bounded
 // suspension), unwinding out of the sub-run() that drives the generator — not the
@@ -212,11 +212,11 @@ export function isGenerator(x) { return x !== null && typeof x === "object" && x
 // A first-class closure: a code pointer (fn name) + a captured environment. The
 // env is plain data, so a closure — and a continuation holding one — serializes
 // through the graph codec (code travels by reference, env by value).
-export function isClosure(x) { return x !== null && typeof x === "object" && x.__waso_closure__ === true; }
+export function isClosure(x) { return x !== null && typeof x === "object" && x.__stackmix_closure__ === true; }
 
 // Wrap a payload as a genuine async value: `await` of it suspends to the host
 // (which resolves `payload`). Plain values awaited inline (identity).
-export function awaitable(payload) { return { __waso_async__: true, payload }; }
+export function awaitable(payload) { return { __stackmix_async__: true, payload }; }
 
 function binop(op, a, b) {
   switch (op) {
@@ -257,7 +257,7 @@ export function run(tier, frames, host) {
       if (cur.handlers && cur.handlers.length) { const h = cur.handlers.pop(); cur.stack.length = h.sp; cur.stack.push(v); cur.ip = h.ip; return; }
       if (cur.gb) cur.gb.done = true;                         // exception propagating past a generator boundary -> that generator is done
       frames.pop();
-      if (frames.length === 0) throw new WasoUncaught(v);
+      if (frames.length === 0) throw new StackmixUncaught(v);
     }
   };
   // Splice a generator's frames onto the MAIN stack, beneath a boundary frame, and
@@ -276,7 +276,7 @@ export function run(tier, frames, host) {
   // A bound closure (Function.prototype.bind) fixes `this` and prepends args; binding
   // is flattened so `target` is never itself bound. `enter` resolves binding, then
   // either pushes a call frame (returning undefined) or returns a generator object.
-  const bindClosure = (cl, bthis, bargs) => (cl.bound ? { __waso_closure__: true, bound: true, target: cl.target, bthis: cl.bthis, bargs: cl.bargs.concat(bargs), gen: cl.gen } : { __waso_closure__: true, bound: true, target: cl, bthis, bargs, gen: cl.gen });
+  const bindClosure = (cl, bthis, bargs) => (cl.bound ? { __stackmix_closure__: true, bound: true, target: cl.target, bthis: cl.bthis, bargs: cl.bargs.concat(bargs), gen: cl.gen } : { __stackmix_closure__: true, bound: true, target: cl, bthis, bargs, gen: cl.gen });
   const enter = (callee, args, thisVal) => {
     if (callee.bound) { args = callee.bargs.concat(args); thisVal = callee.bthis; callee = callee.target; }
     if (callee.gen) return makeGen(callee, args, thisVal);
@@ -285,7 +285,7 @@ export function run(tier, frames, host) {
   };
   const callClosure = (cl, args, thisVal) => { if (cl.bound) { args = cl.bargs.concat(args); thisVal = cl.bthis; cl = cl.target; } return run(tier, [{ fn: cl.fn, ip: 0, locals: args.slice(), stack: [], env: cl.env, handlers: [], thisVal }], host).value; }; // run a non-suspending closure to completion (for synchronous drains)
   // Proxy: a wrapper carries a non-enumerable __proxy__ = { target, handler }. Every
-  // property op checks proxyOf first; a present trap (a Waso closure on the handler)
+  // property op checks proxyOf first; a present trap (a Stackmix closure on the handler)
   // is driven synchronously, else the operation reflects onto the target. Traps run
   // to completion (no mid-trap migration) — fine for reactivity/validation handlers.
   const proxyOf = (o) => (o != null && typeof o === "object" ? o.__proxy__ : undefined);
@@ -297,10 +297,10 @@ export function run(tier, frames, host) {
   const proxyKeys = (px) => { const k = trapOf(px, "ownKeys"); return k ? callClosure(k, [px.target]) : Object.keys(px.target); };
   // fn.call(thisArg, ...a) / fn.apply(thisArg, aArr) / fn.bind(thisArg, ...partial)
   const fnProto = (cl, which, args) => (which === "bind" ? bindClosure(cl, args[0], args.slice(1)) : enter(cl, which === "apply" ? (args[1] != null ? args[1].slice() : []) : args.slice(1), args[0]));
-  // Bridge a Waso closure into a real host function so host methods that take a
+  // Bridge a Stackmix closure into a real host function so host methods that take a
   // callback (Array.from mapFn, String.replace fn, Array.sort comparator, ...) work.
   const hostArgs = (args) => args.map((a) => (isClosure(a) ? (...xs) => callClosure(a, xs) : a));
-  // ToPrimitive for a Waso instance: arithmetic/relational/+ coerce objects by
+  // ToPrimitive for a Stackmix instance: arithmetic/relational/+ coerce objects by
   // calling their own valueOf then toString closures (hint number/default order).
   // Host objects (Map/Set/Date) and plain data fall through to native coercion.
   const toPrim = (v) => {
@@ -331,7 +331,7 @@ export function run(tier, frames, host) {
       // continuation. (Local awaits of plain/resolved values resolve inline and
       // never reach here; an outer continuation that merely HOLDS a paused
       // generator migrates fine — see probe-frontend §J.)
-      if (e instanceof Suspend) { g.done = true; throw new WasoUncaught("waso: cannot suspend to the host (await of a genuine async resource / remote handle) INSIDE a generator mid-iteration — resolve it outside the generator"); }
+      if (e instanceof Suspend) { g.done = true; throw new StackmixUncaught("stackmix: cannot suspend to the host (await of a genuine async resource / remote handle) INSIDE a generator mid-iteration — resolve it outside the generator"); }
       throw e;
     }
   };
@@ -345,15 +345,15 @@ export function run(tier, frames, host) {
     catch (e) {
       g.done = true;
       if (e instanceof Yielded) { g.done = false; return { value: e.value, done: false }; }              // finally yielded
-      if (e instanceof WasoUncaught && e.value && e.value.__genret__ !== undefined) return { value: e.value.__genret__, done: true };
+      if (e instanceof StackmixUncaught && e.value && e.value.__genret__ !== undefined) return { value: e.value.__genret__, done: true };
       throw e;                                                                                            // finally threw -> propagate to caller
     }
   };
   // it.throw(e): inject e at the suspension point. Caught by a try/catch in the
   // generator -> it may yield again; otherwise propagates to the caller.
   const genThrow = (g, e) => {
-    if (!g.started || g.done) { g.done = true; throw new WasoUncaught(e); }
-    if (!unwindToHandler(g.frames, e)) { g.done = true; throw new WasoUncaught(e); } // uncaught in generator -> caller
+    if (!g.started || g.done) { g.done = true; throw new StackmixUncaught(e); }
+    if (!unwindToHandler(g.frames, e)) { g.done = true; throw new StackmixUncaught(e); } // uncaught in generator -> caller
     try { const r = run(tier, g.frames, host); g.done = true; return { value: r.value, done: true }; }
     catch (err) { if (err instanceof Yielded) return { value: err.value, done: false }; g.done = true; throw err; }
   };
@@ -361,7 +361,7 @@ export function run(tier, frames, host) {
   while (true) {
     const f = frames[frames.length - 1];
     const fn = PROGRAM[f.fn];
-    if (!fn) throw new Error(`Waso: unknown function "${f.fn}" — was the program loaded into PROGRAM?`); // clearer than "Cannot read properties of undefined" when a continuation references a missing fn
+    if (!fn) throw new Error(`Stackmix: unknown function "${f.fn}" — was the program loaded into PROGRAM?`); // clearer than "Cannot read properties of undefined" when a continuation references a missing fn
     const ins = fn.code[f.ip];
     try {
     switch (ins[0]) {
@@ -371,7 +371,7 @@ export function run(tier, frames, host) {
       case "POP":    f.stack.pop(); f.ip++; break;
       case "DUP":    f.stack.push(f.stack[f.stack.length - 1]); f.ip++; break;
       case "NOT":    f.stack.push(!f.stack.pop()); f.ip++; break;
-      case "TYPEOF": { const v = f.stack.pop(); f.stack.push(isClosure(v) || (v != null && typeof v === "object" && v.__classobj__) ? "function" : typeof v); f.ip++; break; } // Waso closures AND class objects (callable) report as "function" (instances stay "object")
+      case "TYPEOF": { const v = f.stack.pop(); f.stack.push(isClosure(v) || (v != null && typeof v === "object" && v.__classobj__) ? "function" : typeof v); f.ip++; break; } // Stackmix closures AND class objects (callable) report as "function" (instances stay "object")
       case "BITNOT": f.stack.push(~f.stack.pop()); f.ip++; break;
       case "NEG":    f.stack.push(-f.stack.pop()); f.ip++; break;     // unary minus (correct -0 and BigInt negation)
       case "TOBIG":  f.stack.push(BigInt(f.stack.pop())); f.ip++; break;     // BigInt(x)
@@ -386,7 +386,7 @@ export function run(tier, frames, host) {
       case "INC":    { const v = f.stack.pop(); f.stack.push(typeof v === "bigint" ? v + 1n : v + 1); f.ip++; break; } // ++ (type-aware: 1n for bigint)
       case "DEC":    { const v = f.stack.pop(); f.stack.push(typeof v === "bigint" ? v - 1n : v - 1); f.ip++; break; }
       case "ISA": { const o = d(f.stack.pop()); f.stack.push(!!(o && typeof o === "object" && Array.isArray(o.__class__) && o.__class__.includes(ins[1]))); f.ip++; break; } // instanceof a user class
-      case "ISAB": { const o = d(f.stack.pop()); const C = HOSTCTORS[ins[1]]; f.stack.push((!!C && o instanceof C) || !!(o && typeof o === "object" && Array.isArray(o.__class__) && o.__class__.includes(ins[1]))); f.ip++; break; } // instanceof a built-in (host error/Array/Map/...) — native for host objects, __class__ chain for Waso instances (e.g. `extends Error`)
+      case "ISAB": { const o = d(f.stack.pop()); const C = HOSTCTORS[ins[1]]; f.stack.push((!!C && o instanceof C) || !!(o && typeof o === "object" && Array.isArray(o.__class__) && o.__class__.includes(ins[1]))); f.ip++; break; } // instanceof a built-in (host error/Array/Map/...) — native for host objects, __class__ chain for Stackmix instances (e.g. `extends Error`)
 
       case "ISNULLISH": { const v = f.stack.pop(); f.stack.push(v === null || v === undefined); f.ip++; break; }
       case "KEYS":   { const o = d(f.stack[f.stack.length - 1]); f.stack.pop(); const px = proxyOf(o); f.stack.push(px ? proxyKeys(px) : Object.keys(o)); f.ip++; break; } // for-in / Object.keys (peek-then-deref, re-runnable)
@@ -402,7 +402,7 @@ export function run(tier, frames, host) {
       case "DELMETA": { const target = d(f.stack[f.stack.length - 2]); const pk = f.stack[f.stack.length - 1]; const mk = f.stack[f.stack.length - 3]; f.stack.length -= 3; const bag = ownMetaBag(target, pk); f.stack.push(!!(bag && bag.delete(mk))); f.ip++; break; }
       case "NEWARR": f.stack.push([]); f.ip++; break;
       case "ISARRAY": { const v = d(f.stack[f.stack.length - 1]); f.stack.pop(); f.stack.push(Array.isArray(v)); f.ip++; break; }
-      case "JSONSTR": {                                         // JSON.stringify that drops Waso closures & class objects (JS omits functions)
+      case "JSONSTR": {                                         // JSON.stringify that drops Stackmix closures & class objects (JS omits functions)
         const space = f.stack.pop(); const replacer = f.stack.pop(); const val = f.stack.pop(); f.ip++;
         const isFn = (v) => isClosure(v) || (v != null && typeof v === "object" && v.__classobj__);
         const ur = isClosure(replacer) ? (k, v) => callClosure(replacer, [k, v]) : null;
@@ -443,7 +443,7 @@ export function run(tier, frames, host) {
       case "LOADTHIS": f.stack.push(f.thisVal != null ? f.thisVal : (ins[1] >= 0 ? f.env[ins[1]] : undefined)); f.ip++; break; // dynamic `this`: call-site receiver, else the lexical/home this
       case "MAKECLOSURE": {                                   // ["MAKECLOSURE", fn, [["L"|"E"|"T", idx]...], isGenerator?]
         const env = ins[2].map(([kind, i]) => (kind === "L" ? f.locals[i] : kind === "T" ? (f.thisVal != null ? f.thisVal : (i >= 0 ? f.env[i] : undefined)) : f.env[i])); // "T": snapshot current dynamic this for an arrow's lexical capture
-        f.stack.push({ __waso_closure__: true, fn: ins[1], env, gen: !!ins[3] });
+        f.stack.push({ __stackmix_closure__: true, fn: ins[1], env, gen: !!ins[3] });
         f.ip++; break;
       }
       case "CALLV": {                                          // call a closure value: ["CALLV", argc]
@@ -537,11 +537,11 @@ export function run(tier, frames, host) {
         // `await` is a suspension point. A plain value resolves to itself (no
         // host round-trip) — so async between user functions, Promise.resolve,
         // and Promise.all of resolved values are free; only a genuine async
-        // value (marked __waso_async__) suspends to the host, and a rejected
+        // value (marked __stackmix_async__) suspends to the host, and a rejected
         // promise throws via the exception machinery.
         const v = f.stack[f.stack.length - 1];
-        if (v !== null && typeof v === "object" && v.__waso_reject__) { f.stack.pop(); doThrow(v.value); break; }
-        if (v !== null && typeof v === "object" && v.__waso_async__) { f.stack.pop(); f.ip++; throw new Suspend(frames, { await: v.payload }); }
+        if (v !== null && typeof v === "object" && v.__stackmix_reject__) { f.stack.pop(); doThrow(v.value); break; }
+        if (v !== null && typeof v === "object" && v.__stackmix_async__) { f.stack.pop(); f.ip++; throw new Suspend(frames, { await: v.payload }); }
         f.ip++; break; // plain value: identity
       }
       case "YIELD": {                                           // pause the generator
@@ -580,39 +580,39 @@ export function run(tier, frames, host) {
       }
       case "GENRET": {                                          // it.return(v) -> { value, done:true }, running finallys
         const o = d(f.stack[f.stack.length - 2]); const v = f.stack[f.stack.length - 1]; f.stack.length -= 2; f.ip++;
-        if (isGenerator(o)) { let r; try { r = genReturn(o, v); } catch (e) { if (e instanceof WasoUncaught) { doThrow(e.value); break; } throw e; } f.stack.push({ value: r.value, done: r.done }); break; }
+        if (isGenerator(o)) { let r; try { r = genReturn(o, v); } catch (e) { if (e instanceof StackmixUncaught) { doThrow(e.value); break; } throw e; } f.stack.push({ value: r.value, done: r.done }); break; }
         const m = o && o.return; if (isClosure(m)) { frames.push({ fn: m.fn, ip: 0, locals: [v], stack: [], env: m.env, handlers: [] }); break; }
         f.stack.push(o && o.return ? o.return(v) : { value: v, done: true }); break;
       }
       case "GENTHROW": {                                        // it.throw(e) -> caught in gen (may yield) or propagates to caller
         const o = d(f.stack[f.stack.length - 2]); const e = f.stack[f.stack.length - 1]; f.stack.length -= 2; f.ip++;
-        if (isGenerator(o)) { let r; try { r = genThrow(o, e); } catch (ex) { if (ex instanceof WasoUncaught) { doThrow(ex.value); break; } throw ex; } f.stack.push({ value: r.value, done: r.done }); break; }
+        if (isGenerator(o)) { let r; try { r = genThrow(o, e); } catch (ex) { if (ex instanceof StackmixUncaught) { doThrow(ex.value); break; } throw ex; } f.stack.push({ value: r.value, done: r.done }); break; }
         const m = o && o.throw; if (isClosure(m)) { frames.push({ fn: m.fn, ip: 0, locals: [e], stack: [], env: m.env, handlers: [] }); break; }
         if (o && o.throw) { f.stack.push(o.throw(e)); break; } doThrow(e); break;
       }
       case "AWAITALL": {                                        // Promise.all: resolve every element CONCURRENTLY (one suspension)
         const xs = d(f.stack[f.stack.length - 1]);             // a remote array resolves before we iterate it
-        let rejected = null; for (const x of xs) if (x !== null && typeof x === "object" && x.__waso_reject__) { rejected = x; break; }
+        let rejected = null; for (const x of xs) if (x !== null && typeof x === "object" && x.__stackmix_reject__) { rejected = x; break; }
         if (rejected) { f.stack.pop(); doThrow(rejected.value); break; }   // Promise.all rejects on the first rejection
         f.stack.pop();
         const result = new Array(xs.length); const payloads = [], pendingIdx = [];
-        for (let i = 0; i < xs.length; i++) { const x = xs[i]; if (x !== null && typeof x === "object" && x.__waso_async__) { pendingIdx.push(i); payloads.push(x.payload); } else result[i] = x; }
+        for (let i = 0; i < xs.length; i++) { const x = xs[i]; if (x !== null && typeof x === "object" && x.__stackmix_async__) { pendingIdx.push(i); payloads.push(x.payload); } else result[i] = x; }
         if (!pendingIdx.length) { f.stack.push(result); f.ip++; break; } // all immediate -> no suspension
         f.ip++; throw new Suspend(frames, { awaitAll: payloads, result, pendingIdx });
       }
-      case "MKREJECT": { f.stack.push({ __waso_reject__: true, value: f.stack.pop() }); f.ip++; break; } // Promise.reject(e)
+      case "MKREJECT": { f.stack.push({ __stackmix_reject__: true, value: f.stack.pop() }); f.ip++; break; } // Promise.reject(e)
       case "THROW": { doThrow(f.stack.pop()); break; }
       default: throw new Error("bad op " + ins[0]);
     }
     } catch (e) {
       // Control-flow signals propagate; a real host runtime error (TypeError from
-      // `1n+1`, calling undefined, etc.) becomes a Waso throw catchable by user try/catch.
+      // `1n+1`, calling undefined, etc.) becomes a Stackmix throw catchable by user try/catch.
       if (e instanceof Suspend || e instanceof Yielded || e instanceof Miss) throw e;
-      // A WasoUncaught surfacing here came from a nested synchronous run (proxy trap,
+      // A StackmixUncaught surfacing here came from a nested synchronous run (proxy trap,
       // toString/valueOf coercion, ...): reroute it into THIS frame's handlers so the
       // caller's try/catch sees it. Only a genuine top-level uncaught (outer frames
       // already exhausted) escapes.
-      if (e instanceof WasoUncaught) { if (frames.length === 0) throw e; doThrow(e.value); }
+      if (e instanceof StackmixUncaught) { if (frames.length === 0) throw e; doThrow(e.value); }
       else doThrow(e);
     }
   }

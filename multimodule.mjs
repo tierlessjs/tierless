@@ -1,4 +1,4 @@
-// Waso multi-module conformance — an import graph compiled into one program.
+// Stackmix multi-module conformance — an import graph compiled into one program.
 //
 // Modules are namespaced (the entry keeps "" so its entry fn name is stable); imports
 // resolve through the TS type checker to the exporting module's namespaced global, and
@@ -6,8 +6,8 @@
 // crosses module boundaries also survives continuation migration — a tierless program
 // is one program no matter how many files it spans.
 
-import { PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation, initialFrames, awaitable } from "./waso-core.mjs";
-import { compileProgram, loadModule } from "./waso-tsc.mjs";
+import { PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation, initialFrames, awaitable } from "./stackmix-core.mjs";
+import { compileProgram, loadModule } from "./stackmix-tsc.mjs";
 
 let pass = 0, fail = 0; const fails = [];
 const J = (x) => JSON.stringify(x, (k, v) => (typeof v === "bigint" ? "B:" + v.toString() : v === undefined ? "U" : v));
@@ -16,7 +16,7 @@ function t(name, files, entryFile, expect) {
   let got, err = null;
   try { load(files, entryFile); got = run({ id: "t" }, initialFrames("go", []), { deref: (x) => x }).value; } catch (e) { err = e; }
   const ok = !err && J(got) === J(expect);
-  if (ok) pass++; else { fail++; fails.push(name); console.log(`  FAIL  ${name}`); console.log(`        waso=${err ? "threw " + (err.message || "") : J(got)}  expect=${J(expect)}`); }
+  if (ok) pass++; else { fail++; fails.push(name); console.log(`  FAIL  ${name}`); console.log(`        stackmix=${err ? "threw " + (err.message || "") : J(got)}  expect=${J(expect)}`); }
 }
 // migrate: run the entry through a serialize/resume loop at every ckpt
 async function tm(name, files, entryFile, expect) {
@@ -35,10 +35,10 @@ async function tm(name, files, entryFile, expect) {
     }
   } catch (e) { err = e; }
   const ok = !err && J(got) === J(expect);
-  if (ok) pass++; else { fail++; fails.push(name); console.log(`  FAIL  ${name}`); console.log(`        waso=${err ? "threw " + (err.message || "") : J(got)}  expect=${J(expect)}`); }
+  if (ok) pass++; else { fail++; fails.push(name); console.log(`  FAIL  ${name}`); console.log(`        stackmix=${err ? "threw " + (err.message || "") : J(got)}  expect=${J(expect)}`); }
 }
 
-console.log("Waso multi-module: imports, namespacing, dependency-ordered init, migration\n");
+console.log("Stackmix multi-module: imports, namespacing, dependency-ordered init, migration\n");
 
 t("named function imports", {
   "/math.ts": `export function add(a,b){ return a+b; } export function mul(a,b){ return a*b; }`,

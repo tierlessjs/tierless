@@ -1,6 +1,6 @@
-// Waso — migrate-vs-fetch, the §6 cost model with real measured sizes.
+// Stackmix — migrate-vs-fetch, the §6 cost model with real measured sizes.
 //
-//   node waso-policy.mjs
+//   node stackmix-policy.mjs
 //
 // §6: "Always migrate to the resource is the simple rule, but it's wrong when
 // the continuation is large and the result is small — sometimes you'd rather
@@ -15,11 +15,11 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { compile } from "./waso-compile.mjs";
+import { compile } from "./stackmix-compile.mjs";
 import {
   assemble, makeInstance, setEntryState, capture, restore, Suspend,
   dbQueryHandler, makeRenderHandler, fmt, RESULT, RESOURCES, N, DATASET_BYTES,
-} from "./waso-wasm-core.mjs";
+} from "./stackmix-wasm-core.mjs";
 
 const bytecode = assemble(compile(readFileSync(fileURLToPath(new URL("./app.ts", import.meta.url)), "utf8")).asm);
 
@@ -60,7 +60,7 @@ function decide(contBytes, fetchBytes, mode) {
     : { choice: "fetch",   why: `data ${fmt(fetchBytes)} < continuation ${fmt(contBytes)}` };
 }
 
-console.log("Waso §6 — migrate-vs-fetch, priced with real captured continuation sizes\n");
+console.log("Stackmix §6 — migrate-vs-fetch, priced with real captured continuation sizes\n");
 
 // --- Regime 1: the §11 case — small continuation, large data ----------------
 const r1 = await runScenario(999);

@@ -1,14 +1,14 @@
-// Waso differential tester — find edge-case divergences from the real engine.
+// Stackmix differential tester — find edge-case divergences from the real engine.
 //
 // Completeness can't be asserted; it has to be MEASURED. This runs a large battery
-// of semantic-corner snippets through both Waso and Node and flags any divergence.
+// of semantic-corner snippets through both Stackmix and Node and flags any divergence.
 // It deliberately targets the places a reimplementation breaks — scoping/TDZ/
 // hoisting, closure capture, destructuring corners, control-flow (try/finally,
 // switch, labels), iterator/generator protocol, coercion, getters — not the easy
 // middle. Every divergence it prints is a bug to fix or a caveat to document.
 
-import { PROGRAM, run, initialFrames } from "./waso-core.mjs";
-import { loadModule } from "./waso-tsc.mjs";
+import { PROGRAM, run, initialFrames } from "./stackmix-core.mjs";
+import { loadModule } from "./stackmix-tsc.mjs";
 
 let pass = 0, fail = 0, caveat = 0; const fails = [];
 // Documented, intentional divergences (behavior differs only for already-buggy code):
@@ -27,14 +27,14 @@ function d(name, src) {
   for (const k in PROGRAM) delete PROGRAM[k];
   try { loadModule(PROGRAM, src, { entry: "go" }); got = run({ id: "t" }, initialFrames("go", []), { deref: (x) => x }).value; } catch (e) { gErr = e; }
   try { ref = new Function(src + "\n;return go;")()(); } catch (e) { rErr = e; }
-  // Compare values; if Node throws, Waso should throw too (we don't compare messages).
+  // Compare values; if Node throws, Stackmix should throw too (we don't compare messages).
   const ok = rErr ? !!gErr : (!gErr && J(got) === J(ref));
   const emsg = (e) => (e == null ? "" : e.message !== undefined ? e.message : "value" in e ? "throw " + J(e.value) : String(e)).slice(0, 70);
-  if (ok) pass++; else if (CAVEATS.has(name)) { caveat++; console.log(`  caveat ${name} (documented)`); } else { fail++; fails.push(name); console.log(`  DIFF  ${name}`); if (gErr && !rErr) console.log(`        waso threw: ${emsg(gErr)}  | node=${J(ref)}`); else if (rErr && !gErr) console.log(`        waso=${J(got)}  | node threw`); else console.log(`        waso=${J(got)}  node=${J(ref)}`); }
+  if (ok) pass++; else if (CAVEATS.has(name)) { caveat++; console.log(`  caveat ${name} (documented)`); } else { fail++; fails.push(name); console.log(`  DIFF  ${name}`); if (gErr && !rErr) console.log(`        stackmix threw: ${emsg(gErr)}  | node=${J(ref)}`); else if (rErr && !gErr) console.log(`        stackmix=${J(got)}  | node threw`); else console.log(`        stackmix=${J(got)}  node=${J(ref)}`); }
 }
 const D = (name, expr) => d(name, `function go(){ return (${expr}); }`);
 
-console.log("Waso differential test vs Node — hunting edge divergences\n");
+console.log("Stackmix differential test vs Node — hunting edge divergences\n");
 
 console.log("— coercion & operators —");
 for (const e of ["[]+[]", "[]+{}", "({})+[]", "1+'2'", "'5'-1", "'5'*'2'", "null+1", "undefined+1", "true+1", "false+'x'", "[1,2]+[3]", "+[]", "+{}", "-'5'", "!''", "!0", "!'0'", "~~4.7", "5%-3", "-5%3", "2**-1", "0.1+0.2", "1/0", "-1/0", "0/0", "1<2<3", "3>2>1", "'a'<'b'", "null??5", "0??5", "''||'x'", "NaN||1", "void 0", "typeof typeof 1"]) D("coerce " + e, e);

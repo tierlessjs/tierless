@@ -6,9 +6,9 @@
 // dereferences that handle, it sends a {fetch} request and we ship the object
 // then — on demand — encoded with the identity/cycle-safe graph codec.
 
-import { Tier, run, Suspend, serializeContinuation, deserializeContinuation } from "./waso-core.mjs";
-import { encodeGraph } from "./waso-heap.mjs";
-import { writeFrame, readFrames } from "./waso-frame.mjs";
+import { Tier, run, Suspend, serializeContinuation, deserializeContinuation } from "./stackmix-core.mjs";
+import { encodeGraph } from "./stackmix-heap.mjs";
+import { writeFrame, readFrames } from "./stackmix-frame.mjs";
 import "./app-profile.mjs";
 
 const BIO = 120_000; // > HANDLE_THRESHOLD, so the profile becomes a handle on migrate

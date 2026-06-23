@@ -38,11 +38,11 @@ async can't do. So for #4 the boundary shape is `await`, and the transform's job
 is to emit our AWAIT (+ serializable descriptor) at each suspension, not to rely
 on the engine's async state. Same suspension also resolves a remote handle fetch.
 
-## #4 step 1 (done — waso-tsc.mjs, probe-frontend.mjs)
+## #4 step 1 (done — stackmix-tsc.mjs, probe-frontend.mjs)
 Built a TS->JS-IR frontend targeting the de-risked runtime (NOT the wasm IR).
 Done: closure conversion (free-var analysis -> MAKECLOSURE + LOADENV; top-level
 fn ref = closure with no captures), CALLV over first-class closures, multi-frame
-CALL/RET in waso-core, and `await` lowering (await expr -> expr; AWAIT). Proven:
+CALL/RET in stackmix-core, and `await` lowering (await expr -> expr; AWAIT). Proven:
 real TS `makeAdder`/`main` compiles + runs (=32); and a closure that is live
 across an `await` survives a serialize/deserialize boundary mid-await (env
 travels as data, code by fn-name) and still works (=105). Confirms: async needs
@@ -70,7 +70,7 @@ not by binding — known limitation); source-map metadata.
   a unique id; uses resolve to it). Lexical shadowing now correct: two `n`s in
   different scopes are distinct bindings; boxing is per-binding, not per-name.
 - Control flow: while, break/continue (loop label stack), &&/|| (short-circuit
-  via DUP), ternary, unary !/-, += -= *=, true/false. Added DUP/NOT to waso-core.
+  via DUP), ternary, unary !/-, += -= *=, true/false. Added DUP/NOT to stackmix-core.
 - Source maps: every emitted instruction records its TS line/col/text; a
   serialized continuation maps back to a TS stack trace (describeContinuation).
   Demo prints `#1 task app.ts:4 step()` / `#0 step app.ts:3 await fetchThing()`.
@@ -83,13 +83,13 @@ Added: template literals, array literals with elements, for-of (incl. nested
 destructuring patterns), default parameters, nested function declarations
 (hoisted as local closures), object/array destructuring in declarations,
 == / != (mapped to ===/!==), synthetic temp slots for loop/destructure scratch.
-probe-realts.mjs compiles 5 real JS snippets and checks Waso's output EQUALS
+probe-realts.mjs compiles 5 real JS snippets and checks Stackmix's output EQUALS
 Node's own eval (templates+defaults+for-of+nested fn; array-lit+ternary+while+
 break/continue; destructuring+template; closures-in-array+higher-order;
 nested-destructuring-in-for-of+default+compound). All match.
 ## #4 step 5 (done — stdlib + exceptions, verified vs eval)
 - Array higher-order methods (.map/.filter/.forEach/.reduce) inline-compiled to
-  IR loops + CALLV, so callbacks are real Waso closures (suspendable — proven a
+  IR loops + CALLV, so callbacks are real Stackmix closures (suspendable — proven a
   callback could await). Plain methods (slice/join/split/toUpperCase/... string
   + array) via a new CALLM op that delegates to the host value's method.
 - try/catch/throw: new PUSHTRY/POPTRY/THROW ops + a per-frame handler stack;
@@ -156,7 +156,7 @@ Verified vs Node's eval (probe-realts.mjs, now 32 snippets). Added:
 
 Still deferred (genuine model friction, not just unwritten) — all would need work
 beyond lowering:
-- **getters/setters**: a property *access* would have to invoke a Waso closure,
+- **getters/setters**: a property *access* would have to invoke a Stackmix closure,
   i.e. GETPROP/SETPROP would push a frame and themselves become suspension points.
   Doable but invasive (every member access is potentially a migration point).
 - **static members**: need to reify a runtime class object (statics live on it)
@@ -364,7 +364,7 @@ using X freezes to bytes, ships, and thaws correctly").
   is Symbol.iterator -> needs Symbol, a separate track); `with` (forbidden in
   strict/module mode — correctly rejected); module-level (top-level) variable
   bindings (the entry is a function — no module-init phase).
-- conformance.mjs: PART 1 fidelity (Waso === Node across the whole language), PART 2
+- conformance.mjs: PART 1 fidelity (Stackmix === Node across the whole language), PART 2
   continuation (the SAME programs frozen to bytes & resumed at every `await ckpt()`
   checkpoint, with closures/boxed cells/Maps/Sets/class instances/generators/cyclic
   graphs/live handlers alive across the wire). 56 checks; max continuation 682 B.
@@ -373,7 +373,7 @@ using X freezes to bytes, ships, and thaws correctly").
 ## #4 step 21 (done — completeness-first sweep + differential testing)
 Switched from "support the common case" to "MEASURE completeness against Node, fix
 every divergence." New `difftest.mjs` runs ~217 semantic-corner snippets through
-both Waso and Node and flags any divergence (it can't be asserted, only measured).
+both Stackmix and Node and flags any divergence (it can't be asserted, only measured).
 Now 214/217, with 3 *documented* caveats (see below). What got fixed:
 - **Dynamic `this`**: methods read `this` from the call-site receiver (frame.thisVal),
   not a value baked at definition. Fixes method borrowing, plain-fn-as-method,
@@ -396,7 +396,7 @@ Now 214/217, with 3 *documented* caveats (see below). What got fixed:
   repository's `.find()`, Map/Set.forEach) were force-dispatched to the array-HOF
   inliner; `hof` now guards on isArray at runtime and short-circuits no-callback.
 - A throw inside a nested synchronous run (proxy trap, toString coercion) now
-  routes into the caller's try/catch instead of escaping as WasoUncaught.
+  routes into the caller's try/catch instead of escaping as StackmixUncaught.
 
 ## #4 step 22 (done — metaprogramming: Proxy, Reflect, decorators, DI)
 The framework story (Vue/Nest/Angular). `decorators.mjs` (25 checks) diffs against
@@ -428,7 +428,7 @@ JS, so the *reference* is the compiler's own lowering).
   end: `resolve(C) = new C(...getMetadata("design:paramtypes",C).map(resolve))`.
 
 ## #4 step 23 (done — multi-module + a real type checker)
-A Waso program can now span multiple files. The frontend compiles a **`ts.Program`**
+A Stackmix program can now span multiple files. The frontend compiles a **`ts.Program`**
 (in-memory host, `noLib` so it's fast — ~0.8ms/program) and has a real **type
 checker**. `multimodule.mjs` (11 checks) proves imports, namespacing, dependency
 ordering, AND that a multi-module program migrates as ONE.
@@ -465,16 +465,16 @@ rest didn't.
 - Added a **missing deref**: BIN (a handle OPERAND now resolves to its value, not the
   raw wrapper — `'' + handle`, comparisons), ITERNEXT (a remote iterator), AWAITALL
   (a remote array of promises).
-- `approxExceeds` (waso-heap) was undercounting **Map/Set** (Object.keys(map) is []),
+- `approxExceeds` (stackmix-heap) was undercounting **Map/Set** (Object.keys(map) is []),
   so a huge Map/Set shipped INLINE instead of becoming a handle — now traverses
   entries.
 - **This path is NOT a non-goal** (the README said so; corrected). The invariant is
   load-bearing and now tested directly: `probe-deref.mjs` makes a handle miss exactly
   once mid-op, asserts the op suspends, resumes, and keeps its args (11 checks; the
   test is non-vacuous — it fails against the old pop-then-deref code). Only the live
-  fetch *transport* (cost model in waso-policy.mjs) remains unwired.
+  fetch *transport* (cost model in stackmix-policy.mjs) remains unwired.
 
-## Public API (waso-tsc.mjs)
+## Public API (stackmix-tsc.mjs)
 - `loadModule(PROGRAM, source, {entry, resources})` — single module (existing).
 - `loadProgram(PROGRAM, files, {entry, entryFile, resources})` — `files` is
   Map<absPath, source>; the rest mirrors loadModule.

@@ -1,7 +1,7 @@
-// Waso decorator conformance — legacy/experimental class decorators (the flavor
+// Stackmix decorator conformance — legacy/experimental class decorators (the flavor
 // Nest/Angular use). Node can't run decorator syntax in plain JS, so the reference
 // is the TS compiler's own `experimentalDecorators` transpile, run in Node. Every
-// case asserts Waso computes what the canonical lowering computes.
+// case asserts Stackmix computes what the canonical lowering computes.
 //
 // Scope: CLASS decorators — run at module load, bottom-up, with the class object as
 // the target; a non-null return rebinds the class. This is the backbone of framework
@@ -9,8 +9,8 @@
 // decorators and emitDecoratorMetadata (design:type, for DI) are the next steps —
 // they need a shared-prototype method model and the TS type checker, respectively.
 
-import { PROGRAM, run, initialFrames, Suspend, serializeContinuation, deserializeContinuation, awaitable } from "./waso-core.mjs";
-import { loadModule } from "./waso-tsc.mjs";
+import { PROGRAM, run, initialFrames, Suspend, serializeContinuation, deserializeContinuation, awaitable } from "./stackmix-core.mjs";
+import { loadModule } from "./stackmix-tsc.mjs";
 import ts from "typescript";
 
 let pass = 0, fail = 0; const fails = [];
@@ -26,7 +26,7 @@ const RShim = Object.assign(Object.create(Reflect), {
   getMetadataKeys(t, pk) { const pm = metaWM.get(t) && metaWM.get(t).get(pk); return pm ? [...pm.keys()] : []; },
   metadata(mk, mv) { return (t, pk) => defMeta(mk, mv, t, pk); }, // TS __metadata helper uses this for design:type/paramtypes
 });
-// emitDecoratorMetadata is on so design:paramtypes is emitted; Waso emits it for any
+// emitDecoratorMetadata is on so design:paramtypes is emitted; Stackmix emits it for any
 // decorated class (matching the DI use), so the reference enables it too.
 const refRun = (src) => { const out = ts.transpileModule(src + "\n;", { compilerOptions: { experimentalDecorators: true, emitDecoratorMetadata: true, target: ts.ScriptTarget.ES2020 } }); return new Function("Reflect", out.outputText + "\n;return go;")(RShim)(); };
 
@@ -36,10 +36,10 @@ function d(name, src) {
   try { loadModule(PROGRAM, src, { entry: "go" }); got = run({ id: "t" }, initialFrames("go", []), { deref: (x) => x }).value; } catch (e) { ge = e; }
   try { ref = refRun(src); } catch (e) { re = e; }
   const ok = re ? !!ge : (!ge && J(got) === J(ref));
-  if (ok) pass++; else { fail++; fails.push(name); console.log(`  FAIL  ${name}`); console.log(`        waso=${ge ? "threw " + (ge.message || "") : J(got)}  ref=${re ? "threw" : J(ref)}`); }
+  if (ok) pass++; else { fail++; fails.push(name); console.log(`  FAIL  ${name}`); console.log(`        stackmix=${ge ? "threw " + (ge.message || "") : J(got)}  ref=${re ? "threw" : J(ref)}`); }
 }
 
-console.log("Waso decorator conformance — legacy class decorators vs TS transpile\n");
+console.log("Stackmix decorator conformance — legacy class decorators vs TS transpile\n");
 
 d("registration decorator runs at load", `const registry=[]; function Injectable(c){ registry.push(c.id); } @Injectable class Svc { static id='Svc'; } function go(){ return [registry, new Svc() instanceof Svc]; }`);
 d("decorator factory with options", `const meta=[]; function Component(opts){ return function(c){ meta.push(opts.selector); }; } @Component({selector:'app'}) class App {} function go(){ return meta; }`);
@@ -83,7 +83,7 @@ async function wmig(name, src) {
     }
   } catch (e) { err = e; }
   const ok = !err && J(got) === J(ref);
-  if (ok) pass++; else { fail++; fails.push(name); console.log(`  FAIL  ${name}`); console.log(`        waso=${err ? "threw " + (err.message || "") : J(got)}  ref=${J(ref)}`); }
+  if (ok) pass++; else { fail++; fails.push(name); console.log(`  FAIL  ${name}`); console.log(`        stackmix=${err ? "threw " + (err.message || "") : J(got)}  ref=${J(ref)}`); }
 }
 
 await (async () => {

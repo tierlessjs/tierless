@@ -1,4 +1,4 @@
-;; Waso interpreter — compiled to a real WebAssembly module.
+;; Stackmix interpreter — compiled to a real WebAssembly module.
 ;;
 ;; The stack-machine IR runs as a wasm module; the program's entire live state
 ;; lives in wasm LINEAR MEMORY, so a continuation is a byte-slice of memory

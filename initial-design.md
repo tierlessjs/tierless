@@ -1,6 +1,6 @@
-# Waso — Design Document
+# Stackmix — Design Document
 
-**Working title:** Waso (WASM Stack Oscillator)
+**Working title:** Stackmix (WASM Stack Oscillator)
 **Status:** Early design / pre-prototype
 **One line:** Write one TypeScript program that runs across client and server as a single stateful application; the runtime moves execution between tiers as needed instead of making you split it by hand.
 
@@ -10,7 +10,7 @@
 
 Today you write web apps as two programs pretending to be one. UI code lives on the client, data/secret/orchestration code lives on the server, and a whole layer of machinery — REST endpoints, GraphQL schemas, RPC, loaders — exists mostly to paper over the seam between them. The tier split has been internalized as a *design virtue* ("be explicit about where code runs"), but it's really a workaround for not having a better abstraction.
 
-Waso treats the application as **one stateful program with access to both client and server resources**. You write business logic and presentation logic together. When execution touches a resource that only exists on one tier — the DOM on the client, the database on the server — the runtime ensures execution is on the correct side, migrating the live continuation across the wire if necessary.
+Stackmix treats the application as **one stateful program with access to both client and server resources**. You write business logic and presentation logic together. When execution touches a resource that only exists on one tier — the DOM on the client, the database on the server — the runtime ensures execution is on the correct side, migrating the live continuation across the wire if necessary.
 
 This is *tierless programming* (cf. Eliom, Links, Ur/Web) but with two distinctive bets that no existing system combines:
 
@@ -24,15 +24,15 @@ This isn't a new idea for the author — a working bidirectional proof-of-concep
 
 ## 2. Why this is worth building (and where it isn't)
 
-The mainstream (React Server Components, Qwik) deliberately retreated from both of Waso's bets: they split statically, declare placement with directives, and cross via RPC, never migrating a live continuation. They did this to avoid two real problems (chattiness and the trust boundary — see §7). So the honest framing is: Waso occupies a genuinely unexplored point in the design space, and the reasons others avoided it are the exact problems Waso's design must answer, not proof that it can't work.
+The mainstream (React Server Components, Qwik) deliberately retreated from both of Stackmix's bets: they split statically, declare placement with directives, and cross via RPC, never migrating a live continuation. They did this to avoid two real problems (chattiness and the trust boundary — see §7). So the honest framing is: Stackmix occupies a genuinely unexplored point in the design space, and the reasons others avoided it are the exact problems Stackmix's design must answer, not proof that it can't work.
 
 ### Real use cases
-- **Dynamic filtering of large result sets.** Fetch a big query, filter by a user-supplied predicate. Today you either ship all rows to the client (huge transfer) or pre-build a GraphQL endpoint for every filter you anticipate (boilerplate, and you can't anticipate them all). With Waso you write the filter inline; because you're already on the server where the data is, the filter runs there and only matching rows cross.
-- **Complex orchestration of uncertain shape.** A server action that conditionally fans out to several backend calls. Moving it to the client costs ~50–100ms latency per hop; building a bespoke endpoint is rigid. Waso lets you write the orchestration straight and have it run server-side because that's where the latency wins are — without committing to an API shape before you know it.
+- **Dynamic filtering of large result sets.** Fetch a big query, filter by a user-supplied predicate. Today you either ship all rows to the client (huge transfer) or pre-build a GraphQL endpoint for every filter you anticipate (boilerplate, and you can't anticipate them all). With Stackmix you write the filter inline; because you're already on the server where the data is, the filter runs there and only matching rows cross.
+- **Complex orchestration of uncertain shape.** A server action that conditionally fans out to several backend calls. Moving it to the client costs ~50–100ms latency per hop; building a bespoke endpoint is rigid. Stackmix lets you write the orchestration straight and have it run server-side because that's where the latency wins are — without committing to an API shape before you know it.
 - **Performance: stack smaller than heap.** Sometimes the state needed to *continue* a computation is far smaller than the data needed to *reconstruct* it on the other side. A cursor walk or tree traversal holds a few locals (kilobytes) while the dataset is megabytes. Shipping the continuation beats shipping the data. Static-split frameworks can't express this; they optimize for "keep data on the server," not "minimize continuation size."
 
 ### Honest limits
-The need is **narrower than it would have been a decade ago.** Fat clients + managed services (Firestore, direct-auth'd cloud resources, GraphQL) have thinned out server logic, so the population of apps that genuinely need bidirectional code has shrunk. Waso is most compelling for interactive apps with real server-side logic that isn't worth pre-specifying as an API, where a few ms of migration latency doesn't wreck UX. It is not a universal replacement for the current model.
+The need is **narrower than it would have been a decade ago.** Fat clients + managed services (Firestore, direct-auth'd cloud resources, GraphQL) have thinned out server logic, so the population of apps that genuinely need bidirectional code has shrunk. Stackmix is most compelling for interactive apps with real server-side logic that isn't worth pre-specifying as an API, where a few ms of migration latency doesn't wreck UX. It is not a universal replacement for the current model.
 
 ---
 
@@ -51,15 +51,15 @@ The need is **narrower than it would have been a decade ago.** Fat clients + man
 
 ### 4.1 Pipeline
 ```
-TypeScript  ──►  Waso IR  ──►  WASM (per tier)
+TypeScript  ──►  Stackmix IR  ──►  WASM (per tier)
                   │
                   └─► carries: continuation/checkpoint metadata,
                       resource-boundary markers, type info for
                       serializing locals, source maps
 ```
 
-- **Authoring language:** TypeScript first. The framework is **not** TS-only by construction — the IR is the real interface, and TS is the reference frontend. Other languages can be added later by writing a frontend that lowers to the Waso IR. (Note: languages that bring their own runtime — Python, Go — are the *hard* ones to add, because you'd be at the mercy of their runtime's ability to checkpoint itself; a language you lower yourself is easier. Multi-language is a latent capability, not a v1 goal.)
-  - **Roadmap targets beyond TS — Rust and Dart.** Both have communities already invested in this substrate (Rust: **Yew**, Leptos; Dart: **Flutter** targeting wasm via dart2wasm), a real signal that the multi-substrate door is worth walking through. The load-bearing subtlety: their value to Waso is a *frontend that lowers to the Waso IR* — interpreter-level, serializable capture (§4.2.2) — **not** their native wasm output, whose call stack is exactly the thing §8 (and the prototype's honest limits) says you cannot snapshot in a browser. So "Rust support" means a Rust→IR frontend running on Waso's own interpreter, the same shape as the TS frontend; compiling Rust to stock wasm gets you wasm *execution* but not migratable *continuations*. On the easy/hard axis above, both sit on the easy side of the Python/Go line (you lower them yourself), but they are large languages and the frontends are real work: Rust brings the least runtime to model (no GC) but a big type/trait surface, while Dart brings more (a rich async/isolate model and GC semantics) that the lowering has to express in IR continuation terms. The migration property is the prize either way — a Rust or Dart continuation frozen to bytes and thawed on another tier — and nothing about the IR is TS-shaped, so it stays reachable.
+- **Authoring language:** TypeScript first. The framework is **not** TS-only by construction — the IR is the real interface, and TS is the reference frontend. Other languages can be added later by writing a frontend that lowers to the Stackmix IR. (Note: languages that bring their own runtime — Python, Go — are the *hard* ones to add, because you'd be at the mercy of their runtime's ability to checkpoint itself; a language you lower yourself is easier. Multi-language is a latent capability, not a v1 goal.)
+  - **Roadmap targets beyond TS — Rust and Dart.** Both have communities already invested in this substrate (Rust: **Yew**, Leptos; Dart: **Flutter** targeting wasm via dart2wasm), a real signal that the multi-substrate door is worth walking through. The load-bearing subtlety: their value to Stackmix is a *frontend that lowers to the Stackmix IR* — interpreter-level, serializable capture (§4.2.2) — **not** their native wasm output, whose call stack is exactly the thing §8 (and the prototype's honest limits) says you cannot snapshot in a browser. So "Rust support" means a Rust→IR frontend running on Stackmix's own interpreter, the same shape as the TS frontend; compiling Rust to stock wasm gets you wasm *execution* but not migratable *continuations*. On the easy/hard axis above, both sit on the easy side of the Python/Go line (you lower them yourself), but they are large languages and the frontends are real work: Rust brings the least runtime to model (no GC) but a big type/trait surface, while Dart brings more (a rich async/isolate model and GC semantics) that the lowering has to express in IR continuation terms. The migration property is the prize either way — a Rust or Dart continuation frozen to bytes and thawed on another tier — and nothing about the IR is TS-shaped, so it stays reachable.
 - **IR level:** Closer to WASM than to TypeScript. It's essentially WASM-shaped (linear memory, explicit locals, typed) plus the metadata WASM doesn't carry: where the resource boundaries are, what's live at each, and how to serialize it. Lowering IR→WASM is then a thin pass.
 - **Execution target:** WASM on both client and server. Same module both sides; tiers differ only in which imports are wired up.
 
@@ -88,9 +88,9 @@ Both tiers run the **same module**, so continuations reference shared code by po
 This is what keeps it small — and "small" is the central empirical claim the prototype must validate (§8).
 
 ### 4.5 React (and existing frameworks) sit on top, unmodified
-Waso does not replace React. React runs *inside* the unified program. React already serializes its work down to DOM operations; it doesn't know or care what tier it's on. When React (running on the server) hits a DOM API it doesn't have there, that's a resource boundary — the continuation migrates to the client and React keeps going with the real DOM. Same component code throughout. The tier migration is invisible to React.
+Stackmix does not replace React. React runs *inside* the unified program. React already serializes its work down to DOM operations; it doesn't know or care what tier it's on. When React (running on the server) hits a DOM API it doesn't have there, that's a resource boundary — the continuation migrates to the client and React keeps going with the real DOM. Same component code throughout. The tier migration is invisible to React.
 
-This makes Waso **additive, not a rewrite.** You take an existing Node + browser app, draw a boundary around a portion that's safe to run on either side, and let that portion become tier-fluid. The rest stays as-is.
+This makes Stackmix **additive, not a rewrite.** You take an existing Node + browser app, draw a boundary around a portion that's safe to run on either side, and let that portion become tier-fluid. The rest stays as-is.
 
 ---
 
@@ -138,31 +138,31 @@ The client/server line is not just performance — it's a security boundary, and
 
 ## 8. The WASM stack-switching proposal — relevance and reality
 
-There is an in-flight WASM proposal (WebAssembly/stack-switching, "typed continuations" / WasmFX, effect-handler based) that adds first-class continuations: `cont.new`, `suspend`, `resume`, `switch`. It is directly adjacent and worth tracking, but it does **not** unblock Waso, for two reasons that must be understood precisely:
+There is an in-flight WASM proposal (WebAssembly/stack-switching, "typed continuations" / WasmFX, effect-handler based) that adds first-class continuations: `cont.new`, `suspend`, `resume`, `switch`. It is directly adjacent and worth tracking, but it does **not** unblock Stackmix, for two reasons that must be understood precisely:
 
 ### 8.1 It's in-process by construction
-A continuation in that proposal is a `(ref $ct)` — an address into the *engine's* store (a live pointer into VM stack memory). You can `resume`/`switch`/`cont.bind`/abort it, all of which consume it **on the same machine**. There is **no instruction, and none on the roadmap, to serialize it to bytes, ship it, and rematerialize it on another host.** The proposal is about switching between stacks *within one instance*. Cross-host transport — Waso's actual need — is explicitly out of scope, and the blessed opaque-reference model arguably makes introspection *harder*, not easier.
+A continuation in that proposal is a `(ref $ct)` — an address into the *engine's* store (a live pointer into VM stack memory). You can `resume`/`switch`/`cont.bind`/abort it, all of which consume it **on the same machine**. There is **no instruction, and none on the roadmap, to serialize it to bytes, ship it, and rematerialize it on another host.** The proposal is about switching between stacks *within one instance*. Cross-host transport — Stackmix's actual need — is explicitly out of scope, and the blessed opaque-reference model arguably makes introspection *harder*, not easier.
 
 So the scorecard:
 - *"WASM has no native continuation capture"* → becoming **false for in-process** capture/resume (good: removes the CPS-compilation burden for the same-machine half).
-- *Serializable, transportable continuations* → **still entirely Waso's to build.** This was always the hard part, and the proposal doesn't touch it.
+- *Serializable, transportable continuations* → **still entirely Stackmix's to build.** This was always the hard part, and the proposal doesn't touch it.
 
 ### 8.2 It's not in browsers yet, and it's one-shot
 As of early 2026 the typed stack-switching proposal is experimental and **not enabled in any shipping browser engine** (V8, SpiderMonkey, JavaScriptCore) or in Wasmer/Wasmi. Server-side runtimes are ahead: Wasmtime has a prototype (WasmFX, on its fibers API); Wasmer 7.0 shipped a WASIX `wasix_context_*` switching API. The browser's closest shipping primitive is **JSPI** (Chrome, 2024) — a JS-API-level async-suspension bridge, narrower than the instruction-level proposal.
 
-Also: the proposal's continuations are **one-shot/linear** — resume/switch/bind destructively consume them; a second use traps. (There's an open request, issue #110, for optional multi-shot, but it's not in.) For Waso, one-shot is fine for a plain migration (capture once, resume once on the other side), but it forecloses *speculative* placement — you can't "try fetch, and on failure re-resume the same captured point to migrate instead." One resume per capture.
+Also: the proposal's continuations are **one-shot/linear** — resume/switch/bind destructively consume them; a second use traps. (There's an open request, issue #110, for optional multi-shot, but it's not in.) For Stackmix, one-shot is fine for a plain migration (capture once, resume once on the other side), but it forecloses *speculative* placement — you can't "try fetch, and on failure re-resume the same captured point to migrate instead." One resume per capture.
 
 ### 8.3 What to actually take from it
-1. **Don't architect around waiting for it.** Capture must be done in Waso's own IR, where the continuation is *Waso's* data structure (readable, serializable), not the engine's opaque ref — substrate-independent, and basically what the Rhino PoC did by owning the interpreter.
+1. **Don't architect around waiting for it.** Capture must be done in Stackmix's own IR, where the continuation is *Stackmix's* data structure (readable, serializable), not the engine's opaque ref — substrate-independent, and basically what the Rhino PoC did by owning the interpreter.
 2. **Borrow the interface, build the transport.** The effect-handler shape (tag + handler) is the right model for resource boundaries: hit a resource → `suspend` with a tag → host handler decides migrate-vs-fetch. This is the same structure Unison uses for its `Remote` ability. Model resource access as typed effects/tags; implement the cross-host mechanism yourself.
-3. **Hybrid is viable and matches the architecture.** Use the engine's `suspend` (where available) purely as a clean unwind-to-host-handler trigger, while Waso maintains the serializable *shadow* state (the live locals at the boundary). Because Waso only checkpoints at resource boundaries — not arbitrary points — that shadow state is bounded and known, not a whole-stack blob.
-4. **Engine introspection helps only on the side you own.** On the server you *can* fork Wasmtime/read its fibers, so engine-level capture might populate Waso's serializable representation more cheaply there. But the browser end exposes only the opaque ref, so a portable self-owned representation is mandatory regardless. Engine-reading is an optional server-side optimization, never the mechanism for the client.
+3. **Hybrid is viable and matches the architecture.** Use the engine's `suspend` (where available) purely as a clean unwind-to-host-handler trigger, while Stackmix maintains the serializable *shadow* state (the live locals at the boundary). Because Stackmix only checkpoints at resource boundaries — not arbitrary points — that shadow state is bounded and known, not a whole-stack blob.
+4. **Engine introspection helps only on the side you own.** On the server you *can* fork Wasmtime/read its fibers, so engine-level capture might populate Stackmix's serializable representation more cheaply there. But the browser end exposes only the opaque ref, so a portable self-owned representation is mandatory regardless. Engine-reading is an optional server-side optimization, never the mechanism for the client.
 
 > **Concrete next research task (definite answer, changes server design):** read Wasmtime's fibers/WasmFX code and determine whether a captured continuation can be reconstructed into *instruction-offset + typed-locals*, or only an opaque stack pointer. That decides whether server-side engine introspection meaningfully helps or whether the shadow-state representation must be hand-rolled everywhere.
 
 ---
 
-## 9. Prior art (where Waso sits)
+## 9. Prior art (where Stackmix sits)
 
 Grouped by *who decides placement* and *what crosses the wire*:
 
@@ -170,7 +170,7 @@ Grouped by *who decides placement* and *what crosses the wire*:
 - **Tierless single-program, declared placement, split-compilation:** Eliom/Ocsigen (sections + `~%` injections, type-safe cross-tier references, both directions). Closest in spirit, but **explicitly rejects inference** — their stated belief is the programmer must know where code runs to avoid hidden round-trips. Links, Ur/Web, Hop.js, Opa, Scalagna are the same family.
 - **Runtime live migration, content-addressed code:** Unison (`Remote.transfer`; definitions identified by content hash; ship bytecode, sync missing hashes on the fly; placement via effect-handler `Remote` ability). The cleanest realization of "ship the continuation, sync deps." Not JS, not web-tiered, placement explicit. Ancestors: Cloud Haskell, Erlang, mobile-agent literature.
 
-**Waso's unoccupied cell:** Unison-style live migration, driven by RSC-style resource-dependency *inference*, in the JS/TS+WASM ecosystem, with lazy placement. Each half exists separately and in production-adjacent form; nobody has combined them. The objections each camp cites (chattiness, trust) are precisely the items §5–§7 must answer.
+**Stackmix's unoccupied cell:** Unison-style live migration, driven by RSC-style resource-dependency *inference*, in the JS/TS+WASM ecosystem, with lazy placement. Each half exists separately and in production-adjacent form; nobody has combined them. The objections each camp cites (chattiness, trust) are precisely the items §5–§7 must answer.
 
 Qwik's `$`-optimizer (making closures individually addressable/movable in real JS) and Unison's effect-handler placement are the two most worth studying closely.
 
@@ -178,7 +178,7 @@ Qwik's `$`-optimizer (making closures individually addressable/movable in real J
 
 ## 10. Open questions / risks
 
-1. **Does the continuation actually stay small on real code?** The central empirical bet. Closures capture more than you'd think; the execution context may be fatter than hoped. *Answerable today on Node, in Waso's own IR, with no dependency on the WASM proposal — this is the first prototype.*
+1. **Does the continuation actually stay small on real code?** The central empirical bet. Closures capture more than you'd think; the execution context may be fatter than hoped. *Answerable today on Node, in Stackmix's own IR, with no dependency on the WASM proposal — this is the first prototype.*
 2. **Heap model cleanliness (§5).** Size-threshold + handles + explicit `shared.*` is the current answer; whether it handles genuinely sloppy code acceptably, or needs author-visible structure in some cases, is unresolved.
 3. **IR design.** "WASM-shaped + continuation metadata" is the working assumption; the right abstraction layer may only become clear once capture/serialize is actually implemented.
 4. **Migrate-vs-fetch profiling (§6).** Cold-start-naive + sampled-history-locked-profile is the plan; needs validation that locked profiles generalize and that sampling overhead is acceptable in dev/E2E.
@@ -204,4 +204,4 @@ If that size claim holds, the idea has legs and you move to the heap model and t
 
 ## Appendix: naming
 
-Working title **Waso** (WASM Stack Oscillator). Naming was deliberately deferred — the consensus from discussion is that the right name follows from what the thing turns out to be once a prototype exists, and that it's the cheapest, most reversible decision in the project. A prior PoC was named "Aesop" with no harm done; the credibility comes from the work, not the name. Tagline candidate that stuck: **"No more tiers."** Note that the in-flight WASM proposal now officially calls its primitive "continuations," so naming Waso around continuations-on-wasm would conceptually collide — Waso's actual contribution is *serializing and migrating* them across a tier boundary by resource dependency, which is the part nobody else is doing.
+Working title **Stackmix** (WASM Stack Oscillator). Naming was deliberately deferred — the consensus from discussion is that the right name follows from what the thing turns out to be once a prototype exists, and that it's the cheapest, most reversible decision in the project. A prior PoC was named "Aesop" with no harm done; the credibility comes from the work, not the name. Tagline candidate that stuck: **"No more tiers."** Note that the in-flight WASM proposal now officially calls its primitive "continuations," so naming Stackmix around continuations-on-wasm would conceptually collide — Stackmix's actual contribution is *serializing and migrating* them across a tier boundary by resource dependency, which is the part nobody else is doing.

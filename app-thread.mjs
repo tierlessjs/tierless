@@ -1,9 +1,9 @@
-// The application, authored as ordinary TypeScript and compiled to Waso IR by
+// The application, authored as ordinary TypeScript and compiled to Stackmix IR by
 // the frontend. Both processes import this so they run the identical module
 // (resume is by instruction offset). No tier annotations: placement is inferred
 // from which resources each call touches — db.* force the server, ui.* the client.
-import { PROGRAM } from "./waso-core.mjs";
-import { loadModule } from "./waso-tsc.mjs";
+import { PROGRAM } from "./stackmix-core.mjs";
+import { loadModule } from "./stackmix-tsc.mjs";
 
 export const N = 2000;
 

@@ -1,8 +1,8 @@
-// Waso — two-process demo, CLIENT tier + orchestrator (parent process).
+// Stackmix — two-process demo, CLIENT tier + orchestrator (parent process).
 //
-//   node waso-2p-client.mjs
+//   node stackmix-2p-client.mjs
 //
-// Spawns waso-2p-server.mjs as a child and oscillates one program between the
+// Spawns stackmix-2p-server.mjs as a child and oscillates one program between the
 // two REAL OS processes over a pipe. Unlike the single-process spike, the two
 // tiers share no memory: a §5 handle owned by the server genuinely cannot be
 // read here, and the only way the big dataset could reach this process is if it
@@ -14,8 +14,8 @@ import { fileURLToPath } from "node:url";
 import {
   Tier, run, Suspend, serializeContinuation, deserializeContinuation, contBytes, pendingName, wireHandles,
   initialFrames, fmt,
-} from "./waso-core.mjs";
-import { writeFrame, readFrames } from "./waso-frame.mjs";
+} from "./stackmix-core.mjs";
+import { writeFrame, readFrames } from "./stackmix-frame.mjs";
 
 const rendered = [];
 const client = new Tier("client", {
@@ -27,7 +27,7 @@ const host = {
   deref(h) { throw new Error(`client cannot deref ${h.owner} handle ${h.id} (cross-process fetch not implemented; demo shouldn't need it)`); },
 };
 
-const serverPath = fileURLToPath(new URL("./waso-2p-server.mjs", import.meta.url));
+const serverPath = fileURLToPath(new URL("./stackmix-2p-server.mjs", import.meta.url));
 const child = spawn(process.execPath, [serverPath], { stdio: ["pipe", "pipe", "inherit"] });
 
 // Wire accounting: real bytes per direction of the pipe.
@@ -97,7 +97,7 @@ function report(value) {
   const fullResultBytes = meta.fullResultBytes;
   const s2c = migrations.find((m) => m.from === "server" && m.to === "client");
 
-  console.log("\nWaso — two real OS processes, continuation crossing a pipe\n");
+  console.log("\nStackmix — two real OS processes, continuation crossing a pipe\n");
   console.log(`Program: render(minAge=${minAge})  cold-started on the CLIENT process`);
   console.log(`Dataset: ${meta.n.toLocaleString()} rows, living ONLY in the server process`);
   console.log(`Full result set (if it had been shipped here): ${fmt(fullResultBytes)}\n`);

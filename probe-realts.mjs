@@ -1,13 +1,13 @@
-// Probe: compile real JS/TS and check Waso runs it IDENTICALLY to Node.
+// Probe: compile real JS/TS and check Stackmix runs it IDENTICALLY to Node.
 //
-// Each snippet is valid JavaScript. We compile it with the Waso frontend and run
+// Each snippet is valid JavaScript. We compile it with the Stackmix frontend and run
 // it on the interpreter, AND we eval it in Node, and compare outputs. This is
 // the honest test for "unlock real existing apps": fidelity against the actual
 // JS engine across the new constructs (templates, default params, for-of, array
 // literals, nested function declarations, destructuring, closures, control flow).
 
-import { PROGRAM, run, initialFrames } from "./waso-core.mjs";
-import { loadModule } from "./waso-tsc.mjs";
+import { PROGRAM, run, initialFrames } from "./stackmix-core.mjs";
+import { loadModule } from "./stackmix-tsc.mjs";
 
 let pass = true;
 const J = (x) => JSON.stringify(x, (k, v) => (typeof v === "bigint" ? "B:" + v.toString() : v)); // BigInt isn't JSON-safe
@@ -20,10 +20,10 @@ function check(name, src, entry, args) {
   } catch (e) { err = e; }
   const ok = !err && J(got) === J(ref);
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}`);
-  if (!ok) { pass = false; if (err) console.log(`        error: ${err.message}`); else console.log(`        waso=${J(got)}  node=${J(ref)}`); }
+  if (!ok) { pass = false; if (err) console.log(`        error: ${err.message}`); else console.log(`        stackmix=${J(got)}  node=${J(ref)}`); }
 }
 
-console.log("Probe: compile real JS, compare Waso output to Node's eval\n");
+console.log("Probe: compile real JS, compare Stackmix output to Node's eval\n");
 
 check("templates + default param + for-of + nested fn decl",
 `function summarize(rows, prefix = "row") {
@@ -644,7 +644,7 @@ function go() {
   return { arr, obj, sum: add3(...args) };
 }`, "go", []);
 
-// Async snippets: no genuine async resource, so Waso runs them synchronously
+// Async snippets: no genuine async resource, so Stackmix runs them synchronously
 // (await of a plain value = identity); Node runs them as real Promises, so we
 // await its result and compare the resolved values.
 async function checkAsync(name, src, entry, args) {
@@ -656,7 +656,7 @@ async function checkAsync(name, src, entry, args) {
   } catch (e) { err = e; }
   const ok = !err && J(got) === J(ref);
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}`);
-  if (!ok) { pass = false; if (err) console.log(`        error: ${err.message}`); else console.log(`        waso=${J(got)}  node=${J(ref)}`); }
+  if (!ok) { pass = false; if (err) console.log(`        error: ${err.message}`); else console.log(`        stackmix=${J(got)}  node=${J(ref)}`); }
 }
 
 await checkAsync("async generator + for await (yield + await compose)",
@@ -688,7 +688,7 @@ async function go() {
   return [r1, r2];
 }`, "go", []);
 
-console.log(`\nResult: ${pass ? "all PASS" : "FAILURES"} — Waso compiles real JS and matches Node's own`);
+console.log(`\nResult: ${pass ? "all PASS" : "FAILURES"} — Stackmix compiles real JS and matches Node's own`);
 console.log(`execution across templates, default params, for-of, array/object literals,`);
 console.log(`destructuring (incl. nested), nested function declarations, and closures.`);
 if (!pass) process.exitCode = 1;

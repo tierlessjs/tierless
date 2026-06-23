@@ -1,18 +1,18 @@
-// Waso — minimal spike, single process (design doc §11)
+// Stackmix — minimal spike, single process (design doc §11)
 //
 // Proves the ONE core claim: a continuation captured at a resource boundary
 // serializes *small*, while the data needed to reconstruct the computation
 // stays tier-local. Here the two tiers are isolated runtime instances in one
 // process (the doc explicitly allows "two WASM instances"); every migration
 // still goes through the real wire format, so the measured bytes are genuine.
-// For a true OS-process boundary, see waso-2p-client.mjs.
+// For a true OS-process boundary, see stackmix-2p-client.mjs.
 //
-//   node waso-spike.mjs
+//   node stackmix-spike.mjs
 
 import {
   Tier, run, Suspend, serializeContinuation, deserializeContinuation, contBytes,
   initialFrames, makeDataset, fmt,
-} from "./waso-core.mjs";
+} from "./stackmix-core.mjs";
 
 const N = 100_000;
 const PEOPLE = makeDataset(N);
@@ -72,7 +72,7 @@ const { value, migrations } = oscillate("render", [minAge], client);
 const fullResultBytes = Buffer.byteLength(JSON.stringify(PEOPLE));
 const totalCrossed = migrations.reduce((s, m) => s + m.bytes, 0);
 
-console.log("Waso spike (single process) — continuation size vs. shipping the result set\n");
+console.log("Stackmix spike (single process) — continuation size vs. shipping the result set\n");
 console.log(`Program: render(minAge=${minAge})  cold-started on the CLIENT tier`);
 console.log(`Dataset: ${N.toLocaleString()} rows on the server`);
 console.log(`Full result set (if shipped to the client): ${fmt(fullResultBytes)}\n`);

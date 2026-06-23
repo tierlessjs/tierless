@@ -9,7 +9,7 @@
 // the transform (NOTES-frontend.md), and the same mechanism is what lets a
 // cross-process handle fetch resume a synchronous interpreter.
 
-import { PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation, contBytes, initialFrames, Tier, awaitable } from "./waso-core.mjs";
+import { PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation, contBytes, initialFrames, Tier, awaitable } from "./stackmix-core.mjs";
 
 // async function loadUser(id) {
 //   const u = await db.fetchUser(id);          // RES returns a descriptor; AWAIT suspends
@@ -94,7 +94,7 @@ check(`the await-suspended continuation is small and real (${viaWire.maxWire} B 
 
 // Promise.all resolves its elements CONCURRENTLY (one suspension carrying all the
 // pending awaitables), not one-at-a-time. Proven by max-in-flight (timing-independent).
-const { loadModule } = await import("./waso-tsc.mjs");
+const { loadModule } = await import("./stackmix-tsc.mjs");
 loadModule(PROGRAM, `
   async function go() { const us = await Promise.all([db.fetchUser(1), db.fetchUser(2), db.fetchUser(3)]); return us.map((u) => u.name); }
 `, { entry: "go", resources: ["db.fetchUser"] });

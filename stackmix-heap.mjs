@@ -1,4 +1,4 @@
-// Waso — identity-preserving, cycle-safe graph codec for continuation state.
+// Stackmix — identity-preserving, cycle-safe graph codec for continuation state.
 //
 // The naive wire format (per-value JSON) loses object identity (shared refs
 // become separate copies) and throws on cycles — see probe-heap.mjs. A real
@@ -16,7 +16,7 @@
 // pre-creating each object so cycles and sharing are restored exactly.
 
 export function isHandle(x) {
-  return x !== null && typeof x === "object" && x.__waso_handle__ === true;
+  return x !== null && typeof x === "object" && x.__stackmix_handle__ === true;
 }
 
 // Host standard-library globals exposed to compiled code. They are code/identity,
@@ -67,7 +67,7 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024 } = {})
     // big subgraph -> §5 handle into the owning tier's heap (stays tier-local)
     if (tier && approxExceeds(v, threshold)) {
       const id = objs.length; idOf.set(v, id);
-      objs.push({ k: "H", h: { __waso_handle__: true, owner: tier.id, id: tier.heapPut(v), kind: Array.isArray(v) ? "array" : "object" } });
+      objs.push({ k: "H", h: { __stackmix_handle__: true, owner: tier.id, id: tier.heapPut(v), kind: Array.isArray(v) ? "array" : "object" } });
       return { k: "r", id };
     }
     const id = objs.length; idOf.set(v, id);              // reserve id BEFORE recursing (cycle-safe)

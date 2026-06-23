@@ -1,4 +1,4 @@
-// The Waso application — ordinary TypeScript. No tier annotations: the runtime
+// The Stackmix application — ordinary TypeScript. No tier annotations: the runtime
 // infers placement from which resources you touch (§3, principle #1). Touching
 // db.query forces the server; touching DOM.renderList forces the client. The
 // loop runs wherever it already is (lazy placement), so it filters on the

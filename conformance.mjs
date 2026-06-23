@@ -1,7 +1,7 @@
-// Waso conformance suite — does the full TS/JS language survive our continuations?
+// Stackmix conformance suite — does the full TS/JS language survive our continuations?
 //
 // Two questions, one file:
-//   1. FIDELITY   — does Waso compute the same result as the real engine? Every
+//   1. FIDELITY   — does Stackmix compute the same result as the real engine? Every
 //      `t(...)` compiles a snippet, runs it on the interpreter, AND evals it in
 //      Node, and asserts the outputs are identical (BigInt-safe compare).
 //   2. CONTINUATION — does that result still hold when the computation is SERIALIZED
@@ -10,14 +10,14 @@
 //      generators, cyclic graphs, live try/catch handlers) is alive; the harness
 //      round-trips the ENTIRE continuation through JSON at each checkpoint and
 //      resumes from the bytes. `ckpt` is identity-async, so Node computes the same
-//      value — but Waso's value crossed a wire N times to get there.
+//      value — but Stackmix's value crossed a wire N times to get there.
 //
 // This is the bar for a general-purpose framework: not "the frontend parses X" but
 // "a live computation using X can be frozen to bytes, shipped, and thawed correctly."
 // The same harness is the template for any other language that compiles to the IR.
 
-import { PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation, contBytes, initialFrames, awaitable } from "./waso-core.mjs";
-import { loadModule } from "./waso-tsc.mjs";
+import { PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation, contBytes, initialFrames, awaitable } from "./stackmix-core.mjs";
+import { loadModule } from "./stackmix-tsc.mjs";
 
 let pass = 0, fail = 0; const fails = [];
 const J = (x) => JSON.stringify(x, (k, v) => (typeof v === "bigint" ? "B:" + v.toString() : v));
@@ -26,10 +26,10 @@ function report(name, ok, err, got, ref) {
   fail++; fails.push(name);
   console.log(`  FAIL  ${name}`);
   if (err) console.log(`        error: ${err.message}`);
-  else console.log(`        waso=${J(got)}\n        node=${J(ref)}`);
+  else console.log(`        stackmix=${J(got)}\n        node=${J(ref)}`);
 }
 
-// ---- fidelity: Waso eval === Node eval ------------------------------------
+// ---- fidelity: Stackmix eval === Node eval ------------------------------------
 function t(name, src, entry = "go", args = []) {
   let got, ref, err = null;
   try {
@@ -40,7 +40,7 @@ function t(name, src, entry = "go", args = []) {
   report(name, !err && J(got) === J(ref), err, got, ref);
 }
 
-// async fidelity: Waso runs awaits of plain values inline; Node returns a Promise we await.
+// async fidelity: Stackmix runs awaits of plain values inline; Node returns a Promise we await.
 async function ta(name, src, entry = "go", args = []) {
   let got, ref, err = null;
   try {
@@ -83,8 +83,8 @@ async function w(name, src, entry = "go", args = [], minHops = 1) {
 }
 
 const section = (s) => console.log(`\n— ${s} —`);
-console.log("Waso conformance: full-language fidelity, and survival across continuation migration\n");
-console.log("PART 1 — FIDELITY (Waso === Node)");
+console.log("Stackmix conformance: full-language fidelity, and survival across continuation migration\n");
+console.log("PART 1 — FIDELITY (Stackmix === Node)");
 
 section("literals, operators, coercion");
 t("numbers/strings/bools/null/template", `function go(){const a=1.5,b="x",c=true,d=null; return [a*2,b+"y",!c,d,\`\${a}-\${b}\`];}`);

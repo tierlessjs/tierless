@@ -1,4 +1,4 @@
-// Waso — RealWorld/Conduit benchmark: over-fetch vs server-side assembly.
+// Stackmix — RealWorld/Conduit benchmark: over-fetch vs server-side assembly.
 //
 //   node bench-conduit.mjs        (modeled latency, instant)
 //   node bench-conduit.mjs --real (inject real RTT sleeps -> genuine wall-clock)
@@ -13,13 +13,13 @@
 // We run the SAME assembly function under the runtime in two placements:
 //   REST  : db.articles ships every body to the client; the filter/join/project
 //           run on the client; each author is a round trip. Over-fetch + N+1.
-//   Waso  : the function migrates once, filters/joins/projects on the server
+//   Stackmix  : the function migrates once, filters/joins/projects on the server
 //           where the data lives, and ships back ONLY the assembled feed.
 //
 // HN proved the latency/round-trip win (bytes were equal). Conduit proves the
 // bandwidth/over-fetch win: the big article bodies never leave the server.
 
-import { PROGRAM, run, Suspend, Tier, fmt } from "./waso-core.mjs";
+import { PROGRAM, run, Suspend, Tier, fmt } from "./stackmix-core.mjs";
 import { execute, DEFAULT_RTT, DEFAULT_API } from "./bench-core.mjs";
 
 function asm(lines) {
@@ -105,13 +105,13 @@ async function runStrategy(policy) {
 }
 
 const rest = await runStrategy("fetch");
-const waso = await runStrategy("migrate");
+const stackmix = await runStrategy("migrate");
 
 const datasetBytes = Buffer.byteLength(JSON.stringify(data.articles));
-const matched = waso.value.feed.length;
-const ok = JSON.stringify(rest.value) === JSON.stringify(waso.value) && matched > 0;
+const matched = stackmix.value.feed.length;
+const ok = JSON.stringify(rest.value) === JSON.stringify(stackmix.value) && matched > 0;
 
-console.log("Waso — Conduit feed load: REST over-fetch vs server-side assembly\n");
+console.log("Stackmix — Conduit feed load: REST over-fetch vs server-side assembly\n");
 console.log(`Data: ${N_ARTICLES} articles (~${fmt(datasetBytes / N_ARTICLES)}/body, ${fmt(datasetBytes)} total), ${N_USERS} users`);
 console.log(`Query: home feed where score >= ${MIN_SCORE}  ->  ${matched} articles, each joined to its author`);
 console.log(`Network model: ${DEFAULT_RTT}ms client<->server RTT, ${DEFAULT_API}ms server<->API${REAL ? "  [REAL sleeps]" : "  [modeled]"}\n`);
@@ -119,17 +119,17 @@ console.log(`Network model: ${DEFAULT_RTT}ms client<->server RTT, ${DEFAULT_API}
 const row = (name, s) => `  ${name.padEnd(22)} ${String(s.hops).padStart(4)} rt   ${fmt(s.bytes).padStart(9)}   ${(s.latency + "ms").padStart(8)}`;
 console.log("  strategy               round trips    bytes      latency");
 console.log(row("REST (over-fetch)", rest));
-console.log(row("Waso (migrate)", waso));
+console.log(row("Stackmix (migrate)", stackmix));
 console.log("");
 
 console.log(`Bandwidth: REST drags every article body to the client to filter & join locally;`);
-console.log(`Waso filters/joins/projects on the server and ships only the assembled feed.`);
-console.log(`  bytes crossed : ${fmt(rest.bytes)} -> ${fmt(waso.bytes)}   =  ${(rest.bytes / waso.bytes).toFixed(0)}x less data`);
-console.log(`Round trips: REST ${rest.hops} (db.articles + ${matched} author joins + tags) -> Waso ${waso.hops}`);
-console.log(`             =  ${(rest.latency / waso.latency).toFixed(0)}x faster (${rest.latency}ms -> ${waso.latency}ms)`);
+console.log(`Stackmix filters/joins/projects on the server and ships only the assembled feed.`);
+console.log(`  bytes crossed : ${fmt(rest.bytes)} -> ${fmt(stackmix.bytes)}   =  ${(rest.bytes / stackmix.bytes).toFixed(0)}x less data`);
+console.log(`Round trips: REST ${rest.hops} (db.articles + ${matched} author joins + tags) -> Stackmix ${stackmix.hops}`);
+console.log(`             =  ${(rest.latency / stackmix.latency).toFixed(0)}x faster (${rest.latency}ms -> ${stackmix.latency}ms)`);
 console.log("");
 console.log(`A bespoke server endpoint could also avoid the over-fetch — but that's new`);
-console.log(`boilerplate for every filter you didn't anticipate (the §2 argument). Waso runs`);
+console.log(`boilerplate for every filter you didn't anticipate (the §2 argument). Stackmix runs`);
 console.log(`the filter inline because it's already on the server where the data is.`);
-console.log(`Correctness: REST and Waso produced identical feeds? ${ok ? "YES" : "NO"}`);
+console.log(`Correctness: REST and Stackmix produced identical feeds? ${ok ? "YES" : "NO"}`);
 if (!ok) process.exitCode = 1;

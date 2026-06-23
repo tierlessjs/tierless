@@ -1,6 +1,6 @@
 // Capstone — CLIENT tier + orchestrator (parent process).
 //
-//   node waso-app-2p-client.mjs
+//   node stackmix-app-2p-client.mjs
 //
 // Proves the whole stack composes: a program authored in ordinary TypeScript is
 // compiled by the frontend, cold-starts on the client, and SUSPENDS/RESUMES
@@ -11,16 +11,16 @@
 
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { Tier, run, Suspend, serializeContinuation, deserializeContinuation, contBytes, pendingName, wireHandles, initialFrames, fmt } from "./waso-core.mjs";
-import { describeContinuation } from "./waso-tsc.mjs";
-import { writeFrame, readFrames } from "./waso-frame.mjs";
+import { Tier, run, Suspend, serializeContinuation, deserializeContinuation, contBytes, pendingName, wireHandles, initialFrames, fmt } from "./stackmix-core.mjs";
+import { describeContinuation } from "./stackmix-tsc.mjs";
+import { writeFrame, readFrames } from "./stackmix-frame.mjs";
 import { N, SRC, frag } from "./app-thread.mjs";
 
 const rendered = [];
 const client = new Tier("client", { "ui.render": ([lines]) => { for (const l of lines) rendered.push(l); return lines.length; } });
 const host = { deref() { throw new Error("client deref unexpected"); } };
 
-const child = spawn(process.execPath, [fileURLToPath(new URL("./waso-app-2p-server.mjs", import.meta.url))], { stdio: ["pipe", "pipe", "inherit"] });
+const child = spawn(process.execPath, [fileURLToPath(new URL("./stackmix-app-2p-server.mjs", import.meta.url))], { stdio: ["pipe", "pipe", "inherit"] });
 let resolveNext = null;
 readFrames(child.stdout, (msg) => { const r = resolveNext; resolveNext = null; r && r(msg); });
 const next = () => new Promise((res) => { resolveNext = res; });
@@ -29,7 +29,7 @@ const send = (obj) => writeFrame(child.stdin, obj);
 const migrations = [];
 
 // describeContinuation needs the PROGRAM with .pos.
-import { PROGRAM } from "./waso-core.mjs";
+import { PROGRAM } from "./stackmix-core.mjs";
 const topLoc = (frames) => { const t = describeContinuation(PROGRAM, frames); return t[t.length - 1]?.loc; };
 
 async function main() {
@@ -68,7 +68,7 @@ function topLocFromWire(wire) {
 function finish(value) {
   send({ type: "shutdown" }); child.stdin.end();
   const nInstrs = Object.values(frag).reduce((s, f) => s + f.code.length, 0);
-  console.log("\nWaso capstone — real TypeScript, suspended/resumed across two OS processes\n");
+  console.log("\nStackmix capstone — real TypeScript, suspended/resumed across two OS processes\n");
   console.log(`Authored: app-thread.ts -> compiled to ${nInstrs} IR instrs across ${Object.keys(frag).length} functions`);
   console.log(`Program: main() cold-started on the CLIENT; db.* live on the server, ui.* on the client\n`);
   console.log("Migrations (continuation crossing the pipe, mapped to TS source):");
