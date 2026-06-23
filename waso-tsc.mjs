@@ -144,23 +144,27 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   const objLiteralThis = new Map();  // object-literal node -> synthetic thisId (for methods/getters that use `this`)
   let thisCounter = -1, classUid = 0;
   { const scan = (n) => { if ((ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n)) && (ts.isIdentifier(n.name) || ts.isStringLiteral(n.name))) accessorNames.add(n.name.text); ts.forEachChild(n, scan); }; scan(sf); } // pre-scan ALL accessor names (class + object-literal)
+  const decof = (node) => ((ts.canHaveDecorators(node) ? ts.getDecorators(node) : null) || []).map((dn) => dn.expression); // decorator expression nodes on a declaration
   const collectClass = (s) => {
     const isStatic = (mem) => (mem.modifiers || []).some((m) => m.kind === ts.SyntaxKind.StaticKeyword);
     const named = (n) => (n && (ts.isIdentifier(n) || ts.isPrivateIdentifier(n)) ? n.text : null); // `#x` private fields/methods -> "#x" key
-    const fields = [], methods = [], accessors = [], sfields = [], smethods = [], saccessors = [], cmethods = []; let ctor = null;
+    const fields = [], methods = [], accessors = [], sfields = [], smethods = [], saccessors = [], cmethods = [], pdecorators = []; let ctor = null;
+    const paramsOf = (mem, key) => (mem.parameters || []).forEach((p, i) => { const ds = decof(p); if (ds.length) pdecorators.push({ key, index: i, exprs: ds, static: isStatic(mem) }); }); // @Inject() x: T -> dec(target, key, i)
     for (const mem of s.members) {
-      const st = isStatic(mem), nm = named(mem.name);
+      const st = isStatic(mem), nm = named(mem.name), dec = decof(mem);
       if (ts.isMethodDeclaration(mem) && !nm && mem.name && ts.isComputedPropertyName(mem.name)) cmethods.push({ keyExpr: mem.name.expression, node: mem, static: st }); // [k](){} / [Symbol.iterator](){}
-      else if (ts.isPropertyDeclaration(mem) && mem.initializer && nm) (st ? sfields : fields).push({ name: nm, init: mem.initializer });
-      else if (ts.isMethodDeclaration(mem) && nm) (st ? smethods : methods).push({ name: nm, node: mem });
-      else if (ts.isGetAccessorDeclaration(mem) && nm) { (st ? saccessors : accessors).push({ name: nm, kind: "get", node: mem }); accessorNames.add(nm); }
-      else if (ts.isSetAccessorDeclaration(mem) && nm) { (st ? saccessors : accessors).push({ name: nm, kind: "set", node: mem }); accessorNames.add(nm); }
-      else if (ts.isConstructorDeclaration(mem) && mem.body) ctor = mem;
+      else if (ts.isPropertyDeclaration(mem) && mem.initializer && nm) (st ? sfields : fields).push({ name: nm, init: mem.initializer, decorators: dec });
+      else if (ts.isPropertyDeclaration(mem) && nm && dec.length) (st ? sfields : fields).push({ name: nm, init: null, decorators: dec }); // decorated field with no initializer (still needs the property decorator to run)
+      else if (ts.isMethodDeclaration(mem) && nm) { (st ? smethods : methods).push({ name: nm, node: mem, decorators: dec }); paramsOf(mem, nm); }
+      else if (ts.isGetAccessorDeclaration(mem) && nm) { (st ? saccessors : accessors).push({ name: nm, kind: "get", node: mem, decorators: dec }); accessorNames.add(nm); paramsOf(mem, nm); }
+      else if (ts.isSetAccessorDeclaration(mem) && nm) { (st ? saccessors : accessors).push({ name: nm, kind: "set", node: mem, decorators: dec }); accessorNames.add(nm); paramsOf(mem, nm); }
+      else if (ts.isConstructorDeclaration(mem) && mem.body) { ctor = mem; paramsOf(mem, undefined); }
     }
     const extendsId = (s.heritageClauses || []).filter((h) => h.token === ts.SyntaxKind.ExtendsKeyword).flatMap((h) => h.types).map((t) => t.expression).find((e) => ts.isIdentifier(e)) || null;
     const uname = s.parent === sf ? s.name.text : `${s.name.text}$c${classUid++}`; // top-level keeps its name; local gets a unique one (no collisions)
     const decos = (ts.canHaveDecorators(s) ? ts.getDecorators(s) : null) || []; // @Injectable()/@Component()/... (legacy: run on the class at module load)
-    classes.set(uname, { name: uname, thisId: thisCounter--, staticThisId: thisCounter--, fields, methods, accessors, sfields, smethods, saccessors, cmethods, ctor, superName: null, _ext: extendsId, decorators: decos.map((d) => d.expression), topLevel: s.parent === sf });
+    const hasMemberDec = pdecorators.length || [...fields, ...sfields, ...methods, ...smethods, ...accessors, ...saccessors].some((x) => x.decorators && x.decorators.length);
+    classes.set(uname, { name: uname, thisId: thisCounter--, staticThisId: thisCounter--, fields, methods, accessors, sfields, smethods, saccessors, cmethods, ctor, superName: null, _ext: extendsId, decorators: decos.map((d) => d.expression), pdecorators, hasMemberDec, topLevel: s.parent === sf });
     if (s.name && bindingOf.has(s.name)) classOfBinding.set(bindingOf.get(s.name), uname);
   };
   { const w = (n) => { if (ts.isClassDeclaration(n) && n.name) collectClass(n); ts.forEachChild(n, w); }; w(sf); } // classes ANYWHERE (top-level + local)
@@ -181,6 +185,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     const co = tempSlot(); emit("NEWOBJ"); emit("STORE", co);
     emit("LOAD", co); emit("PUSH", chain.map((c) => c.name)); emit("SETPROP", "__class__"); emit("POP");
     emit("LOAD", co); emit("PUSH", true); emit("SETHIDDEN", "__classobj__"); emit("POP"); // marks the class object (callable) so `typeof ClassName` is "function" while instances stay "object"
+    emit("LOAD", co); emit("LOAD", co); emit("SETHIDDEN", "prototype"); emit("POP"); // Class.prototype aliases the class object (we collapse prototype/constructor): instance-member decorator targets and metadata land here
     emit("LOAD", co); emit("CLSPUT", cname); emit("POP"); // cache BEFORE static methods/inits so a self-reference (e.g. `static b = C.a+1`) resolves to the in-progress object instead of re-entering the builder
     for (const cls of chain) for (const m of cls.smethods) { const info = cls.compiled[`static ${m.name}`]; emit("LOAD", co); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.staticThisId ? ["L", co] : provide(id))), !!m.node.asteriskToken); emit("SETPROP", m.name); emit("POP"); }
     for (const cls of chain) for (const fld of cls.sfields) { emit("LOAD", co); expr(fld.init); emit("SETPROP", fld.name); emit("POP"); } // init runs code
@@ -196,6 +201,29 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       emit("LOAD", co); emit("LOAD", tbl); emit("SETPROP", "__accessors__"); emit("POP");
     }
     for (const cls of chain) for (const m of cls.cmethods) if (m.static) { emit("LOAD", co); expr(m.keyExpr); emit("MAKECLOSURE", m.compiled.prog, m.compiled.freeIds.map((id) => (id === cls.staticThisId ? ["L", co] : provide(id))), m.compiled.gen); emit("SETINDEX"); }
+    // --- member decorators (legacy): target = class object; run once when it is built ---
+    // A method decorator gets a {value, writable, enumerable, configurable} descriptor;
+    // its (possibly replaced) `value` becomes the method. Instance methods are shared
+    // (dynamic `this`) and stashed at __dm_<name> for `new` to pick up; static methods
+    // are replaced on the class object directly. Property/parameter decorators run for
+    // their side effects (metadata). Decorators apply bottom-up.
+    const decorateMethod = (m, isStatic) => {
+      const info = rec.compiled[isStatic ? `static ${m.name}` : m.name]; const tid = isStatic ? rec.staticThisId : rec.thisId;
+      const dt = tempSlot(); emit("NEWOBJ"); emit("STORE", dt);
+      emit("LOAD", dt); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === tid ? ["L", co] : provide(id))), !!m.node.asteriskToken); emit("SETPROP", "value"); emit("POP");
+      for (const [k, v] of [["writable", true], ["enumerable", false], ["configurable", true]]) { emit("LOAD", dt); emit("PUSH", v); emit("SETPROP", k); emit("POP"); }
+      for (let i = m.decorators.length - 1; i >= 0; i--) { // dec(target, key, descriptor) -> a returned descriptor replaces dt; else dt was mutated in place
+        expr(m.decorators[i]); emit("LOAD", co); emit("PUSH", m.name); emit("LOAD", dt); emit("CALLV", 3);
+        const set = label("dm"), done = label("dmd"); emit("DUP"); emit("ISNULLISH"); emit("JMPF", set); emit("POP"); emit("JMP", done); mark(set); emit("STORE", dt); mark(done);
+      }
+      emit("LOAD", co); emit("LOAD", dt); emit("GETPROP", "value"); emit(isStatic ? "SETPROP" : "SETHIDDEN", isStatic ? m.name : `__dm_${m.name}`); emit("POP"); // static: replace on class; instance: stash for `new`
+    };
+    for (const m of rec.methods) if (m.decorators && m.decorators.length) decorateMethod(m, false);
+    for (const m of rec.smethods) if (m.decorators && m.decorators.length) decorateMethod(m, true);
+    const sideEffect = (decs, args) => { for (let i = decs.length - 1; i >= 0; i--) { expr(decs[i]); args(); emit("POP"); } };
+    for (const fld of [...rec.fields, ...rec.sfields]) if (fld.decorators && fld.decorators.length) sideEffect(fld.decorators, () => { emit("LOAD", co); emit("PUSH", fld.name); emit("CALLV", 2); }); // @Column/@Input: dec(target, key)
+    for (const a of [...rec.accessors, ...rec.saccessors]) if (a.decorators && a.decorators.length) sideEffect(a.decorators, () => { emit("LOAD", co); emit("PUSH", a.name); emit("PUSH", undefined); emit("CALLV", 3); }); // accessor decorator: dec(target, key, desc) — side effects only (no replacement)
+    for (const pd of rec.pdecorators) sideEffect(pd.exprs, () => { emit("LOAD", co); emit("PUSH", pd.key); emit("PUSH", pd.index); emit("CALLV", 3); }); // @Inject(): dec(target, key, paramIndex)
     emit("LOAD", co); emit("RET");                                 // already cached above; return it
     mark(ready); emit("RET");                                       // cached value already on stack
   };
@@ -441,7 +469,10 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         const hostBase = chain[0].hostSuper; // extends a host Error -> prepend its ancestry so `instanceof Error` holds
         const classNames = (hostBase ? (hostBase === "Error" ? ["Error"] : ["Error", hostBase]) : []).concat(chain.map((c) => c.name));
         emit("LOAD", inst); emit("PUSH", classNames); emit("SETHIDDEN", "__class__"); emit("POP"); // non-enumerable: JSON/for-in/keys see only data fields
-        for (const cls of chain) for (const m of cls.methods) { const info = cls.compiled[m.name]; emit("LOAD", inst); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.thisId ? ["L", inst] : provide(id))), !!m.node.asteriskToken); emit("SETHIDDEN", m.name); emit("POP"); } // methods non-enumerable (derived overrides base)
+        for (const cls of chain) for (const m of cls.methods) { // methods non-enumerable (derived overrides base)
+          if (m.decorators && m.decorators.length) { emit("LOAD", inst); classObject(cls.name); emit("GETPROP", `__dm_${m.name}`); emit("SETHIDDEN", m.name); emit("POP"); continue; } // decorated: shared closure built+decorated once on the class object (dynamic this)
+          const info = cls.compiled[m.name]; emit("LOAD", inst); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.thisId ? ["L", inst] : provide(id))), !!m.node.asteriskToken); emit("SETHIDDEN", m.name); emit("POP");
+        }
         const accs = new Map(); // name -> { get?: {cls,info}, set?: {cls,info} }
         for (const cls of chain) { const byName = new Map(); for (const a of cls.accessors) { const e = byName.get(a.name) || {}; e[a.kind] = { cls, info: cls.compiled[`${a.kind} ${a.name}`] }; byName.set(a.name, e); } for (const [n, e] of byName) accs.set(n, e); } // derived class's accessor fully shadows the base's for that name (get+set merge only WITHIN a class) — matches JS prototype accessor semantics
         if (accs.size) {                                            // build the instance's __accessors__ table (closures capture this)
@@ -640,6 +671,12 @@ export function compileModule(source, { resources = [], entry = "main", file = "
           if (m === "deleteProperty") { expr(a[0]); expr(a[1]); emit("DELINDEX"); return true; }
           if (m === "ownKeys") { expr(a[0]); emit("KEYS"); return true; }
           if (m === "apply") { expr(a[0]); expr(a[1]); expr(a[2]); emit("REFAPPLY"); return true; }
+          // Reflect-metadata (runtime store; no design:type auto-emit — that needs the type checker)
+          if (m === "defineMetadata") { expr(a[0]); expr(a[1]); expr(a[2]); a[3] ? expr(a[3]) : emit("PUSH", undefined); emit("DEFMETA"); return true; } // (mk, mv, target, pk?)
+          if (m === "getMetadata" || m === "getOwnMetadata") { expr(a[0]); expr(a[1]); a[2] ? expr(a[2]) : emit("PUSH", undefined); emit("GETMETA"); return true; } // (mk, target, pk?)
+          if (m === "hasMetadata" || m === "hasOwnMetadata") { expr(a[0]); expr(a[1]); a[2] ? expr(a[2]) : emit("PUSH", undefined); emit("HASMETA"); return true; }
+          if (m === "getMetadataKeys" || m === "getOwnMetadataKeys") { expr(a[0]); a[1] ? expr(a[1]) : emit("PUSH", undefined); emit("METAKEYS"); return true; } // (target, pk?)
+          if (m === "deleteMetadata") { expr(a[0]); expr(a[1]); a[2] ? expr(a[2]) : emit("PUSH", undefined); emit("DELMETA"); return true; }
           fail(node, "unsupported Reflect." + m);
         }
         if (ts.isIdentifier(callee.expression) && bindingOf.get(callee.expression) == null && GLOBAL_OBJS.has(callee.expression.text)) { emit("GLOBAL", callee.expression.text); hostMethod(m, node.arguments); return true; } // Math.max / Object.keys / JSON.stringify / Array.isArray ...
@@ -807,7 +844,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   // expressions) once per tier, before anything else. Function/class declarations
   // and TS-only nodes are NOT executed here (handled separately).
   const initStmts = sf.statements.filter((s) => ts.isVariableStatement(s) || ts.isExpressionStatement(s) || ts.isIfStatement(s) || ts.isForStatement(s) || ts.isForOfStatement(s) || ts.isForInStatement(s) || ts.isWhileStatement(s) || ts.isDoStatement(s) || ts.isSwitchStatement(s) || ts.isTryStatement(s) || ts.isBlock(s) || ts.isThrowStatement(s));
-  const decoratedClasses = [...classes.values()].filter((r) => r.topLevel && r.decorators && r.decorators.length); // legacy class decorators run at module load
+  const decoratedClasses = [...classes.values()].filter((r) => r.topLevel && ((r.decorators && r.decorators.length) || r.hasMemberDec)); // class + member decorators run at module load (eager class-object build)
   // Apply class decorators bottom-up: `C = d0(d1(...(C)))`; a non-null return rebinds
   // the cached class object (registration decorators return nothing — the common case).
   const emitDecorate = ({ emit, expr, tempSlot, label, mark, classObject }) => {

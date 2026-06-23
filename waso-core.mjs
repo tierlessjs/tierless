@@ -234,6 +234,13 @@ function binop(op, a, b) {
 const COERCING = new Set(["+", "-", "*", "/", "%", "**", "<", "<=", ">", ">="]);
 // Built-in constructors usable as the RHS of `instanceof` (host objects match natively).
 const HOSTCTORS = { Error, TypeError, RangeError, SyntaxError, ReferenceError, EvalError, URIError, Array, Map, Set, WeakMap, WeakSet, Date, RegExp, Object, Number, String, Boolean, Promise };
+// Reflect-metadata store. Unlike the WeakMap-based polyfill, metadata lives ON the
+// target as a non-enumerable __meta__ (a Map keyed by propertyKey -> Map of
+// metadataKey -> value), so it travels with the object through the codec. No
+// prototype-chain walk: getMetadata reads the target's own metadata.
+function metaMap(target) { let m = target.__meta__; if (!m) { m = new Map(); Object.defineProperty(target, "__meta__", { value: m, enumerable: false, writable: true, configurable: true }); } return m; }
+function defineMeta(mk, mv, target, pk) { if (target == null || (typeof target !== "object" && typeof target !== "function")) return; const m = metaMap(target); let pm = m.get(pk); if (!pm) { pm = new Map(); m.set(pk, pm); } pm.set(mk, mv); }
+function ownMetaBag(target, pk) { const m = target != null && typeof target === "object" ? target.__meta__ : undefined; return m ? m.get(pk) : undefined; }
 
 export function run(tier, frames, host) {
   const d = (x) => {
@@ -384,6 +391,11 @@ export function run(tier, frames, host) {
       case "NEWPROXY": { const handler = f.stack.pop(); const target = d(f.stack.pop()); const p = {}; Object.defineProperty(p, "__proxy__", { value: { target, handler }, enumerable: false, writable: true, configurable: true }); f.stack.push(p); f.ip++; break; } // new Proxy(target, handler)
       case "HASKEY": { const o = d(f.stack.pop()); const k = f.stack.pop(); const px = proxyOf(o); f.stack.push(px ? proxyHas(px, k) : k in o); f.ip++; break; } // `k in o`, proxy-aware
       case "REFAPPLY": { const argsArr = f.stack.pop(); const thisArg = f.stack.pop(); const fn = f.stack.pop(); f.ip++; if (isClosure(fn)) { const g = enter(fn, (argsArr || []).slice(), thisArg); if (g !== undefined) f.stack.push(g); break; } f.stack.push(fn.apply(thisArg, hostArgs(argsArr || []))); break; } // Reflect.apply(fn, thisArg, args)
+      case "DEFMETA": { const pk = f.stack.pop(); const target = d(f.stack.pop()); const mv = f.stack.pop(); const mk = f.stack.pop(); defineMeta(mk, mv, target, pk); f.stack.push(undefined); f.ip++; break; } // Reflect.defineMetadata(mk, mv, target, pk?)
+      case "GETMETA": { const pk = f.stack.pop(); const target = d(f.stack.pop()); const mk = f.stack.pop(); const bag = ownMetaBag(target, pk); f.stack.push(bag ? bag.get(mk) : undefined); f.ip++; break; }
+      case "HASMETA": { const pk = f.stack.pop(); const target = d(f.stack.pop()); const mk = f.stack.pop(); const bag = ownMetaBag(target, pk); f.stack.push(!!(bag && bag.has(mk))); f.ip++; break; }
+      case "METAKEYS": { const pk = f.stack.pop(); const target = d(f.stack.pop()); const bag = ownMetaBag(target, pk); f.stack.push(bag ? [...bag.keys()] : []); f.ip++; break; }
+      case "DELMETA": { const pk = f.stack.pop(); const target = d(f.stack.pop()); const mk = f.stack.pop(); const bag = ownMetaBag(target, pk); f.stack.push(!!(bag && bag.delete(mk))); f.ip++; break; }
       case "NEWARR": f.stack.push([]); f.ip++; break;
       case "ISARRAY": f.stack.push(Array.isArray(d(f.stack.pop()))); f.ip++; break;
       case "JSONSTR": {                                         // JSON.stringify that drops Waso closures & class objects (JS omits functions)
