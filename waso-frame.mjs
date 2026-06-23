@@ -18,18 +18,28 @@ export function writeFrame(stream, obj, bin = EMPTY) {
 }
 
 // Calls onFrame(obj, bin, totalByteLength) for each complete frame.
+//
+// Chunks accumulate in a list and are concatenated only once a whole frame has arrived
+// (and only across the chunks that hold it), so a large continuation streamed over many
+// small reads costs O(n), not the O(n²) of re-concatenating the whole buffer per chunk.
 export function readFrames(stream, onFrame) {
-  let buf = Buffer.alloc(0);
+  let chunks = [];  // unconsumed chunks
+  let buffered = 0; // total bytes across `chunks`
+  let need = 8;     // bytes required before the next frame can be parsed: the 8-byte header, then the full frame
+  const byteAt = (i) => { let p = i; for (const c of chunks) { if (p < c.length) return c[p]; p -= c.length; } return 0; }; // peek a header byte without concatenating
+  const u32 = (o) => ((byteAt(o) << 24) | (byteAt(o + 1) << 16) | (byteAt(o + 2) << 8) | byteAt(o + 3)) >>> 0;
   stream.on("data", (chunk) => {
-    buf = Buffer.concat([buf, chunk]);
-    while (buf.length >= 8) {
-      const jsonLen = buf.readUInt32BE(0);
-      const binLen = buf.readUInt32BE(4);
+    chunks.push(chunk); buffered += chunk.length;
+    while (buffered >= need) {
+      const jsonLen = u32(0);
+      const binLen = u32(4);
       const total = 8 + jsonLen + binLen;
-      if (buf.length < total) break;
+      if (buffered < total) { need = total; break; } // wait for the rest of this frame — no copy yet
+      const buf = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, buffered); // single copy, only once the whole frame is here
       const obj = JSON.parse(buf.subarray(8, 8 + jsonLen).toString("utf8"));
       const bin = binLen ? Buffer.from(buf.subarray(8 + jsonLen, total)) : EMPTY;
-      buf = buf.subarray(total);
+      const rem = buf.subarray(total);
+      chunks = rem.length ? [rem] : []; buffered = rem.length; need = 8;
       onFrame(obj, bin, total);
     }
   });

@@ -22,7 +22,8 @@
 //
 // Locals: 0=minAge, 1=rows, 2=matched, 3=i, 4=row
 
-import { encodeGraph, decodeGraph, GLOBALS, CTORS } from "./waso-heap.mjs";
+import { encodeGraph, decodeGraph, GLOBALS, CTORS, isHandle } from "./waso-heap.mjs";
+export { isHandle }; // one source of truth (waso-heap.mjs); re-exported here for callers that import it from core
 
 export const L = { minAge: 0, rows: 1, matched: 2, i: 3, row: 4 };
 
@@ -43,6 +44,11 @@ function assemble(asm) {
   return code;
 }
 
+// NOTE: PROGRAM is a process-wide singleton that loadModule/loadProgram mutate in place,
+// so two independent Waso programs can't coexist in one process, and the base `render` fn
+// below is always present unless deleted. Callers that load a second, unrelated program
+// must clear it first (`for (const k in PROGRAM) delete PROGRAM[k]`, as the tests do). A
+// per-context program table would lift this; the singleton is a deliberate prototype choice.
 export const PROGRAM = {
   render: {
     nlocals: 5,
@@ -105,10 +111,6 @@ export class Tier {
   has(name) { return name in this.resources; }
   heapPut(obj) { const id = `${this.id}#${this.nextHeapId++}`; this.heap.set(id, obj); return id; }
   heapGet(id) { return this.heap.get(id); }
-}
-
-export function isHandle(x) {
-  return x !== null && typeof x === "object" && x.__waso_handle__ === true;
 }
 
 // ---------------------------------------------------------------------------
@@ -355,10 +357,12 @@ export function run(tier, frames, host) {
     try { const r = run(tier, g.frames, host); g.done = true; return { value: r.value, done: true }; }
     catch (err) { if (err instanceof Yielded) return { value: err.value, done: false }; g.done = true; throw err; }
   };
-  if (PROGRAM["%moduleinit"] && tier && !tier.__minit) { tier.__minit = true; run(tier, [{ fn: "%moduleinit", ip: 0, locals: [], stack: [], env: [], handlers: [] }], host); } // module-level statements, once per tier
+  if (PROGRAM["%moduleinit"] && tier && tier.__minit !== PROGRAM["%moduleinit"]) { tier.__minit = PROGRAM["%moduleinit"]; run(tier, [{ fn: "%moduleinit", ip: 0, locals: [], stack: [], env: [], handlers: [] }], host); } // module-level statements, once per loaded program — keyed on the init fn so loading a NEW module into this tier re-runs its init (a flat boolean latched and skipped it)
   while (true) {
     const f = frames[frames.length - 1];
-    const ins = PROGRAM[f.fn].code[f.ip];
+    const fn = PROGRAM[f.fn];
+    if (!fn) throw new Error(`Waso: unknown function "${f.fn}" — was the program loaded into PROGRAM?`); // clearer than "Cannot read properties of undefined" when a continuation references a missing fn
+    const ins = fn.code[f.ip];
     try {
     switch (ins[0]) {
       case "PUSH":   f.stack.push(ins[1]); f.ip++; break;

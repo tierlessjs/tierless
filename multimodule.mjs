@@ -7,7 +7,7 @@
 // is one program no matter how many files it spans.
 
 import { PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation, initialFrames, awaitable } from "./waso-core.mjs";
-import { compileProgram } from "./waso-tsc.mjs";
+import { compileProgram, loadModule } from "./waso-tsc.mjs";
 
 let pass = 0, fail = 0; const fails = [];
 const J = (x) => JSON.stringify(x, (k, v) => (typeof v === "bigint" ? "B:" + v.toString() : v === undefined ? "U" : v));
@@ -99,6 +99,21 @@ await (async () => {
     "/dep.ts": `export function Injectable(c){} @Injectable export class Clock { now(){ return 42; } }`,
     "/main.ts": `import { Clock } from "./dep"; function Injectable(c){} @Injectable class Handler { constructor(c: Clock){ this.c=c; } async handle(){ const t=await ckpt(this.c.now()); return "t="+t; } } function resolve(C){ const pts=Reflect.getMetadata("design:paramtypes",C)||[]; return new C(...pts.map(resolve)); } async function go(){ return resolve(Handler).handle(); }`,
   }, "/main.ts", "t=42");
+})();
+
+// Loading a NEW module into a tier that already ran code must re-run the new module's
+// top-level init. A flat boolean __minit latched after the first run and silently skipped
+// it, so the second module's top-level bindings were never initialized (returned undefined).
+(() => {
+  for (const k in PROGRAM) delete PROGRAM[k];
+  const tier = { id: "reuse" }; const host = { deref: (x) => x };
+  loadModule(PROGRAM, `let x = 1; function go(){ return x; }`, { entry: "go" });
+  const first = run(tier, initialFrames("go", []), host).value;                   // 1 — first module's init ran
+  loadModule(PROGRAM, `let y = 100; function go(){ return y; }`, { entry: "go" }); // overwrites %moduleinit on the SAME tier
+  let second, err = null;
+  try { second = run(tier, initialFrames("go", []), host).value; } catch (e) { err = e; }
+  const ok = !err && first === 1 && second === 100;
+  if (ok) pass++; else { fail++; fails.push("tier reuse re-runs a newly loaded module's init"); console.log(`  FAIL  tier reuse re-runs a newly loaded module's init`); console.log(`        first=${first} second=${err ? "threw " + err.message : second}  expect 1 then 100`); }
 })();
 
 console.log(`\n${"=".repeat(64)}`);
