@@ -119,8 +119,8 @@ function immediate(x) {
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
 }
 
-const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, TYPEOF: 0 };
-const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : DELTA[ins[0]] ?? 0;
+const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, ISA: 0, TYPEOF: 0 };
+const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" ? -ins[2] : DELTA[ins[0]] ?? 0;
 
 // Labeled asm -> instruction list with JMP/JMPF targets resolved to indices.
 function resolveLabels(rawCode) {
@@ -162,6 +162,16 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings) {
   // Takes the local index (not an expression) so each use is a fresh local.get —
   // a Binaryen IR node can't be shared between parents.
   const falsy = (i) => m.i32.or(m.i32.or(m.i32.eqz(get(i)), m.i32.eq(get(i), m.i32.const(UNDEF))), m.i32.or(m.i32.eq(get(i), m.i32.const(NULL)), m.i32.eq(get(i), m.i32.const(FALSE))));
+  // Build a string literal [STRTAG, len, ...bytes] into local `slot`, using that
+  // slot as its own address temp (raw addr while writing, tagged at the end).
+  const buildStrInto = (slot, s) => {
+    const out = [m.local.set(slot, m.i32.load(0, 4, m.i32.const(BUMP_ADDR))),
+      m.i32.store(0, 4, get(slot), m.i32.const(STRTAG)), m.i32.store(4, 4, get(slot), m.i32.const(s.length))];
+    for (let k = 0; k < s.length; k++) out.push(m.i32.store8(8 + k, 1, get(slot), m.i32.const(s.charCodeAt(k))));
+    out.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(slot), m.i32.const(8 + ((s.length + 3) & ~3)))));
+    out.push(m.local.set(slot, m.i32.or(get(slot), m.i32.const(1))));
+    return out;
+  };
 
   const r = new binaryen.Relooper(m);
   const refOf = new Map();           // leader index -> Relooper block
@@ -175,20 +185,26 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings) {
     for (const ins of code.slice(start, end)) {
       switch (ins[0]) {
         case "PUSH": {
-          if (typeof ins[1] === "string") {    // string literal: build [STRTAG, len, ...bytes] on the heap inline
-            const s = ins[1], tmp = scratch(h + 1);
-            stmts.push(m.local.set(tmp, m.i32.load(0, 4, m.i32.const(BUMP_ADDR))));
-            stmts.push(m.i32.store(0, 4, get(tmp), m.i32.const(STRTAG)));
-            stmts.push(m.i32.store(4, 4, get(tmp), m.i32.const(s.length)));
-            for (let k = 0; k < s.length; k++) stmts.push(m.i32.store8(8 + k, 1, get(tmp), m.i32.const(s.charCodeAt(k))));
-            stmts.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(tmp), m.i32.const(8 + ((s.length + 3) & ~3)))));
-            stmts.push(m.local.set(scratch(h), m.i32.or(get(tmp), m.i32.const(1)))); h++; break;
+          const v = ins[1];
+          if (typeof v === "string") { stmts.push(...buildStrInto(scratch(h), v)); h++; break; } // string literal
+          if (Array.isArray(v)) {              // constant array (e.g. a class's __class__ name list): NEWARR + ARRPUSH each element
+            stmts.push(m.local.set(scratch(h), m.call("__newarr", [], I32)));
+            for (const el of v) {
+              if (typeof el === "string") stmts.push(...buildStrInto(scratch(h + 1), el));
+              else stmts.push(m.local.set(scratch(h + 1), m.i32.const(immediate(el))));
+              stmts.push(m.drop(m.call("__arrpush", [get(scratch(h)), get(scratch(h + 1))], I32)));
+            }
+            h++; break;
           }
-          stmts.push(m.local.set(scratch(h), m.i32.const(immediate(ins[1])))); h++; break; // tagged immediate
+          stmts.push(m.local.set(scratch(h), m.i32.const(immediate(v)))); h++; break; // tagged immediate
         }
         case "LOAD": stmts.push(m.local.set(scratch(h), get(loc(ins[1])))); h++; break;
         case "STORE": h--; stmts.push(m.local.set(loc(ins[1]), get(scratch(h)))); break;
         case "LOADENV": stmts.push(m.local.set(scratch(h), m.i32.load(8 + ins[1] * 4, 4, m.i32.and(get(ENV), m.i32.const(~3))))); h++; break; // env[idx] from the closure
+        case "LOADTHIS": {                     // `this`: methods capture the instance into env, so this = env[idx]
+          if (ins[1] < 0) throw new Error("aot: dynamic LOADTHIS (no lexical this) not yet supported");
+          stmts.push(m.local.set(scratch(h), m.i32.load(8 + ins[1] * 4, 4, m.i32.and(get(ENV), m.i32.const(~3))))); h++; break;
+        }
         case "DUP": stmts.push(m.local.set(scratch(h), get(scratch(h - 1)))); h++; break; // duplicate the operand-stack top
         case "POP": h--; break;
         case "ADD": case "SUB": case "MUL": case "LT": case "LE": case "GT": case "GE": {
@@ -268,9 +284,21 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings) {
           const v = m.call("__getprop", [get(scratch(h - 1)), m.i32.const(keyIds.get(ins[1]))], I32);
           stmts.push(m.local.set(scratch(h - 1), v)); break;
         }
-        case "SETPROP": {                      // [obj, val] -> [obj]; obj.key = val
+        case "SETPROP": case "SETHIDDEN": {    // [obj, val] -> [obj]; obj.key = val (hidden = same store; non-enumerable only matters for reflection)
           h -= 2; const r = m.call("__setprop", [get(scratch(h)), m.i32.const(keyIds.get(ins[1])), get(scratch(h + 1))], I32);
           stmts.push(m.local.set(scratch(h), r)); h++; break;
+        }
+        case "CALLMETHOD": {                   // recv.name(args): the method closure captured `this`, so call it with env = the method
+          const argc = ins[2]; h -= argc + 1;  // stack: [recv, arg0..arg_{argc-1}]
+          stmts.push(m.local.set(scratch(h), m.call("__getprop", [get(scratch(h)), m.i32.const(keyIds.get(ins[1]))], I32))); // recv[name] = method closure
+          const fn = m.i32.load(4, 4, m.i32.and(get(scratch(h)), m.i32.const(~3)));
+          const args = [get(scratch(h))]; for (let k = 0; k < argc; k++) args.push(get(scratch(h + 1 + k)));
+          stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, args, binaryen.createType(new Array(argc + 1).fill(I32)), I32))); h++; break;
+        }
+        case "ISA": {                          // obj instanceof <name>: is the name string in obj.__class__?
+          stmts.push(...buildStrInto(scratch(h), ins[1]));   // name string into the free slot above the operand
+          const res = m.call("__isa", [get(scratch(h - 1)), get(scratch(h)), m.i32.const(keyIds.get("__class__"))], I32);
+          stmts.push(m.local.set(scratch(h - 1), bool(res))); break;
         }
         case "ALLOC": {                        // pop n (tagged); allocate [len | n fields]; push a tagged pointer
           h--; const nRaw = () => m.i32.shr_s(get(scratch(h)), m.i32.const(1));
@@ -508,6 +536,31 @@ function addStringRuntime(m) {
   ], binaryen.none));
 }
 
+// Runtime helper for instanceof (added when a program uses ISA). A user class
+// tags each instance with a hidden __class__ array of its class-name chain.
+function addClassRuntime(m) {
+  const I32 = binaryen.i32;
+  const g = (i) => m.local.get(i, I32);
+  const c = (n) => m.i32.const(n);
+  const ld = (off, p) => m.i32.load(off, 4, p);
+  const addr = (i) => m.i32.and(g(i), c(~3));
+  // __isa(obj, name, classKey) -> 0/1.  locals: 3=arr,4=backing,5=len,6=i
+  m.addFunction("__isa", binaryen.createType([I32, I32, I32]), I32, [I32, I32, I32, I32], m.block(null, [
+    m.if(m.i32.eqz(m.i32.and(g(0), c(1))), m.return(c(0))),               // not a pointer -> false
+    m.if(m.i32.ne(ld(0, addr(0)), c(OBJTAG)), m.return(c(0))),            // not a plain object -> false
+    m.local.set(3, m.call("__getprop", [g(0), g(2)], I32)),               // arr = obj.__class__
+    m.if(m.i32.eqz(m.i32.and(g(3), c(1))), m.return(c(0))),
+    m.if(m.i32.ne(ld(0, addr(3)), c(ARRTAG)), m.return(c(0))),            // __class__ isn't an array -> false
+    m.local.set(4, ld(8, addr(3))), m.local.set(5, ld(4, addr(3))), m.local.set(6, c(0)),
+    m.loop("I", m.block(null, [
+      m.if(m.i32.ge_u(g(6), g(5)), m.return(c(0))),                       // exhausted -> false
+      m.if(m.call("__eq", [ld(4, m.i32.add(g(4), m.i32.mul(g(6), c(4)))), g(1)], I32), m.return(c(1))), // backing[i] === name
+      m.local.set(6, m.i32.add(g(6), c(1))), m.br("I"),
+    ])),
+    m.unreachable(),
+  ], binaryen.none));
+}
+
 // program: { name: { argc?, nlocals, code } }. resources: import names a RES may
 // call. Returns wasm bytes, Asyncify-instrumented unless asyncify:false.
 //
@@ -519,14 +572,16 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const m = new binaryen.Module();
   m.setMemory(1, 1, "memory");
   const uses = (...ops) => Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ops.includes(i[0])));
-  const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN");
-  const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP");
-  const usesStrings = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF")));
+  const usesClasses = uses("ISA");                          // instanceof needs the class runtime
+  const usesConstArray = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "PUSH" && Array.isArray(i[1])));
+  const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN") || usesConstArray; // __class__ name lists build arrays
+  const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD") || usesClasses; // instances + method dispatch
+  const usesStrings = usesClasses || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA compares class-name strings (__eq)
   if (usesArrays || usesObjects || usesStrings) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow/concat paths
-  // Property keys are interned to small ints at compile time, so GETPROP/SETPROP
-  // are id matches in the object runtime (no string bytes in linear memory yet).
+  // Property and method keys are interned to small ints at compile time, so
+  // GETPROP/SETPROP/SETHIDDEN/CALLMETHOD are id matches in the object runtime.
   const keyIds = new Map();
-  for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && (i[0] === "GETPROP" || i[0] === "SETPROP") && !keyIds.has(i[1])) keyIds.set(i[1], keyIds.size + 1);
+  for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && (i[0] === "GETPROP" || i[0] === "SETPROP" || i[0] === "SETHIDDEN" || i[0] === "CALLMETHOD") && !keyIds.has(i[1])) keyIds.set(i[1], keyIds.size + 1);
   const arity = {}; // each resource is imported with the arity it is called with
   for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && i[0] === "RES") arity[i[1]] = i[2] || 0;
   for (const res of resources) m.addFunctionImport(res, "env", res, binaryen.createType(new Array(arity[res] || 0).fill(binaryen.i32)), binaryen.i32);
@@ -535,11 +590,12 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   // program-order index, and a closure carries that index (MAKECLOSURE / CALLV).
   const fnNames = Object.keys(program);
   const fnIndex = Object.fromEntries(fnNames.map((n, i) => [n, i]));
-  const usesClosures = uses("MAKECLOSURE", "CALLV");
+  const usesClosures = uses("MAKECLOSURE", "CALLV", "CALLDYN", "CALLMETHOD"); // all call through the function table
   for (const [name, fn] of Object.entries(program)) compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings);
   if (usesArrays) addArrayRuntime(m);
   if (usesObjects) addObjectRuntime(m);
   if (usesStrings) addStringRuntime(m);
+  if (usesClasses) addClassRuntime(m);
   if (usesClosures) {
     m.addTable("0", fnNames.length, fnNames.length, binaryen.funcref);
     m.addActiveElementSegment("0", "fns", fnNames, m.i32.const(0));
