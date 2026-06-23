@@ -53,6 +53,10 @@ const OBJTAG = -3, INITCAP_OBJ = 2;
 // A string: [STRTAG, byteLength, ...bytes] (one byte per char, padded to a word).
 // "+" and "===" become polymorphic — string-aware — through the runtime helpers.
 const STRTAG = -4;
+// A generator object: [GENTAG, bodyFnIndex, ip, done, ...savedLocals]. A generator
+// function compiles to a trampoline (called normally, returns one of these) plus a
+// dispatch body (resumed by GENNEXT) that saves/restores its locals here at YIELD.
+const GENTAG = -5;
 
 // Host-side array helpers: build/read a growable array in an instance's linear
 // memory (so resources can pass number[] across the boundary). Layout matches
@@ -119,7 +123,7 @@ function immediate(x) {
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
 }
 
-const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, ISA: 0, TYPEOF: 0 };
+const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, GENNEXT: -1 };
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" ? -ins[2] : DELTA[ins[0]] ?? 0;
 
 // Labeled asm -> instruction list with JMP/JMPF targets resolved to indices.
@@ -142,12 +146,39 @@ function leaderSet(code) {
 
 const maxStack = (code) => { let h = 0, max = 0; for (const ins of code) { h += delta(ins); if (h > max) max = h; } return max; };
 
+// Per-block operand-stack entry heights, by propagating over the CFG. Structured
+// IR keeps the height consistent at every block boundary — but not always zero
+// (e.g. for-of keeps the result object on the stack across the done-check branch),
+// so a block indexes its scratch slots from its entry height, not from zero.
+// Also returns the max absolute height, for sizing the scratch locals.
+function blockHeights(code, leaders) {
+  const blockAt = new Map(leaders.map((s, i) => [s, i]));
+  const endOf = (bi) => (bi + 1 < leaders.length ? leaders[bi + 1] : code.length);
+  const entry = new Array(leaders.length).fill(undefined);
+  entry[0] = 0; let maxAbs = 0; const q = [0];
+  while (q.length) {
+    const bi = q.shift(); let h = entry[bi]; if (h > maxAbs) maxAbs = h;
+    for (let k = leaders[bi]; k < endOf(bi); k++) { h += delta(code[k]); if (h > maxAbs) maxAbs = h; }
+    const last = code[endOf(bi) - 1], succ = [];
+    if (last[0] === "JMP") succ.push(blockAt.get(last[1]));
+    else if (last[0] === "JMPF") { succ.push(blockAt.get(last[1])); succ.push(blockAt.get(endOf(bi))); }
+    else if (last[0] !== "RET") succ.push(blockAt.get(endOf(bi))); // fall-through
+    for (const s of succ) {
+      if (s === undefined) continue;
+      if (entry[s] === undefined) { entry[s] = h; q.push(s); }
+      else if (entry[s] !== h) throw new Error(`aot: inconsistent stack height entering block @${leaders[s]} (${entry[s]} vs ${h})`);
+    }
+  }
+  return { entryH: entry, maxAbs };
+}
+
 function compileFn(m, name, fn, handles, fnIndex, keyIds, strings) {
   const I32 = binaryen.i32;
   const argc = fn.argc || 0, nl = fn.nlocals;
   const code = resolveLabels(fn.code);
   const leaders = leaderSet(code);
-  const maxH = maxStack(code) + 1;   // +1 scratch headroom for ALLOC's temp
+  const { entryH, maxAbs } = blockHeights(code, leaders);
+  const maxH = maxAbs + 1;           // +1 scratch headroom for ALLOC / build temps
   // Calling convention: WASM local 0 is the closure environment — the receiver of
   // a CALLV, the implicit (unused) arg of a direct CALL, and where LOADENV /
   // capturing MAKECLOSUREs read and write. So IR local i is WASM local i+1, and
@@ -181,7 +212,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings) {
     const start = leaders[bi];
     const end = bi + 1 < leaders.length ? leaders[bi + 1] : code.length;
     const stmts = [];
-    let h = 0, result = null, term = { kind: "fall", next: end };
+    let h = entryH[bi], result = null, term = { kind: "fall", next: end };
     for (const ins of code.slice(start, end)) {
       switch (ins[0]) {
         case "PUSH": {
@@ -246,7 +277,8 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings) {
           stmts.push(m.local.set(scratch(h), e)); h++; break;
         }
         case "MAKECLOSURE": {                  // box a function as a closure [CLOSTAG, fnIndex, ...env]
-          if (ins[3]) throw new Error("aot: generator closures not yet supported");
+          // ins[3] = generator flag: ignored here — a generator function compiles to a
+          // trampoline at fnIndex[name] that returns a generator object when called.
           const idx = fnIndex[ins[1]]; if (idx === undefined) throw new Error("aot: MAKECLOSURE of unknown fn " + ins[1]);
           const caps = ins[2] || [], tmp = scratch(h + 1);                                                        // tmp = the new closure's base addr
           stmts.push(m.local.set(tmp, m.i32.load(0, 4, m.i32.const(BUMP_ADDR))));
@@ -279,6 +311,10 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings) {
           stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, args, binaryen.createType(new Array(argc + 1).fill(I32)), I32))); h++; break;
         }
         case "TYPEOF": stmts.push(m.local.set(scratch(h - 1), m.call("__typeof", [get(scratch(h - 1))], I32))); break; // value -> type string
+        case "ITER": break;                    // normalize an iterable -> iterator; a generator is already its own iterator (no-op)
+        case "GENNEXT": {                      // [gen, sentValue] -> [{value, done}]; drive the generator (sent value ignored for now)
+          h -= 2; stmts.push(m.local.set(scratch(h), m.call("__gennext", [get(scratch(h))], I32))); h++; break;
+        }
         case "NEWOBJ": stmts.push(m.local.set(scratch(h), m.call("__newobj", [], I32))); h++; break;
         case "GETPROP": {                      // [obj] -> [obj.key]; key interned to an id
           const v = m.call("__getprop", [get(scratch(h - 1)), m.i32.const(keyIds.get(ins[1]))], I32);
@@ -332,7 +368,6 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings) {
         default: throw new Error("aot: unsupported opcode " + ins[0]);
       }
     }
-    if (h !== 0) throw new Error(`aot: ${name} block @${start} left operand stack at height ${h} (blocks must be balanced)`);
     const body = term.kind === "ret" ? m.block(null, [...stmts, m.return(result)], binaryen.none) : m.block(null, stmts, binaryen.none);
     const ref = r.addBlock(body);
     refOf.set(start, ref);
@@ -561,6 +596,123 @@ function addClassRuntime(m) {
   ], binaryen.none));
 }
 
+// A generator function compiles to two wasm functions. The TRAMPOLINE keeps the
+// original name and is what CALLV calls: it allocates a generator object holding
+// the body's table index and the initial args, and returns it (so no CALLV
+// change is needed — a generator call just returns an object). locals: tmp.
+function emitGenTrampoline(m, name, fn, bodyIdx) {
+  const I32 = binaryen.i32;
+  const g = (i) => m.local.get(i, I32);
+  const c = (n) => m.i32.const(n);
+  const argc = fn.argc || 0, nl = fn.nlocals, tmp = argc + 1; // params 0..argc (env + args); tmp local after them
+  const out = [
+    m.local.set(tmp, m.i32.load(0, 4, c(BUMP_ADDR))),                                  // tmp = bump
+    m.i32.store(0, 4, g(tmp), c(GENTAG)), m.i32.store(4, 4, g(tmp), c(bodyIdx)),
+    m.i32.store(8, 4, g(tmp), c(0)), m.i32.store(12, 4, g(tmp), c(0)),                 // ip = 0, done = 0
+  ];
+  for (let k = 0; k < argc; k++) out.push(m.i32.store(16 + k * 4, 4, g(tmp), g(k + 1))); // slots[k] = arg_k (param k+1)
+  out.push(m.i32.store(0, 4, c(BUMP_ADDR), m.i32.add(g(tmp), c(16 + nl * 4))));         // bump past the object (extra slots are fresh 0)
+  out.push(m.return(m.i32.or(g(tmp), c(1))));
+  m.addFunction(name, binaryen.createType(new Array(argc + 1).fill(I32)), I32, [I32], m.block(null, out, binaryen.none));
+}
+
+// The dispatch BODY (`name$gen`), called by GENNEXT through the generator object.
+// It restores its locals from the object, br_tables on the saved ip to the right
+// basic block, runs to the next YIELD (save locals + ip, return the yielded
+// value, done=0) or RET (done=1, return the value). A second, self-contained
+// codegen path: a generator is inherently resumable, so it can't use the
+// straight-line Relooper body. Numeric bodies for now (the common generator).
+function compileGenBody(m, bodyName, fn) {
+  const I32 = binaryen.i32;
+  const nl = fn.nlocals, code = resolveLabels(fn.code), maxH = maxStack(code) + 1;
+  const loc = (i) => i + 1, scratch = (k) => 1 + nl + k, ipLocal = 1 + nl + maxH;
+  const get = (i) => m.local.get(i, I32);
+  const genAddr = () => m.i32.and(get(0), m.i32.const(~3));                            // param 0 = the generator object
+  const bool = (cond) => m.select(cond, m.i32.const(TRUE), m.i32.const(FALSE));
+  const falsy = (i) => m.i32.or(m.i32.or(m.i32.eqz(get(i)), m.i32.eq(get(i), m.i32.const(UNDEF))), m.i32.or(m.i32.eq(get(i), m.i32.const(NULL)), m.i32.eq(get(i), m.i32.const(FALSE))));
+  const goto = (b) => [m.local.set(ipLocal, m.i32.const(b)), m.br("L")]; // intra-call jump: update the dispatch local, re-dispatch
+  const saveIp = (b) => m.i32.store(8, 4, genAddr(), m.i32.const(b));     // persist the resume point into the object (across calls)
+  const setDone = (d) => m.i32.store(12, 4, genAddr(), m.i32.const(d));
+  const saveLocals = () => { const out = []; for (let i = 0; i < nl; i++) out.push(m.i32.store(16 + i * 4, 4, genAddr(), get(loc(i)))); return out; };
+
+  const Lset = new Set([0]);             // basic-block leaders (YIELD's successor is a resume point)
+  code.forEach((ins, i) => {
+    if (ins[0] === "JMP" || ins[0] === "JMPF") { Lset.add(ins[1]); if (i + 1 < code.length) Lset.add(i + 1); }
+    else if ((ins[0] === "RET" || ins[0] === "YIELD") && i + 1 < code.length) Lset.add(i + 1);
+  });
+  const leaders = [...Lset].filter((x) => x >= 0 && x < code.length).sort((a, b) => a - b);
+  const blockOf = (ip) => leaders.indexOf(ip);
+
+  const rendered = [];                   // per block: [...stmts, ...terminator]
+  for (let bi = 0; bi < leaders.length; bi++) {
+    const start = leaders[bi], end = bi + 1 < leaders.length ? leaders[bi + 1] : code.length;
+    const resume = start > 0 && code[start - 1][0] === "YIELD"; // entered on resume: a sent value sits on the operand stack
+    const stmts = []; let h = resume ? 1 : 0, term = [];
+    if (resume) stmts.push(m.local.set(scratch(0), m.i32.const(UNDEF))); // sent value (two-way next() is a later slice)
+    for (const ins of code.slice(start, end)) {
+      switch (ins[0]) {
+        case "PUSH": stmts.push(m.local.set(scratch(h), m.i32.const(immediate(ins[1])))); h++; break;
+        case "LOAD": stmts.push(m.local.set(scratch(h), get(loc(ins[1])))); h++; break;
+        case "STORE": h--; stmts.push(m.local.set(loc(ins[1]), get(scratch(h)))); break;
+        case "POP": h--; break;
+        case "DUP": stmts.push(m.local.set(scratch(h), get(scratch(h - 1)))); h++; break;
+        case "BIN": {
+          h -= 2; const a = get(scratch(h)), b = get(scratch(h + 1)), op = ins[1]; let e;
+          if (op === "+") e = m.i32.add(a, b);
+          else if (op === "-") e = m.i32.sub(a, b);
+          else if (op === "*") e = m.i32.mul(m.i32.shr_s(a, m.i32.const(1)), b);
+          else if (op === "<") e = bool(m.i32.lt_s(a, b));
+          else if (op === "<=") e = bool(m.i32.le_s(a, b));
+          else if (op === ">") e = bool(m.i32.gt_s(a, b));
+          else if (op === ">=") e = bool(m.i32.ge_s(a, b));
+          else if (op === "===" || op === "==") e = bool(m.i32.eq(a, b));
+          else if (op === "!==" || op === "!=") e = bool(m.i32.ne(a, b));
+          else throw new Error("aot: generator BIN " + op + " not yet supported");
+          stmts.push(m.local.set(scratch(h), e)); h++; break;
+        }
+        case "JMP": term = goto(blockOf(ins[1])); break;
+        case "JMPF": h--; term = [m.if(falsy(scratch(h)), m.block(null, goto(blockOf(ins[1])), binaryen.none))]; break;
+        case "YIELD": h--; term = [...saveLocals(), saveIp(blockOf(end)), setDone(0), m.return(get(scratch(h)))]; break; // suspend: resume at the next block
+        case "RET": h--; term = [setDone(1), m.return(get(scratch(h)))]; break;
+        default: throw new Error("aot: opcode " + ins[0] + " not supported in a generator body yet");
+      }
+    }
+    rendered.push([...stmts, ...term]); // a "fall" terminator is empty — control flows naturally to the next block's code
+  }
+
+  const N = leaders.length;
+  const labels = leaders.map((_, i) => "b" + i);
+  let node = m.block("b0", [m.switch(labels, "D", get(ipLocal))], binaryen.none); // br_table on ip, then b0 code follows
+  for (let bi = 0; bi < N - 1; bi++) node = m.block("b" + (bi + 1), [node, ...rendered[bi]], binaryen.none);
+  const dispatch = m.block("D", [node, ...rendered[N - 1]], binaryen.none);
+  const prologue = [];
+  for (let i = 0; i < nl; i++) prologue.push(m.local.set(loc(i), m.i32.load(16 + i * 4, 4, genAddr())));
+  prologue.push(m.local.set(ipLocal, m.i32.load(8, 4, genAddr())));
+  const body = m.block(null, [...prologue, m.loop("L", m.block(null, [dispatch, m.unreachable()], binaryen.none))], binaryen.none);
+  m.addFunction(bodyName, binaryen.createType([I32]), I32, new Array(nl + maxH + 1).fill(I32), body);
+}
+
+// Runtime: drive a generator one step (added when a program uses generators).
+function addGenRuntime(m, valueKey, doneKey) {
+  const I32 = binaryen.i32;
+  const g = (i) => m.local.get(i, I32);
+  const c = (n) => m.i32.const(n);
+  const genAddr = () => m.i32.and(g(0), c(~3));
+  // {value, done} result object.  locals: 2 = the object
+  const mkResult = (valExpr, doneExpr) => m.block(null, [
+    m.local.set(2, m.call("__newobj", [], I32)),
+    m.local.set(2, m.call("__setprop", [g(2), c(valueKey), valExpr], I32)),
+    m.local.set(2, m.call("__setprop", [g(2), c(doneKey), doneExpr], I32)),
+    m.return(g(2)),
+  ], binaryen.none);
+  // __gennext(gen) -> {value, done}.  locals: 1=ret, 2=obj
+  m.addFunction("__gennext", binaryen.createType([I32]), I32, [I32, I32], m.block(null, [
+    m.if(m.i32.load(12, 4, genAddr()), mkResult(c(UNDEF), c(TRUE))),                    // already finished
+    m.local.set(1, m.call_indirect("0", m.i32.load(4, 4, genAddr()), [g(0)], binaryen.createType([I32]), I32)), // run to the next yield/return
+    mkResult(g(1), m.select(m.i32.load(12, 4, genAddr()), c(TRUE), c(FALSE))),          // value + done (the body set done)
+  ], binaryen.none));
+}
+
 // program: { name: { argc?, nlocals, code } }. resources: import names a RES may
 // call. Returns wasm bytes, Asyncify-instrumented unless asyncify:false.
 //
@@ -573,29 +725,40 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   m.setMemory(1, 1, "memory");
   const uses = (...ops) => Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ops.includes(i[0])));
   const usesClasses = uses("ISA");                          // instanceof needs the class runtime
+  // A generator function is one a generator MAKECLOSURE (ins[3]) targets — not
+  // just one that yields, so `function*(){}` with no yield still counts. Each is
+  // compiled as a trampoline + dispatch body.
+  const gens = [...new Set(Object.values(program).flatMap((fn) => fn.code.filter((i) => Array.isArray(i) && i[0] === "MAKECLOSURE" && i[3]).map((i) => i[1])))];
+  const usesGenerators = gens.length > 0 || uses("GENNEXT", "YIELD"); // gen runtime + {value, done} objects
   const usesConstArray = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "PUSH" && Array.isArray(i[1])));
   const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN") || usesConstArray; // __class__ name lists build arrays
-  const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD") || usesClasses; // instances + method dispatch
+  const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD") || usesClasses || usesGenerators; // instances, method dispatch, {value,done} results
   const usesStrings = usesClasses || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA compares class-name strings (__eq)
   if (usesArrays || usesObjects || usesStrings) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow/concat paths
   // Property and method keys are interned to small ints at compile time, so
   // GETPROP/SETPROP/SETHIDDEN/CALLMETHOD are id matches in the object runtime.
   const keyIds = new Map();
   for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && (i[0] === "GETPROP" || i[0] === "SETPROP" || i[0] === "SETHIDDEN" || i[0] === "CALLMETHOD") && !keyIds.has(i[1])) keyIds.set(i[1], keyIds.size + 1);
+  if (usesGenerators) for (const k of ["value", "done"]) if (!keyIds.has(k)) keyIds.set(k, keyIds.size + 1); // GENNEXT builds {value, done}
   const arity = {}; // each resource is imported with the arity it is called with
   for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && i[0] === "RES") arity[i[1]] = i[2] || 0;
   for (const res of resources) m.addFunctionImport(res, "env", res, binaryen.createType(new Array(arity[res] || 0).fill(binaryen.i32)), binaryen.i32);
   if (handles) m.addFunctionImport("__fetch", "env", "__fetch", binaryen.createType([binaryen.i32]), binaryen.i32); // §5 deref-miss suspends here
   // Closures call through a function table: every user function sits at its
   // program-order index, and a closure carries that index (MAKECLOSURE / CALLV).
-  const fnNames = Object.keys(program);
+  // A generator function adds a second entry — its dispatch body `name$gen`.
+  const fnNames = [...Object.keys(program), ...gens.map((g) => g + "$gen")];
   const fnIndex = Object.fromEntries(fnNames.map((n, i) => [n, i]));
-  const usesClosures = uses("MAKECLOSURE", "CALLV", "CALLDYN", "CALLMETHOD"); // all call through the function table
-  for (const [name, fn] of Object.entries(program)) compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings);
+  const usesClosures = fnNames.length > 0 && uses("MAKECLOSURE", "CALLV", "CALLDYN", "CALLMETHOD"); // all call through the function table
+  for (const [name, fn] of Object.entries(program)) {
+    if (gens.includes(name)) { emitGenTrampoline(m, name, fn, fnIndex[name + "$gen"]); compileGenBody(m, name + "$gen", fn); } // generator: trampoline + dispatch body
+    else compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings);
+  }
   if (usesArrays) addArrayRuntime(m);
   if (usesObjects) addObjectRuntime(m);
   if (usesStrings) addStringRuntime(m);
   if (usesClasses) addClassRuntime(m);
+  if (usesGenerators) addGenRuntime(m, keyIds.get("value"), keyIds.get("done"));
   if (usesClosures) {
     m.addTable("0", fnNames.length, fnNames.length, binaryen.funcref);
     m.addActiveElementSegment("0", "fns", fnNames, m.i32.const(0));
