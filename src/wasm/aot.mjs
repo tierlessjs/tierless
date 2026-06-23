@@ -38,6 +38,10 @@ import binaryen from "binaryen";
 export const BUMP_ADDR = 8;
 export const HEAP_BASE = 64;
 export const RESIDENT_BASE = 8192; // receiver-local bitmap: has a given handle been fetched yet
+// Class-object registry: one word per class (memoized class object for statics),
+// in the free tail of the ctrl region [24, HEAP_BASE), so it ships with a
+// migrated continuation. Up to (HEAP_BASE-24)/4 = 10 classes.
+const CLSREG_BASE = 24;
 
 // Growable arrays: a stable 3-word header [ARRTAG, length, backing] plus a
 // separate backing store [capacity, ...slots], so push() can grow the backing
@@ -123,7 +127,7 @@ function immediate(x) {
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
 }
 
-const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1 };
+const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1 };
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" ? -ins[2] : DELTA[ins[0]] ?? 0;
 
 // Labeled asm -> instruction list with JMP/JMPF targets resolved to indices.
@@ -172,7 +176,7 @@ function blockHeights(code, leaders) {
   return { entryH: entry, maxAbs };
 }
 
-function compileFn(m, name, fn, handles, fnIndex, keyIds, strings) {
+function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds) {
   const I32 = binaryen.i32;
   const argc = fn.argc || 0, nl = fn.nlocals;
   const code = resolveLabels(fn.code);
@@ -313,6 +317,25 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings) {
         case "TYPEOF": stmts.push(m.local.set(scratch(h - 1), m.call("__typeof", [get(scratch(h - 1))], I32))); break; // value -> type string
         case "ITER": break;                    // normalize an iterable -> iterator; a generator is already its own iterator (no-op)
         case "AWAIT": break;                    // await of a plain value is identity (async between user functions is synchronous here)
+        case "CLSGET": {                       // class-object registry read: cached class object for a name, else undefined
+          const at = m.i32.const(CLSREG_BASE + clsIds.get(ins[1]) * 4);
+          stmts.push(m.local.set(scratch(h), m.i32.load(0, 4, at)));
+          stmts.push(m.local.set(scratch(h), m.select(m.i32.eqz(get(scratch(h))), m.i32.const(UNDEF), get(scratch(h))))); h++; break; // 0 = not built -> undefined
+        }
+        case "CLSPUT": stmts.push(m.i32.store(0, 4, m.i32.const(CLSREG_BASE + clsIds.get(ins[1]) * 4), get(scratch(h - 1)))); break; // memoize, leave on the stack
+        case "ISNULLISH": stmts.push(m.local.set(scratch(h - 1), bool(m.i32.or(m.i32.eq(get(scratch(h - 1)), m.i32.const(UNDEF)), m.i32.eq(get(scratch(h - 1)), m.i32.const(NULL)))))); break;
+        case "CALLVS": {                       // call a closure with a spread args array: [closure, argsArray] -> result
+          h -= 2; const closeSlot = scratch(h), argsSlot = scratch(h + 1);
+          const fn = () => m.i32.load(4, 4, m.i32.and(get(closeSlot), m.i32.const(~3)));
+          const len = () => m.i32.load(4, 4, m.i32.and(get(argsSlot), m.i32.const(~3)));
+          const elem = (i) => m.i32.load(4 + i * 4, 4, m.i32.load(8, 4, m.i32.and(get(argsSlot), m.i32.const(~3)))); // backing[i]
+          let chain = m.call_indirect("0", fn(), [get(closeSlot)], binaryen.createType([I32]), I32); // 0 args
+          for (let k = 1; k <= 4; k++) {       // dispatch on the actual arg count (a target up to 4 params)
+            const args = [get(closeSlot)]; for (let j = 0; j < k; j++) args.push(elem(j));
+            chain = m.if(m.i32.eq(len(), m.i32.const(k)), m.call_indirect("0", fn(), args, binaryen.createType(new Array(k + 1).fill(I32)), I32), chain);
+          }
+          stmts.push(m.local.set(scratch(h), chain)); h++; break;
+        }
         case "GENNEXT": {                      // [gen, sentValue] -> [{value, done}]; drive the generator one step
           h -= 2; stmts.push(m.local.set(scratch(h), m.call("__gennext", [get(scratch(h)), get(scratch(h + 1))], I32))); h++; break;
         }
@@ -818,6 +841,10 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && (i[0] === "GETPROP" || i[0] === "SETPROP" || i[0] === "SETHIDDEN" || i[0] === "CALLMETHOD" || i[0] === "GETPROPA" || i[0] === "SETPROPA") && !keyIds.has(i[1])) keyIds.set(i[1], keyIds.size + 1);
   if (usesGenerators) for (const k of ["value", "done"]) if (!keyIds.has(k)) keyIds.set(k, keyIds.size + 1); // GENNEXT builds {value, done}
   if (usesAccessors) for (const k of ["__accessors__", "get", "set"]) if (!keyIds.has(k)) keyIds.set(k, keyIds.size + 1); // accessor lookups
+  // Class names get a registry slot each (for the memoized class object used by statics).
+  const clsIds = new Map();
+  for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && (i[0] === "CLSGET" || i[0] === "CLSPUT") && !clsIds.has(i[1])) clsIds.set(i[1], clsIds.size);
+  if (clsIds.size > (HEAP_BASE - CLSREG_BASE) / 4) throw new Error("aot: too many classes for the class-object registry");
   const arity = {}; // each resource is imported with the arity it is called with
   for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && i[0] === "RES") arity[i[1]] = i[2] || 0;
   for (const res of resources) m.addFunctionImport(res, "env", res, binaryen.createType(new Array(arity[res] || 0).fill(binaryen.i32)), binaryen.i32);
@@ -827,10 +854,10 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   // A generator function adds a second entry — its dispatch body `name$gen`.
   const fnNames = [...Object.keys(program), ...gens.map((g) => g + "$gen")];
   const fnIndex = Object.fromEntries(fnNames.map((n, i) => [n, i]));
-  const usesClosures = fnNames.length > 0 && uses("MAKECLOSURE", "CALLV", "CALLDYN", "CALLMETHOD", "GETPROPA", "SETPROPA"); // all call through the function table
+  const usesClosures = fnNames.length > 0 && uses("MAKECLOSURE", "CALLV", "CALLVS", "CALLDYN", "CALLMETHOD", "GETPROPA", "SETPROPA"); // all call through the function table
   for (const [name, fn] of Object.entries(program)) {
     if (gens.includes(name)) { emitGenTrampoline(m, name, fn, fnIndex[name + "$gen"]); compileGenBody(m, name + "$gen", fn, keyIds, fnIndex); } // generator: trampoline + dispatch body
-    else compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings);
+    else compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings, clsIds);
   }
   if (usesArrays) addArrayRuntime(m);
   if (usesObjects) addObjectRuntime(m);

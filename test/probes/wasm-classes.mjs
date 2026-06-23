@@ -70,6 +70,24 @@ const programs = [
   ["plain fields coexist with accessors", `
     class C { constructor() { this.n = 5; this._v = 2; } get x() { return this._v * 10; } }
     function main() { const c = new C(); return c.n + c.x; }`],                                       // 5 + 20 = 25
+  ["static field", `
+    class C { static count = 5; }
+    function main() { return C.count; }`],                                                            // 5
+  ["static method", `
+    class C { static make(n) { return n * 2; } }
+    function main() { return C.make(3); }`],                                                          // 6
+  ["static field and method together", `
+    class C { static s = 5; static make(n) { return n * 2; } }
+    function main() { return C.s + C.make(3); }`],                                                    // 11
+  ["statics coexist with an instance", `
+    class C { static s = 1; constructor(x) { this.n = x; } get() { return this.n; } }
+    function main() { const c = new C(15); return c.get() + C.s; }`],                                 // 16
+  ["a static method calls another static method", `
+    class C { static base() { return 10; } static plus(n) { return C.base() + n; } }
+    function main() { return C.plus(5); }`],                                                          // 15
+  ["a mutated static field is memoized", `
+    class C { static n = 5; static bump() { C.n = C.n + 1; return C.n; } }
+    function main() { C.bump(); return C.bump(); }`],                                                 // 6 then 7
 ];
 
 function interp(src) {
