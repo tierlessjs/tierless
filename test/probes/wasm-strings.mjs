@@ -48,6 +48,14 @@ const programs = [
       for (let i = 0; i < 5; i = i + 1) { n = n + i; }
       return "sum=" + n;                         // "sum=10"
     }`],
+  ["typeof number", `function main() { return typeof 5; }`],
+  ["typeof string", `function main() { return typeof "x"; }`],
+  ["typeof boolean", `function main() { return typeof (1 < 2); }`],
+  ["typeof undefined", `function main() { let x; return typeof x; }`],
+  ["typeof null is object", `function main() { return typeof null; }`],
+  ["typeof object", `function main() { return typeof { a: 1 }; }`],
+  ["typeof function", `function main() { const f = (x) => x; return typeof f; }`],
+  ["typeof guards a branch", `function main() { const v = 5; if (typeof v === "number") { return "num"; } return "other"; }`],
 ];
 
 function interp(src) {
@@ -69,5 +77,5 @@ for (const [name, src] of programs) {
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}: interpreter ${JSON.stringify(i)} == native ${JSON.stringify(n)}`);
 }
 const ok = results.every(Boolean);
-console.log(`\nResult: ${ok ? "ALL PASS" : "FAILURES"} — the AOT compiler runs strings (literals, concat with coercion, value equality) and matches the interpreter`);
+console.log(`\nResult: ${ok ? "ALL PASS" : "FAILURES"} — the AOT compiler runs strings (literals, concat with coercion, value equality, typeof) and matches the interpreter`);
 process.exit(ok ? 0 : 1);

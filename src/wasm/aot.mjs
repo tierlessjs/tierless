@@ -119,7 +119,7 @@ function immediate(x) {
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
 }
 
-const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1 };
+const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, TYPEOF: 0 };
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : DELTA[ins[0]] ?? 0;
 
 // Labeled asm -> instruction list with JMP/JMPF targets resolved to indices.
@@ -262,6 +262,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings) {
           const args = [get(recv)]; for (let k = 0; k < argc; k++) args.push(get(scratch(h + 2 + k)));           // env (the closure) is param 0; `this` (recv) is dropped (no method use yet)
           stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, args, binaryen.createType(new Array(argc + 1).fill(I32)), I32))); h++; break;
         }
+        case "TYPEOF": stmts.push(m.local.set(scratch(h - 1), m.call("__typeof", [get(scratch(h - 1))], I32))); break; // value -> type string
         case "NEWOBJ": stmts.push(m.local.set(scratch(h), m.call("__newobj", [], I32))); h++; break;
         case "GETPROP": {                      // [obj] -> [obj.key]; key interned to an id
           const v = m.call("__getprop", [get(scratch(h - 1)), m.i32.const(keyIds.get(ins[1]))], I32);
@@ -474,6 +475,23 @@ function addStringRuntime(m) {
     m.return(m.i32.add(g(0), g(1))),
   ], binaryen.none));
 
+  // __typeof(v) -> the JS typeof string.  local 1 holds the built string.
+  const retStr = (s) => {                                               // statements that build s and return its tagged pointer
+    const out = [m.local.set(1, bump()), st(0, g(1), c(STRTAG)), st(4, g(1), c(s.length))];
+    for (let k = 0; k < s.length; k++) out.push(st8(8 + k, g(1), c(s.charCodeAt(k))));
+    out.push(setBump(m.i32.add(g(1), c(8 + ((s.length + 3) & ~3)))), m.return(m.i32.or(g(1), c(1))));
+    return m.block(null, out, binaryen.none);
+  };
+  m.addFunction("__typeof", binaryen.createType([I32]), I32, [I32], m.block(null, [
+    m.if(m.i32.eq(g(0), c(UNDEF)), retStr("undefined")),
+    m.if(m.i32.or(m.i32.eq(g(0), c(TRUE)), m.i32.eq(g(0), c(FALSE))), retStr("boolean")),
+    m.if(m.i32.eq(g(0), c(NULL)), retStr("object")),                   // typeof null === "object" (the JS quirk)
+    m.if(m.i32.eqz(m.i32.and(g(0), c(1))), retStr("number")),         // fixnum
+    m.if(m.i32.eq(ld(0, addr(0)), c(STRTAG)), retStr("string")),      // a pointer: dispatch on the heap tag
+    m.if(m.i32.eq(ld(0, addr(0)), c(CLOSTAG)), retStr("function")),
+    retStr("object"),                                                 // arrays / objects
+  ], binaryen.none));
+
   // __eq(a, b) -> 0/1.  identical bits, or equal strings by value.  locals: 2=la,3=i
   m.addFunction("__eq", binaryen.createType([I32, I32]), I32, [I32, I32], m.block(null, [
     m.if(m.i32.eq(g(0), g(1)), m.return(c(1))),                       // identical bits: fixnums, same pointer, same singleton
@@ -503,7 +521,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const uses = (...ops) => Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ops.includes(i[0])));
   const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN");
   const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP");
-  const usesStrings = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "PUSH" && typeof i[1] === "string"));
+  const usesStrings = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF")));
   if (usesArrays || usesObjects || usesStrings) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow/concat paths
   // Property keys are interned to small ints at compile time, so GETPROP/SETPROP
   // are id matches in the object runtime (no string bytes in linear memory yet).
