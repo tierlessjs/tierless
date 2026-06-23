@@ -60,13 +60,13 @@ migration survival) and/or `test/difftest.mjs` (differential vs Node).
 ## Commits & pull requests
 
 - Keep commits focused and write a clear message explaining *why*, not just *what*.
-- Fill out the PR template; note how you tested.
+- In the PR description, say what changed and how you tested it.
 - For anything architecturally significant, opening an issue to discuss first will
   save everyone time.
 
 ## Reporting bugs
 
-Use the issue templates. For a language-fidelity bug, the most useful report is
+For a language-fidelity bug, the most useful report is
 the **smallest** TypeScript snippet that behaves differently under Stackmix than
 under Node, plus what you expected. Security issues should follow
 [`SECURITY.md`](./SECURITY.md) instead of a public issue.
