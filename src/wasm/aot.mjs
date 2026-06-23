@@ -79,6 +79,28 @@ export const pointerAddr = (v) => (v & ~3);
 export const makeResident = (addr) => (addr | 1);
 export const makeHandle = (addr) => (addr | 3);
 
+// Primitive singletons: undefined / null / false / true. Each is odd (so never a
+// fixnum) with a reserved "address" below HEAP_BASE, so it reads as a pointer
+// into [0, HEAP_BASE) — a range the heap walker and §5 both skip (inHeap requires
+// addr >= HEAP_BASE), so a singleton never aliases a real object. This keeps
+// undefined/null/false distinct from the fixnum 0 (JS: 0 !== false, null !== undefined).
+export const UNDEF = 0x1, NULL = 0x5, FALSE = 0x9, TRUE = 0xD;
+export const tagBool = (b) => (b ? TRUE : FALSE);
+// Decode a tagged value back to a JS value (a pointer stays opaque — walk the heap).
+export function decodeValue(v) {
+  switch (v) { case UNDEF: return undefined; case NULL: return null; case TRUE: return true; case FALSE: return false; }
+  return (v & 1) === 0 ? v >> 1 : { ptr: pointerAddr(v) };
+}
+// Map an IR PUSH literal to its tagged immediate (floats/strings: a later slice).
+function immediate(x) {
+  if (x === undefined) return UNDEF;
+  if (x === null) return NULL;
+  if (x === true) return TRUE;
+  if (x === false) return FALSE;
+  if (typeof x === "number" && Number.isInteger(x)) return x << 1;
+  throw new Error("aot: unsupported literal " + JSON.stringify(x));
+}
+
 const DELTA = { PUSH: 1, LOAD: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1 };
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : DELTA[ins[0]] ?? 0;
 
@@ -111,6 +133,11 @@ function compileFn(m, name, fn, handles, fnIndex) {
   const scratch = (k) => nl + k;     // operand-stack slots live above the IR locals
   const labelHelper = nl + maxH;     // the Relooper's scratch local
   const get = (i) => m.local.get(i, I32);
+  const bool = (cond) => m.select(cond, m.i32.const(TRUE), m.i32.const(FALSE));   // i32 0/1 -> tagged boolean
+  // JS truthiness of the value in local `i`: falsy is 0, undefined, null, false.
+  // Takes the local index (not an expression) so each use is a fresh local.get —
+  // a Binaryen IR node can't be shared between parents.
+  const falsy = (i) => m.i32.or(m.i32.or(m.i32.eqz(get(i)), m.i32.eq(get(i), m.i32.const(UNDEF))), m.i32.or(m.i32.eq(get(i), m.i32.const(NULL)), m.i32.eq(get(i), m.i32.const(FALSE))));
 
   const r = new binaryen.Relooper(m);
   const refOf = new Map();           // leader index -> Relooper block
@@ -123,7 +150,7 @@ function compileFn(m, name, fn, handles, fnIndex) {
     let h = 0, result = null, term = { kind: "fall", next: end };
     for (const ins of code.slice(start, end)) {
       switch (ins[0]) {
-        case "PUSH": stmts.push(m.local.set(scratch(h), m.i32.const(ins[1] << 1))); h++; break; // tagged int
+        case "PUSH": stmts.push(m.local.set(scratch(h), m.i32.const(immediate(ins[1])))); h++; break; // tagged immediate
         case "LOAD": stmts.push(m.local.set(scratch(h), get(ins[1]))); h++; break;
         case "STORE": h--; stmts.push(m.local.set(ins[1], get(scratch(h)))); break;
         case "POP": h--; break;
@@ -131,13 +158,13 @@ function compileFn(m, name, fn, handles, fnIndex) {
           h -= 2; const a = get(scratch(h)), b = get(scratch(h + 1));
           // tagged ints: a+b / a-b are already correctly tagged (2n±2m = 2(n±m));
           // MUL untags one operand ((a>>1)*b = 2nm); comparisons are monotonic on
-          // tagged ints, so compare directly then tag the 0/1 boolean.
+          // tagged ints, so compare directly then map the 0/1 to a tagged boolean.
           const e = ins[0] === "ADD" ? m.i32.add(a, b) : ins[0] === "SUB" ? m.i32.sub(a, b)
             : ins[0] === "MUL" ? m.i32.mul(m.i32.shr_s(a, m.i32.const(1)), b)
-            : ins[0] === "LT" ? m.i32.shl(m.i32.lt_s(a, b), m.i32.const(1))
-            : ins[0] === "LE" ? m.i32.shl(m.i32.le_s(a, b), m.i32.const(1))
-            : ins[0] === "GT" ? m.i32.shl(m.i32.gt_s(a, b), m.i32.const(1))
-            : m.i32.shl(m.i32.ge_s(a, b), m.i32.const(1));
+            : ins[0] === "LT" ? bool(m.i32.lt_s(a, b))
+            : ins[0] === "LE" ? bool(m.i32.le_s(a, b))
+            : ins[0] === "GT" ? bool(m.i32.gt_s(a, b))
+            : bool(m.i32.ge_s(a, b));
           stmts.push(m.local.set(scratch(h), e)); h++; break;
         }
         case "CALL": case "RES": {
@@ -150,12 +177,12 @@ function compileFn(m, name, fn, handles, fnIndex) {
           if (op === "+") e = m.i32.add(a, b);
           else if (op === "-") e = m.i32.sub(a, b);
           else if (op === "*") e = m.i32.mul(m.i32.shr_s(a, m.i32.const(1)), b);
-          else if (op === "<") e = m.i32.shl(m.i32.lt_s(a, b), m.i32.const(1));
-          else if (op === "<=") e = m.i32.shl(m.i32.le_s(a, b), m.i32.const(1));
-          else if (op === ">") e = m.i32.shl(m.i32.gt_s(a, b), m.i32.const(1));
-          else if (op === ">=") e = m.i32.shl(m.i32.ge_s(a, b), m.i32.const(1));
-          else if (op === "===" || op === "==") e = m.i32.shl(m.i32.eq(a, b), m.i32.const(1));
-          else if (op === "!==" || op === "!=") e = m.i32.shl(m.i32.ne(a, b), m.i32.const(1));
+          else if (op === "<") e = bool(m.i32.lt_s(a, b));
+          else if (op === "<=") e = bool(m.i32.le_s(a, b));
+          else if (op === ">") e = bool(m.i32.gt_s(a, b));
+          else if (op === ">=") e = bool(m.i32.ge_s(a, b));
+          else if (op === "===" || op === "==") e = bool(m.i32.eq(a, b));     // tagged identity == JS === for these primitives
+          else if (op === "!==" || op === "!=") e = bool(m.i32.ne(a, b));
           else throw new Error("aot: unsupported BIN " + op);
           stmts.push(m.local.set(scratch(h), e)); h++; break;
         }
@@ -218,7 +245,7 @@ function compileFn(m, name, fn, handles, fnIndex) {
     if (term.kind === "ret") continue;
     if (term.kind === "jmp") { r.addBranch(ref, refOf.get(term.target), 0, 0); continue; }
     if (term.kind === "jmpf") {
-      r.addBranch(ref, refOf.get(term.target), m.i32.eqz(get(term.cond)), 0); // JMPF jumps when the condition is false
+      r.addBranch(ref, refOf.get(term.target), falsy(term.cond), 0);           // JMPF jumps when the condition is falsy (JS truthiness)
       r.addBranch(ref, refOf.get(term.next), 0, 0);                            // else fall through
       continue;
     }
