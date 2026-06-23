@@ -1,0 +1,25 @@
+{
+  "name": "waso",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Waso prototype — tierless continuation migration (design doc spike)",
+  "scripts": {
+    "test": "node test.mjs",
+    "spike": "node waso-spike.mjs",
+    "2p": "node waso-2p-client.mjs",
+    "build:wasm": "node build-wasm.mjs",
+    "wasm": "node build-wasm.mjs && node waso-wasm.mjs",
+    "wasm:2p": "node build-wasm.mjs && node waso-wasm-2p-client.mjs",
+    "policy": "node build-wasm.mjs && node waso-policy.mjs",
+    "bench:hn": "node bench-hn.mjs",
+    "bench:sweep": "node bench-sweep.mjs",
+    "bench:conduit": "node bench-conduit.mjs",
+    "fetch:2p": "node waso-fetch-2p-client.mjs",
+    "app:2p": "node waso-app-2p-client.mjs"
+  },
+  "dependencies": {
+    "typescript": "^5.9.3",
+    "wabt": "^1.0.39"
+  }
+}
