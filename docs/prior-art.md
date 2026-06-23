@@ -31,6 +31,26 @@ Takeaways / what to steal:
   gotcha (resume-by-offset breaks under version skew; content-addressed code
   fixes it). Revisit when we tackle #5.
 
+### The NJS lineage (where the idea comes from)
+
+Stackmix traces to **NJS / Narrative JavaScript** (Neil Mix, ~2006) — a CPS
+source-to-source compiler that reified the JavaScript stack into a continuation
+*object* via a blocking operator, running on stock engines (including Rhino).
+Remarkably, the 2006 design already named, by name, most of what Stackmix is
+built on: migrate-vs-fetch, lazy placement ("opportunistic context oscillation"),
+resource pinning (DOM/native code can't move, so transfer the stack to it), and
+usage-based prefetch. The core model has been stable for ~20 years; what changed
+is the substrate — a real TypeScript type checker and an explicit, serializable
+IR — not the idea.
+
+The one thing that *did* change in 20 years is native suspension: `async`/`await`
+and generators now exist. Stackmix reuses their *semantics* for the boundary
+shape, but — because a paused native async state is engine-internal and cannot be
+serialized — the transportable continuation is still Stackmix's own data
+structure, exactly as NJS had to build its own. See
+[`architecture.md`](./architecture.md#why-the-transportable-continuation-is-ours-to-build)
+for that rationale.
+
 ## B. Replay-from-a-log (the alternative we are NOT using)
 
 The mainstream "durable execution" engines — **Temporal**, **Restate**, and the

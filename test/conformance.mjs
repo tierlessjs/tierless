@@ -123,7 +123,7 @@ t("object/array + defaults + rest + nested", `function go(){const {a=1,b,...rest
 t("swap + for-of destructure", `function go(){let a=1,b=2;[a,b]=[b,a];const o=[];for(const [k,v] of [["x",1],["y",2]])o.push(k+v);return {a,b,o};}`);
 
 section("objects & arrays");
-t("object literal: shorthand/computed/spread/getter-setter", `function go(){const n=5;const base={a:1};const o={n,[\"k\"+1]:2,...base,get d(){return this.n*2;}};const r=o.d;return {n:o.n,k1:o.k1,a:o.a,d:r};}`);
+t("object literal: shorthand/computed/spread/getter-setter", `function go(){const n=5;const base={a:1};const o={n,["k"+1]:2,...base,get d(){return this.n*2;}};const r=o.d;return {n:o.n,k1:o.k1,a:o.a,d:r};}`);
 t("array spread/holes/flat/includes", `function go(){return {sp:[0,...[1,2],3],fl:[1,[2,3],[4]].flat(),inc:[1,2,3].includes(2),idx:[5,6,7].indexOf(6)};}`);
 t("Map / Set / JSON / Object.*", `function go(){const m=new Map([["a",1]]);m.set("b",2);const s=new Set([1,1,2]);return {m:[...m],size:m.size,set:[...s],keys:Object.keys({x:1,y:2}),json:JSON.parse(JSON.stringify({z:[1,2]}))};}`);
 

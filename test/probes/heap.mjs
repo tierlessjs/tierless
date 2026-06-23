@@ -6,7 +6,7 @@
 // + the JSON transport the two-process demo uses) those cases and reports what
 // breaks. It is meant to FAIL — it documents exactly what the heap work fixes.
 
-import { serializeContinuation, deserializeContinuation, contBytes, Tier } from "#stackmix/runtime/core.mjs";
+import { serializeContinuation, deserializeContinuation, Tier } from "#stackmix/runtime/core.mjs";
 
 const tier = new Tier("server", {});
 const ship = (locals) => {

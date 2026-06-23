@@ -1,15 +1,61 @@
 {
   "name": "stackmix",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Tierless continuation migration — one program that runs across client and server, with the runtime moving live execution between tiers.",
+  "keywords": [
+    "continuation",
+    "migration",
+    "tierless",
+    "isomorphic",
+    "client-server",
+    "serialization",
+    "interpreter",
+    "typescript",
+    "webassembly",
+    "distributed"
+  ],
+  "homepage": "https://github.com/bfulton/stackmix#readme",
+  "bugs": {
+    "url": "https://github.com/bfulton/stackmix/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bfulton/stackmix.git"
+  },
+  "license": "MIT",
+  "author": "Bright Fulton",
+  "main": "./src/index.mjs",
+  "types": "./types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./src/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
   "imports": {
     "#stackmix": "./src/index.mjs",
     "#stackmix/*": "./src/*"
   },
+  "bin": {
+    "stackmix": "./bin/stackmix.mjs"
+  },
+  "files": [
+    "src",
+    "types",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "test": "node test/run.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint .",
     "build:wasm": "node src/wasm/build.mjs",
     "spike": "node examples/spike/index.mjs",
     "2p": "node examples/two-process/client.mjs",
@@ -25,5 +71,11 @@
   "dependencies": {
     "typescript": "^5.9.3",
     "wabt": "^1.0.39"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.13.0",
+    "@types/node": "^22.7.0",
+    "eslint": "^9.13.0",
+    "globals": "^15.11.0"
   }
 }

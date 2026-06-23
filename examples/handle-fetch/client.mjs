@@ -25,8 +25,8 @@ const cache = new Map();
 const host = { deref(h) { if (h.owner === client.id) return client.heap.get(h.id); return cache.has(h.id) ? cache.get(h.id) : new Miss(h); } };
 
 const child = spawn(process.execPath, [fileURLToPath(new URL("./server.mjs", import.meta.url))], { stdio: ["pipe", "pipe", "inherit"] });
-let toServer = 0, fromServer = 0, fetchBytes = 0, migrateBackBytes = 0;
-const send = (obj, bin) => { toServer += writeFrame(child.stdin, obj, bin); };
+let fromServer = 0, fetchBytes = 0, migrateBackBytes = 0;
+const send = (obj, bin) => writeFrame(child.stdin, obj, bin);
 let resolveNext = null;
 readFrames(child.stdout, (msg, bin, total) => { fromServer += total; const r = resolveNext; resolveNext = null; r && r({ msg, bin }); });
 const next = () => new Promise((res) => { resolveNext = res; });
