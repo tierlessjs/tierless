@@ -37,6 +37,7 @@ const cases = [
   { file: "test/probes/wasm-strings.mjs",         needs: ["the AOT compiler runs strings"] },
   { file: "test/probes/wasm-classes.mjs",         needs: ["the AOT compiler runs classes"] },
   { file: "test/probes/wasm-generators.mjs",      needs: ["the AOT compiler runs generators"] },
+  { file: "test/probes/wasm-async.mjs",           needs: ["the AOT compiler runs async/await"] },
   { file: "test/probes/wasm-render.mjs",          needs: ["the render demo (app.ts) compiled to native wasm, ran, and migrated"] },
   { file: "test/probes/frontend.mjs",             needs: ["all PASS — closures"] },
   { file: "examples/hn-thread/client.mjs",        needs: ["Real TS migrated over a WebSocket and computed correctly? YES"] },
