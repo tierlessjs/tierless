@@ -20,9 +20,15 @@ import { RESOURCES } from "./core.mjs";
 
 const BINOP = {
   [ts.SyntaxKind.LessThanToken]: "LT",
+  [ts.SyntaxKind.LessThanEqualsToken]: "LE",
+  [ts.SyntaxKind.GreaterThanToken]: "GT",
   [ts.SyntaxKind.GreaterThanEqualsToken]: "GE",
   [ts.SyntaxKind.PlusToken]: "ADD",
-  // (>, <=, -, * are easy to add the same way when a program needs them)
+  [ts.SyntaxKind.MinusToken]: "SUB",
+  [ts.SyntaxKind.AsteriskToken]: "MUL",
+  // Note: the wasm interpreter (interpreter.wat) only implements ADD/LT/GE; the
+  // AOT compiler (aot.mjs) implements all of these. Programs using SUB/MUL/LE/GT
+  // must go through the AOT path.
 };
 
 export function compile(source, entryName = "render") {
@@ -157,6 +163,17 @@ export function compile(source, entryName = "render") {
       emit("JMPF", end);
       stmt(node.statement);
       if (node.incrementor && expr(node.incrementor)) emit("POP");
+      emit("JMP", loop);
+      mark(end);
+      return;
+    }
+
+    if (ts.isWhileStatement(node)) {
+      const loop = label("loop"), end = label("end");
+      mark(loop);
+      if (!expr(node.expression)) fail(node, "while needs a condition value");
+      emit("JMPF", end);
+      stmt(node.statement);
       emit("JMP", loop);
       mark(end);
       return;

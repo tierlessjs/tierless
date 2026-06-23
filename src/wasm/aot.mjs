@@ -76,7 +76,7 @@ export const pointerAddr = (v) => (v & ~3);
 export const makeResident = (addr) => (addr | 1);
 export const makeHandle = (addr) => (addr | 3);
 
-const DELTA = { PUSH: 1, LOAD: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0 };
+const DELTA = { PUSH: 1, LOAD: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0 };
 const delta = (ins) => (ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : DELTA[ins[0]] ?? 0);
 
 // Labeled asm -> instruction list with JMP/JMPF targets resolved to indices.
@@ -124,14 +124,16 @@ function compileFn(m, name, fn, handles) {
         case "LOAD": stmts.push(m.local.set(scratch(h), get(ins[1]))); h++; break;
         case "STORE": h--; stmts.push(m.local.set(ins[1], get(scratch(h)))); break;
         case "POP": h--; break;
-        case "ADD": case "SUB": case "MUL": case "LT": case "GE": {
+        case "ADD": case "SUB": case "MUL": case "LT": case "LE": case "GT": case "GE": {
           h -= 2; const a = get(scratch(h)), b = get(scratch(h + 1));
           // tagged ints: a+b / a-b are already correctly tagged (2n±2m = 2(n±m));
-          // MUL untags one operand ((a>>1)*b = 2nm); LT/GE compare directly
-          // (monotonic) then tag the 0/1 boolean.
+          // MUL untags one operand ((a>>1)*b = 2nm); comparisons are monotonic on
+          // tagged ints, so compare directly then tag the 0/1 boolean.
           const e = ins[0] === "ADD" ? m.i32.add(a, b) : ins[0] === "SUB" ? m.i32.sub(a, b)
             : ins[0] === "MUL" ? m.i32.mul(m.i32.shr_s(a, m.i32.const(1)), b)
             : ins[0] === "LT" ? m.i32.shl(m.i32.lt_s(a, b), m.i32.const(1))
+            : ins[0] === "LE" ? m.i32.shl(m.i32.le_s(a, b), m.i32.const(1))
+            : ins[0] === "GT" ? m.i32.shl(m.i32.gt_s(a, b), m.i32.const(1))
             : m.i32.shl(m.i32.ge_s(a, b), m.i32.const(1));
           stmts.push(m.local.set(scratch(h), e)); h++; break;
         }

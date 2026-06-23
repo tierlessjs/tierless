@@ -36,6 +36,15 @@ const programs = [
       for (let j = 0; j < a.length; j = j + 1) { s = s + a[j]; } // 0+1+2+3+4 = 10
       return s + db.query();
     }`],
+  ["arithmetic: - and *", `
+    declare const db: { query(): number };
+    function main(): number { let x = 7; let y = 3; return (x - y) * 2 + db.query(); }`],   // 8 + 42 = 50
+  ["while loop with <=", `
+    declare const db: { query(): number };
+    function main(): number { let s = 0; let i = 1; while (i <= 5) { s = s + i; i = i + 1; } return s + db.query(); }`], // 15 + 42 = 57
+  ["> comparison", `
+    declare const db: { query(): number };
+    function main(): number { let r = db.query(); if (r > 40) { return r - 40; } return 0; }`], // 42 - 40 = 2
 ];
 
 function interp(src) {
