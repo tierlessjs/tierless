@@ -38,7 +38,7 @@ function instance(handlers) {
     "DOM.renderList": (e, items) => { const xs = hostArrayValues(e.memory, items); rendered.push(...xs); return tagInt(xs.length); },
   });
   seti32(ex.memory, BUMP_ADDR, HEAP_BASE);
-  const r = untagInt(ex.render(tagInt(THRESH)));
+  const r = untagInt(ex.render(0, tagInt(THRESH)));   // leading 0 = the closure env (render captures nothing)
   check(`render() native: returned ${r}, rendered ${JSON.stringify(rendered)}`, r === EXPECTED.length && JSON.stringify(rendered) === JSON.stringify(EXPECTED));
 }
 
@@ -52,7 +52,7 @@ function instance(handlers) {
   seti32(A.memory, BUMP_ADDR, HEAP_BASE);
   seti32(A.memory, DATA_PTR, STACK_BASE);
   seti32(A.memory, DATA_PTR + 4, STACK_END);
-  A.render(tagInt(THRESH));
+  A.render(0, tagInt(THRESH));
   A.asyncify_stop_unwind();
   const blob = JSON.parse(JSON.stringify(Array.from(new Uint8Array(A.memory.buffer, 0, STACK_END))));
 
@@ -62,7 +62,7 @@ function instance(handlers) {
   });
   new Uint8Array(B.memory.buffer).set(Uint8Array.from(blob));
   B.asyncify_start_rewind(DATA_PTR);
-  const r = untagInt(B.render(tagInt(THRESH)));
+  const r = untagInt(B.render(0, tagInt(THRESH)));
   check(`render() migrated A->B: returned ${r}, rendered ${JSON.stringify(rendered)}`, r === EXPECTED.length && JSON.stringify(rendered) === JSON.stringify(EXPECTED));
 }
 

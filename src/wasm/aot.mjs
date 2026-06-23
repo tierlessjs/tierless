@@ -105,8 +105,8 @@ function immediate(x) {
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
 }
 
-const DELTA = { PUSH: 1, LOAD: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1 };
-const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : DELTA[ins[0]] ?? 0;
+const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1 };
+const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : DELTA[ins[0]] ?? 0;
 
 // Labeled asm -> instruction list with JMP/JMPF targets resolved to indices.
 function resolveLabels(rawCode) {
@@ -134,8 +134,14 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds) {
   const code = resolveLabels(fn.code);
   const leaders = leaderSet(code);
   const maxH = maxStack(code) + 1;   // +1 scratch headroom for ALLOC's temp
-  const scratch = (k) => nl + k;     // operand-stack slots live above the IR locals
-  const labelHelper = nl + maxH;     // the Relooper's scratch local
+  // Calling convention: WASM local 0 is the closure environment — the receiver of
+  // a CALLV, the implicit (unused) arg of a direct CALL, and where LOADENV /
+  // capturing MAKECLOSUREs read and write. So IR local i is WASM local i+1, and
+  // the operand-stack scratch slots live above the IR locals.
+  const ENV = 0;
+  const loc = (i) => i + 1;
+  const scratch = (k) => 1 + nl + k;
+  const labelHelper = 1 + nl + maxH; // the Relooper's scratch local
   const get = (i) => m.local.get(i, I32);
   const bool = (cond) => m.select(cond, m.i32.const(TRUE), m.i32.const(FALSE));   // i32 0/1 -> tagged boolean
   // JS truthiness of the value in local `i`: falsy is 0, undefined, null, false.
@@ -155,8 +161,10 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds) {
     for (const ins of code.slice(start, end)) {
       switch (ins[0]) {
         case "PUSH": stmts.push(m.local.set(scratch(h), m.i32.const(immediate(ins[1])))); h++; break; // tagged immediate
-        case "LOAD": stmts.push(m.local.set(scratch(h), get(ins[1]))); h++; break;
-        case "STORE": h--; stmts.push(m.local.set(ins[1], get(scratch(h)))); break;
+        case "LOAD": stmts.push(m.local.set(scratch(h), get(loc(ins[1])))); h++; break;
+        case "STORE": h--; stmts.push(m.local.set(loc(ins[1]), get(scratch(h)))); break;
+        case "LOADENV": stmts.push(m.local.set(scratch(h), m.i32.load(8 + ins[1] * 4, 4, m.i32.and(get(ENV), m.i32.const(~3))))); h++; break; // env[idx] from the closure
+        case "DUP": stmts.push(m.local.set(scratch(h), get(scratch(h - 1)))); h++; break; // duplicate the operand-stack top
         case "POP": h--; break;
         case "ADD": case "SUB": case "MUL": case "LT": case "LE": case "GT": case "GE": {
           h -= 2; const a = get(scratch(h)), b = get(scratch(h + 1));
@@ -174,7 +182,10 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds) {
         case "CALL": case "RES": {
           const ac = ins[2] || 0; h -= ac;
           const args = []; for (let j = 0; j < ac; j++) args.push(get(scratch(h + j)));
-          stmts.push(m.local.set(scratch(h), m.call(ins[1], args, I32))); h++; break;
+          // user functions take the env as param 0 (a direct call has no closure, so 0);
+          // resources are host imports, called with their natural arity.
+          const callArgs = ins[0] === "CALL" ? [m.i32.const(0), ...args] : args;
+          stmts.push(m.local.set(scratch(h), m.call(ins[1], callArgs, I32))); h++; break;
         }
         case "BIN": {                          // tsc.mjs binary op; operand tags handled like the dedicated ops
           h -= 2; const a = get(scratch(h)), b = get(scratch(h + 1)), op = ins[1]; let e;
@@ -190,21 +201,38 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds) {
           else throw new Error("aot: unsupported BIN " + op);
           stmts.push(m.local.set(scratch(h), e)); h++; break;
         }
-        case "MAKECLOSURE": {                  // box a function as a closure [CLOSTAG, fnIndex] (captures: not yet)
-          if ((ins[2] || []).length) throw new Error("aot: closures with captures not yet supported");
+        case "MAKECLOSURE": {                  // box a function as a closure [CLOSTAG, fnIndex, ...env]
           if (ins[3]) throw new Error("aot: generator closures not yet supported");
           const idx = fnIndex[ins[1]]; if (idx === undefined) throw new Error("aot: MAKECLOSURE of unknown fn " + ins[1]);
-          stmts.push(m.local.set(scratch(h + 1), m.i32.load(0, 4, m.i32.const(BUMP_ADDR))));                      // tmp = bump
-          stmts.push(m.i32.store(0, 4, get(scratch(h + 1)), m.i32.const(CLOSTAG)));
-          stmts.push(m.i32.store(4, 4, get(scratch(h + 1)), m.i32.const(idx)));                                   // fn table index
-          stmts.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(scratch(h + 1)), m.i32.const(8))));
-          stmts.push(m.local.set(scratch(h), m.i32.or(get(scratch(h + 1)), m.i32.const(1)))); h++; break;         // tagged closure pointer
+          const caps = ins[2] || [], tmp = scratch(h + 1);                                                        // tmp = the new closure's base addr
+          stmts.push(m.local.set(tmp, m.i32.load(0, 4, m.i32.const(BUMP_ADDR))));
+          stmts.push(m.i32.store(0, 4, get(tmp), m.i32.const(CLOSTAG)));
+          stmts.push(m.i32.store(4, 4, get(tmp), m.i32.const(idx)));                                              // fn table index
+          caps.forEach(([kind, ci], j) => {                                                                       // env[j] = each captured value
+            let v;
+            if (kind === "L") v = get(loc(ci));                                                                  // capture a local
+            else if (kind === "E") v = m.i32.load(8 + ci * 4, 4, m.i32.and(get(ENV), m.i32.const(~3)));          // re-capture an outer env slot
+            else throw new Error("aot: closure capture kind " + kind + " not yet supported");                    // "T" (this): arrives with classes
+            stmts.push(m.i32.store(8 + j * 4, 4, get(tmp), v));
+          });
+          stmts.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(tmp), m.i32.const(8 + caps.length * 4))));
+          stmts.push(m.local.set(scratch(h), m.i32.or(get(tmp), m.i32.const(1)))); h++; break;                    // tagged closure pointer
         }
         case "CALLV": {                        // call a closure value: stack is [closure, arg0..arg_{argc-1}]
           const argc = ins[1]; h -= argc + 1;
           const fn = m.i32.load(4, 4, m.i32.and(get(scratch(h)), m.i32.const(~3)));                              // closure[1] = fn table index
-          const args = []; for (let k = 0; k < argc; k++) args.push(get(scratch(h + 1 + k)));
-          stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, args, binaryen.createType(new Array(argc).fill(I32)), I32))); h++; break;
+          const args = [get(scratch(h))]; for (let k = 0; k < argc; k++) args.push(get(scratch(h + 1 + k)));    // env (the closure itself) is param 0
+          stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, args, binaryen.createType(new Array(argc + 1).fill(I32)), I32))); h++; break;
+        }
+        case "CALLDYN": {                      // recv[key](args): dynamic dispatch. Supported receiver is an array
+          const argc = ins[1]; h -= argc + 2;  // (a closure held in a collection, e.g. fns[j]()); the array element IS the closure.
+          const recv = scratch(h);             // stack: [recv, key, arg0..arg_{argc-1}]
+          const backing = m.i32.load(8, 4, m.i32.and(get(recv), m.i32.const(~3)));
+          const callee = m.i32.load(4, 4, m.i32.add(backing, m.i32.mul(m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1)), m.i32.const(4)))); // recv[untag(key)]
+          stmts.push(m.local.set(recv, callee));                                                                 // stash the closure in the receiver slot
+          const fn = m.i32.load(4, 4, m.i32.and(get(recv), m.i32.const(~3)));
+          const args = [get(recv)]; for (let k = 0; k < argc; k++) args.push(get(scratch(h + 2 + k)));           // env (the closure) is param 0; `this` (recv) is dropped (no method use yet)
+          stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, args, binaryen.createType(new Array(argc + 1).fill(I32)), I32))); h++; break;
         }
         case "NEWOBJ": stmts.push(m.local.set(scratch(h), m.call("__newobj", [], I32))); h++; break;
         case "GETPROP": {                      // [obj] -> [obj.key]; key interned to an id
@@ -269,7 +297,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds) {
 
   const body = r.renderAndDispose(refOf.get(0), labelHelper);
   const varTypes = new Array((nl - argc) + maxH + 1).fill(I32);               // IR locals beyond params + scratch + label helper
-  m.addFunction(name, binaryen.createType(new Array(argc).fill(I32)), I32, varTypes, body);
+  m.addFunction(name, binaryen.createType(new Array(argc + 1).fill(I32)), I32, varTypes, body); // +1 leading param: the env
 }
 
 // Runtime helpers for growable arrays (added only when a program uses them).
@@ -357,6 +385,11 @@ function addObjectRuntime(m) {
 
 // program: { name: { argc?, nlocals, code } }. resources: import names a RES may
 // call. Returns wasm bytes, Asyncify-instrumented unless asyncify:false.
+//
+// Calling convention: every user function takes the closure environment as a
+// leading param, so the exported entry's signature is (env, ...args). A host
+// invoking it passes a dummy env (0) first — e.g. render(0, threshold). An
+// entry with no args needs nothing extra (the missing env coerces to 0).
 export function compileToWasm(program, { entry = "main", resources = [], asyncify = true, handles = false } = {}) {
   const m = new binaryen.Module();
   m.setMemory(1, 1, "memory");
