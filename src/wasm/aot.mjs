@@ -37,6 +37,7 @@ import binaryen from "binaryen";
 // Asyncify mechanics.) So anything live across a suspend must be memory-backed.
 export const BUMP_ADDR = 8;
 export const HEAP_BASE = 64;
+export const RESIDENT_BASE = 8192; // receiver-local bitmap: has a given handle been fetched yet
 
 // Tagged-value helpers (also used to read/write values across the host boundary).
 // Pointers use two low bits: bit 0 = pointer, bit 1 = remote (a §5 handle whose
@@ -73,7 +74,7 @@ function leaderSet(code) {
 
 const maxStack = (code) => { let h = 0, max = 0; for (const ins of code) { h += delta(ins); if (h > max) max = h; } return max; };
 
-function compileFn(m, name, fn) {
+function compileFn(m, name, fn, handles) {
   const I32 = binaryen.i32;
   const argc = fn.argc || 0, nl = fn.nlocals;
   const code = resolveLabels(fn.code);
@@ -121,8 +122,18 @@ function compileFn(m, name, fn) {
           stmts.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(scratch(h + 1)), m.i32.mul(m.i32.add(nRaw(), m.i32.const(1)), m.i32.const(4))))); // *bump = tmp + (n+1)*4
           stmts.push(m.local.set(scratch(h), m.i32.or(get(scratch(h + 1)), m.i32.const(1)))); h++; break;         // result = tmp | 1 (tagged pointer)
         }
-        case "AGET": { h -= 2; const addr = m.i32.and(get(scratch(h)), m.i32.const(~3)), idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1));
-          stmts.push(m.local.set(scratch(h), m.i32.load(4, 4, m.i32.add(addr, m.i32.mul(idx, m.i32.const(4)))))); h++; break; } // field = mem[addr + 4 + idx*4] (skip length header)
+        case "AGET": {
+          h -= 2;
+          const addr = () => m.i32.and(get(scratch(h)), m.i32.const(~3));
+          const field = () => m.i32.add(addr(), m.i32.mul(m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1)), m.i32.const(4)));
+          if (handles) { // §5: a remote handle not yet resident -> __fetch (suspend), then load
+            const slot = m.i32.shr_u(m.i32.sub(addr(), m.i32.const(HEAP_BASE)), m.i32.const(2));
+            stmts.push(m.if(
+              m.i32.and(m.i32.ne(m.i32.and(get(scratch(h)), m.i32.const(2)), m.i32.const(0)), m.i32.eqz(m.i32.load8_u(RESIDENT_BASE, 1, slot))),
+              m.drop(m.call("__fetch", [get(scratch(h))], I32))));
+          }
+          stmts.push(m.local.set(scratch(h), m.i32.load(4, 4, field()))); h++; break; // field = mem[addr + 4 + idx*4]
+        }
         case "ASET": { h -= 3; const addr = m.i32.and(get(scratch(h)), m.i32.const(~3)), idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1)), v = get(scratch(h + 2));
           stmts.push(m.i32.store(4, 4, m.i32.add(addr, m.i32.mul(idx, m.i32.const(4))), v)); break; } // mem[addr + 4 + idx*4] = val
         case "JMP": term = { kind: "jmp", target: ins[1] }; break;
@@ -158,11 +169,12 @@ function compileFn(m, name, fn) {
 
 // program: { name: { argc?, nlocals, code } }. resources: import names a RES may
 // call. Returns wasm bytes, Asyncify-instrumented unless asyncify:false.
-export function compileToWasm(program, { entry = "main", resources = [], asyncify = true } = {}) {
+export function compileToWasm(program, { entry = "main", resources = [], asyncify = true, handles = false } = {}) {
   const m = new binaryen.Module();
   m.setMemory(1, 1, "memory");
   for (const res of resources) m.addFunctionImport(res, "env", res, binaryen.createType([]), binaryen.i32); // 0-arg i32 resources (subset)
-  for (const [name, fn] of Object.entries(program)) compileFn(m, name, fn);
+  if (handles) m.addFunctionImport("__fetch", "env", "__fetch", binaryen.createType([binaryen.i32]), binaryen.i32); // §5 deref-miss suspends here
+  for (const [name, fn] of Object.entries(program)) compileFn(m, name, fn, handles);
   m.addFunctionExport(entry, entry);
   if (!m.validate()) { const txt = m.emitText(); throw new Error("aot: module did not validate\n" + txt); }
   if (asyncify) m.runPasses(["asyncify"]); // unwind/rewind frames to/from linear memory

@@ -13,7 +13,7 @@
 import { BUMP_ADDR, HEAP_BASE, isPointer, pointerAddr, makeHandle } from "./aot.mjs";
 
 // Linear-memory layout shared with the wasm probes (Asyncify control + stack).
-export const DATA_PTR = 16, STACK_BASE = 1024, STACK_END = 8192, RESIDENT_BASE = 8192;
+export const DATA_PTR = 16, STACK_BASE = 1024, STACK_END = 8192;
 export const HANDLE_THRESHOLD = 64; // bytes; an object bigger than this stays home
 
 const get = (dv, a) => dv.getInt32(a, true);
