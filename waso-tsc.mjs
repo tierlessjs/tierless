@@ -146,10 +146,14 @@ function resolveBindings(sf) {
   return { bindingOf, declFn, bindingsByFn, boxed, usesArguments, moduleBindings };
 }
 
-export function compileModule(source, { resources = [], entry = "main", file = "/app.ts" } = {}) {
-  const program = makeProgram(new Map([[file, source]]));
-  const checker = program.getTypeChecker();
-  const sf = program.getSourceFile(file);
+// Compile one module's source file into the shared `out`. `prefix` namespaces every
+// global name (out keys, module-binding registry keys, class unames) so modules don't
+// collide; the entry module uses "" for back-compat. `importResolve(idNode)` maps an
+// imported identifier to another module's already-namespaced global ref. Exports the
+// module's own top-level decls into `declRef` so other modules can resolve them.
+function compileInto(sf, checker, { resources = [], entry = null, prefix = "", out, importResolve = () => null, sharedClasses = null, initName = "%moduleinit" }) {
+  const G = (n) => prefix + n; // global name for this module
+  const topClassByName = new Map(); // bare class name -> uname (this module), for classNameOf
   const topFns = new Map();
   const generatorFns = new Set();   // top-level `function*` names -> a call makes an iterator, not a normal call
   for (const s of sf.statements) if (ts.isFunctionDeclaration(s) && s.name) { topFns.set(s.name.text, s); if (s.asteriskToken) generatorFns.add(s.name.text); }
@@ -157,7 +161,8 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   // capturing `this`; the constructor (with field inits prepended) runs at `new`.
   const resourceSet = new Set(resources);
   const { bindingOf, bindingsByFn, boxed, usesArguments, moduleBindings } = resolveBindings(sf);
-  const classes = new Map();         // unique class name -> record
+  for (const [id, nm] of moduleBindings) moduleBindings.set(id, G(nm)); // namespace the per-tier module-binding registry keys
+  const classes = sharedClasses || new Map(); // unique (namespaced) class name -> record; SHARED across a program so a derived class can reference an imported base (top-level class methods capture only module bindings + `this`, so the base's own module compiles them)
   const classOfBinding = new Map();  // bindingId -> unique class name (LOCAL classes, which have a block binding)
   const accessorNames = new Set();   // property names that are a get/set in SOME class/object-literal -> read/write uses the accessor-aware op
   const objLiteralThis = new Map();  // object-literal node -> synthetic thisId (for methods/getters that use `this`)
@@ -180,19 +185,20 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       else if (ts.isConstructorDeclaration(mem) && mem.body) { ctor = mem; paramsOf(mem, undefined); }
     }
     const extendsId = (s.heritageClauses || []).filter((h) => h.token === ts.SyntaxKind.ExtendsKeyword).flatMap((h) => h.types).map((t) => t.expression).find((e) => ts.isIdentifier(e)) || null;
-    const uname = s.parent === sf ? s.name.text : `${s.name.text}$c${classUid++}`; // top-level keeps its name; local gets a unique one (no collisions)
+    const top = s.parent === sf;
+    const uname = top ? G(s.name.text) : G(`${s.name.text}$c${classUid++}`); // top-level keeps its (namespaced) name; local gets a unique one
+    if (top) topClassByName.set(s.name.text, uname);
     const decos = (ts.canHaveDecorators(s) ? ts.getDecorators(s) : null) || []; // @Injectable()/@Component()/... (legacy: run on the class at module load)
     const hasMemberDec = pdecorators.length || [...fields, ...sfields, ...methods, ...smethods, ...accessors, ...saccessors].some((x) => x.decorators && x.decorators.length);
-    classes.set(uname, { name: uname, thisId: thisCounter--, staticThisId: thisCounter--, fields, methods, accessors, sfields, smethods, saccessors, cmethods, ctor, superName: null, _ext: extendsId, decorators: decos.map((d) => d.expression), pdecorators, hasMemberDec, topLevel: s.parent === sf });
+    classes.set(uname, { name: uname, thisId: thisCounter--, staticThisId: thisCounter--, fields, methods, accessors, sfields, smethods, saccessors, cmethods, ctor, superName: null, _ext: extendsId, decorators: decos.map((d) => d.expression), pdecorators, hasMemberDec, topLevel: top, declNode: s });
     if (s.name && bindingOf.has(s.name)) classOfBinding.set(bindingOf.get(s.name), uname);
   };
   { const w = (n) => { if (ts.isClassDeclaration(n) && n.name) collectClass(n); ts.forEachChild(n, w); }; w(sf); } // classes ANYWHERE (top-level + local)
-  const classNameOf = (idNode) => { const b = bindingOf.get(idNode); if (b != null && classOfBinding.has(b)) return classOfBinding.get(b); if (classes.has(idNode.text)) return idNode.text; return null; };
-  for (const rec of classes.values()) { const e = rec._ext; if (!e) continue; const userSuper = (bindingOf.has(e) && classOfBinding.has(bindingOf.get(e))) ? classOfBinding.get(bindingOf.get(e)) : (classes.has(e.text) ? e.text : null); if (userSuper) rec.superName = userSuper; else if (bindingOf.get(e) == null && ERROR_CTORS.has(e.text)) rec.hostSuper = e.text; } // resolve supers: user class, else a host error base (extends Error/TypeError/...)
-  const out = {};
+  const classNameOf = (idNode) => { const b = bindingOf.get(idNode); if (b != null && classOfBinding.has(b)) return classOfBinding.get(b); if (topClassByName.has(idNode.text)) return topClassByName.get(idNode.text); return null; };
+  for (const rec of classes.values()) { if (rec.superName || rec.hostSuper || !rec._ext) continue; const e = rec._ext; const imp = importResolve(e); const userSuper = (bindingOf.has(e) && classOfBinding.has(bindingOf.get(e))) ? classOfBinding.get(bindingOf.get(e)) : (topClassByName.has(e.text) ? topClassByName.get(e.text) : (imp && imp.kind === "class" ? imp.uname : null)); if (userSuper) rec.superName = userSuper; else if (bindingOf.get(e) == null && ERROR_CTORS.has(e.text)) rec.hostSuper = e.text; } // supers: local class, imported class, or a host error base
   let gen = 0;
   const neededBuilders = new Set();   // classes whose class-object builder (%Name) must be generated
-  const lineColOf = (node) => { if (!node || !node.getStart) return null; const lc = sf.getLineAndCharacterOfPosition(node.getStart(sf)); return { file, line: lc.line + 1, col: lc.character + 1, text: node.getText(sf).replace(/\s+/g, " ").slice(0, 32) }; };
+  const lineColOf = (node) => { if (!node || !node.getStart) return null; const lc = sf.getLineAndCharacterOfPosition(node.getStart(sf)); return { file: sf.fileName, line: lc.line + 1, col: lc.character + 1, text: node.getText(sf).replace(/\s+/g, " ").slice(0, 32) }; };
   // The class object: a singleton (statics live on it), built-or-returned by a
   // 0-arg builder fn, cached per tier (CLSGET/CLSPUT). Emitted as raw IR via
   // compileFn's emitBody hook so static-field initializers reuse expr().
@@ -300,7 +306,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     for (const f of rec.fields) { emit("LOADENV", capture(rec.thisId)); expr(f.init); emit("SETPROP", f.name); emit("POP"); }
     emit("PUSH", undefined); emit("RET");
   };
-  const compileTop = (name) => { if (name in out) return; out[name] = null; out[name] = compileFn(topFns.get(name), name); };
+  const compileTop = (name) => { const k = G(name); if (k in out) return; out[k] = null; out[k] = compileFn(topFns.get(name), k); }; // namespaced program key
   const compileClass = (cname) => {
     const rec = classes.get(cname); if (rec.compiled) return rec;
     if (rec.superName) compileClass(rec.superName);
@@ -374,9 +380,10 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (!typeNode) { emit("GLOBAL", "Object"); return; }
       if (ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)) {
         const tn = typeNode.typeName.text;
-        if (classes.has(tn)) { classObject(tn); return; }            // same-module class
+        if (topClassByName.has(tn)) { classObject(topClassByName.get(tn)); return; }                     // same-module class
+        const imp = importResolve(typeNode.typeName); if (imp && imp.kind === "class") { emit("MAKECLOSURE", `%${imp.uname}`, []); emit("CALLV", 0); return; } // imported class (checker-resolved across modules)
         if (TYPE_GLOBALS.has(tn)) { emit("GLOBAL", tn); return; }      // String/Number/Boolean/Array/Date wrappers
-        emit("GLOBAL", "Object"); return;                             // interface / alias / generic / imported -> Object
+        emit("GLOBAL", "Object"); return;                             // interface / alias / generic -> Object
       }
       switch (typeNode.kind) {
         case ts.SyntaxKind.StringKeyword: emit("GLOBAL", "String"); return;
@@ -387,12 +394,18 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         default: emit("GLOBAL", "Object"); return;
       }
     }
-    const unresolvedId = (n) => bindingOf.get(n) == null && !topFns.has(n.text) && !classes.has(n.text) && !GLOBAL_OBJS.has(n.text) && !GLOBAL_CALLS.has(n.text) && !CTOR_GLOBALS.has(n.text) && !["undefined", "NaN", "Infinity"].includes(n.text);
+    const unresolvedId = (n) => bindingOf.get(n) == null && !topFns.has(n.text) && !topClassByName.has(n.text) && !importResolve(n) && !GLOBAL_OBJS.has(n.text) && !GLOBAL_CALLS.has(n.text) && !CTOR_GLOBALS.has(n.text) && !["undefined", "NaN", "Infinity"].includes(n.text);
+    const emitImport = (ref) => { // reference another module's already-compiled export by namespaced global name
+      if (ref.kind === "class") { emit("MAKECLOSURE", `%${ref.uname}`, []); emit("CALLV", 0); return; } // its class object
+      if (ref.kind === "fn") { emit("MAKECLOSURE", ref.name, [], ref.gen); return; }
+      emit("MGET", ref.name); // const/let/var binding (per-tier registry)
+    };
     function readUse(idNode) {
       const cn = classNameOf(idNode); if (cn) { classObject(cn); return; }  // bare `ClassName` (top-level or local) -> the class object
       const id = bindingOf.get(idNode);
       if (id == null) {
-        if (topFns.has(idNode.text)) { compileTop(idNode.text); emit("MAKECLOSURE", idNode.text, [], generatorFns.has(idNode.text)); return; }
+        if (topFns.has(idNode.text)) { compileTop(idNode.text); emit("MAKECLOSURE", G(idNode.text), [], generatorFns.has(idNode.text)); return; }
+        const imp = importResolve(idNode); if (imp) { emitImport(imp); return; } // imported value
         if (GLOBAL_OBJS.has(idNode.text)) { emit("GLOBAL", idNode.text); return; } // bare `Math`/`JSON`/... -> host global
         if (idNode.text === "undefined") { emit("PUSH", undefined); return; }
         if (idNode.text === "NaN") { emit("PUSH", NaN); return; }
@@ -602,7 +615,9 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         if (k === ts.SyntaxKind.QuestionQuestionEqualsToken) { logicalAssignExpr(node.left, "??", node.right); return true; }
         if (k === ts.SyntaxKind.InstanceOfKeyword) {
           const cn = ts.isIdentifier(node.right) ? classNameOf(node.right) : null;
-          if (cn) { expr(node.left); emit("ISA", cn); return true; } // user class
+          if (cn) { expr(node.left); emit("ISA", cn); return true; } // user class (this module)
+          const imp = ts.isIdentifier(node.right) ? importResolve(node.right) : null;
+          if (imp && imp.kind === "class") { expr(node.left); emit("ISA", imp.uname); return true; } // imported class
           if (ts.isIdentifier(node.right) && bindingOf.get(node.right) == null && BUILTIN_CTORS.has(node.right.text)) { expr(node.left); emit("ISAB", node.right.text); return true; } // Error/TypeError/Array/Map/...
           fail(node, "instanceof needs a class or built-in constructor");
         }
@@ -922,7 +937,14 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     return { nlocals: topSlot, code, pos, freeIds: envIds };
   }
 
-  compileTop(entry);
+  if (entry) compileTop(entry);
+  // Eagerly compile this module's exports (functions + classes) so other modules can
+  // reference them by namespaced global name without re-entering this module's context.
+  for (const s of sf.statements) {
+    if (!(s.modifiers || []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) continue;
+    if (ts.isFunctionDeclaration(s) && s.name) compileTop(s.name.text);
+    else if (ts.isClassDeclaration(s) && s.name && topClassByName.has(s.name.text)) { const u = topClassByName.get(s.name.text); compileClass(u); neededBuilders.add(u); } // generate the class-object + __construct__ builders so importers can reference them
+  }
   // Module-init: run the top-level statements (var decls -> MSET, side-effecting
   // expressions) once per tier, before anything else. Function/class declarations
   // and TS-only nodes are NOT executed here (handled separately).
@@ -940,7 +962,8 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       emit("LOAD", co); emit("CLSPUT", rec.name); emit("POP"); // rebind so later `ClassName` references see the decorated class
     }
   };
-  if (initStmts.length || decoratedClasses.length) { const stub = { parameters: [] }; bindingsByFn.set(stub, bindingsByFn.get(null) || []); out["%moduleinit"] = compileFn(stub, "%moduleinit", { emitBody: (ctx) => { for (const s of initStmts) ctx.stmt(s); emitDecorate(ctx); ctx.emit("PUSH", undefined); ctx.emit("RET"); } }); }
+  const hasInit = initStmts.length || decoratedClasses.length;
+  if (hasInit) { const stub = { parameters: [] }; bindingsByFn.set(stub, bindingsByFn.get(null) || []); out[initName] = compileFn(stub, initName, { emitBody: (ctx) => { for (const s of initStmts) ctx.stmt(s); emitDecorate(ctx); ctx.emit("PUSH", undefined); ctx.emit("RET"); } }); }
   // Generate class-object builders now that every class is fully compiled (so
   // static-method freeIds are known). Fixpoint: a field init may reference more classes.
   const builtBuilders = new Set();
@@ -952,12 +975,50 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       if (classes.get(cname).topLevel) out[`%new_${cname}`] = compileFn(argStub(), `%new_${cname}`, { emitBody: (ctx) => buildConstructBody(cname, ctx) }); // dynamic `new C(...)` / Reflect.construct (top-level classes capture nothing from outer scopes)
     }
   }
-  const frag = {};
-  for (const [k, v] of Object.entries(out)) frag[k] = { nlocals: v.nlocals, code: v.code, pos: v.pos };
-  return frag;
+  return { initName: hasInit ? initName : null };
+}
+
+const fragOf = (out) => { const frag = {}; for (const [k, v] of Object.entries(out)) frag[k] = { nlocals: v.nlocals, code: v.code, pos: v.pos }; return frag; };
+
+export function compileModule(source, { resources = [], entry = "main", file = "/app.ts" } = {}) {
+  const program = makeProgram(new Map([[file, source]]));
+  const out = {};
+  compileInto(program.getSourceFile(file), program.getTypeChecker(), { resources, entry, prefix: "", out, initName: "%moduleinit" });
+  return fragOf(out); // single module: core auto-runs "%moduleinit"
 }
 
 export function loadModule(PROGRAM, source, opts) { const frag = compileModule(source, opts); for (const [k, v] of Object.entries(frag)) PROGRAM[k] = v; return frag; }
+
+// Multi-module: compile an import graph into one PROGRAM. `files` is Map<path, source>;
+// the entry module keeps prefix "" (so its entry fn name is stable), every other module
+// is namespaced m{i}$. Imports resolve through the type checker to the exporting module's
+// namespaced global; module inits run in dependency order from a master "%moduleinit".
+export function compileProgram(files, { entry = "main", entryFile, resources = [] } = {}) {
+  const program = makeProgram(files);
+  const checker = program.getTypeChecker();
+  const paths = [...files.keys()];
+  const ef = entryFile || paths[0];
+  const depsOf = (p) => { const out = []; for (const s of program.getSourceFile(p).statements) { if (!ts.isImportDeclaration(s) && !ts.isExportDeclaration(s)) continue; const spec = s.moduleSpecifier; if (!spec) continue; const sym = checker.getSymbolAtLocation(spec); const d = sym && sym.declarations && sym.declarations[0]; const f = d && d.getSourceFile && d.getSourceFile().fileName; if (f && paths.includes(f)) out.push(f); } return out; };
+  const order = [], seen = new Set(); const visit = (p, stack) => { if (seen.has(p) || stack.has(p)) return; stack.add(p); for (const d of depsOf(p)) visit(d, stack); stack.delete(p); seen.add(p); order.push(p); }; // deps before dependents
+  for (const p of paths) visit(p, new Set());
+  const prefixOf = new Map(); let mi = 0;
+  for (const p of order) prefixOf.set(p, p === ef ? "" : `m${++mi}$`);
+  // Map every exported top-level declaration node -> its namespaced runtime reference.
+  const declRef = new Map();
+  for (const p of order) { const pre = prefixOf.get(p); for (const s of program.getSourceFile(p).statements) {
+    if (!(s.modifiers || []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) continue;
+    if (ts.isFunctionDeclaration(s) && s.name) declRef.set(s, { kind: "fn", name: pre + s.name.text, gen: !!s.asteriskToken });
+    else if (ts.isClassDeclaration(s) && s.name) declRef.set(s, { kind: "class", uname: pre + s.name.text });
+    else if (ts.isVariableStatement(s)) for (const d of s.declarationList.declarations) if (ts.isIdentifier(d.name)) declRef.set(d, { kind: "binding", name: pre + d.name.text });
+  } }
+  const importResolve = (idNode) => { let sym = checker.getSymbolAtLocation(idNode); if (!sym) return null; if (sym.flags & ts.SymbolFlags.Alias) sym = checker.getAliasedSymbol(sym); const decl = (sym.declarations || []).find((d) => declRef.has(d)); return decl ? declRef.get(decl) : null; };
+  const out = {}; const inits = []; const sharedClasses = new Map(); // shared so cross-module inheritance resolves
+  for (const p of order) { const isEntry = p === ef; const r = compileInto(program.getSourceFile(p), checker, { resources: isEntry ? resources : [], entry: isEntry ? entry : null, prefix: prefixOf.get(p), out, importResolve, sharedClasses, initName: `%init$${prefixOf.get(p)}` }); if (r.initName) inits.push(r.initName); }
+  if (inits.length) { const code = []; for (const n of inits) code.push(["MAKECLOSURE", n, []], ["CALLV", 0], ["POP"]); code.push(["PUSH", undefined], ["RET"]); out["%moduleinit"] = { nlocals: 0, code, pos: code.map(() => null) }; } // master init: run each module's init in dependency order
+  return fragOf(out);
+}
+
+export function loadProgram(PROGRAM, files, opts) { const frag = compileProgram(files, opts); for (const [k, v] of Object.entries(frag)) PROGRAM[k] = v; return frag; }
 
 export function describeContinuation(PROGRAM, frames) {
   return frames.map((f, i) => { const at = Math.max(0, f.ip - 1); const loc = PROGRAM[f.fn] && PROGRAM[f.fn].pos ? PROGRAM[f.fn].pos[at] : null; return { depth: frames.length - 1 - i, fn: f.fn, loc }; });

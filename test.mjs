@@ -22,6 +22,7 @@ const cases = [
   { file: "conformance.mjs",         needs: ["Result: ALL PASS"] },
   { file: "difftest.mjs",            needs: ["NO DIVERGENCES"] },
   { file: "decorators.mjs",          needs: ["Result: ALL PASS"] },
+  { file: "multimodule.mjs",         needs: ["Result: ALL PASS"] },
 ];
 
 // Build the wasm once up front.
