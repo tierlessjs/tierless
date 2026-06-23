@@ -27,6 +27,15 @@ const programs = [
   ["nested loops", `
     declare const db: { query(): number };
     function main(): number { let s = 0; for (let i = 0; i < 4; i = i + 1) { for (let j = 0; j < 3; j = j + 1) { s = s + 1; } } return s + db.query(); }`],
+  ["arrays: build (with a grow), index, length", `
+    declare const db: { query(): number };
+    function main(): number {
+      const a = [];
+      for (let i = 0; i < 5; i = i + 1) { a.push(i); }           // 5 pushes -> grows past INITCAP=4
+      let s = 0;
+      for (let j = 0; j < a.length; j = j + 1) { s = s + a[j]; } // 0+1+2+3+4 = 10
+      return s + db.query();
+    }`],
 ];
 
 function interp(src) {

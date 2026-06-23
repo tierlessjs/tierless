@@ -39,6 +39,11 @@ export const BUMP_ADDR = 8;
 export const HEAP_BASE = 64;
 export const RESIDENT_BASE = 8192; // receiver-local bitmap: has a given handle been fetched yet
 
+// Growable arrays: a stable 3-word header [ARRTAG, length, backing] plus a
+// separate backing store [capacity, ...slots], so push() can grow the backing
+// (via memory.copy) without moving the header — the array's identity is stable.
+const ARRTAG = -1, INITCAP = 4;
+
 // Tagged-value helpers (also used to read/write values across the host boundary).
 // Pointers use two low bits: bit 0 = pointer, bit 1 = remote (a §5 handle whose
 // object stayed on the owning tier). Heap addresses are 4-aligned, so both bits
@@ -51,7 +56,7 @@ export const pointerAddr = (v) => (v & ~3);
 export const makeResident = (addr) => (addr | 1);
 export const makeHandle = (addr) => (addr | 3);
 
-const DELTA = { PUSH: 1, LOAD: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3 };
+const DELTA = { PUSH: 1, LOAD: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0 };
 const delta = (ins) => (ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : DELTA[ins[0]] ?? 0);
 
 // Labeled asm -> instruction list with JMP/JMPF targets resolved to indices.
@@ -136,6 +141,11 @@ function compileFn(m, name, fn, handles) {
         }
         case "ASET": { h -= 3; const addr = m.i32.and(get(scratch(h)), m.i32.const(~3)), idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1)), v = get(scratch(h + 2));
           stmts.push(m.i32.store(4, 4, m.i32.add(addr, m.i32.mul(idx, m.i32.const(4))), v)); break; } // mem[addr + 4 + idx*4] = val
+        case "NEWARR": stmts.push(m.local.set(scratch(h), m.call("__newarr", [], I32))); h++; break;
+        case "ARRPUSH": { h -= 2; stmts.push(m.drop(m.call("__arrpush", [get(scratch(h)), get(scratch(h + 1))], I32))); break; } // arr.push(v)
+        case "ARRGET": { h -= 2; const backing = m.i32.load(8, 4, m.i32.and(get(scratch(h)), m.i32.const(~3))); const idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1));
+          stmts.push(m.local.set(scratch(h), m.i32.load(4, 4, m.i32.add(backing, m.i32.mul(idx, m.i32.const(4)))))); h++; break; } // arr[idx] = backing[idx]
+        case "ARRLEN": stmts.push(m.local.set(scratch(h - 1), m.i32.shl(m.i32.load(4, 4, m.i32.and(get(scratch(h - 1)), m.i32.const(~3))), m.i32.const(1)))); break; // tagInt(length)
         case "JMP": term = { kind: "jmp", target: ins[1] }; break;
         case "JMPF": h--; term = { kind: "jmpf", target: ins[1], cond: scratch(h), next: end }; break;
         case "RET": h--; result = get(scratch(h)); term = { kind: "ret" }; break;
@@ -167,14 +177,48 @@ function compileFn(m, name, fn, handles) {
   m.addFunction(name, binaryen.createType(new Array(argc).fill(I32)), I32, varTypes, body);
 }
 
+// Runtime helpers for growable arrays (added only when a program uses them).
+function addArrayRuntime(m) {
+  const I32 = binaryen.i32;
+  const g = (i) => m.local.get(i, I32);
+  const c = (n) => m.i32.const(n);
+  const ld = (off, p) => m.i32.load(off, 4, p);
+  const st = (off, p, v) => m.i32.store(off, 4, p, v);
+  const bump = () => m.i32.load(0, 4, c(BUMP_ADDR));
+  const setBump = (v) => m.i32.store(0, 4, c(BUMP_ADDR), v);
+
+  // __newarr() -> tagged array pointer.  locals: 0=backing, 1=header
+  m.addFunction("__newarr", binaryen.createType([]), I32, [I32, I32], m.block(null, [
+    m.local.set(0, bump()), st(0, g(0), c(INITCAP)), setBump(m.i32.add(g(0), c((INITCAP + 1) * 4))), // backing = [cap, ...slots]
+    m.local.set(1, bump()), st(0, g(1), c(ARRTAG)), st(4, g(1), c(0)), st(8, g(1), g(0)), setBump(m.i32.add(g(1), c(12))), // header = [ARRTAG, len=0, backing]
+    m.return(m.i32.or(g(1), c(1))),
+  ], binaryen.none));
+
+  // __arrpush(arr, v) -> 0.  locals: 0=arr,1=v (params); 2=addr,3=backing,4=len,5=cap,6=newBacking
+  m.addFunction("__arrpush", binaryen.createType([I32, I32]), I32, [I32, I32, I32, I32, I32], m.block(null, [
+    m.local.set(2, m.i32.and(g(0), c(~3))), m.local.set(3, ld(8, g(2))), m.local.set(4, ld(4, g(2))), m.local.set(5, ld(0, g(3))),
+    m.if(m.i32.ge_s(g(4), g(5)), m.block(null, [           // full -> grow (double capacity, memory.copy the elements)
+      m.local.set(6, bump()), st(0, g(6), m.i32.mul(g(5), c(2))), setBump(m.i32.add(g(6), m.i32.add(m.i32.mul(g(5), c(8)), c(4)))),
+      m.memory.copy(m.i32.add(g(6), c(4)), m.i32.add(g(3), c(4)), m.i32.mul(g(5), c(4))),
+      st(8, g(2), g(6)), m.local.set(3, g(6)),
+    ], binaryen.none)),
+    m.i32.store(0, 4, m.i32.add(g(3), m.i32.add(c(4), m.i32.mul(g(4), c(4)))), g(1)),  // backing[len] = v
+    st(4, g(2), m.i32.add(g(4), c(1))),                                                // length = len + 1
+    m.return(c(0)),
+  ], binaryen.none));
+}
+
 // program: { name: { argc?, nlocals, code } }. resources: import names a RES may
 // call. Returns wasm bytes, Asyncify-instrumented unless asyncify:false.
 export function compileToWasm(program, { entry = "main", resources = [], asyncify = true, handles = false } = {}) {
   const m = new binaryen.Module();
   m.setMemory(1, 1, "memory");
+  const usesArrays = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && (i[0] === "NEWARR" || i[0] === "ARRPUSH" || i[0] === "ARRGET" || i[0] === "ARRLEN")));
+  if (usesArrays) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the array runtime
   for (const res of resources) m.addFunctionImport(res, "env", res, binaryen.createType([]), binaryen.i32); // 0-arg i32 resources (subset)
   if (handles) m.addFunctionImport("__fetch", "env", "__fetch", binaryen.createType([binaryen.i32]), binaryen.i32); // §5 deref-miss suspends here
   for (const [name, fn] of Object.entries(program)) compileFn(m, name, fn, handles);
+  if (usesArrays) addArrayRuntime(m);
   m.addFunctionExport(entry, entry);
   if (!m.validate()) { const txt = m.emitText(); throw new Error("aot: module did not validate\n" + txt); }
   if (asyncify) m.runPasses(["asyncify"]); // unwind/rewind frames to/from linear memory
