@@ -42,6 +42,11 @@ export const RESIDENT_BASE = 8192; // receiver-local bitmap: has a given handle 
 // in the free tail of the ctrl region [24, HEAP_BASE), so it ships with a
 // migrated continuation. Up to (HEAP_BASE-24)/4 = 10 classes.
 const CLSREG_BASE = 24;
+// Exception state (the sentinel-return protocol): a pending-exception flag and
+// the thrown value, in the ctrl region [0, 8). A throw with no local handler
+// sets these and returns; each call site checks the flag and unwinds. Cleared
+// when a handler catches, so it is 0 at any suspend point (no mid-throw migrate).
+const EXC_FLAG = 0, EXC_VALUE = 4;
 
 // Growable arrays: a stable 3-word header [ARRTAG, length, backing] plus a
 // separate backing store [capacity, ...slots], so push() can grow the backing
@@ -127,8 +132,11 @@ function immediate(x) {
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
 }
 
-const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1 };
+const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1 };
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" ? -ins[2] : DELTA[ins[0]] ?? 0;
+// Ops that run user code and can therefore propagate an exception — so a block ends
+// after one, and the next checks the pending-exception flag.
+const CALL_OPS = new Set(["CALL", "CALLV", "CALLMETHOD", "CALLDYN", "CALLVS", "GETPROPA", "SETPROPA"]);
 
 // Labeled asm -> instruction list with JMP/JMPF targets resolved to indices.
 function resolveLabels(rawCode) {
@@ -138,12 +146,16 @@ function resolveLabels(rawCode) {
 }
 
 // Basic-block leaders: index 0, every branch target, and the instruction after
-// every branch or RET.
-function leaderSet(code) {
+// every branch or RET. With exceptions on, a catch target, the instruction after
+// a THROW, and the instruction after each call all start blocks too (a call ends
+// a block so the next can check the pending-exception flag).
+function leaderSet(code, hasExc) {
   const L = new Set([0]);
   code.forEach((ins, i) => {
     if (ins[0] === "JMP" || ins[0] === "JMPF") { L.add(ins[1]); if (i + 1 < code.length) L.add(i + 1); }
     else if (ins[0] === "RET" && i + 1 < code.length) L.add(i + 1);
+    else if (hasExc && ins[0] === "PUSHTRY") L.add(ins[1]);
+    else if (hasExc && (ins[0] === "THROW" || CALL_OPS.has(ins[0])) && i + 1 < code.length) L.add(i + 1);
   });
   return [...L].filter((x) => x >= 0 && x < code.length).sort((a, b) => a - b);
 }
@@ -154,34 +166,49 @@ const maxStack = (code) => { let h = 0, max = 0; for (const ins of code) { h += 
 // IR keeps the height consistent at every block boundary — but not always zero
 // (e.g. for-of keeps the result object on the stack across the done-check branch),
 // so a block indexes its scratch slots from its entry height, not from zero.
-// Also returns the max absolute height, for sizing the scratch locals.
+// Also returns the max absolute height (for sizing the scratch locals) and, for
+// exceptions, the lexically-active handler { catch, sp } of each block's throwing
+// terminator (a THROW or call) — by tracking PUSHTRY/POPTRY and seeding each
+// catch block (reached only via the exception edge) with the thrown value on top.
 function blockHeights(code, leaders) {
   const blockAt = new Map(leaders.map((s, i) => [s, i]));
   const endOf = (bi) => (bi + 1 < leaders.length ? leaders[bi + 1] : code.length);
   const entry = new Array(leaders.length).fill(undefined);
-  entry[0] = 0; let maxAbs = 0; const q = [0];
+  const entryHand = new Array(leaders.length).fill(undefined); // handler stack: [{ catch: ip, sp }]
+  const blockHandler = new Array(leaders.length).fill(null);
+  entry[0] = 0; entryHand[0] = []; let maxAbs = 0; const q = [0];
   while (q.length) {
     const bi = q.shift(); let h = entry[bi]; if (h > maxAbs) maxAbs = h;
-    for (let k = leaders[bi]; k < endOf(bi); k++) { h += delta(code[k]); if (h > maxAbs) maxAbs = h; }
+    const hand = entryHand[bi].slice();
+    for (let k = leaders[bi]; k < endOf(bi); k++) {
+      const ins = code[k];
+      if (ins[0] === "PUSHTRY") {
+        const cb = blockAt.get(ins[1]);
+        if (cb !== undefined && entry[cb] === undefined) { entry[cb] = h + 1; entryHand[cb] = hand.slice(); q.push(cb); } // catch: thrown value on top, enclosing handlers
+        hand.push({ catch: ins[1], sp: h });
+      } else if (ins[0] === "POPTRY") hand.pop();
+      else if (ins[0] === "THROW" || CALL_OPS.has(ins[0])) blockHandler[bi] = hand.length ? hand[hand.length - 1] : null;
+      h += delta(ins); if (h > maxAbs) maxAbs = h;
+    }
     const last = code[endOf(bi) - 1], succ = [];
     if (last[0] === "JMP") succ.push(blockAt.get(last[1]));
     else if (last[0] === "JMPF") { succ.push(blockAt.get(last[1])); succ.push(blockAt.get(endOf(bi))); }
-    else if (last[0] !== "RET") succ.push(blockAt.get(endOf(bi))); // fall-through
+    else if (last[0] !== "RET" && last[0] !== "THROW") succ.push(blockAt.get(endOf(bi))); // fall-through
     for (const s of succ) {
       if (s === undefined) continue;
-      if (entry[s] === undefined) { entry[s] = h; q.push(s); }
+      if (entry[s] === undefined) { entry[s] = h; entryHand[s] = hand.slice(); q.push(s); }
       else if (entry[s] !== h) throw new Error(`aot: inconsistent stack height entering block @${leaders[s]} (${entry[s]} vs ${h})`);
     }
   }
-  return { entryH: entry, maxAbs };
+  return { entryH: entry, maxAbs, blockHandler };
 }
 
-function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds) {
+function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, exceptions) {
   const I32 = binaryen.i32;
   const argc = fn.argc || 0, nl = fn.nlocals;
   const code = resolveLabels(fn.code);
-  const leaders = leaderSet(code);
-  const { entryH, maxAbs } = blockHeights(code, leaders);
+  const leaders = leaderSet(code, exceptions);
+  const { entryH, maxAbs, blockHandler } = blockHeights(code, leaders);
   const maxH = maxAbs + 1;           // +1 scratch headroom for ALLOC / build temps
   // Calling convention: WASM local 0 is the closure environment — the receiver of
   // a CALLV, the implicit (unused) arg of a direct CALL, and where LOADENV /
@@ -207,12 +234,18 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds) {
     out.push(m.local.set(slot, m.i32.or(get(slot), m.i32.const(1))));
     return out;
   };
+  // Exception protocol helpers.
+  const excFlag = () => m.i32.load(0, 4, m.i32.const(EXC_FLAG));                                // pending?
+  const raise = (valSlot) => [m.i32.store(0, 4, m.i32.const(EXC_VALUE), get(valSlot)), m.i32.store(0, 4, m.i32.const(EXC_FLAG), m.i32.const(1))]; // set EXC_VALUE + flag (propagate)
+  const propagate = () => m.return(m.i32.const(0));                                             // unwind: return a dummy; the caller checks the flag
+  const catchInto = (sp) => m.block(null, [m.local.set(scratch(sp), m.i32.load(0, 4, m.i32.const(EXC_VALUE))), m.i32.store(0, 4, m.i32.const(EXC_FLAG), m.i32.const(0))], binaryen.none); // a caught propagated exception: value onto the operand stack, clear the flag
 
   const r = new binaryen.Relooper(m);
   const refOf = new Map();           // leader index -> Relooper block
   const blocks = [];                 // { ref, term }
 
   for (let bi = 0; bi < leaders.length; bi++) {
+    if (entryH[bi] === undefined) continue; // unreachable (e.g. a try body that always returns/throws leaves a dead fall-through)
     const start = leaders[bi];
     const end = bi + 1 < leaders.length ? leaders[bi + 1] : code.length;
     const stmts = [];
@@ -397,20 +430,39 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds) {
         case "ARRGET": { h -= 2; const backing = m.i32.load(8, 4, m.i32.and(get(scratch(h)), m.i32.const(~3))); const idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1));
           stmts.push(m.local.set(scratch(h), m.i32.load(4, 4, m.i32.add(backing, m.i32.mul(idx, m.i32.const(4)))))); h++; break; } // arr[idx] = backing[idx]
         case "ARRLEN": stmts.push(m.local.set(scratch(h - 1), m.i32.shl(m.i32.load(4, 4, m.i32.and(get(scratch(h - 1)), m.i32.const(~3))), m.i32.const(1)))); break; // tagInt(length)
+        case "NEG": stmts.push(m.local.set(scratch(h - 1), m.i32.sub(m.i32.const(0), get(scratch(h - 1))))); break; // -(n<<1) = (-n)<<1
+        case "PUSHTRY": case "POPTRY": break;  // handler scope is resolved at compile time (blockHeights); no runtime code
+        case "THROW": h--; term = { kind: "throw", handler: blockHandler[bi], value: scratch(h) }; break;
         case "JMP": term = { kind: "jmp", target: ins[1] }; break;
         case "JMPF": h--; term = { kind: "jmpf", target: ins[1], cond: scratch(h), next: end }; break;
         case "RET": h--; result = get(scratch(h)); term = { kind: "ret" }; break;
         default: throw new Error("aot: unsupported opcode " + ins[0]);
       }
     }
-    const body = term.kind === "ret" ? m.block(null, [...stmts, m.return(result)], binaryen.none) : m.block(null, stmts, binaryen.none);
-    const ref = r.addBlock(body);
+    // A call ends a block (under exceptions): the next block checks the flag.
+    if (exceptions && CALL_OPS.has(code[end - 1][0])) term = { kind: "callcheck", handler: blockHandler[bi], next: end };
+    // Body: a RET returns its value; a no-handler THROW/exception unwinds (set the
+    // flag / return); everything else falls through to its branches.
+    let tail = [];
+    if (term.kind === "ret") tail = [m.return(result)];
+    else if (term.kind === "throw" && !term.handler) tail = [...raise(term.value), propagate()];
+    else if (term.kind === "callcheck" && !term.handler) tail = [m.if(excFlag(), propagate())];
+    const ref = r.addBlock(m.block(null, [...stmts, ...tail], binaryen.none));
     refOf.set(start, ref);
     blocks.push({ ref, term });
   }
 
   for (const { ref, term } of blocks) {
     if (term.kind === "ret") continue;
+    if (term.kind === "throw") {                                                  // a local handler: the value is already at scratch(sp); just branch to the catch
+      if (term.handler) r.addBranch(ref, refOf.get(term.handler.catch), 0, 0);    // no handler: the body already raised + returned
+      continue;
+    }
+    if (term.kind === "callcheck") {
+      if (term.handler) r.addBranch(ref, refOf.get(term.handler.catch), excFlag(), catchInto(term.handler.sp)); // exception -> catch (value onto the stack, clear flag)
+      r.addBranch(ref, refOf.get(term.next), 0, 0);                               // else (or no handler: body returned on exception) fall through
+      continue;
+    }
     if (term.kind === "jmp") { r.addBranch(ref, refOf.get(term.target), 0, 0); continue; }
     if (term.kind === "jmpf") {
       r.addBranch(ref, refOf.get(term.target), falsy(term.cond), 0);           // JMPF jumps when the condition is falsy (JS truthiness)
@@ -731,6 +783,7 @@ function compileGenBody(m, bodyName, fn, keyIds, fnIndex) {
         case "STORE": h--; stmts.push(m.local.set(loc(ins[1]), get(scratch(h)))); break;
         case "POP": h--; break;
         case "DUP": stmts.push(m.local.set(scratch(h), get(scratch(h - 1)))); h++; break;
+        case "NEG": stmts.push(m.local.set(scratch(h - 1), m.i32.sub(m.i32.const(0), get(scratch(h - 1))))); break;
         case "ITER": case "AWAIT": break;     // no-ops (a generator is its own iterator; await of a plain value is identity)
         case "BIN": {
           h -= 2; const a = get(scratch(h)), b = get(scratch(h + 1)), op = ins[1]; let e;
@@ -830,6 +883,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const gens = [...new Set(Object.values(program).flatMap((fn) => fn.code.filter((i) => Array.isArray(i) && i[0] === "MAKECLOSURE" && i[3]).map((i) => i[1])))];
   const usesGenerators = gens.length > 0 || uses("GENNEXT", "YIELD"); // gen runtime + {value, done} objects
   const usesAccessors = uses("GETPROPA", "SETPROPA");      // getters/setters need the accessor runtime
+  const usesExceptions = uses("THROW", "PUSHTRY");         // try/catch/throw: sentinel-return unwinding
   const usesConstArray = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "PUSH" && Array.isArray(i[1])));
   const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN") || usesConstArray; // __class__ name lists build arrays
   const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA") || usesClasses || usesGenerators; // instances, method dispatch, {value,done} results
@@ -857,7 +911,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const usesClosures = fnNames.length > 0 && uses("MAKECLOSURE", "CALLV", "CALLVS", "CALLDYN", "CALLMETHOD", "GETPROPA", "SETPROPA"); // all call through the function table
   for (const [name, fn] of Object.entries(program)) {
     if (gens.includes(name)) { emitGenTrampoline(m, name, fn, fnIndex[name + "$gen"]); compileGenBody(m, name + "$gen", fn, keyIds, fnIndex); } // generator: trampoline + dispatch body
-    else compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings, clsIds);
+    else compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings, clsIds, usesExceptions);
   }
   if (usesArrays) addArrayRuntime(m);
   if (usesObjects) addObjectRuntime(m);
