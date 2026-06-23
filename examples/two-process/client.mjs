@@ -1,8 +1,8 @@
 // Stackmix — two-process demo, CLIENT tier + orchestrator (parent process).
 //
-//   node stackmix-2p-client.mjs
+//   node examples/two-process/client.mjs
 //
-// Spawns stackmix-2p-server.mjs as a child and oscillates one program between the
+// Spawns examples/two-process/server.mjs as a child and oscillates one program between the
 // two REAL OS processes over a pipe. Unlike the single-process spike, the two
 // tiers share no memory: a §5 handle owned by the server genuinely cannot be
 // read here, and the only way the big dataset could reach this process is if it

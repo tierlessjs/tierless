@@ -1,12 +1,12 @@
 // Stackmix — shared wasm runtime core. Used by the single-process demo
-// (stackmix-wasm.mjs) and the two-process demo (stackmix-wasm-2p-*.mjs) so the
-// mechanism can't drift. See stackmix.wat for the memory map and the design-doc
-// mapping; see stackmix-compile.mjs for the TypeScript -> bytecode frontend.
+// (examples/wasm/index.mjs) and the two-process demo (examples/wasm-two-process) so the
+// mechanism can't drift. See interpreter.wat for the memory map and the design-doc
+// mapping; see compile.mjs for the TypeScript -> bytecode frontend.
 
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-// --- memory map (must match stackmix.wat) --------------------------------------
+// --- memory map (must match interpreter.wat) --------------------------------------
 export const IP = 0, SP = 4, SMALL_BUMP = 8, RESULT = 12, FP = 16;
 export const OPSTACK_BASE = 512;
 export const BYTECODE_BASE = 4096;
@@ -49,7 +49,7 @@ export function assemble(asm) {
   return buf;
 }
 
-// --- wasm module (auto-build from stackmix.wat if needed) -----------------------
+// --- wasm module (auto-build from interpreter.wat if needed) -----------------------
 const WASM_PATH = fileURLToPath(new URL("./interpreter.wasm", import.meta.url));
 let MODULE = null;
 async function getModule() {

@@ -5,10 +5,18 @@ authored as ordinary TypeScript, that runs across a server tier and a client
 tier — the runtime migrates the live computation to wherever the next resource
 lives, instead of you splitting it by hand.
 
+Stackmix isn't published to npm yet, so link it from a local checkout first:
+
 ```bash
-npm install
+# in a clone of the framework (bfulton/stackmix):
+npm install && npm link
+
+# then, in this project:
+npm link stackmix
 npm start
 ```
+
+Once Stackmix is published, this is just `npm install && npm start`.
 
 ## Files
 
@@ -24,6 +32,3 @@ two real processes (or two machines), replace the in-process oscillator with a
 socket that carries the serialized continuation between them — the continuation is
 plain data you own. See the [Stackmix examples](https://github.com/bfulton/stackmix/tree/main/examples)
 for the cross-process and benchmark versions.
-
-> During local development, before Stackmix is published to npm, link the
-> framework into this project with `npm link stackmix` from a checkout.

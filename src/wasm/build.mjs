@@ -1,4 +1,4 @@
-// Compile stackmix.wat -> stackmix.wasm using wabt. The .wat is the source of truth;
+// Compile interpreter.wat -> interpreter.wasm using wabt. The .wat is the source of truth;
 // the .wasm is a build artifact.
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -13,4 +13,4 @@ const { buffer } = mod.toBinary({ write_debug_names: true });
 mod.destroy();
 
 writeFileSync(out, Buffer.from(buffer));
-console.log(`built stackmix.wasm (${buffer.length} bytes)`);
+console.log(`built interpreter.wasm (${buffer.length} bytes)`);

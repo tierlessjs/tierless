@@ -1,6 +1,6 @@
 // Capstone — CLIENT tier + orchestrator (parent process).
 //
-//   node stackmix-app-2p-client.mjs
+//   node examples/hn-thread/client.mjs
 //
 // Proves the whole stack composes: a program authored in ordinary TypeScript is
 // compiled by the frontend, cold-starts on the client, and SUSPENDS/RESUMES

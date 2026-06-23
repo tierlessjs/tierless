@@ -1,6 +1,6 @@
 // Stackmix — migrate-vs-fetch, the §6 cost model with real measured sizes.
 //
-//   node stackmix-policy.mjs
+//   node examples/policy/index.mjs
 //
 // §6: "Always migrate to the resource is the simple rule, but it's wrong when
 // the continuation is large and the result is small — sometimes you'd rather

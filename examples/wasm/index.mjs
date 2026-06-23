@@ -1,14 +1,14 @@
 // Stackmix on real WebAssembly, single process (two instances of one module).
 //
-//   node stackmix-wasm.mjs       (auto-builds stackmix.wasm; compiles app.ts)
+//   node examples/wasm/index.mjs       (auto-builds interpreter.wasm; compiles app.ts)
 //
 // The program is authored as ordinary TypeScript in app.ts, compiled to Stackmix
-// bytecode by the reference frontend, and run on the compiled stackmix.wasm. The
+// bytecode by the reference frontend, and run on the compiled interpreter.wasm. The
 // two tiers are two instances of the SAME module wired with DIFFERENT imports
 // (the import table is the capability boundary). Migration copies the live
 // region of one instance's linear memory into the other's — the continuation
 // IS a slice of linear memory. For a real OS-process boundary, see
-// stackmix-wasm-2p-client.mjs.
+// examples/wasm-two-process/client.mjs.
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -52,7 +52,7 @@ const resName = (id) => Object.keys(RESOURCES).find((k) => RESOURCES[k] === id);
 
 console.log("Stackmix: TypeScript -> Stackmix IR -> wasm, continuation = a slice of linear memory\n");
 console.log(`Authored: app.ts (compiled to ${asm.filter(Array.isArray).length} IR instrs)`);
-console.log(`Module:   stackmix.wasm (${wasmByteLength()} bytes), one module, two instances`);
+console.log(`Module:   interpreter.wasm (${wasmByteLength()} bytes), one module, two instances`);
 console.log(`Program:  render(threshold=${THRESHOLD})  cold-started on the CLIENT instance`);
 console.log(`Dataset:  ${N.toLocaleString()} ints in the server's HEAP_BIG = ${fmt(DATASET_BYTES)}\n`);
 

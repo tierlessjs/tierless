@@ -1,6 +1,6 @@
 // Stackmix — HN benchmark scale curve.
 //
-//   node bench-sweep.mjs        (writes bench-sweep.csv)
+//   node bench/sweep.mjs        (writes bench-sweep.csv)
 //
 // Turns the single 2x2 data point into curves: as the thread grows, the naive
 // REST client's round trips grow O(nodes), a hand-tuned parallel client's grow

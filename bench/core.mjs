@@ -1,5 +1,5 @@
-// Stackmix — shared HN benchmark core. Used by bench-hn.mjs (the 2x2 single run)
-// and bench-sweep.mjs (the scale curve) so the mechanism can't drift.
+// Stackmix — shared HN benchmark core. Used by bench/hn.mjs (the 2x2 single run)
+// and bench/sweep.mjs (the scale curve) so the mechanism can't drift.
 //
 // Two IR traversals (sequential per-item, concurrent per-level), a synthetic
 // HN thread generator, and an orchestrator that runs a traversal under either

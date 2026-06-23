@@ -1,6 +1,6 @@
 // Cross-process fetch demo — CLIENT tier + orchestrator (parent process).
 //
-//   node stackmix-fetch-2p-client.mjs
+//   node examples/handle-fetch/client.mjs
 //
 // The capstone: a continuation migrates between two real OS processes, and when
 // the client dereferences a handle to data that stayed on the server, the

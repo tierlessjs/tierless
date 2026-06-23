@@ -5,9 +5,9 @@
 // stays tier-local. Here the two tiers are isolated runtime instances in one
 // process (the doc explicitly allows "two WASM instances"); every migration
 // still goes through the real wire format, so the measured bytes are genuine.
-// For a true OS-process boundary, see stackmix-2p-client.mjs.
+// For a true OS-process boundary, see examples/two-process/client.mjs.
 //
-//   node stackmix-spike.mjs
+//   node examples/spike/index.mjs
 
 import {
   Tier, Suspend, serializeContinuation, deserializeContinuation, contBytes,

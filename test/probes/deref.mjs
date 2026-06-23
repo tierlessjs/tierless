@@ -9,7 +9,7 @@
 // asserts the op suspends, resumes, and computes the right answer with its stack intact.
 //
 // The transport that actually fetches a remote handle isn't wired yet (it's modeled in
-// stackmix-policy.mjs), but the re-runnable invariant is real and load-bearing for it — so
+// examples/policy/index.mjs), but the re-runnable invariant is real and load-bearing for it — so
 // it's tested here directly rather than left to a future integration.
 
 import { createRuntime } from "#stackmix";

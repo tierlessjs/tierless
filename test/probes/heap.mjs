@@ -54,7 +54,7 @@ console.log(`      other tier has a handle it cannot traverse (cross-process der
 import { encodeGraph, decodeGraph, isHandle } from "#stackmix/runtime/heap.mjs";
 const roundtrip = (values, opts) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph(values, opts))));
 
-console.log(`\n--- with the graph codec (stackmix-heap.mjs) ---\n`);
+console.log(`\n--- with the graph codec (heap.mjs) ---\n`);
 let pass = true;
 const check = (name, cond) => { console.log(`   ${cond ? "PASS" : "FAIL"}  ${name}`); pass &&= cond; };
 

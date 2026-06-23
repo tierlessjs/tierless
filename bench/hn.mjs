@@ -1,7 +1,7 @@
 // Stackmix — HN benchmark, single run (the concurrency x placement matrix).
 //
-//   node bench-hn.mjs            (modeled latency, instant)
-//   node bench-hn.mjs --real     (inject real RTT sleeps -> genuine wall-clock)
+//   node bench/hn.mjs            (modeled latency, instant)
+//   node bench/hn.mjs --real     (inject real RTT sleeps -> genuine wall-clock)
 //
 // The Hacker News thread is the canonical client-side waterfall: to load a
 // thread you fetch the story, then each comment, then THEIR children — one

@@ -1,8 +1,8 @@
 // Stackmix — shared core (IR, interpreter, wire format)
 //
-// Used by both the single-process spike (stackmix-spike.mjs) and the two-process
-// version (stackmix-2p-client.mjs / stackmix-2p-server.mjs) so the mechanism can't
-// drift between them. See stackmix-spike.mjs's header for the design-doc mapping.
+// Used by both the single-process spike (examples/spike/index.mjs) and the two-process
+// version (examples/two-process/client.mjs / examples/two-process/server.mjs) so the mechanism can't
+// drift between them. See examples/spike/index.mjs's header for the design-doc mapping.
 
 // ---------------------------------------------------------------------------
 // IR  (WASM-shaped: a stack machine with explicit, numbered locals)
@@ -15,7 +15,7 @@
 // (compiler/tsc) emits the same shape.
 
 import { encodeGraph, decodeGraph, GLOBALS, CTORS, isHandle } from "./heap.mjs";
-export { isHandle }; // one source of truth (stackmix-heap.mjs); re-exported here for callers that import it from core
+export { isHandle }; // one source of truth (heap.mjs); re-exported here for callers that import it from core
 
 
 // ---------------------------------------------------------------------------
@@ -37,12 +37,12 @@ export class Tier {
 }
 
 // ---------------------------------------------------------------------------
-// Wire format — identity-preserving, cycle-safe graph encoding (stackmix-heap.mjs).
+// Wire format — identity-preserving, cycle-safe graph encoding (heap.mjs).
 // All values reachable from the continuation are encoded into one shared table,
 // so object identity and cycles survive the round trip; a subgraph larger than
 // HANDLE_THRESHOLD becomes a §5 handle into the source tier's heap (tier-local,
-// not shipped). See probe-heap.mjs for the failure modes this replaces, and
-// stackmix-fetch.mjs for dereferencing a handle on the other tier.
+// not shipped). See test/probes/heap.mjs for the failure modes this replaces, and
+// fetch.mjs for dereferencing a handle on the other tier.
 // ---------------------------------------------------------------------------
 
 export function serializeContinuation(cont, sourceTier) {

@@ -1,6 +1,6 @@
 // Stackmix wasm, two-process demo — CLIENT tier + orchestrator (parent process).
 //
-//   node stackmix-wasm-2p-client.mjs        (or: npm run wasm:2p)
+//   node examples/wasm-two-process/client.mjs        (or: npm run wasm:2p)
 //
 // The full stack: app.ts -> Stackmix IR -> wasm, oscillating between two REAL OS
 // processes, where the continuation crossing the pipe is an actual slice of
@@ -85,7 +85,7 @@ function report(value) {
 
   console.log("\nStackmix: app.ts -> wasm, continuation slice crossing a pipe between two OS processes\n");
   console.log(`Authored: app.ts (compiled to ${asm.filter(Array.isArray).length} IR instrs)`);
-  console.log(`Module:   stackmix.wasm (${wasmByteLength()} bytes), one module, one instance per process`);
+  console.log(`Module:   interpreter.wasm (${wasmByteLength()} bytes), one module, one instance per process`);
   console.log(`Program:  render(threshold=${THRESHOLD})  cold-started on the CLIENT process`);
   console.log(`Dataset:  ${meta.n.toLocaleString()} ints, living ONLY in the server process = ${fmt(datasetBytes)}\n`);
 

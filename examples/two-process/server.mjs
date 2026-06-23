@@ -1,6 +1,6 @@
 // Stackmix — two-process demo, SERVER tier (child process).
 //
-// Spawned by stackmix-2p-client.mjs. Owns db.query and the large dataset. Reads
+// Spawned by examples/two-process/client.mjs. Owns db.query and the large dataset. Reads
 // continuation frames from stdin, resumes them on the server tier, and writes
 // the result (or the next continuation) back on stdout. All logging goes to
 // stderr so it can never corrupt the binary frame stream on stdout.

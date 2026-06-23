@@ -1,7 +1,7 @@
 // Stackmix — RealWorld/Conduit benchmark: over-fetch vs server-side assembly.
 //
-//   node bench-conduit.mjs        (modeled latency, instant)
-//   node bench-conduit.mjs --real (inject real RTT sleeps -> genuine wall-clock)
+//   node bench/conduit.mjs        (modeled latency, instant)
+//   node bench/conduit.mjs --real (inject real RTT sleeps -> genuine wall-clock)
 //
 // A different shape than the HN waterfall. Conduit's home feed is assembled from
 // several sources, and the realistic ask is a filter the public API doesn't

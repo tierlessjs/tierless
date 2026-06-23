@@ -1,7 +1,7 @@
 // Stackmix — identity-preserving, cycle-safe graph codec for continuation state.
 //
 // The naive wire format (per-value JSON) loses object identity (shared refs
-// become separate copies) and throws on cycles — see probe-heap.mjs. A real
+// become separate copies) and throws on cycles — see test/probes/heap.mjs. A real
 // continuation references an object graph with sharing and cycles, so the wire
 // format must encode the GRAPH, not each value independently.
 //
