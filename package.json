@@ -3,20 +3,24 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Stackmix prototype — tierless continuation migration (design doc spike)",
+  "description": "Tierless continuation migration — one program that runs across client and server, with the runtime moving live execution between tiers.",
+  "imports": {
+    "#stackmix": "./src/index.mjs",
+    "#stackmix/*": "./src/*"
+  },
   "scripts": {
-    "test": "node test.mjs",
-    "spike": "node stackmix-spike.mjs",
-    "2p": "node stackmix-2p-client.mjs",
-    "build:wasm": "node build-wasm.mjs",
-    "wasm": "node build-wasm.mjs && node stackmix-wasm.mjs",
-    "wasm:2p": "node build-wasm.mjs && node stackmix-wasm-2p-client.mjs",
-    "policy": "node build-wasm.mjs && node stackmix-policy.mjs",
-    "bench:hn": "node bench-hn.mjs",
-    "bench:sweep": "node bench-sweep.mjs",
-    "bench:conduit": "node bench-conduit.mjs",
-    "fetch:2p": "node stackmix-fetch-2p-client.mjs",
-    "app:2p": "node stackmix-app-2p-client.mjs"
+    "test": "node test/run.mjs",
+    "build:wasm": "node src/wasm/build.mjs",
+    "spike": "node examples/spike/index.mjs",
+    "2p": "node examples/two-process/client.mjs",
+    "wasm": "node src/wasm/build.mjs && node examples/wasm/index.mjs",
+    "wasm:2p": "node src/wasm/build.mjs && node examples/wasm-two-process/client.mjs",
+    "policy": "node src/wasm/build.mjs && node examples/policy/index.mjs",
+    "bench:hn": "node bench/hn.mjs",
+    "bench:sweep": "node bench/sweep.mjs",
+    "bench:conduit": "node bench/conduit.mjs",
+    "fetch:2p": "node examples/handle-fetch/client.mjs",
+    "app:2p": "node examples/hn-thread/client.mjs"
   },
   "dependencies": {
     "typescript": "^5.9.3",
