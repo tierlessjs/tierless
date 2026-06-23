@@ -525,13 +525,40 @@ function compileInto(sf, checker, { resources = [], entry = null, prefix = "", o
 
     function optChain(node) {                                   // `?.` chain with short-circuit to the chain end
       const end = label("oc");
+      const nullChk = () => { emit("DUP"); emit("ISNULLISH"); const cont = label("occ"); emit("JMPF", cont); emit("POP"); emit("PUSH", undefined); emit("JMP", end); mark(cont); };
       const walk = (n) => {
         const base = n.expression;
+        if (ts.isCallExpression(n)) {
+          if (ts.isPropertyAccessExpression(base)) {
+            // obj?.m(a) / obj.m?.(a): emit receiver on stack, dispatch as CALLMETHOD
+            // so host methods (arr?.map, str?.trim, map?.get, ...) work correctly.
+            if (isAccess(base.expression)) walk(base.expression); else expr(base.expression);
+            if (base.questionDotToken) nullChk();     // short-circuit if receiver is null
+            if (n.questionDotToken) { emit("DUP"); emit(getOp(base.name.text), base.name.text); emit("ISNULLISH"); const cont = label("occ"); emit("JMPF", cont); emit("POP"); emit("PUSH", undefined); emit("JMP", end); mark(cont); } // short-circuit if method is null
+            if (n.arguments.some((a) => ts.isSpreadElement(a))) { spreadArgs(n.arguments); emit("CALLMETHODS", base.name.text); }
+            else { n.arguments.forEach((a) => expr(a)); emit("CALLMETHOD", base.name.text, n.arguments.length); }
+            return;
+          }
+          if (ts.isElementAccessExpression(base)) {
+            // obj?.[k](a): emit receiver + key on stack, dispatch as CALLDYN
+            if (isAccess(base.expression)) walk(base.expression); else expr(base.expression);
+            if (base.questionDotToken) nullChk();
+            expr(base.argumentExpression);
+            if (n.arguments.some((a) => ts.isSpreadElement(a))) { spreadArgs(n.arguments); emit("CALLDYNS"); }
+            else { n.arguments.forEach((a) => expr(a)); emit("CALLDYN", n.arguments.length); }
+            return;
+          }
+          // fn?.() — closure or bare reference on the stack
+          if (isAccess(base)) walk(base); else expr(base);
+          if (n.questionDotToken) nullChk();
+          if (n.arguments.some((a) => ts.isSpreadElement(a))) { spreadArgs(n.arguments); emit("CALLVS"); }
+          else { n.arguments.forEach((a) => expr(a)); emit("CALLV", n.arguments.length); }
+          return;
+        }
         if (isAccess(base)) walk(base); else expr(base);
-        if (n.questionDotToken) { emit("DUP"); emit("ISNULLISH"); const cont = label("occ"); emit("JMPF", cont); emit("POP"); emit("PUSH", undefined); emit("JMP", end); mark(cont); }
+        if (n.questionDotToken) nullChk();
         if (ts.isPropertyAccessExpression(n)) emit(getOp(n.name.text), n.name.text);
         else if (ts.isElementAccessExpression(n)) { expr(n.argumentExpression); emit("INDEX"); }
-        else if (ts.isCallExpression(n)) { n.arguments.forEach((a) => expr(a)); emit("CALLV", n.arguments.length); }
       };
       walk(node); mark(end); return true;
     }
@@ -779,7 +806,7 @@ function compileInto(sf, checker, { resources = [], entry = null, prefix = "", o
         }
         if (ts.isIdentifier(callee.expression) && bindingOf.get(callee.expression) == null && GLOBAL_OBJS.has(callee.expression.text)) { emit("GLOBAL", callee.expression.text); hostMethod(m, node.arguments); return true; } // Math.max / Object.keys / JSON.stringify / Array.isArray ...
         if ((m === "next" || m === "return" || m === "throw") && node.arguments.length <= 1) { expr(callee.expression); node.arguments[0] ? expr(node.arguments[0]) : emit("PUSH", undefined); emit(m === "next" ? "GENNEXT" : m === "return" ? "GENRET" : "GENTHROW"); return true; } // it.next/return/throw(v)
-        if (m === "push") { expr(callee.expression); expr(node.arguments[0]); emit("ARRPUSH"); return false; }
+        if (m === "push" && node.arguments.length === 1 && !ts.isSpreadElement(node.arguments[0])) { expr(callee.expression); expr(node.arguments[0]); emit("ARRPUSH"); return false; } // fast path for the common single-arg push; multi-arg / spread falls through to CALLMETHOD
         if (HOF.has(m)) return hof(callee.expression, m, node.arguments);
         if (PLAIN_METHODS.has(m)) { expr(callee.expression); hostMethod(m, node.arguments); return true; }
         expr(callee.expression); // obj.m(...): CALLMETHOD dispatches user-closure method vs host method (Map/Set/...) at runtime
@@ -887,8 +914,9 @@ function compileInto(sf, checker, { resources = [], entry = null, prefix = "", o
         expr(node.expression); emit("KEYS"); emit("STORE", iter); emit("PUSH", 0); emit("STORE", idx);
         const loop = label("loop"), step = label("step"), end = label("end"); mark(loop);
         emit("LOAD", idx); emit("LOAD", iter); emit("GETPROP", "length"); emit("BIN", "<"); emit("JMPF", end);
-        const decl = node.initializer.declarations[0];
-        emit("LOAD", iter); emit("LOAD", idx); emit("INDEX"); bindStackTop(decl.name, true);
+        emit("LOAD", iter); emit("LOAD", idx); emit("INDEX");
+        if (ts.isVariableDeclarationList(node.initializer)) { const decl = node.initializer.declarations[0]; if (ts.isIdentifier(decl.name)) bindStackTop(decl.name, true); else { const t = tempSlot(); emit("STORE", t); bindPattern(decl.name, t); } }
+        else { const kt = tempSlot(); emit("STORE", kt); assignTo(node.initializer, () => emit("LOAD", kt)); } // for (x in o): x already declared
         cf.push({ loop: true, brk: end, cont: step, name: lbl }); stmt(node.statement); cf.pop();
         mark(step); emit("LOAD", idx); emit("PUSH", 1); emit("BIN", "+"); emit("STORE", idx); emit("JMP", loop); mark(end); return;
       }
@@ -900,8 +928,8 @@ function compileInto(sf, checker, { resources = [], entry = null, prefix = "", o
         emit("DUP"); emit("GETPROP", "done"); emit("JMPF", body); emit("POP"); emit("JMP", end); // done -> drop result, exit
         mark(body); emit("GETPROP", "value");                     // stack: [value]
         if (node.awaitModifier) emit("AWAIT");                    // `for await`: await each value (identity for a plain value)
-        const decl = node.initializer.declarations[0];
-        if (ts.isIdentifier(decl.name)) bindStackTop(decl.name, true); else { const t = tempSlot(); emit("STORE", t); bindPattern(decl.name, t); }
+        if (ts.isVariableDeclarationList(node.initializer)) { const decl = node.initializer.declarations[0]; if (ts.isIdentifier(decl.name)) bindStackTop(decl.name, true); else { const t = tempSlot(); emit("STORE", t); bindPattern(decl.name, t); } }
+        else { const vt = tempSlot(); emit("STORE", vt); assignTo(node.initializer, () => emit("LOAD", vt)); } // for (x of iter): x already declared
         cf.push({ loop: true, brk: end, cont: step, name: lbl }); stmt(node.statement); cf.pop();
         mark(step); emit("JMP", loop); mark(end); return;
       }
