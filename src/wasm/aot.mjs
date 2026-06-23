@@ -44,6 +44,26 @@ export const RESIDENT_BASE = 8192; // receiver-local bitmap: has a given handle 
 // (via memory.copy) without moving the header — the array's identity is stable.
 const ARRTAG = -1, INITCAP = 4;
 
+// Host-side array helpers: build/read a growable array in an instance's linear
+// memory (so resources can pass number[] across the boundary). Layout matches
+// the array runtime: header [ARRTAG, length, backing], backing [cap, ...slots].
+export function hostArray(memory, values) {
+  const dv = new DataView(memory.buffer);
+  const backing = dv.getInt32(BUMP_ADDR, true), cap = Math.max(values.length, 1);
+  dv.setInt32(backing, cap, true);
+  for (let i = 0; i < values.length; i++) dv.setInt32(backing + 4 + i * 4, values[i] << 1, true); // tagged ints
+  const header = backing + (cap + 1) * 4;
+  dv.setInt32(header, -1, true); dv.setInt32(header + 4, values.length, true); dv.setInt32(header + 8, backing, true);
+  dv.setInt32(BUMP_ADDR, header + 12, true);
+  return header | 1; // tagged array pointer
+}
+export function hostArrayValues(memory, taggedPtr) {
+  const dv = new DataView(memory.buffer), addr = taggedPtr & ~3;
+  const len = dv.getInt32(addr + 4, true), backing = dv.getInt32(addr + 8, true), out = [];
+  for (let i = 0; i < len; i++) out.push(dv.getInt32(backing + 4 + i * 4, true) >> 1); // untag ints
+  return out;
+}
+
 // Tagged-value helpers (also used to read/write values across the host boundary).
 // Pointers use two low bits: bit 0 = pointer, bit 1 = remote (a §5 handle whose
 // object stayed on the owning tier). Heap addresses are 4-aligned, so both bits
@@ -215,7 +235,9 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   m.setMemory(1, 1, "memory");
   const usesArrays = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && (i[0] === "NEWARR" || i[0] === "ARRPUSH" || i[0] === "ARRGET" || i[0] === "ARRLEN")));
   if (usesArrays) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the array runtime
-  for (const res of resources) m.addFunctionImport(res, "env", res, binaryen.createType([]), binaryen.i32); // 0-arg i32 resources (subset)
+  const arity = {}; // each resource is imported with the arity it is called with
+  for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && i[0] === "RES") arity[i[1]] = i[2] || 0;
+  for (const res of resources) m.addFunctionImport(res, "env", res, binaryen.createType(new Array(arity[res] || 0).fill(binaryen.i32)), binaryen.i32);
   if (handles) m.addFunctionImport("__fetch", "env", "__fetch", binaryen.createType([binaryen.i32]), binaryen.i32); // §5 deref-miss suspends here
   for (const [name, fn] of Object.entries(program)) compileFn(m, name, fn, handles);
   if (usesArrays) addArrayRuntime(m);
