@@ -1,3 +1,8 @@
 node_modules/
-stackmix.wasm
+
+# build artifact (compiled from src/wasm/interpreter.wat)
+src/wasm/interpreter.wasm
+
+# bench output
 bench-sweep.csv
+*.tsbuildinfo
