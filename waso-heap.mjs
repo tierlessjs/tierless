@@ -41,6 +41,8 @@ function approxExceeds(root, limit) {
     seen.add(x);
     total += 16; if (total > limit) return true;
     if (Array.isArray(x)) { for (const e of x) stack.push(e); }
+    else if (x instanceof Map) { total += 16 * x.size; if (total > limit) return true; for (const [k, v] of x) { stack.push(k); stack.push(v); } } // entries aren't enumerable own keys — traverse them or a huge Map looks ~empty and wrongly ships inline
+    else if (x instanceof Set) { total += 16 * x.size; if (total > limit) return true; for (const e of x) stack.push(e); }
     else for (const k of Object.keys(x)) { total += k.length; stack.push(x[k]); }
   }
   return false;
