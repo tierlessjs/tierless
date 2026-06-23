@@ -52,6 +52,18 @@ const programs = [
   ["return() leaves the generator done", `
     function* g() { yield 1; yield 2; }
     function main() { const it = g(); it.next(); it.return(0); return it.next().done ? 1 : 0; }`], // 1
+  ["yield* delegates to another generator", `
+    function* inner() { yield 1; yield 2; }
+    function* outer() { yield* inner(); yield 3; }
+    function main() { let s = 0; for (const x of outer()) { s = s + x; } return s; }`],            // 1+2+3 = 6
+  ["yield* between surrounding yields", `
+    function* inner() { yield 2; yield 3; }
+    function* outer() { yield 1; yield* inner(); yield 4; yield 5; }
+    function main() { let s = 0; for (const x of outer()) { s = s + x; } return s; }`],            // 1+2+3+4+5 = 15
+  ["yield* a range generator", `
+    function* range(a, b) { for (let i = a; i < b; i = i + 1) { yield i; } }
+    function* g() { yield* range(1, 5); }
+    function main() { let s = 0; for (const x of g()) { s = s + x; } return s; }`],                 // 1+2+3+4 = 10
 ];
 
 function interp(src) {

@@ -672,18 +672,12 @@ function emitGenTrampoline(m, name, fn, bodyIdx) {
 // value, done=0) or RET (done=1, return the value). A second, self-contained
 // codegen path: a generator is inherently resumable, so it can't use the
 // straight-line Relooper body. Numeric bodies for now (the common generator).
-function compileGenBody(m, bodyName, fn) {
+function compileGenBody(m, bodyName, fn, keyIds, fnIndex) {
   const I32 = binaryen.i32;
-  const nl = fn.nlocals, code = resolveLabels(fn.code), maxH = maxStack(code) + 1;
-  const loc = (i) => i + 1, scratch = (k) => 1 + nl + k, ipLocal = 1 + nl + maxH;
+  const nl = fn.nlocals, code = resolveLabels(fn.code);
+  const loc = (i) => i + 1;
   const get = (i) => m.local.get(i, I32);
   const genAddr = () => m.i32.and(get(0), m.i32.const(~3));                            // param 0 = the generator object
-  const bool = (cond) => m.select(cond, m.i32.const(TRUE), m.i32.const(FALSE));
-  const falsy = (i) => m.i32.or(m.i32.or(m.i32.eqz(get(i)), m.i32.eq(get(i), m.i32.const(UNDEF))), m.i32.or(m.i32.eq(get(i), m.i32.const(NULL)), m.i32.eq(get(i), m.i32.const(FALSE))));
-  const goto = (b) => [m.local.set(ipLocal, m.i32.const(b)), m.br("L")]; // intra-call jump: update the dispatch local, re-dispatch
-  const saveIp = (b) => m.i32.store(8, 4, genAddr(), m.i32.const(b));     // persist the resume point into the object (across calls)
-  const setDone = (d) => m.i32.store(12, 4, genAddr(), m.i32.const(d));
-  const saveLocals = () => { const out = []; for (let i = 0; i < nl; i++) out.push(m.i32.store(20 + i * 4, 4, genAddr(), get(loc(i)))); return out; };
 
   const Lset = new Set([0]);             // basic-block leaders (YIELD's successor is a resume point)
   code.forEach((ins, i) => {
@@ -692,13 +686,21 @@ function compileGenBody(m, bodyName, fn) {
   });
   const leaders = [...Lset].filter((x) => x >= 0 && x < code.length).sort((a, b) => a - b);
   const blockOf = (ip) => leaders.indexOf(ip);
+  const { entryH, maxAbs } = blockHeights(code, leaders); // YIELD is delta 0, so a resume block enters with the sent value on top
+  const maxH = maxAbs + 1, scratch = (k) => 1 + nl + k, ipLocal = 1 + nl + maxH;
+  const bool = (cond) => m.select(cond, m.i32.const(TRUE), m.i32.const(FALSE));
+  const falsy = (i) => m.i32.or(m.i32.or(m.i32.eqz(get(i)), m.i32.eq(get(i), m.i32.const(UNDEF))), m.i32.or(m.i32.eq(get(i), m.i32.const(NULL)), m.i32.eq(get(i), m.i32.const(FALSE))));
+  const goto = (b) => [m.local.set(ipLocal, m.i32.const(b)), m.br("L")]; // intra-call jump: update the dispatch local, re-dispatch
+  const saveIp = (b) => m.i32.store(8, 4, genAddr(), m.i32.const(b));     // persist the resume point into the object (across calls)
+  const setDone = (d) => m.i32.store(12, 4, genAddr(), m.i32.const(d));
+  const saveLocals = () => { const out = []; for (let i = 0; i < nl; i++) out.push(m.i32.store(20 + i * 4, 4, genAddr(), get(loc(i)))); return out; };
 
   const rendered = [];                   // per block: [...stmts, ...terminator]
   for (let bi = 0; bi < leaders.length; bi++) {
     const start = leaders[bi], end = bi + 1 < leaders.length ? leaders[bi + 1] : code.length;
-    const resume = start > 0 && code[start - 1][0] === "YIELD"; // entered on resume: the sent value sits on the operand stack
-    const stmts = []; let h = resume ? 1 : 0, term = [];
-    if (resume) stmts.push(m.local.set(scratch(0), m.i32.load(16, 4, genAddr()))); // the value passed to next() becomes the yield expression's value
+    const resume = start > 0 && code[start - 1][0] === "YIELD"; // entered on resume: the sent value sits on top of the operand stack
+    const stmts = []; let h = entryH[bi], term = [];
+    if (resume) stmts.push(m.local.set(scratch(h - 1), m.i32.load(16, 4, genAddr()))); // next(v): v becomes the yield expression's value
     for (const ins of code.slice(start, end)) {
       switch (ins[0]) {
         case "PUSH": stmts.push(m.local.set(scratch(h), m.i32.const(immediate(ins[1])))); h++; break;
@@ -706,6 +708,7 @@ function compileGenBody(m, bodyName, fn) {
         case "STORE": h--; stmts.push(m.local.set(loc(ins[1]), get(scratch(h)))); break;
         case "POP": h--; break;
         case "DUP": stmts.push(m.local.set(scratch(h), get(scratch(h - 1)))); h++; break;
+        case "ITER": case "AWAIT": break;     // no-ops (a generator is its own iterator; await of a plain value is identity)
         case "BIN": {
           h -= 2; const a = get(scratch(h)), b = get(scratch(h + 1)), op = ins[1]; let e;
           if (op === "+") e = m.i32.add(a, b);
@@ -720,6 +723,23 @@ function compileGenBody(m, bodyName, fn) {
           else throw new Error("aot: generator BIN " + op + " not yet supported");
           stmts.push(m.local.set(scratch(h), e)); h++; break;
         }
+        case "GETPROP": stmts.push(m.local.set(scratch(h - 1), m.call("__getprop", [get(scratch(h - 1)), m.i32.const(keyIds.get(ins[1]))], I32))); break;
+        case "MAKECLOSURE": {                  // no-capture only (yield* targets a top-level generator)
+          if ((ins[2] || []).length) throw new Error("aot: capturing closures in a generator body not yet supported");
+          const idx = fnIndex[ins[1]]; if (idx === undefined) throw new Error("aot: MAKECLOSURE of unknown fn " + ins[1]);
+          stmts.push(m.local.set(scratch(h + 1), m.i32.load(0, 4, m.i32.const(BUMP_ADDR))));
+          stmts.push(m.i32.store(0, 4, get(scratch(h + 1)), m.i32.const(CLOSTAG)));
+          stmts.push(m.i32.store(4, 4, get(scratch(h + 1)), m.i32.const(idx)));
+          stmts.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(scratch(h + 1)), m.i32.const(8))));
+          stmts.push(m.local.set(scratch(h), m.i32.or(get(scratch(h + 1)), m.i32.const(1)))); h++; break;
+        }
+        case "CALLV": {                        // call a closure (e.g. the inner generator's trampoline)
+          const argc = ins[1]; h -= argc + 1;
+          const fnv = m.i32.load(4, 4, m.i32.and(get(scratch(h)), m.i32.const(~3)));
+          const args = [get(scratch(h))]; for (let k = 0; k < argc; k++) args.push(get(scratch(h + 1 + k)));
+          stmts.push(m.local.set(scratch(h), m.call_indirect("0", fnv, args, binaryen.createType(new Array(argc + 1).fill(I32)), I32))); h++; break;
+        }
+        case "GENNEXT": { h -= 2; stmts.push(m.local.set(scratch(h), m.call("__gennext", [get(scratch(h)), get(scratch(h + 1))], I32))); h++; break; }
         case "JMP": term = goto(blockOf(ins[1])); break;
         case "JMPF": h--; term = [m.if(falsy(scratch(h)), m.block(null, goto(blockOf(ins[1])), binaryen.none))]; break;
         case "YIELD": h--; term = [...saveLocals(), saveIp(blockOf(end)), setDone(0), m.return(get(scratch(h)))]; break; // suspend: resume at the next block
@@ -809,7 +829,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const fnIndex = Object.fromEntries(fnNames.map((n, i) => [n, i]));
   const usesClosures = fnNames.length > 0 && uses("MAKECLOSURE", "CALLV", "CALLDYN", "CALLMETHOD", "GETPROPA", "SETPROPA"); // all call through the function table
   for (const [name, fn] of Object.entries(program)) {
-    if (gens.includes(name)) { emitGenTrampoline(m, name, fn, fnIndex[name + "$gen"]); compileGenBody(m, name + "$gen", fn); } // generator: trampoline + dispatch body
+    if (gens.includes(name)) { emitGenTrampoline(m, name, fn, fnIndex[name + "$gen"]); compileGenBody(m, name + "$gen", fn, keyIds, fnIndex); } // generator: trampoline + dispatch body
     else compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings);
   }
   if (usesArrays) addArrayRuntime(m);
