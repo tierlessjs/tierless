@@ -17,9 +17,6 @@ This is *tierless programming* (cf. Eliom, Links, Ur/Web) but with two distincti
 1. **Placement is inferred from resource dependencies, not declared.** You don't annotate `"use server"`. Touching `db.query` implies server; touching `document` implies client. The resource you reference determines the tier.
 2. **Execution migrates as a live continuation.** When you cross a tier boundary mid-computation, the runtime serializes the (small) execution state and resumes on the other side — rather than forcing you to restructure the crossing as an RPC call.
 
-### Why now
-On a single controlled interpreter present on both tiers, a continuation is just a heap object you serialize and resume — the mechanism is well understood. What's changed is that the substrate for doing this portably — WASM — now exists and is broadly deployed, which is what makes a browser-targeting version feasible.
-
 ---
 
 ## 2. Why this is worth building (and where it isn't)
