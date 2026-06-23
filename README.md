@@ -176,16 +176,16 @@ depth; Conduit = bandwidth on fan-out filtering + joins.
 ## Files
 
 ```
-initial-design.md     the design document (the spec)
-NOTES-frontend.md     frontend dev log (chronological) + "pick up here" / caveats
-app.ts                the demo application, authored as ordinary TypeScript
+initial-design.md         the design document (the spec)
+NOTES-frontend.md         frontend dev log (chronological) + "pick up here" / caveats
+app.ts                    the demo application, authored as ordinary TypeScript
 stackmix-tsc.mjs          JS-path frontend: full-language TS -> Stackmix IR, via a ts.Program
-                      + type checker; loadModule (1 file) / loadProgram (import graph)
+                          + type checker; loadModule (1 file) / loadProgram (import graph)
 stackmix-core.mjs         JS-interpreter runtime + language semantics (the substrate)
 stackmix-heap.mjs         identity-preserving, cycle-safe continuation wire codec
 stackmix-compile.mjs      wasm-path frontend: the i32 TS subset -> the wasm IR
 stackmix.wat              the interpreter, as a WebAssembly module (build -> stackmix.wasm)
-build-wasm.mjs        compiles stackmix.wat -> stackmix.wasm via wabt
+build-wasm.mjs            compiles stackmix.wat -> stackmix.wasm via wabt
 stackmix-wasm-core.mjs    wasm runtime: instances, capture/restore, heap, policy bits
 stackmix-wasm.mjs         wasm demo, single process (two instances)
 stackmix-wasm-2p-*.mjs    wasm demo, two OS processes (slice crosses a pipe)
@@ -193,7 +193,7 @@ stackmix-spike.mjs        JS demo, single process
 stackmix-2p-*.mjs         JS demo, two OS processes
 stackmix-frame.mjs        length-prefixed framing (JSON header + binary attachment)
 stackmix-policy.mjs       §6 migrate-vs-fetch cost model
-test.mjs              runs every demo + suite and asserts the headline claims
+test.mjs                  runs every demo + suite and asserts the headline claims
 conformance.mjs / difftest.mjs / decorators.mjs / multimodule.mjs   the four test suites
 ```
 
