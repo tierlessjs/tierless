@@ -21,6 +21,7 @@ const cases = [
   { file: "probe-realts.mjs",        needs: ["all PASS — Waso compiles real JS"] },
   { file: "conformance.mjs",         needs: ["Result: ALL PASS"] },
   { file: "difftest.mjs",            needs: ["NO DIVERGENCES"] },
+  { file: "decorators.mjs",          needs: ["Result: ALL PASS"] },
 ];
 
 // Build the wasm once up front.

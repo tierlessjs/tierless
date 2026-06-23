@@ -159,7 +159,8 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     }
     const extendsId = (s.heritageClauses || []).filter((h) => h.token === ts.SyntaxKind.ExtendsKeyword).flatMap((h) => h.types).map((t) => t.expression).find((e) => ts.isIdentifier(e)) || null;
     const uname = s.parent === sf ? s.name.text : `${s.name.text}$c${classUid++}`; // top-level keeps its name; local gets a unique one (no collisions)
-    classes.set(uname, { name: uname, thisId: thisCounter--, staticThisId: thisCounter--, fields, methods, accessors, sfields, smethods, saccessors, cmethods, ctor, superName: null, _ext: extendsId });
+    const decos = (ts.canHaveDecorators(s) ? ts.getDecorators(s) : null) || []; // @Injectable()/@Component()/... (legacy: run on the class at module load)
+    classes.set(uname, { name: uname, thisId: thisCounter--, staticThisId: thisCounter--, fields, methods, accessors, sfields, smethods, saccessors, cmethods, ctor, superName: null, _ext: extendsId, decorators: decos.map((d) => d.expression), topLevel: s.parent === sf });
     if (s.name && bindingOf.has(s.name)) classOfBinding.set(bindingOf.get(s.name), uname);
   };
   { const w = (n) => { if (ts.isClassDeclaration(n) && n.name) collectClass(n); ts.forEachChild(n, w); }; w(sf); } // classes ANYWHERE (top-level + local)
@@ -774,7 +775,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       fail(node, "unsupported statement");
     }
 
-    if (opts.emitBody) { opts.emitBody({ emit, expr, stmt, tempSlot, label, mark, provide, capture }); const { code, pos } = assemble(); return { nlocals: topSlot, code, pos, freeIds: envIds }; } // synthetic class-object builder / module-init
+    if (opts.emitBody) { opts.emitBody({ emit, expr, stmt, tempSlot, label, mark, provide, capture, classObject }); const { code, pos } = assemble(); return { nlocals: topSlot, code, pos, freeIds: envIds }; } // synthetic class-object builder / module-init
 
     // --- prologue: rest param, default params, box captured params, fields, hoist nested fn decls
     let argsTemp = null; if (usesArguments.has(node)) { argsTemp = tempSlot(); emit("ARGUMENTS"); emit("STORE", argsTemp); } // snapshot passed args FIRST (before pre-create/defaults mutate locals); installed below
@@ -806,7 +807,20 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   // expressions) once per tier, before anything else. Function/class declarations
   // and TS-only nodes are NOT executed here (handled separately).
   const initStmts = sf.statements.filter((s) => ts.isVariableStatement(s) || ts.isExpressionStatement(s) || ts.isIfStatement(s) || ts.isForStatement(s) || ts.isForOfStatement(s) || ts.isForInStatement(s) || ts.isWhileStatement(s) || ts.isDoStatement(s) || ts.isSwitchStatement(s) || ts.isTryStatement(s) || ts.isBlock(s) || ts.isThrowStatement(s));
-  if (initStmts.length) { const stub = { parameters: [] }; bindingsByFn.set(stub, bindingsByFn.get(null) || []); out["%moduleinit"] = compileFn(stub, "%moduleinit", { emitBody: ({ stmt, emit }) => { for (const s of initStmts) stmt(s); emit("PUSH", undefined); emit("RET"); } }); }
+  const decoratedClasses = [...classes.values()].filter((r) => r.topLevel && r.decorators && r.decorators.length); // legacy class decorators run at module load
+  // Apply class decorators bottom-up: `C = d0(d1(...(C)))`; a non-null return rebinds
+  // the cached class object (registration decorators return nothing — the common case).
+  const emitDecorate = ({ emit, expr, tempSlot, label, mark, classObject }) => {
+    for (const rec of decoratedClasses) {
+      classObject(rec.name); const co = tempSlot(); emit("STORE", co); // build the class object eagerly
+      for (let i = rec.decorators.length - 1; i >= 0; i--) { // source order is top-to-bottom; apply innermost (last) first
+        expr(rec.decorators[i]); emit("LOAD", co); emit("CALLV", 1);
+        const keep = label("deco"); emit("DUP"); emit("ISNULLISH"); emit("JMPF", keep); emit("POP"); emit("LOAD", co); mark(keep); emit("STORE", co); // co = result ?? co
+      }
+      emit("LOAD", co); emit("CLSPUT", rec.name); emit("POP"); // rebind so later `ClassName` references see the decorated class
+    }
+  };
+  if (initStmts.length || decoratedClasses.length) { const stub = { parameters: [] }; bindingsByFn.set(stub, bindingsByFn.get(null) || []); out["%moduleinit"] = compileFn(stub, "%moduleinit", { emitBody: (ctx) => { for (const s of initStmts) ctx.stmt(s); emitDecorate(ctx); ctx.emit("PUSH", undefined); ctx.emit("RET"); } }); }
   // Generate class-object builders now that every class is fully compiled (so
   // static-method freeIds are known). Fixpoint: a field init may reference more classes.
   const builtBuilders = new Set();
