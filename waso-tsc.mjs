@@ -177,7 +177,45 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   // The class object: a singleton (statics live on it), built-or-returned by a
   // 0-arg builder fn, cached per tier (CLSGET/CLSPUT). Emitted as raw IR via
   // compileFn's emitBody hook so static-field initializers reuse expr().
-  const buildClassObjectBody = (cname, { emit, expr, tempSlot, label, mark, provide }) => {
+  // Build an instance up to (but not including) the constructor call: a fresh object
+  // tagged with the class chain, instance methods (decorated -> shared closure),
+  // accessors, and computed methods. Shared by the inline `new ClassName` lowering and
+  // the per-class %new_<cname> builder that powers dynamic `new C(...)` / Reflect.construct.
+  const emitInstanceAssembly = (cname, { emit, expr, tempSlot, provide, classObject }) => {
+    const rec = compileClass(cname);
+    const chain = []; for (let c = rec; c; c = c.superName ? compileClass(c.superName) : null) chain.unshift(c); // base-first
+    const inst = tempSlot(); emit("NEWOBJ"); emit("STORE", inst);
+    const hostBase = chain[0].hostSuper;
+    const classNames = (hostBase ? (hostBase === "Error" ? ["Error"] : ["Error", hostBase]) : []).concat(chain.map((c) => c.name));
+    emit("LOAD", inst); emit("PUSH", classNames); emit("SETHIDDEN", "__class__"); emit("POP");
+    for (const cls of chain) for (const m of cls.methods) {
+      if (m.decorators && m.decorators.length) { emit("LOAD", inst); classObject(cls.name); emit("GETPROP", `__dm_${m.name}`); emit("SETHIDDEN", m.name); emit("POP"); continue; }
+      const info = cls.compiled[m.name]; emit("LOAD", inst); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.thisId ? ["L", inst] : provide(id))), !!m.node.asteriskToken); emit("SETHIDDEN", m.name); emit("POP");
+    }
+    const accs = new Map();
+    for (const cls of chain) { const byName = new Map(); for (const a of cls.accessors) { const e = byName.get(a.name) || {}; e[a.kind] = { cls, info: cls.compiled[`${a.kind} ${a.name}`] }; byName.set(a.name, e); } for (const [n, e] of byName) accs.set(n, e); }
+    if (accs.size) {
+      const tbl = tempSlot(); emit("NEWOBJ"); emit("STORE", tbl);
+      for (const [aname, e] of accs) {
+        const ent = tempSlot(); emit("NEWOBJ"); emit("STORE", ent);
+        for (const kind of ["get", "set"]) { const s = e[kind]; if (!s) continue; emit("LOAD", ent); emit("MAKECLOSURE", s.info.prog, s.info.freeIds.map((id) => (id === s.cls.thisId ? ["L", inst] : provide(id)))); emit("SETPROP", kind); emit("POP"); }
+        emit("LOAD", tbl); emit("LOAD", ent); emit("SETPROP", aname); emit("POP");
+      }
+      emit("LOAD", inst); emit("LOAD", tbl); emit("SETHIDDEN", "__accessors__"); emit("POP");
+    }
+    for (const cls of chain) for (const m of cls.cmethods) if (!m.static) { emit("LOAD", inst); expr(m.keyExpr); emit("MAKECLOSURE", m.compiled.prog, m.compiled.freeIds.map((id) => (id === cls.thisId ? ["L", inst] : provide(id))), m.compiled.gen); emit("SETINDEX"); }
+    return { rec, inst };
+  };
+  // %new_<cname>(argsArray): the class as a callable constructor — assemble the instance,
+  // run the ctor with the args spread, return it. Stored on the class object as
+  // __construct__ so `new C(...)` on a runtime class value and Reflect.construct work.
+  const buildConstructBody = (cname, ctx) => {
+    const { emit, provide } = ctx;
+    const { rec, inst } = emitInstanceAssembly(cname, ctx);
+    const info = rec.compiled.__ctor__; emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === rec.thisId ? ["L", inst] : provide(id)))); emit("LOAD", 0); emit("CALLVS"); emit("POP"); // ctor(...argsArray)
+    emit("LOAD", inst); emit("RET");
+  };
+  const buildClassObjectBody = (cname, { emit, expr, tempSlot, label, mark, provide, emitTypeRef }) => {
     const rec = compileClass(cname);
     const chain = []; for (let c = rec; c; c = c.superName ? compileClass(c.superName) : null) chain.unshift(c); // base-first; derived overrides
     const ready = label("clsr");
@@ -186,6 +224,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     emit("LOAD", co); emit("PUSH", chain.map((c) => c.name)); emit("SETPROP", "__class__"); emit("POP");
     emit("LOAD", co); emit("PUSH", true); emit("SETHIDDEN", "__classobj__"); emit("POP"); // marks the class object (callable) so `typeof ClassName` is "function" while instances stay "object"
     emit("LOAD", co); emit("LOAD", co); emit("SETHIDDEN", "prototype"); emit("POP"); // Class.prototype aliases the class object (we collapse prototype/constructor): instance-member decorator targets and metadata land here
+    if (rec.topLevel) { emit("LOAD", co); emit("MAKECLOSURE", `%new_${cname}`, []); emit("SETHIDDEN", "__construct__"); emit("POP"); } // callable constructor for dynamic `new C(...)` / Reflect.construct
     emit("LOAD", co); emit("CLSPUT", cname); emit("POP"); // cache BEFORE static methods/inits so a self-reference (e.g. `static b = C.a+1`) resolves to the in-progress object instead of re-entering the builder
     for (const cls of chain) for (const m of cls.smethods) { const info = cls.compiled[`static ${m.name}`]; emit("LOAD", co); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.staticThisId ? ["L", co] : provide(id))), !!m.node.asteriskToken); emit("SETPROP", m.name); emit("POP"); }
     for (const cls of chain) for (const fld of cls.sfields) { emit("LOAD", co); expr(fld.init); emit("SETPROP", fld.name); emit("POP"); } // init runs code
@@ -224,6 +263,13 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     for (const fld of [...rec.fields, ...rec.sfields]) if (fld.decorators && fld.decorators.length) sideEffect(fld.decorators, () => { emit("LOAD", co); emit("PUSH", fld.name); emit("CALLV", 2); }); // @Column/@Input: dec(target, key)
     for (const a of [...rec.accessors, ...rec.saccessors]) if (a.decorators && a.decorators.length) sideEffect(a.decorators, () => { emit("LOAD", co); emit("PUSH", a.name); emit("PUSH", undefined); emit("CALLV", 3); }); // accessor decorator: dec(target, key, desc) — side effects only (no replacement)
     for (const pd of rec.pdecorators) sideEffect(pd.exprs, () => { emit("LOAD", co); emit("PUSH", pd.key); emit("PUSH", pd.index); emit("CALLV", 3); }); // @Inject(): dec(target, key, paramIndex)
+    // emitDecoratorMetadata: a decorated class carries design:paramtypes (its ctor's
+    // parameter types) so a DI container can resolve constructor injection by type.
+    if (rec.decorators && rec.decorators.length && rec.ctor) { // TS emits this only for a class with an explicit constructor
+      emit("PUSH", "design:paramtypes"); emit("NEWARR");
+      for (const p of rec.ctor.parameters) { emit("DUP"); emitTypeRef(p.type); emit("ARRPUSH"); }
+      emit("LOAD", co); emit("PUSH", undefined); emit("DEFMETA"); emit("POP"); // defineMetadata("design:paramtypes", [...], classObject)
+    }
     emit("LOAD", co); emit("RET");                                 // already cached above; return it
     mark(ready); emit("RET");                                       // cached value already on stack
   };
@@ -299,6 +345,29 @@ export function compileModule(source, { resources = [], entry = "main", file = "
     // classes compile (so static-method freeIds are known), avoiding the re-entrancy
     // when a static method references its own class mid-compile.
     function classObject(cname) { compileClass(cname); neededBuilders.add(cname); emit("MAKECLOSURE", `%${cname}`, []); emit("CALLV", 0); return true; }
+    // Resolve a TS type annotation to its runtime constructor (design:type / paramtypes),
+    // the same lowering emitDecoratorMetadata does. Done syntactically: same-module class
+    // references and the serializable builtins resolve; interfaces/unions/generics/cross-
+    // module aliases fall back to Object (matching TS for non-class types). A full type
+    // checker would be needed to follow imported type aliases.
+    const TYPE_GLOBALS = new Set(["String", "Number", "Boolean", "Array", "Date"]);
+    function emitTypeRef(typeNode) {
+      if (!typeNode) { emit("GLOBAL", "Object"); return; }
+      if (ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)) {
+        const tn = typeNode.typeName.text;
+        if (classes.has(tn)) { classObject(tn); return; }            // same-module class
+        if (TYPE_GLOBALS.has(tn)) { emit("GLOBAL", tn); return; }      // String/Number/Boolean/Array/Date wrappers
+        emit("GLOBAL", "Object"); return;                             // interface / alias / generic / imported -> Object
+      }
+      switch (typeNode.kind) {
+        case ts.SyntaxKind.StringKeyword: emit("GLOBAL", "String"); return;
+        case ts.SyntaxKind.NumberKeyword: emit("GLOBAL", "Number"); return;
+        case ts.SyntaxKind.BooleanKeyword: emit("GLOBAL", "Boolean"); return;
+        case ts.SyntaxKind.ArrayType: case ts.SyntaxKind.TupleType: emit("GLOBAL", "Array"); return;
+        case ts.SyntaxKind.VoidKeyword: case ts.SyntaxKind.UndefinedKeyword: case ts.SyntaxKind.NullKeyword: case ts.SyntaxKind.NeverKeyword: emit("PUSH", undefined); return;
+        default: emit("GLOBAL", "Object"); return;
+      }
+    }
     const unresolvedId = (n) => bindingOf.get(n) == null && !topFns.has(n.text) && !classes.has(n.text) && !GLOBAL_OBJS.has(n.text) && !GLOBAL_CALLS.has(n.text) && !CTOR_GLOBALS.has(n.text) && !["undefined", "NaN", "Infinity"].includes(n.text);
     function readUse(idNode) {
       const cn = classNameOf(idNode); if (cn) { classObject(cn); return; }  // bare `ClassName` (top-level or local) -> the class object
@@ -462,29 +531,12 @@ export function compileModule(source, { resources = [], entry = "main", file = "
         if (ts.isIdentifier(node.expression) && node.expression.text === "Proxy" && bindingOf.get(node.expression) == null) { const a = node.arguments || []; expr(a[0]); expr(a[1]); emit("NEWPROXY"); return true; } // new Proxy(target, handler)
         if (ts.isIdentifier(node.expression) && bindingOf.get(node.expression) == null && CTOR_GLOBALS.has(node.expression.text)) { const a = node.arguments || []; a.forEach((x) => expr(x)); emit("CTORG", node.expression.text, a.length); return true; } // new Map/Set/Date/...
         const cname = ts.isIdentifier(node.expression) ? classNameOf(node.expression) : null;
-        if (!cname) fail(node, "unsupported `new`");
-        const rec = compileClass(cname);
-        const chain = []; for (let c = rec; c; c = c.superName ? compileClass(c.superName) : null) chain.unshift(c); // base-first
-        const inst = tempSlot(); emit("NEWOBJ"); emit("STORE", inst);
-        const hostBase = chain[0].hostSuper; // extends a host Error -> prepend its ancestry so `instanceof Error` holds
-        const classNames = (hostBase ? (hostBase === "Error" ? ["Error"] : ["Error", hostBase]) : []).concat(chain.map((c) => c.name));
-        emit("LOAD", inst); emit("PUSH", classNames); emit("SETHIDDEN", "__class__"); emit("POP"); // non-enumerable: JSON/for-in/keys see only data fields
-        for (const cls of chain) for (const m of cls.methods) { // methods non-enumerable (derived overrides base)
-          if (m.decorators && m.decorators.length) { emit("LOAD", inst); classObject(cls.name); emit("GETPROP", `__dm_${m.name}`); emit("SETHIDDEN", m.name); emit("POP"); continue; } // decorated: shared closure built+decorated once on the class object (dynamic this)
-          const info = cls.compiled[m.name]; emit("LOAD", inst); emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === cls.thisId ? ["L", inst] : provide(id))), !!m.node.asteriskToken); emit("SETHIDDEN", m.name); emit("POP");
+        if (!cname) { // dynamic `new C(...)` — C is a runtime class value (DI container resolving a constructor)
+          expr(node.expression); emit("GETPROP", "__construct__");
+          spreadArgs(node.arguments || []); emit("CALLV", 1); return true; // __construct__(argsArray) — the array is one argument; %new_ spreads it to the ctor
         }
-        const accs = new Map(); // name -> { get?: {cls,info}, set?: {cls,info} }
-        for (const cls of chain) { const byName = new Map(); for (const a of cls.accessors) { const e = byName.get(a.name) || {}; e[a.kind] = { cls, info: cls.compiled[`${a.kind} ${a.name}`] }; byName.set(a.name, e); } for (const [n, e] of byName) accs.set(n, e); } // derived class's accessor fully shadows the base's for that name (get+set merge only WITHIN a class) — matches JS prototype accessor semantics
-        if (accs.size) {                                            // build the instance's __accessors__ table (closures capture this)
-          const tbl = tempSlot(); emit("NEWOBJ"); emit("STORE", tbl);
-          for (const [aname, e] of accs) {
-            const ent = tempSlot(); emit("NEWOBJ"); emit("STORE", ent);
-            for (const kind of ["get", "set"]) { const s = e[kind]; if (!s) continue; emit("LOAD", ent); emit("MAKECLOSURE", s.info.prog, s.info.freeIds.map((id) => (id === s.cls.thisId ? ["L", inst] : provide(id)))); emit("SETPROP", kind); emit("POP"); }
-            emit("LOAD", tbl); emit("LOAD", ent); emit("SETPROP", aname); emit("POP");
-          }
-          emit("LOAD", inst); emit("LOAD", tbl); emit("SETHIDDEN", "__accessors__"); emit("POP");
-        }
-        for (const cls of chain) for (const m of cls.cmethods) if (!m.static) { emit("LOAD", inst); expr(m.keyExpr); emit("MAKECLOSURE", m.compiled.prog, m.compiled.freeIds.map((id) => (id === cls.thisId ? ["L", inst] : provide(id))), m.compiled.gen); emit("SETINDEX"); } // inst[computedKey] = method
+        const ctx = { emit, expr, tempSlot, provide, classObject };
+        const { rec, inst } = emitInstanceAssembly(cname, ctx);
         const args = node.arguments || []; // every class has a constructor now (explicit or synthesized)
         const info = rec.compiled.__ctor__; emit("MAKECLOSURE", info.prog, info.freeIds.map((id) => (id === rec.thisId ? ["L", inst] : provide(id)))); args.forEach((a) => expr(a)); emit("CALLV", args.length); emit("POP");
         emit("LOAD", inst); return true;
@@ -592,12 +644,20 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       fail(node, "unsupported expression");
     }
 
-    function hof(objNode, kind, args) {                         // inline-compile map/filter/forEach/reduce/find/findIndex/some/every
-      const src = tempSlot(), fn = tempSlot(), i = tempSlot();
+    function hof(objNode, kind, args) {                         // inline-compile map/filter/forEach/reduce/find/findIndex/some/every (array receiver)
+      if (!args.length) { expr(objNode); emit("CALLMETHOD", kind, 0); return true; } // no callback -> never the array HOF; a real method (e.g. a repository's .find())
+      const src = tempSlot();
       expr(objNode); emit("STORE", src);
+      const valueProducing = kind !== "forEach";
+      // The HOF names collide with user/host method names (a repository's .find(),
+      // Map/Set .forEach, ...). Inline only when the receiver is actually an array;
+      // otherwise dispatch the real method. (Inlining is what lets a callback await/
+      // migrate, so it's worth keeping for the common array case.)
+      const hostL = label("hofhost"), doneL = label("hofdone");
+      emit("LOAD", src); emit("ISARRAY"); emit("JMPF", hostL);
+      const fn = tempSlot(), i = tempSlot();
       expr(args[0]); emit("STORE", fn);
-      let acc = null, outv = null, res = null, hostFallback = null;
-      if (kind === "forEach") { hostFallback = label("hofhost"); emit("LOAD", src); emit("ISARRAY"); emit("JMPF", hostFallback); } // Map/Set/host-iterable forEach -> dispatch to the host method (the inline loop is array-only)
+      let acc = null, outv = null, res = null;
       if (kind === "reduce") { if (args.length < 2) fail(objNode, "reduce needs an initial value"); acc = tempSlot(); expr(args[1]); emit("STORE", acc); }
       else if (kind === "map" || kind === "filter") { outv = tempSlot(); emit("NEWARR"); emit("STORE", outv); }
       else if (kind === "find") { res = tempSlot(); emit("PUSH", undefined); emit("STORE", res); }
@@ -618,8 +678,11 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       else if (kind === "some") { const skip = label("sm"); callCb(); emit("JMPF", skip); emit("PUSH", true); emit("STORE", res); emit("JMP", end); mark(skip); }
       else if (kind === "every") { const skip = label("ev"); callCb(); emit("NOT"); emit("JMPF", skip); emit("PUSH", false); emit("STORE", res); emit("JMP", end); mark(skip); }
       emit("LOAD", i); emit("PUSH", 1); emit("BIN", "+"); emit("STORE", i); emit("JMP", loop); mark(end);
-      if (kind === "forEach") { if (hostFallback) { const done = label("hofdone"); emit("JMP", done); mark(hostFallback); emit("LOAD", src); emit("LOAD", fn); emit("CALLMETHOD", "forEach", 1); emit("POP"); mark(done); } return false; }
-      emit("LOAD", kind === "reduce" ? acc : outv != null ? outv : res); return true;
+      if (valueProducing) emit("LOAD", kind === "reduce" ? acc : outv != null ? outv : res);
+      emit("JMP", doneL);
+      mark(hostL); emit("LOAD", src); args.forEach((a) => expr(a)); emit("CALLMETHOD", kind, args.length); if (!valueProducing) emit("POP"); // real method dispatch (user .find()/.map(), Map/Set.forEach, ...)
+      mark(doneL);
+      return valueProducing;
     }
 
     function superHostCall(args) {                 // super(msg) when extending a host Error: set message (+ default name), like Error.call(this, msg)
@@ -671,6 +734,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
           if (m === "deleteProperty") { expr(a[0]); expr(a[1]); emit("DELINDEX"); return true; }
           if (m === "ownKeys") { expr(a[0]); emit("KEYS"); return true; }
           if (m === "apply") { expr(a[0]); expr(a[1]); expr(a[2]); emit("REFAPPLY"); return true; }
+          if (m === "construct") { expr(a[0]); emit("GETPROP", "__construct__"); a[1] ? expr(a[1]) : emit("NEWARR"); emit("CALLV", 1); return true; } // Reflect.construct(C, argsArray)
           // Reflect-metadata (runtime store; no design:type auto-emit — that needs the type checker)
           if (m === "defineMetadata") { expr(a[0]); expr(a[1]); expr(a[2]); a[3] ? expr(a[3]) : emit("PUSH", undefined); emit("DEFMETA"); return true; } // (mk, mv, target, pk?)
           if (m === "getMetadata" || m === "getOwnMetadata") { expr(a[0]); expr(a[1]); a[2] ? expr(a[2]) : emit("PUSH", undefined); emit("GETMETA"); return true; } // (mk, target, pk?)
@@ -812,7 +876,7 @@ export function compileModule(source, { resources = [], entry = "main", file = "
       fail(node, "unsupported statement");
     }
 
-    if (opts.emitBody) { opts.emitBody({ emit, expr, stmt, tempSlot, label, mark, provide, capture, classObject }); const { code, pos } = assemble(); return { nlocals: topSlot, code, pos, freeIds: envIds }; } // synthetic class-object builder / module-init
+    if (opts.emitBody) { opts.emitBody({ emit, expr, stmt, tempSlot, label, mark, provide, capture, classObject, emitTypeRef }); const { code, pos } = assemble(); return { nlocals: topSlot, code, pos, freeIds: envIds }; } // synthetic class-object builder / module-init
 
     // --- prologue: rest param, default params, box captured params, fields, hoist nested fn decls
     let argsTemp = null; if (usesArguments.has(node)) { argsTemp = tempSlot(); emit("ARGUMENTS"); emit("STORE", argsTemp); } // snapshot passed args FIRST (before pre-create/defaults mutate locals); installed below
@@ -861,10 +925,12 @@ export function compileModule(source, { resources = [], entry = "main", file = "
   // Generate class-object builders now that every class is fully compiled (so
   // static-method freeIds are known). Fixpoint: a field init may reference more classes.
   const builtBuilders = new Set();
+  const argStub = () => { const s = { parameters: [{}] }; bindingsByFn.set(s, [Symbol("args")]); return s; }; // reserves local slot 0 for the args array
   while ([...neededBuilders].some((c) => !builtBuilders.has(c))) {
     for (const cname of [...neededBuilders]) {
       if (builtBuilders.has(cname)) continue; builtBuilders.add(cname);
       out[`%${cname}`] = compileFn({ parameters: [] }, `%${cname}`, { emitBody: (ctx) => buildClassObjectBody(cname, ctx) });
+      if (classes.get(cname).topLevel) out[`%new_${cname}`] = compileFn(argStub(), `%new_${cname}`, { emitBody: (ctx) => buildConstructBody(cname, ctx) }); // dynamic `new C(...)` / Reflect.construct (top-level classes capture nothing from outer scopes)
     }
   }
   const frag = {};

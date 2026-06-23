@@ -18,14 +18,17 @@ const J = (x) => JSON.stringify(x, (k, v) => (typeof v === "bigint" ? "B:" + v.t
 // Minimal reflect-metadata shim for the reference (bare Node Reflect has no
 // defineMetadata) so metadata-using decorators validate against the same store model.
 const metaWM = new WeakMap();
+const defMeta = (mk, mv, t, pk) => { let m = metaWM.get(t); if (!m) metaWM.set(t, (m = new Map())); let pm = m.get(pk); if (!pm) m.set(pk, (pm = new Map())); pm.set(mk, mv); };
+const getMeta = (mk, t, pk) => { const pm = metaWM.get(t) && metaWM.get(t).get(pk); return pm ? pm.get(mk) : undefined; };
 const RShim = Object.assign(Object.create(Reflect), {
-  defineMetadata(mk, mv, t, pk) { let m = metaWM.get(t); if (!m) metaWM.set(t, (m = new Map())); let pm = m.get(pk); if (!pm) m.set(pk, (pm = new Map())); pm.set(mk, mv); },
-  getMetadata(mk, t, pk) { const pm = metaWM.get(t) && metaWM.get(t).get(pk); return pm ? pm.get(mk) : undefined; },
-  getOwnMetadata(mk, t, pk) { const pm = metaWM.get(t) && metaWM.get(t).get(pk); return pm ? pm.get(mk) : undefined; },
+  defineMetadata: defMeta, getMetadata: getMeta, getOwnMetadata: getMeta,
   hasMetadata(mk, t, pk) { const pm = metaWM.get(t) && metaWM.get(t).get(pk); return !!(pm && pm.has(mk)); },
   getMetadataKeys(t, pk) { const pm = metaWM.get(t) && metaWM.get(t).get(pk); return pm ? [...pm.keys()] : []; },
+  metadata(mk, mv) { return (t, pk) => defMeta(mk, mv, t, pk); }, // TS __metadata helper uses this for design:type/paramtypes
 });
-const refRun = (src) => { const out = ts.transpileModule(src + "\n;", { compilerOptions: { experimentalDecorators: true, target: ts.ScriptTarget.ES2020 } }); return new Function("Reflect", out.outputText + "\n;return go;")(RShim)(); };
+// emitDecoratorMetadata is on so design:paramtypes is emitted; Waso emits it for any
+// decorated class (matching the DI use), so the reference enables it too.
+const refRun = (src) => { const out = ts.transpileModule(src + "\n;", { compilerOptions: { experimentalDecorators: true, emitDecoratorMetadata: true, target: ts.ScriptTarget.ES2020 } }); return new Function("Reflect", out.outputText + "\n;return go;")(RShim)(); };
 
 function d(name, src) {
   let got, ref, ge = null, re = null;
@@ -84,7 +87,14 @@ async function wmig(name, src) {
 }
 
 await (async () => {
-  console.log("\n— decorators survive continuation migration —");
+  console.log("\n— emitDecoratorMetadata (design:paramtypes) for DI —");
+const nm = `function nm(t){ return t? (t.name || (t.__class__&&t.__class__[t.__class__.length-1]) || '?') : 'U'; }`;
+d("ctor paramtypes: class + builtins", `function Injectable(c){} class Repo{} @Injectable class Svc{ constructor(r:Repo, name:string, n:number, flag:boolean){} } ${nm} function go(){ return Reflect.getMetadata('design:paramtypes',Svc).map(nm); }`);
+d("interface/alias param falls back to Object", `function Injectable(c){} interface Foo{x:number} @Injectable class S{ constructor(f:Foo, d:Date, xs:string[]){} } ${nm} function go(){ return Reflect.getMetadata('design:paramtypes',S).map(nm); }`);
+d("no-arg ctor gives empty paramtypes", `function Injectable(c){} @Injectable class S{} function go(){ return Reflect.getMetadata('design:paramtypes',S)||'none'; }`);
+d("type-based constructor DI resolves the graph", `const reg=new Set(); function Injectable(c){ reg.add(c); } @Injectable class Logger{ msg(){ return 'log'; } } @Injectable class Repo{ constructor(l:Logger){ this.l=l; } find(){ return this.l.msg()+':data'; } } @Injectable class Svc{ constructor(repo:Repo){ this.repo=repo; } run(){ return this.repo.find(); } } function resolve(C){ const pts=Reflect.getMetadata('design:paramtypes',C)||[]; return new C(...pts.map(resolve)); } function go(){ return resolve(Svc).run(); }`);
+
+console.log("\n— decorators survive continuation migration —");
   await wmig("decorated method survives the wire", `function tag(t,k,d){ const o=d.value; d.value=function(...a){ return '['+o.apply(this,a)+']'; }; } class N{ constructor(v){this.v=v;} @tag show(){ return this.v; } } async function go(){ const n=new N(7); const a=n.show(); await ckpt(0); return [a, n.show()]; }`);
   await wmig("route metadata survives the wire", `function Get(p){ return function(t,k,d){ Reflect.defineMetadata('path',p,t,k); }; } class Ctrl{ @Get('/x') h(){ return 1; } } async function go(){ const p=Ctrl.prototype; const before=Reflect.getMetadata('path',p,'h'); await ckpt(0); return [before, Reflect.getMetadata('path',p,'h')]; }`);
 })();

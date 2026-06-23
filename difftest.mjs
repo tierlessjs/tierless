@@ -237,6 +237,11 @@ d("Reflect get/set/has/delete", "function go(){ const o={a:1,b:2}; Reflect.set(o
 d("Reflect.ownKeys and apply", "function go(){ function f(x,y){return this.k+x+y;} return [Reflect.ownKeys({p:1,q:2}),Reflect.apply(f,{k:10},[2,3])]; }");
 d("proxy handler delegates to Reflect", "function go(){ const log=[]; const p=new Proxy({a:1},{get(t,k,r){log.push('g:'+k);return Reflect.get(t,k,r);},set(t,k,v,r){log.push('s:'+k);return Reflect.set(t,k,v,r);}}); p.b=p.a+5; return [p.b,log]; }");
 d("Reflect.set returns boolean", "function go(){ const o={}; const r=Reflect.set(o,'x',9); return [r,o.x]; }");
+d("user method named find (repository pattern)", "function go(){ const repo={items:[{id:1},{id:2}],find(id){return this.items.find(x=>x.id===id);}}; return [repo.find(2).id, repo.find(9)]; }");
+d("user methods named map/filter/some", "function go(){ const q={data:[1,2,3],map(f){return this.data.map(f);},filter(f){return this.data.filter(f);},some(){return 'mine';}}; return [q.map(x=>x*2),q.filter(x=>x>1),q.some()]; }");
+d("array HOF still inlines after guard", "function go(){ return [[1,2,3].map(x=>x*x),[1,2,3,4].filter(x=>x%2===0),[1,2,3].find(x=>x>1),[1,2,3].reduce((a,b)=>a+b,0)]; }");
+d("Reflect.construct builds instance", "class P{constructor(a,b){this.a=a;this.b=b;} sum(){return this.a+this.b;}} function go(){ const p=Reflect.construct(P,[3,4]); return [p.sum(),p instanceof P]; }");
+d("dynamic new on a class value", "class A{constructor(n){this.n=n;} get(){return this.n*10;}} function make(C,n){return new C(n);} function go(){ const a=make(A,5); return [a.get(),a instanceof A]; }");
 
 console.log("— closures & control flow extras —");
 d("try/finally return value in loop", "function go(){ function f(){for(let i=0;i<3;i++){try{if(i===2)return i;}finally{}}return -1;} return f(); }");
