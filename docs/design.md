@@ -18,7 +18,7 @@ This is *tierless programming* (cf. Eliom, Links, Ur/Web) but with two distincti
 2. **Execution migrates as a live continuation.** When you cross a tier boundary mid-computation, the runtime serializes the (small) execution state and resumes on the other side — rather than forcing you to restructure the crossing as an RPC call.
 
 ### Why now
-This isn't a new idea for the author — a working bidirectional proof-of-concept existed years ago on the JVM (server-side JS via Rhino, before Node existed). On a single controlled interpreter present on both tiers, a continuation is just a heap object you serialize and resume. What's changed is that the substrate for doing this portably — WASM — now exists and is broadly deployed, which is what makes a browser-targeting version feasible.
+On a single controlled interpreter present on both tiers, a continuation is just a heap object you serialize and resume — the mechanism is well understood. What's changed is that the substrate for doing this portably — WASM — now exists and is broadly deployed, which is what makes a browser-targeting version feasible.
 
 ---
 
@@ -153,7 +153,7 @@ As of early 2026 the typed stack-switching proposal is experimental and **not en
 Also: the proposal's continuations are **one-shot/linear** — resume/switch/bind destructively consume them; a second use traps. (There's an open request, issue #110, for optional multi-shot, but it's not in.) For Stackmix, one-shot is fine for a plain migration (capture once, resume once on the other side), but it forecloses *speculative* placement — you can't "try fetch, and on failure re-resume the same captured point to migrate instead." One resume per capture.
 
 ### 8.3 What to actually take from it
-1. **Don't architect around waiting for it.** Capture must be done in Stackmix's own IR, where the continuation is *Stackmix's* data structure (readable, serializable), not the engine's opaque ref — substrate-independent, and basically what the Rhino PoC did by owning the interpreter.
+1. **Don't architect around waiting for it.** Capture must be done in Stackmix's own IR, where the continuation is *Stackmix's* data structure (readable, serializable), not the engine's opaque ref — substrate-independent.
 2. **Borrow the interface, build the transport.** The effect-handler shape (tag + handler) is the right model for resource boundaries: hit a resource → `suspend` with a tag → host handler decides migrate-vs-fetch. This is the same structure Unison uses for its `Remote` ability. Model resource access as typed effects/tags; implement the cross-host mechanism yourself.
 3. **Hybrid is viable and matches the architecture.** Use the engine's `suspend` (where available) purely as a clean unwind-to-host-handler trigger, while Stackmix maintains the serializable *shadow* state (the live locals at the boundary). Because Stackmix only checkpoints at resource boundaries — not arbitrary points — that shadow state is bounded and known, not a whole-stack blob.
 4. **Engine introspection helps only on the side you own.** On the server you *can* fork Wasmtime/read its fibers, so engine-level capture might populate Stackmix's serializable representation more cheaply there. But the browser end exposes only the opaque ref, so a portable self-owned representation is mandatory regardless. Engine-reading is an optional server-side optimization, never the mechanism for the client.
