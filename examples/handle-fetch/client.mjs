@@ -11,10 +11,10 @@
 
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { Tier, run, Suspend, Miss, serializeContinuation, deserializeContinuation, initialFrames, contBytes, fmt } from "#stackmix/runtime/core.mjs";
-import { decodeGraph } from "#stackmix/runtime/heap.mjs";
-import { writeFrame, readFrames } from "#stackmix/runtime/frame.mjs";
-import "./profile.mjs";
+import { Tier, Suspend, Miss, serializeContinuation, deserializeContinuation, initialFrames, contBytes, fmt, decodeGraph, writeFrame, readFrames } from "#stackmix";
+import { buildRuntime } from "./profile.mjs";
+
+const rt = buildRuntime();
 
 const rendered = [];
 const client = new Tier("client", { "render": ([name]) => { rendered.push(name); return name.length; } });
@@ -45,7 +45,7 @@ async function main() {
   while (true) {
     try {
       if (pending) { frames[frames.length - 1].stack.push(client.resources[pending.name](pending.args)); pending = null; }
-      const res = run(client, frames, host);
+      const res = rt.run(client, frames, host);
       return finish(res.value);
     } catch (e) {
       if (!(e instanceof Suspend)) throw e;

@@ -6,7 +6,10 @@
 // coherent when the owner mutates. Proves a migrated continuation can use a
 // handle to data that stayed on the other tier — the piece that was unbuilt.
 
-import { PROGRAM, run } from "#stackmix/runtime/core.mjs";
+import { createRuntime } from "#stackmix";
+const rt = createRuntime();
+const PROGRAM = rt.program;
+const run = (tier, frames, host) => rt.run(tier, frames, host);
 import { Heap, Channel, makeHost } from "#stackmix/runtime/fetch.mjs";
 
 // A straight-line program that dereferences its handle local twice, then once

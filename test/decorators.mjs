@@ -9,7 +9,11 @@
 // decorators and emitDecoratorMetadata (design:type, for DI) are the next steps —
 // they need a shared-prototype method model and the TS type checker, respectively.
 
-import { PROGRAM, run, initialFrames, Suspend, serializeContinuation, deserializeContinuation, awaitable } from "#stackmix/runtime/core.mjs";
+import { createRuntime } from "#stackmix";
+import { initialFrames, Suspend, serializeContinuation, deserializeContinuation, awaitable } from "#stackmix/runtime/core.mjs";
+const rt = createRuntime();
+const PROGRAM = rt.program;
+const run = (tier, frames, host) => rt.run(tier, frames, host);
 import { loadModule } from "#stackmix/compiler/tsc.mjs";
 import ts from "typescript";
 

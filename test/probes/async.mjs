@@ -9,7 +9,11 @@
 // the transform (NOTES-frontend.md), and the same mechanism is what lets a
 // cross-process handle fetch resume a synchronous interpreter.
 
-import { PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation, contBytes, initialFrames, Tier, awaitable } from "#stackmix/runtime/core.mjs";
+import { createRuntime } from "#stackmix";
+import { Suspend, serializeContinuation, deserializeContinuation, contBytes, initialFrames, Tier, awaitable } from "#stackmix/runtime/core.mjs";
+const rt = createRuntime();
+const PROGRAM = rt.program;
+const run = (tier, frames, host) => rt.run(tier, frames, host);
 
 // async function loadUser(id) {
 //   const u = await db.fetchUser(id);          // RES returns a descriptor; AWAIT suspends

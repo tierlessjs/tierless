@@ -6,7 +6,11 @@
 // JS engine across the new constructs (templates, default params, for-of, array
 // literals, nested function declarations, destructuring, closures, control flow).
 
-import { PROGRAM, run, initialFrames } from "#stackmix/runtime/core.mjs";
+import { createRuntime } from "#stackmix";
+import { initialFrames } from "#stackmix/runtime/core.mjs";
+const rt = createRuntime();
+const PROGRAM = rt.program;
+const run = (tier, frames, host) => rt.run(tier, frames, host);
 import { loadModule } from "#stackmix/compiler/tsc.mjs";
 
 let pass = true;

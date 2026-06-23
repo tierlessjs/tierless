@@ -10,10 +10,12 @@
 //   node stackmix-spike.mjs
 
 import {
-  Tier, run, Suspend, serializeContinuation, deserializeContinuation, contBytes,
-  initialFrames, makeDataset, fmt,
-} from "#stackmix/runtime/core.mjs";
+  Tier, Suspend, serializeContinuation, deserializeContinuation, contBytes,
+  initialFrames, fmt,
+} from "#stackmix";
+import { makeDataset, buildRuntime } from "../shared/people-demo.mjs";
 
+const rt = buildRuntime();
 const N = 100_000;
 const PEOPLE = makeDataset(N);
 const rendered = [];
@@ -45,7 +47,7 @@ function oscillate(entry, args, startTier) {
         frames[frames.length - 1].stack.push(current.resources[pending.name](pending.args));
         pending = null;
       }
-      return { value: run(current, frames, host).value, migrations };
+      return { value: rt.run(current, frames, host).value, migrations };
     } catch (e) {
       if (!(e instanceof Suspend)) throw e;
       const target = Object.values(allTiers).find((t) => t.id !== current.id && t.has(e.pending.name));

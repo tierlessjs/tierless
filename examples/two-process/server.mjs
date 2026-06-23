@@ -6,10 +6,12 @@
 // stderr so it can never corrupt the binary frame stream on stdout.
 
 import {
-  Tier, run, Suspend, serializeContinuation, deserializeContinuation,
-  wireHandles, makeDataset, fmt,
-} from "#stackmix/runtime/core.mjs";
-import { writeFrame, readFrames } from "#stackmix/runtime/frame.mjs";
+  Tier, Suspend, serializeContinuation, deserializeContinuation,
+  wireHandles, fmt, writeFrame, readFrames,
+} from "#stackmix";
+import { makeDataset, buildRuntime } from "../shared/people-demo.mjs";
+
+const rt = buildRuntime();
 
 const N = 100_000;
 const PEOPLE = makeDataset(N);
@@ -41,7 +43,7 @@ readFrames(process.stdin, (msg) => {
     if (pending) { // run the resource that forced the migration here (db.query)
       frames[frames.length - 1].stack.push(server.resources[pending.name](pending.args));
     }
-    const result = run(server, frames, host);
+    const result = rt.run(server, frames, host);
     writeFrame(process.stdout, { type: "done", value: result.value });
   } catch (e) {
     if (!(e instanceof Suspend)) {

@@ -12,10 +12,12 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
-  Tier, run, Suspend, serializeContinuation, deserializeContinuation, contBytes, pendingName, wireHandles,
-  initialFrames, fmt,
-} from "#stackmix/runtime/core.mjs";
-import { writeFrame, readFrames } from "#stackmix/runtime/frame.mjs";
+  Tier, Suspend, serializeContinuation, deserializeContinuation, contBytes, pendingName, wireHandles,
+  initialFrames, fmt, writeFrame, readFrames,
+} from "#stackmix";
+import { buildRuntime } from "../shared/people-demo.mjs";
+
+const rt = buildRuntime();
 
 const rendered = [];
 const client = new Tier("client", {
@@ -57,7 +59,7 @@ async function main() {
         frames[frames.length - 1].stack.push(client.resources[pending.name](pending.args));
         pending = null;
       }
-      const result = run(client, frames, host); // finishes on the client
+      const result = rt.run(client, frames, host); // finishes on the client
       finish(result.value);
       return;
     } catch (e) {

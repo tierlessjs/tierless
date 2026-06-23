@@ -12,7 +12,11 @@
 // stackmix-policy.mjs), but the re-runnable invariant is real and load-bearing for it — so
 // it's tested here directly rather than left to a future integration.
 
-import { PROGRAM, run, Suspend, Miss } from "#stackmix/runtime/core.mjs";
+import { createRuntime } from "#stackmix";
+import { Suspend, Miss } from "#stackmix/runtime/core.mjs";
+const rt = createRuntime();
+const PROGRAM = rt.program;
+const run = (tier, frames, host) => rt.run(tier, frames, host);
 
 let pass = 0, fail = 0; const fails = [];
 const HANDLE = { __stackmix_handle__: true, owner: "srv", id: 0, kind: "object" };

@@ -7,7 +7,11 @@
 // switch, labels), iterator/generator protocol, coercion, getters — not the easy
 // middle. Every divergence it prints is a bug to fix or a caveat to document.
 
-import { PROGRAM, run, initialFrames } from "#stackmix/runtime/core.mjs";
+import { createRuntime } from "#stackmix";
+import { initialFrames } from "#stackmix/runtime/core.mjs";
+const rt = createRuntime();
+const PROGRAM = rt.program;
+const run = (tier, frames, host) => rt.run(tier, frames, host);
 import { loadModule } from "#stackmix/compiler/tsc.mjs";
 
 let pass = 0, fail = 0, caveat = 0; const fails = [];

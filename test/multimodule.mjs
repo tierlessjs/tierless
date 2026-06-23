@@ -6,7 +6,11 @@
 // crosses module boundaries also survives continuation migration — a tierless program
 // is one program no matter how many files it spans.
 
-import { PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation, initialFrames, awaitable } from "#stackmix/runtime/core.mjs";
+import { createRuntime } from "#stackmix";
+import { Suspend, serializeContinuation, deserializeContinuation, initialFrames, awaitable } from "#stackmix/runtime/core.mjs";
+const rt = createRuntime();
+const PROGRAM = rt.program;
+const run = (tier, frames, host) => rt.run(tier, frames, host);
 import { compileProgram, loadModule } from "#stackmix/compiler/tsc.mjs";
 
 let pass = 0, fail = 0; const fails = [];

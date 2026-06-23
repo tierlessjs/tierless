@@ -8,92 +8,15 @@
 // IR  (WASM-shaped: a stack machine with explicit, numbered locals)
 // ---------------------------------------------------------------------------
 //
-// The program is the hand-lowered form of this "ordinary TypeScript":
-//
-//   function render(minAge) {
-//     const rows = db.query("people");        // server resource
-//     const matched = [];
-//     for (const row of rows) {
-//       if (row.age >= minAge) matched.push(row.name + " (" + row.age + ")");
-//     }
-//     DOM.renderList(matched);                 // client resource
-//     return matched.length;
-//   }
-//
-// Locals: 0=minAge, 1=rows, 2=matched, 3=i, 4=row
+// A *program* is a plain registry object: function name -> { nlocals, code, pos? }.
+// The interpreter (`run`) takes the program explicitly; `createRuntime()` (see
+// src/index.mjs) owns one and binds it, so independent programs never share state.
+// Hand-lowered IR examples live under examples/; the TypeScript frontend
+// (compiler/tsc) emits the same shape.
 
 import { encodeGraph, decodeGraph, GLOBALS, CTORS, isHandle } from "./heap.mjs";
 export { isHandle }; // one source of truth (stackmix-heap.mjs); re-exported here for callers that import it from core
 
-export const L = { minAge: 0, rows: 1, matched: 2, i: 3, row: 4 };
-
-// Labeled assembly form: jump targets are label strings, resolved to indices.
-function assemble(asm) {
-  const labels = {};
-  const code = [];
-  for (const line of asm) {
-    if (typeof line === "string") { labels[line] = code.length; continue; }
-    code.push(line.slice());
-  }
-  for (const ins of code) {
-    if ((ins[0] === "JMP" || ins[0] === "JMPF") && typeof ins[1] === "string") {
-      if (!(ins[1] in labels)) throw new Error("unknown label " + ins[1]);
-      ins[1] = labels[ins[1]];
-    }
-  }
-  return code;
-}
-
-// NOTE: PROGRAM is a process-wide singleton that loadModule/loadProgram mutate in place,
-// so two independent Stackmix programs can't coexist in one process, and the base `render` fn
-// below is always present unless deleted. Callers that load a second, unrelated program
-// must clear it first (`for (const k in PROGRAM) delete PROGRAM[k]`, as the tests do). A
-// per-context program table would lift this; the singleton is a deliberate prototype choice.
-export const PROGRAM = {
-  render: {
-    nlocals: 5,
-    code: assemble([
-      ["PUSH", "people"],
-      ["RES", "db.query", 1],
-      ["STORE", L.rows],
-      ["NEWARR"],
-      ["STORE", L.matched],
-      ["PUSH", 0],
-      ["STORE", L.i],
-      "loop",
-      ["LOAD", L.i],
-      ["LOAD", L.rows],
-      ["GETPROP", "length"],
-      ["BIN", "<"],
-      ["JMPF", "end"],
-      ["LOAD", L.rows],
-      ["LOAD", L.i],
-      ["INDEX"],
-      ["STORE", L.row],
-      ["LOAD", L.row],
-      ["GETPROP", "age"],
-      ["LOAD", L.minAge],
-      ["BIN", ">="],
-      ["JMPF", "cont"],
-      ["LOAD", L.matched],
-      ["LOAD", L.row], ["GETPROP", "name"],
-      ["PUSH", " ("], ["BIN", "+"],
-      ["LOAD", L.row], ["GETPROP", "age"], ["BIN", "+"],
-      ["PUSH", ")"], ["BIN", "+"],
-      ["ARRPUSH"],
-      "cont",
-      ["LOAD", L.i], ["PUSH", 1], ["BIN", "+"], ["STORE", L.i],
-      ["JMP", "loop"],
-      "end",
-      ["LOAD", L.matched],
-      ["RES", "DOM.renderList", 1],
-      ["POP"],
-      ["LOAD", L.matched],
-      ["GETPROP", "length"],
-      ["RET"],
-    ]),
-  },
-};
 
 // ---------------------------------------------------------------------------
 // Tiers — each an isolated runtime instance: own heap, own import set.
@@ -244,7 +167,7 @@ function metaMap(target) { let m = target.__meta__; if (!m) { m = new Map(); Obj
 function defineMeta(mk, mv, target, pk) { if (target == null || (typeof target !== "object" && typeof target !== "function")) return; const m = metaMap(target); let pm = m.get(pk); if (!pm) { pm = new Map(); m.set(pk, pm); } pm.set(mk, mv); }
 function ownMetaBag(target, pk) { const m = target != null && typeof target === "object" ? target.__meta__ : undefined; return m ? m.get(pk) : undefined; }
 
-export function run(tier, frames, host) {
+export function run(program, tier, frames, host) {
   const d = (x) => {
     if (!isHandle(x)) return x;
     const r = host.deref(x);
@@ -283,7 +206,7 @@ export function run(tier, frames, host) {
     frames.push({ fn: callee.fn, ip: 0, locals: args, stack: [], env: callee.env, handlers: [], thisVal });
     return undefined;
   };
-  const callClosure = (cl, args, thisVal) => { if (cl.bound) { args = cl.bargs.concat(args); thisVal = cl.bthis; cl = cl.target; } return run(tier, [{ fn: cl.fn, ip: 0, locals: args.slice(), stack: [], env: cl.env, handlers: [], thisVal }], host).value; }; // run a non-suspending closure to completion (for synchronous drains)
+  const callClosure = (cl, args, thisVal) => { if (cl.bound) { args = cl.bargs.concat(args); thisVal = cl.bthis; cl = cl.target; } return run(program, tier, [{ fn: cl.fn, ip: 0, locals: args.slice(), stack: [], env: cl.env, handlers: [], thisVal }], host).value; }; // run a non-suspending closure to completion (for synchronous drains)
   // Proxy: a wrapper carries a non-enumerable __proxy__ = { target, handler }. Every
   // property op checks proxyOf first; a present trap (a Stackmix closure on the handler)
   // is driven synchronously, else the operation reflects onto the target. Traps run
@@ -321,7 +244,7 @@ export function run(tier, frames, host) {
     if (g.done) return { value: undefined, done: true };
     if (g.started) g.frames[g.frames.length - 1].stack.push(sendVal); // resume: the sent value IS the yield expression's value
     g.started = true;
-    try { const r = run(tier, g.frames, host); g.done = true; return { value: r.value, done: true }; }
+    try { const r = run(program, tier, g.frames, host); g.done = true; return { value: r.value, done: true }; }
     catch (e) {
       if (e instanceof Yielded) return { value: e.value, done: false };
       // A genuine async resource / remote-handle deref awaited INSIDE a generator
@@ -341,7 +264,7 @@ export function run(tier, frames, host) {
   const genReturn = (g, v) => {
     if (g.done || !g.started) { g.done = true; return { value: v, done: true }; }
     if (!unwindToHandler(g.frames, { __genret__: v })) { g.done = true; return { value: v, done: true }; } // no finally -> just complete
-    try { const r = run(tier, g.frames, host); g.done = true; return { value: r.value, done: true }; } // finally ran and fell through / overrode
+    try { const r = run(program, tier, g.frames, host); g.done = true; return { value: r.value, done: true }; } // finally ran and fell through / overrode
     catch (e) {
       g.done = true;
       if (e instanceof Yielded) { g.done = false; return { value: e.value, done: false }; }              // finally yielded
@@ -354,14 +277,14 @@ export function run(tier, frames, host) {
   const genThrow = (g, e) => {
     if (!g.started || g.done) { g.done = true; throw new StackmixUncaught(e); }
     if (!unwindToHandler(g.frames, e)) { g.done = true; throw new StackmixUncaught(e); } // uncaught in generator -> caller
-    try { const r = run(tier, g.frames, host); g.done = true; return { value: r.value, done: true }; }
+    try { const r = run(program, tier, g.frames, host); g.done = true; return { value: r.value, done: true }; }
     catch (err) { if (err instanceof Yielded) return { value: err.value, done: false }; g.done = true; throw err; }
   };
-  if (PROGRAM["%moduleinit"] && tier && tier.__minit !== PROGRAM["%moduleinit"]) { tier.__minit = PROGRAM["%moduleinit"]; run(tier, [{ fn: "%moduleinit", ip: 0, locals: [], stack: [], env: [], handlers: [] }], host); } // module-level statements, once per loaded program — keyed on the init fn so loading a NEW module into this tier re-runs its init (a flat boolean latched and skipped it)
+  if (program["%moduleinit"] && tier && tier.__minit !== program["%moduleinit"]) { tier.__minit = program["%moduleinit"]; run(program, tier, [{ fn: "%moduleinit", ip: 0, locals: [], stack: [], env: [], handlers: [] }], host); } // module-level statements, once per loaded program — keyed on the init fn so loading a NEW module into this tier re-runs its init (a flat boolean latched and skipped it)
   while (true) {
     const f = frames[frames.length - 1];
-    const fn = PROGRAM[f.fn];
-    if (!fn) throw new Error(`Stackmix: unknown function "${f.fn}" — was the program loaded into PROGRAM?`); // clearer than "Cannot read properties of undefined" when a continuation references a missing fn
+    const fn = program[f.fn];
+    if (!fn) throw new Error(`Stackmix: unknown function "${f.fn}" — was it loaded into the runtime (createRuntime)?`); // clearer than "Cannot read properties of undefined" when a continuation references a missing fn
     const ins = fn.code[f.ip];
     try {
     switch (ins[0]) {
@@ -626,19 +549,6 @@ export function padLocals(args, n) {
 
 export function initialFrames(entry, args) {
   return [{ fn: entry, ip: 0, locals: args.slice(), stack: [], env: [], handlers: [] }];
-}
-
-// ---------------------------------------------------------------------------
-// Shared helpers for the demo.
-// ---------------------------------------------------------------------------
-
-export function makeDataset(n) {
-  const people = new Array(n);
-  // A chunky bio field stands in for "the data needed to reconstruct the result
-  // is large" — the megabytes that should NOT cross when we migrate.
-  const filler = "x".repeat(100);
-  for (let i = 0; i < n; i++) people[i] = { name: "Person " + i, age: i % 100, bio: filler };
-  return people;
 }
 
 export const fmt = (b) =>

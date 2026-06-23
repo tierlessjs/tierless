@@ -19,8 +19,8 @@
 // HN proved the latency/round-trip win (bytes were equal). Conduit proves the
 // bandwidth/over-fetch win: the big article bodies never leave the server.
 
-import { PROGRAM, run, Suspend, Tier, fmt } from "#stackmix/runtime/core.mjs";
-import { execute, DEFAULT_RTT, DEFAULT_API } from "./core.mjs";
+import { Tier, fmt } from "#stackmix";
+import { rt, execute, DEFAULT_RTT, DEFAULT_API } from "./core.mjs";
 
 function asm(lines) {
   const labels = {}, code = [];
@@ -45,7 +45,7 @@ function asm(lines) {
 //     return { feed, tags };                     // small projection
 //   }
 // locals: 0 minScore,1 articles,2 feed,3 i,4 a,5 author,6 item,7 tags,8 result
-PROGRAM.loadFeed = {
+rt.program.loadFeed = {
   nlocals: 9,
   code: asm([
     ["RES", "db.articles", 0], ["STORE", 1],

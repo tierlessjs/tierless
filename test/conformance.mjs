@@ -16,7 +16,11 @@
 // "a live computation using X can be frozen to bytes, shipped, and thawed correctly."
 // The same harness is the template for any other language that compiles to the IR.
 
-import { PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation, contBytes, initialFrames, awaitable } from "#stackmix/runtime/core.mjs";
+import { createRuntime } from "#stackmix";
+import { Suspend, serializeContinuation, deserializeContinuation, contBytes, initialFrames, awaitable } from "#stackmix/runtime/core.mjs";
+const rt = createRuntime();
+const PROGRAM = rt.program;
+const run = (tier, frames, host) => rt.run(tier, frames, host);
 import { loadModule } from "#stackmix/compiler/tsc.mjs";
 
 let pass = 0, fail = 0; const fails = [];

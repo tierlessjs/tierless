@@ -1,9 +1,9 @@
 // The application, authored as ordinary TypeScript and compiled to Stackmix IR by
-// the frontend. Both processes import this so they run the identical module
-// (resume is by instruction offset). No tier annotations: placement is inferred
-// from which resources each call touches — db.* force the server, ui.* the client.
-import { PROGRAM } from "#stackmix/runtime/core.mjs";
-import { loadModule } from "#stackmix/compiler/tsc.mjs";
+// the frontend. Both processes build a runtime from this so they run the identical
+// module (resume is by instruction offset). No tier annotations: placement is
+// inferred from which resources each call touches — db.* force the server, ui.*
+// the client.
+import { createRuntime } from "#stackmix";
 
 export const N = 2000;
 
@@ -26,8 +26,13 @@ function main(): number {
 }
 `;
 
-export const frag = loadModule(PROGRAM, SRC, {
-  entry: "main",
-  resources: ["db.items", "db.title", "ui.render"],
-  file: "app-thread.ts",
-});
+// Each process builds its own runtime — there is no shared global program.
+export function buildRuntime() {
+  const rt = createRuntime();
+  rt.load(SRC, {
+    entry: "main",
+    resources: ["db.items", "db.title", "ui.render"],
+    file: "app-thread.ts",
+  });
+  return rt;
+}

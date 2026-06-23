@@ -11,10 +11,10 @@
 
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { Tier, run, Suspend, serializeContinuation, deserializeContinuation, contBytes, pendingName, wireHandles, initialFrames, fmt } from "#stackmix/runtime/core.mjs";
-import { describeContinuation } from "#stackmix/compiler/tsc.mjs";
-import { writeFrame, readFrames } from "#stackmix/runtime/frame.mjs";
-import { N, SRC, frag } from "./thread.mjs";
+import { Tier, Suspend, serializeContinuation, deserializeContinuation, contBytes, pendingName, wireHandles, initialFrames, fmt, writeFrame, readFrames } from "#stackmix";
+import { N, buildRuntime } from "./thread.mjs";
+
+const rt = buildRuntime();
 
 const rendered = [];
 const client = new Tier("client", { "ui.render": ([lines]) => { for (const l of lines) rendered.push(l); return lines.length; } });
@@ -28,9 +28,7 @@ const send = (obj) => writeFrame(child.stdin, obj);
 
 const migrations = [];
 
-// describeContinuation needs the PROGRAM with .pos.
-import { PROGRAM } from "#stackmix/runtime/core.mjs";
-const topLoc = (frames) => { const t = describeContinuation(PROGRAM, frames); return t[t.length - 1]?.loc; };
+const topLoc = (frames) => { const t = rt.describe(frames); return t[t.length - 1]?.loc; };
 
 async function main() {
   let frames = initialFrames("main", []);
@@ -38,7 +36,7 @@ async function main() {
   while (true) {
     try {
       if (pending) { frames[frames.length - 1].stack.push(client.resources[pending.name](pending.args)); pending = null; }
-      const res = run(client, frames, host);
+      const res = rt.run(client, frames, host);
       return finish(res.value);
     } catch (e) {
       if (!(e instanceof Suspend)) throw e;
@@ -61,15 +59,15 @@ async function main() {
 function topLocFromWire(wire) {
   // reconstruct frames cheaply for the trace: the wire's frame fn+ip are enough
   const frames = wire.frames.map((f) => ({ fn: f.fn, ip: f.ip }));
-  const t = describeContinuation(PROGRAM, frames);
+  const t = rt.describe(frames);
   return t[t.length - 1]?.loc;
 }
 
 function finish(value) {
   send({ type: "shutdown" }); child.stdin.end();
-  const nInstrs = Object.values(frag).reduce((s, f) => s + f.code.length, 0);
+  const nInstrs = Object.values(rt.program).reduce((s, f) => s + f.code.length, 0);
   console.log("\nStackmix capstone — real TypeScript, suspended/resumed across two OS processes\n");
-  console.log(`Authored: app-thread.ts -> compiled to ${nInstrs} IR instrs across ${Object.keys(frag).length} functions`);
+  console.log(`Authored: app-thread.ts -> compiled to ${nInstrs} IR instrs across ${Object.keys(rt.program).length} functions`);
   console.log(`Program: main() cold-started on the CLIENT; db.* live on the server, ui.* on the client\n`);
   console.log("Migrations (continuation crossing the pipe, mapped to TS source):");
   for (const m of migrations)
@@ -84,5 +82,4 @@ function finish(value) {
   process.exitCode = ok ? 0 : 1;
 }
 
-void SRC;
 main().catch((e) => { console.error(e); process.exit(1); });

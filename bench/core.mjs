@@ -6,9 +6,13 @@
 // placement policy on the real runtime, counting real cross-tier hops.
 
 import {
-  PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation,
+  createRuntime, Suspend, serializeContinuation, deserializeContinuation,
   contBytes, initialFrames, Tier,
-} from "#stackmix/runtime/core.mjs";
+} from "#stackmix";
+
+// One runtime shared by every benchmark traversal (bench/conduit.mjs installs its
+// own IR into the same registry).
+export const rt = createRuntime();
 
 export const DEFAULT_RTT = 50; // ms, client <-> server round trip (dominates)
 export const DEFAULT_API = 2;  // ms, server <-> its API/DB per round (co-located)
@@ -23,7 +27,7 @@ function asm(lines) {
 
 // Sequential: one api.item per node (the obvious traversal).
 // locals: 0 rootId,1 root,2 results,3 queue,4 kids,5 j,6 head,7 cid,8 c
-PROGRAM.loadThread = {
+rt.program.loadThread = {
   nlocals: 9,
   code: asm([
     ["LOAD", 0], ["RES", "api.item", 1], ["STORE", 1],
@@ -56,7 +60,7 @@ PROGRAM.loadThread = {
 
 // Concurrent: one api.items(level) per tree level (fan out a level at once).
 // locals: 0 rootId,1 level,2 results,3 items,4 next,5 i,6 it,7 kids,8 j
-PROGRAM.loadThreadConcurrent = {
+rt.program.loadThreadConcurrent = {
   nlocals: 9,
   code: asm([
     ["NEWARR"], ["STORE", 1], ["LOAD", 1], ["LOAD", 0], ["ARRPUSH"],
@@ -114,7 +118,7 @@ export async function execute(entry, args, { startTier, tiers, policy, net, rtt,
   let frames = initialFrames(entry, args);
   while (true) {
     let res;
-    try { res = run(current, frames, host); }
+    try { res = rt.run(current, frames, host); }
     catch (e) {
       if (!(e instanceof Suspend)) throw e;
       const owner = tiers.find((t) => t.has(e.pending.name));

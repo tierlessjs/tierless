@@ -6,10 +6,10 @@
 // dereferences that handle, it sends a {fetch} request and we ship the object
 // then — on demand — encoded with the identity/cycle-safe graph codec.
 
-import { Tier, run, Suspend, serializeContinuation, deserializeContinuation } from "#stackmix/runtime/core.mjs";
-import { encodeGraph } from "#stackmix/runtime/heap.mjs";
-import { writeFrame, readFrames } from "#stackmix/runtime/frame.mjs";
-import "./profile.mjs";
+import { Tier, Suspend, serializeContinuation, deserializeContinuation, encodeGraph, writeFrame, readFrames } from "#stackmix";
+import { buildRuntime } from "./profile.mjs";
+
+const rt = buildRuntime();
 
 const BIO = 120_000; // > HANDLE_THRESHOLD, so the profile becomes a handle on migrate
 const server = new Tier("server", {
@@ -33,7 +33,7 @@ readFrames(process.stdin, (msg, bin) => {
     let frames = got.frames;
     try {
       if (got.pending) frames[frames.length - 1].stack.push(server.resources[got.pending.name](got.pending.args));
-      const res = run(server, frames, host);
+      const res = rt.run(server, frames, host);
       writeFrame(process.stdout, { type: "done", value: res.value });
     } catch (e) {
       if (!(e instanceof Suspend)) { writeFrame(process.stdout, { type: "error", message: String(e && e.message || e) }); return; }

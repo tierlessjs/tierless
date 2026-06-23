@@ -6,7 +6,11 @@
 // serialization boundary MID-AWAIT — its captured environment travels as data,
 // its code by reference. That's the #4 thesis in miniature.
 
-import { PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation, initialFrames, isClosure, awaitable } from "#stackmix/runtime/core.mjs";
+import { createRuntime } from "#stackmix";
+import { Suspend, serializeContinuation, deserializeContinuation, initialFrames, isClosure, awaitable } from "#stackmix/runtime/core.mjs";
+const rt = createRuntime();
+const PROGRAM = rt.program;
+const run = (tier, frames, host) => rt.run(tier, frames, host);
 import { loadModule, describeContinuation } from "#stackmix/compiler/tsc.mjs";
 
 let pass = true;

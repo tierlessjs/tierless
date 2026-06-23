@@ -1,8 +1,9 @@
 // Capstone — SERVER tier (child process). Owns db.items / db.title. Runs the
 // migrated continuation of a program compiled from real TypeScript.
-import { Tier, run, Suspend, serializeContinuation, deserializeContinuation } from "#stackmix/runtime/core.mjs";
-import { writeFrame, readFrames } from "#stackmix/runtime/frame.mjs";
-import { N } from "./thread.mjs"; // also registers the compiled program into PROGRAM
+import { Tier, Suspend, serializeContinuation, deserializeContinuation, writeFrame, readFrames } from "#stackmix";
+import { N, buildRuntime } from "./thread.mjs";
+
+const rt = buildRuntime();
 
 const server = new Tier("server", {
   "db.items": () => Array.from({ length: N }, (_, i) => i),
@@ -17,7 +18,7 @@ readFrames(process.stdin, (msg) => {
   let frames = got.frames;
   try {
     if (got.pending) frames[frames.length - 1].stack.push(server.resources[got.pending.name](got.pending.args));
-    const res = run(server, frames, host);
+    const res = rt.run(server, frames, host);
     writeFrame(process.stdout, { type: "done", value: res.value });
   } catch (e) {
     if (!(e instanceof Suspend)) { writeFrame(process.stdout, { type: "error", message: String(e && e.message || e) }); return; }
