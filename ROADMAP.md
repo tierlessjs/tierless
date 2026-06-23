@@ -43,9 +43,14 @@ where it goes next. Items are grouped, not strictly ordered; see
   the browser's native `WebSocket` and the wire codec is `Buffer`-free — but
   nothing runs in an actual browser yet: no DOM-resource host, no bundle, no
   headless-browser test. That last mile is the remaining browser-target work.
-- **Full-language WASM path** is explicitly *not* planned — the JS path covers the
-  language; the wasm path exists only to prove the linear-memory capture
-  mechanism.
+- **Compile the IR to WASM (browser execution path).** Reverses the earlier
+  interpret-only stance: the browser should run the program as native WASM, not a
+  bytecode interpreter. Lower IR→WASM via Binaryen (drafting off AssemblyScript for
+  the vanilla codegen), keep continuations serializable with Asyncify — its unwind
+  state lives in linear memory, so it slices out and ships — then layer the §5 heap
+  + resume-by-offset model on top. The load-bearing step is proven in
+  `test/probes/asyncify.mjs`: a compiled-wasm continuation suspended at a resource
+  call, its call stack serialized, and resumed in a *fresh* instance.
 
 ## Framework shape
 
