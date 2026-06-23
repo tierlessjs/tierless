@@ -32,6 +32,16 @@ const programs = [
   ["await a boolean condition", `
     async function ready() { return 1 < 2; }
     async function main() { if (await ready()) { return "go"; } return "stop"; }`],               // "go"
+  ["async generator consumed by for-await", `
+    async function* g() { yield 1; yield 2; yield 3; }
+    async function main() { let s = 0; for await (const x of g()) { s = s + x; } return s; }`],   // 6
+  ["async generator that awaits in its body", `
+    async function dbl(x) { return x * 2; }
+    async function* g() { yield await dbl(5); yield await dbl(10); }
+    async function main() { let s = 0; for await (const x of g()) { s = s + x; } return s; }`],   // 10 + 20 = 30
+  ["async range generator", `
+    async function* range(a, b) { for (let i = a; i < b; i = i + 1) { yield i; } }
+    async function main() { let s = 0; for await (const x of range(1, 5)) { s = s + x; } return s; }`], // 1+2+3+4 = 10
 ];
 
 function interp(src) {
@@ -53,5 +63,5 @@ for (const [name, src] of programs) {
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}: interpreter ${JSON.stringify(i)} == native ${JSON.stringify(n)}`);
 }
 const ok = results.every(Boolean);
-console.log(`\nResult: ${ok ? "ALL PASS" : "FAILURES"} — the AOT compiler runs async/await (synchronous resolution between user functions) and matches the interpreter`);
+console.log(`\nResult: ${ok ? "ALL PASS" : "FAILURES"} — the AOT compiler runs async/await and async generators (synchronous resolution between user functions) and matches the interpreter`);
 process.exit(ok ? 0 : 1);
