@@ -46,6 +46,12 @@ const programs = [
   ["two-way next(): running accumulator fed by next()", `
     function* adder() { let t = 0; while (true) { const x = yield t; t = t + x; } }
     function main() { const it = adder(); it.next(); it.next(10); return it.next(20).value; }`],  // 0 then +10 +20 -> 30
+  ["return() abandons the generator with its value", `
+    function* g() { yield 1; yield 2; yield 3; }
+    function main() { const it = g(); it.next(); return it.return(99).value; }`],                  // 99
+  ["return() leaves the generator done", `
+    function* g() { yield 1; yield 2; }
+    function main() { const it = g(); it.next(); it.return(0); return it.next().done ? 1 : 0; }`], // 1
 ];
 
 function interp(src) {

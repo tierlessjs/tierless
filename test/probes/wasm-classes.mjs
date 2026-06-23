@@ -52,6 +52,12 @@ const programs = [
   ["instanceof: own class is true", `
     class A { constructor() {} }
     function main() { return new A() instanceof A; }`],                                               // true
+  ["a method extracted as a value keeps its this", `
+    class C { constructor() { this.n = 3; } get() { return this.n; } }
+    function main() { const c = new C(); const f = c.get; return f(); }`],                            // 3 (method captured this)
+  ["method value through a variable", `
+    class Box { constructor(v) { this.v = v; } val() { return this.v + 1; } }
+    function main() { const b = new Box(7); const m = b.val; return m(); }`],                         // 8
 ];
 
 function interp(src) {

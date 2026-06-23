@@ -123,7 +123,7 @@ function immediate(x) {
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
 }
 
-const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, GENNEXT: -1 };
+const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, GENNEXT: -1, GENRET: -1 };
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" ? -ins[2] : DELTA[ins[0]] ?? 0;
 
 // Labeled asm -> instruction list with JMP/JMPF targets resolved to indices.
@@ -314,6 +314,9 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings) {
         case "ITER": break;                    // normalize an iterable -> iterator; a generator is already its own iterator (no-op)
         case "GENNEXT": {                      // [gen, sentValue] -> [{value, done}]; drive the generator one step
           h -= 2; stmts.push(m.local.set(scratch(h), m.call("__gennext", [get(scratch(h)), get(scratch(h + 1))], I32))); h++; break;
+        }
+        case "GENRET": {                       // [gen, value] -> [{value, done:true}]; abandon the generator (no finally yet)
+          h -= 2; stmts.push(m.local.set(scratch(h), m.call("__genret", [get(scratch(h)), get(scratch(h + 1))], I32))); h++; break;
         }
         case "NEWOBJ": stmts.push(m.local.set(scratch(h), m.call("__newobj", [], I32))); h++; break;
         case "GETPROP": {                      // [obj] -> [obj.key]; key interned to an id
@@ -711,6 +714,11 @@ function addGenRuntime(m, valueKey, doneKey) {
     m.i32.store(16, 4, genAddr(), g(1)),                                               // the sent value (becomes the paused yield's value)
     m.local.set(2, m.call_indirect("0", m.i32.load(4, 4, genAddr()), [g(0)], binaryen.createType([I32]), I32)), // run to the next yield/return
     mkResult(g(2), m.select(m.i32.load(12, 4, genAddr()), c(TRUE), c(FALSE))),          // value + done (the body set done)
+  ], binaryen.none));
+  // __genret(gen, value) -> {value, done:true}.  it.return(v): abandon the generator (finally blocks are a later slice).
+  m.addFunction("__genret", binaryen.createType([I32, I32]), I32, [I32, I32], m.block(null, [
+    m.i32.store(12, 4, genAddr(), c(1)),                                               // mark done
+    mkResult(g(1), c(TRUE)),
   ], binaryen.none));
 }
 
