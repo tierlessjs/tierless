@@ -2,10 +2,11 @@
 // execution path; design §4.1). Each IR function becomes a real WASM function,
 // so the program runs natively rather than being stepped by an interpreter.
 //
-// Scope: a numeric subset with control flow — PUSH, LOAD, STORE, POP,
-// ADD/SUB/MUL/LT/GE, CALL (user function), RES (resource = the suspend point),
-// RET, and JMP/JMPF (resolved label or index targets). A real value model (WASM
-// GC / tagged) and the §5 heap are the next slices.
+// Scope: a numeric subset with control flow and a linear-memory heap — PUSH,
+// LOAD, STORE, POP, ADD/SUB/MUL/LT/GE, CALL (user function), RES (resource = the
+// suspend point), RET, JMP/JMPF (resolved label or index targets), and
+// ALLOC/AGET/ASET (bump-allocated i32 arrays). A tagged value model over this
+// heap and the §5 small-vs-handle split are the next slices.
 //
 // Two load-bearing choices:
 //   - Control flow: the IR is split into basic blocks and handed to Binaryen's
@@ -20,7 +21,15 @@
 
 import binaryen from "binaryen";
 
-const DELTA = { PUSH: 1, LOAD: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0 };
+// Linear-memory heap: a bump pointer at BUMP_ADDR, objects from HEAP_BASE. The
+// value model MUST live in linear memory, not WASM GC: Asyncify captures a
+// continuation by spilling live locals into linear memory, and a WASM GC
+// reference cannot be written to linear memory — so a continuation holding a GC
+// ref could never be captured. Serializable continuations force memory-backed values.
+export const BUMP_ADDR = 8;
+export const HEAP_BASE = 64;
+
+const DELTA = { PUSH: 1, LOAD: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3 };
 const delta = (ins) => (ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : DELTA[ins[0]] ?? 0);
 
 // Labeled asm -> instruction list with JMP/JMPF targets resolved to indices.
@@ -48,7 +57,7 @@ function compileFn(m, name, fn) {
   const argc = fn.argc || 0, nl = fn.nlocals;
   const code = resolveLabels(fn.code);
   const leaders = leaderSet(code);
-  const maxH = maxStack(code);
+  const maxH = maxStack(code) + 1;   // +1 scratch headroom for ALLOC's temp
   const scratch = (k) => nl + k;     // operand-stack slots live above the IR locals
   const labelHelper = nl + maxH;     // the Relooper's scratch local
   const get = (i) => m.local.get(i, I32);
@@ -79,6 +88,13 @@ function compileFn(m, name, fn) {
           const args = []; for (let j = 0; j < ac; j++) args.push(get(scratch(h + j)));
           stmts.push(m.local.set(scratch(h), m.call(ins[1], args, I32))); h++; break;
         }
+        case "ALLOC": {                        // pop n, bump-allocate n words, push the pointer
+          h--; stmts.push(m.local.set(scratch(h + 1), m.i32.load(0, 4, m.i32.const(BUMP_ADDR))));         // tmp = *bump
+          stmts.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(scratch(h + 1)), m.i32.mul(get(scratch(h)), m.i32.const(4))))); // *bump = tmp + n*4
+          stmts.push(m.local.set(scratch(h), get(scratch(h + 1)))); h++; break;            // result = tmp
+        }
+        case "AGET": { h -= 2; const p = get(scratch(h)), i = get(scratch(h + 1)); stmts.push(m.local.set(scratch(h), m.i32.load(0, 4, m.i32.add(p, m.i32.mul(i, m.i32.const(4)))))); h++; break; } // push mem[ptr + idx*4]
+        case "ASET": { h -= 3; const p = get(scratch(h)), i = get(scratch(h + 1)), v = get(scratch(h + 2)); stmts.push(m.i32.store(0, 4, m.i32.add(p, m.i32.mul(i, m.i32.const(4))), v)); break; } // mem[ptr + idx*4] = val
         case "JMP": term = { kind: "jmp", target: ins[1] }; break;
         case "JMPF": h--; term = { kind: "jmpf", target: ins[1], cond: scratch(h), next: end }; break;
         case "RET": h--; result = get(scratch(h)); term = { kind: "ret" }; break;
