@@ -12,7 +12,7 @@
 
 import { WebSocketServer, WebSocket } from "ws";
 import { wsPort, makePeer } from "#stackmix";
-import { compileToWasm } from "#stackmix/wasm/aot.mjs";
+import { compileToWasm, tagInt, untagInt } from "#stackmix/wasm/aot.mjs";
 
 const DATA_PTR = 16, STACK_BASE = 1024, STACK_END = 8192, RES_VALUE = 42;
 const EXPECT = 100 + (10 + RES_VALUE); // main = y + (x + resource) = 152
@@ -42,7 +42,7 @@ async function main() {
   wss.on("connection", (socket) => {
     const peer = makePeer(wsPort(socket));
     peer.on("resume", (_req, bin) => {
-      const ex = aotInstance((e) => { if (e.asyncify_get_state() === 2) e.asyncify_stop_rewind(); return RES_VALUE; });
+      const ex = aotInstance((e) => { if (e.asyncify_get_state() === 2) e.asyncify_stop_rewind(); return tagInt(RES_VALUE); });
       new Uint8Array(ex.memory.buffer).set(bin);     // load the continuation slice
       ex.asyncify_start_rewind(DATA_PTR);
       return { obj: { value: ex.main() } };
@@ -66,10 +66,11 @@ async function main() {
   peer.close();
   wss.close();
 
-  const ok = obj.value === EXPECT;
+  const value = untagInt(obj.value); // results cross the boundary tagged
+  const ok = value === EXPECT;
   console.log(`\nStackmix — a COMPILED (IR->WASM+Asyncify) continuation migrated over a real WebSocket\n`);
   console.log(`  client cold-started, suspended at the RES, shipped ${blob.length} B of linear memory`);
-  console.log(`  server resumed it in a fresh instance and returned ${obj.value} (expected ${EXPECT})\n`);
+  console.log(`  server resumed it in a fresh instance and returned ${value} (expected ${EXPECT})\n`);
   console.log(`Result: ${ok ? "ALL PASS" : "FAILURES"} — a compiled continuation migrated over a real WebSocket and resumed`);
   process.exit(ok ? 0 : 1);
 }

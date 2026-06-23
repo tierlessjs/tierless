@@ -2,11 +2,17 @@
 // execution path; design §4.1). Each IR function becomes a real WASM function,
 // so the program runs natively rather than being stepped by an interpreter.
 //
-// Scope: a numeric subset with control flow and a linear-memory heap — PUSH,
-// LOAD, STORE, POP, ADD/SUB/MUL/LT/GE, CALL (user function), RES (resource = the
-// suspend point), RET, JMP/JMPF (resolved label or index targets), and
-// ALLOC/AGET/ASET (bump-allocated i32 arrays). A tagged value model over this
-// heap and the §5 small-vs-handle split are the next slices.
+// Scope: a numeric subset with control flow, a linear-memory heap, and a tagged
+// value model — PUSH, LOAD, STORE, POP, ADD/SUB/MUL/LT/GE, CALL (user function),
+// RES (resource = the suspend point), RET, JMP/JMPF (resolved label or index
+// targets), and ALLOC/AGET/ASET (length-prefixed heap arrays). The §5
+// small-vs-handle split is the next slice.
+//
+// Values are low-bit tagged so a continuation is self-describing: an int is
+// (n << 1) (bit 0 = 0), a heap pointer is (addr | 1) (bit 0 = 1, addr 4-aligned).
+// That lets a walker tell a pointer from an integer per slot — the property §5
+// needs to decide what ships inline vs. becomes a handle. Each heap object also
+// carries a raw length word at offset 0, so objects are self-describing too.
 //
 // Two load-bearing choices:
 //   - Control flow: the IR is split into basic blocks and handed to Binaryen's
@@ -31,6 +37,12 @@ import binaryen from "binaryen";
 // Asyncify mechanics.) So anything live across a suspend must be memory-backed.
 export const BUMP_ADDR = 8;
 export const HEAP_BASE = 64;
+
+// Tagged-value helpers (also used to read/write values across the host boundary).
+export const tagInt = (n) => (n << 1);
+export const untagInt = (v) => (v >> 1);
+export const isPointer = (v) => (v & 1) === 1;
+export const pointerAddr = (v) => (v & ~1);
 
 const DELTA = { PUSH: 1, LOAD: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3 };
 const delta = (ins) => (ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : DELTA[ins[0]] ?? 0);
@@ -76,14 +88,19 @@ function compileFn(m, name, fn) {
     let h = 0, result = null, term = { kind: "fall", next: end };
     for (const ins of code.slice(start, end)) {
       switch (ins[0]) {
-        case "PUSH": stmts.push(m.local.set(scratch(h), m.i32.const(ins[1]))); h++; break;
+        case "PUSH": stmts.push(m.local.set(scratch(h), m.i32.const(ins[1] << 1))); h++; break; // tagged int
         case "LOAD": stmts.push(m.local.set(scratch(h), get(ins[1]))); h++; break;
         case "STORE": h--; stmts.push(m.local.set(ins[1], get(scratch(h)))); break;
         case "POP": h--; break;
         case "ADD": case "SUB": case "MUL": case "LT": case "GE": {
           h -= 2; const a = get(scratch(h)), b = get(scratch(h + 1));
+          // tagged ints: a+b / a-b are already correctly tagged (2n±2m = 2(n±m));
+          // MUL untags one operand ((a>>1)*b = 2nm); LT/GE compare directly
+          // (monotonic) then tag the 0/1 boolean.
           const e = ins[0] === "ADD" ? m.i32.add(a, b) : ins[0] === "SUB" ? m.i32.sub(a, b)
-            : ins[0] === "MUL" ? m.i32.mul(a, b) : ins[0] === "LT" ? m.i32.lt_s(a, b) : m.i32.ge_s(a, b);
+            : ins[0] === "MUL" ? m.i32.mul(m.i32.shr_s(a, m.i32.const(1)), b)
+            : ins[0] === "LT" ? m.i32.shl(m.i32.lt_s(a, b), m.i32.const(1))
+            : m.i32.shl(m.i32.ge_s(a, b), m.i32.const(1));
           stmts.push(m.local.set(scratch(h), e)); h++; break;
         }
         case "CALL": case "RES": {
@@ -91,13 +108,17 @@ function compileFn(m, name, fn) {
           const args = []; for (let j = 0; j < ac; j++) args.push(get(scratch(h + j)));
           stmts.push(m.local.set(scratch(h), m.call(ins[1], args, I32))); h++; break;
         }
-        case "ALLOC": {                        // pop n, bump-allocate n words, push the pointer
-          h--; stmts.push(m.local.set(scratch(h + 1), m.i32.load(0, 4, m.i32.const(BUMP_ADDR))));         // tmp = *bump
-          stmts.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(scratch(h + 1)), m.i32.mul(get(scratch(h)), m.i32.const(4))))); // *bump = tmp + n*4
-          stmts.push(m.local.set(scratch(h), get(scratch(h + 1)))); h++; break;            // result = tmp
+        case "ALLOC": {                        // pop n (tagged); allocate [len | n fields]; push a tagged pointer
+          h--; const nRaw = () => m.i32.shr_s(get(scratch(h)), m.i32.const(1));
+          stmts.push(m.local.set(scratch(h + 1), m.i32.load(0, 4, m.i32.const(BUMP_ADDR))));                      // tmp = *bump (raw addr)
+          stmts.push(m.i32.store(0, 4, get(scratch(h + 1)), nRaw()));                                             // header: mem[tmp] = n
+          stmts.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(scratch(h + 1)), m.i32.mul(m.i32.add(nRaw(), m.i32.const(1)), m.i32.const(4))))); // *bump = tmp + (n+1)*4
+          stmts.push(m.local.set(scratch(h), m.i32.or(get(scratch(h + 1)), m.i32.const(1)))); h++; break;         // result = tmp | 1 (tagged pointer)
         }
-        case "AGET": { h -= 2; const p = get(scratch(h)), i = get(scratch(h + 1)); stmts.push(m.local.set(scratch(h), m.i32.load(0, 4, m.i32.add(p, m.i32.mul(i, m.i32.const(4)))))); h++; break; } // push mem[ptr + idx*4]
-        case "ASET": { h -= 3; const p = get(scratch(h)), i = get(scratch(h + 1)), v = get(scratch(h + 2)); stmts.push(m.i32.store(0, 4, m.i32.add(p, m.i32.mul(i, m.i32.const(4))), v)); break; } // mem[ptr + idx*4] = val
+        case "AGET": { h -= 2; const addr = m.i32.and(get(scratch(h)), m.i32.const(~1)), idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1));
+          stmts.push(m.local.set(scratch(h), m.i32.load(4, 4, m.i32.add(addr, m.i32.mul(idx, m.i32.const(4)))))); h++; break; } // field = mem[addr + 4 + idx*4] (skip length header)
+        case "ASET": { h -= 3; const addr = m.i32.and(get(scratch(h)), m.i32.const(~1)), idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1)), v = get(scratch(h + 2));
+          stmts.push(m.i32.store(4, 4, m.i32.add(addr, m.i32.mul(idx, m.i32.const(4))), v)); break; } // mem[addr + 4 + idx*4] = val
         case "JMP": term = { kind: "jmp", target: ins[1] }; break;
         case "JMPF": h--; term = { kind: "jmpf", target: ins[1], cond: scratch(h), next: end }; break;
         case "RET": h--; result = get(scratch(h)); term = { kind: "ret" }; break;
