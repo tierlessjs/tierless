@@ -5,9 +5,9 @@
 // work) before resuming. Because we own the continuation, an await-suspended
 // computation is SERIALIZABLE — we round-trip it through JSON at every await and
 // it still completes correctly. Native async/await cannot do this: a paused
-// async function's state is engine-internal. That gap is exactly why #4 must own
-// the transform (NOTES-frontend.md), and the same mechanism is what lets a
-// cross-process handle fetch resume a synchronous interpreter.
+// async function's state is engine-internal. That gap is exactly why the frontend
+// must own the transform (see docs/architecture.md), and the same mechanism is
+// what lets a cross-process handle fetch resume a synchronous interpreter.
 
 import { createRuntime } from "#stackmix";
 import { Suspend, serializeContinuation, deserializeContinuation, contBytes, initialFrames, Tier, awaitable } from "#stackmix/runtime/core.mjs";
