@@ -22,10 +22,13 @@
 import binaryen from "binaryen";
 
 // Linear-memory heap: a bump pointer at BUMP_ADDR, objects from HEAP_BASE. The
-// value model MUST live in linear memory, not WASM GC: Asyncify captures a
-// continuation by spilling live locals into linear memory, and a WASM GC
-// reference cannot be written to linear memory — so a continuation holding a GC
-// ref could never be captured. Serializable continuations force memory-backed values.
+// value model lives in linear memory, not WASM GC, because a *migrated*
+// continuation must be byte-serializable: GC references live in tables / the GC
+// heap — never in the linear-memory slice that crosses the wire — and an
+// externref points at a host object that can't travel anyway. (Asyncify's own
+// handling of reference-typed locals is inconsistent — sometimes instrumented,
+// sometimes a Binaryen abort — but the decisive constraint is serialization, not
+// Asyncify mechanics.) So anything live across a suspend must be memory-backed.
 export const BUMP_ADDR = 8;
 export const HEAP_BASE = 64;
 
