@@ -2,16 +2,6 @@
 
 > Stackmix is currently a research-stage framework and should not yet be used to run untrusted code across a trust boundary in production.
 
-## Supported Versions
-
-Stackmix is pre-1.0. The API and runtime are still evolving, and only the
-latest `0.x` release receives security fixes.
-
-| Version       | Supported          |
-| ------------- | ------------------ |
-| latest `0.x`  | :white_check_mark: |
-| older `0.x`   | :x:                |
-
 ## Reporting a Vulnerability
 
 Please report security issues privately through GitHub's
