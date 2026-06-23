@@ -46,6 +46,10 @@ const ARRTAG = -1, INITCAP = 4;
 // A closure (tsc.mjs lowers every function to one): a heap object [CLOSTAG,
 // fnTableIndex, ...captured env]. CALLV calls through the function table.
 const CLOSTAG = -2;
+// A string-keyed object: a stable header [OBJTAG, count, backing] plus a backing
+// store [cap, k0, v0, k1, v1, ...] of (internedKeyId, taggedValue) pairs. Keys
+// are interned to small ints at compile time, so property access is an id match.
+const OBJTAG = -3, INITCAP_OBJ = 2;
 
 // Host-side array helpers: build/read a growable array in an instance's linear
 // memory (so resources can pass number[] across the boundary). Layout matches
@@ -101,7 +105,7 @@ function immediate(x) {
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
 }
 
-const DELTA = { PUSH: 1, LOAD: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1 };
+const DELTA = { PUSH: 1, LOAD: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1 };
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : DELTA[ins[0]] ?? 0;
 
 // Labeled asm -> instruction list with JMP/JMPF targets resolved to indices.
@@ -124,7 +128,7 @@ function leaderSet(code) {
 
 const maxStack = (code) => { let h = 0, max = 0; for (const ins of code) { h += delta(ins); if (h > max) max = h; } return max; };
 
-function compileFn(m, name, fn, handles, fnIndex) {
+function compileFn(m, name, fn, handles, fnIndex, keyIds) {
   const I32 = binaryen.i32;
   const argc = fn.argc || 0, nl = fn.nlocals;
   const code = resolveLabels(fn.code);
@@ -201,6 +205,15 @@ function compileFn(m, name, fn, handles, fnIndex) {
           const fn = m.i32.load(4, 4, m.i32.and(get(scratch(h)), m.i32.const(~3)));                              // closure[1] = fn table index
           const args = []; for (let k = 0; k < argc; k++) args.push(get(scratch(h + 1 + k)));
           stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, args, binaryen.createType(new Array(argc).fill(I32)), I32))); h++; break;
+        }
+        case "NEWOBJ": stmts.push(m.local.set(scratch(h), m.call("__newobj", [], I32))); h++; break;
+        case "GETPROP": {                      // [obj] -> [obj.key]; key interned to an id
+          const v = m.call("__getprop", [get(scratch(h - 1)), m.i32.const(keyIds.get(ins[1]))], I32);
+          stmts.push(m.local.set(scratch(h - 1), v)); break;
+        }
+        case "SETPROP": {                      // [obj, val] -> [obj]; obj.key = val
+          h -= 2; const r = m.call("__setprop", [get(scratch(h)), m.i32.const(keyIds.get(ins[1])), get(scratch(h + 1))], I32);
+          stmts.push(m.local.set(scratch(h), r)); h++; break;
         }
         case "ALLOC": {                        // pop n (tagged); allocate [len | n fields]; push a tagged pointer
           h--; const nRaw = () => m.i32.shr_s(get(scratch(h)), m.i32.const(1));
@@ -290,13 +303,71 @@ function addArrayRuntime(m) {
   ], binaryen.none));
 }
 
+// Runtime helpers for string-keyed objects (added only when a program uses them).
+// An object is a stable header [OBJTAG, count, backing] + backing [cap, (key,val)...].
+function addObjectRuntime(m) {
+  const I32 = binaryen.i32;
+  const g = (i) => m.local.get(i, I32);
+  const c = (n) => m.i32.const(n);
+  const ld = (off, p) => m.i32.load(off, 4, p);
+  const st = (off, p, v) => m.i32.store(off, 4, p, v);
+  const bump = () => m.i32.load(0, 4, c(BUMP_ADDR));
+  const setBump = (v) => m.i32.store(0, 4, c(BUMP_ADDR), v);
+  const pair = (backing, i) => m.i32.add(g(backing), m.i32.mul(g(i), c(8))); // address of the i-th (key,val) pair, minus the cap word
+
+  // __newobj() -> tagged object pointer.  locals: 0=backing, 1=header
+  m.addFunction("__newobj", binaryen.createType([]), I32, [I32, I32], m.block(null, [
+    m.local.set(0, bump()), st(0, g(0), c(INITCAP_OBJ)), setBump(m.i32.add(g(0), c((1 + 2 * INITCAP_OBJ) * 4))), // backing = [cap, ...pairs]
+    m.local.set(1, bump()), st(0, g(1), c(OBJTAG)), st(4, g(1), c(0)), st(8, g(1), g(0)), setBump(m.i32.add(g(1), c(12))), // header = [OBJTAG, count=0, backing]
+    m.return(m.i32.or(g(1), c(1))),
+  ], binaryen.none));
+
+  // __getprop(obj, key) -> value or undefined.  params 0=obj,1=key; locals 2=addr,3=backing,4=count,5=i
+  m.addFunction("__getprop", binaryen.createType([I32, I32]), I32, [I32, I32, I32, I32], m.block(null, [
+    m.local.set(2, m.i32.and(g(0), c(~3))), m.local.set(3, ld(8, g(2))), m.local.set(4, ld(4, g(2))), m.local.set(5, c(0)),
+    m.loop("L", m.block(null, [
+      m.if(m.i32.ge_u(g(5), g(4)), m.return(c(UNDEF))),            // i >= count -> undefined (missing key)
+      m.if(m.i32.eq(ld(4, pair(3, 5)), g(1)), m.return(ld(8, pair(3, 5)))), // key match -> value
+      m.local.set(5, m.i32.add(g(5), c(1))), m.br("L"),
+    ])),
+    m.unreachable(),
+  ], binaryen.none));
+
+  // __setprop(obj, key, val) -> obj.  params 0=obj,1=key,2=val; locals 3=addr,4=backing,5=count,6=i,7=cap,8=newBacking
+  m.addFunction("__setprop", binaryen.createType([I32, I32, I32]), I32, [I32, I32, I32, I32, I32, I32], m.block(null, [
+    m.local.set(3, m.i32.and(g(0), c(~3))), m.local.set(4, ld(8, g(3))), m.local.set(5, ld(4, g(3))), m.local.set(6, c(0)),
+    m.block("append", [
+      m.loop("L", m.block(null, [
+        m.br_if("append", m.i32.ge_u(g(6), g(5))),                // no existing key -> append
+        m.if(m.i32.eq(ld(4, pair(4, 6)), g(1)), m.block(null, [st(8, pair(4, 6), g(2)), m.return(g(0))])), // overwrite in place
+        m.local.set(6, m.i32.add(g(6), c(1))), m.br("L"),
+      ])),
+    ]),
+    m.local.set(7, ld(0, g(4))),                                  // cap
+    m.if(m.i32.ge_s(g(5), g(7)), m.block(null, [                  // full -> grow (double, memory.copy the pairs)
+      m.local.set(8, bump()), st(0, g(8), m.i32.mul(g(7), c(2))), setBump(m.i32.add(g(8), m.i32.add(m.i32.mul(g(7), c(16)), c(4)))),
+      m.memory.copy(m.i32.add(g(8), c(4)), m.i32.add(g(4), c(4)), m.i32.mul(g(5), c(8))),
+      st(8, g(3), g(8)), m.local.set(4, g(8)),
+    ], binaryen.none)),
+    st(4, pair(4, 5), g(1)), st(8, pair(4, 5), g(2)),             // backing pair[count] = (key, val)
+    st(4, g(3), m.i32.add(g(5), c(1))),                           // count++
+    m.return(g(0)),
+  ], binaryen.none));
+}
+
 // program: { name: { argc?, nlocals, code } }. resources: import names a RES may
 // call. Returns wasm bytes, Asyncify-instrumented unless asyncify:false.
 export function compileToWasm(program, { entry = "main", resources = [], asyncify = true, handles = false } = {}) {
   const m = new binaryen.Module();
   m.setMemory(1, 1, "memory");
-  const usesArrays = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && (i[0] === "NEWARR" || i[0] === "ARRPUSH" || i[0] === "ARRGET" || i[0] === "ARRLEN")));
-  if (usesArrays) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the array runtime
+  const uses = (...ops) => Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ops.includes(i[0])));
+  const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN");
+  const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP");
+  if (usesArrays || usesObjects) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow paths
+  // Property keys are interned to small ints at compile time, so GETPROP/SETPROP
+  // are id matches in the object runtime (no string bytes in linear memory yet).
+  const keyIds = new Map();
+  for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && (i[0] === "GETPROP" || i[0] === "SETPROP") && !keyIds.has(i[1])) keyIds.set(i[1], keyIds.size + 1);
   const arity = {}; // each resource is imported with the arity it is called with
   for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && i[0] === "RES") arity[i[1]] = i[2] || 0;
   for (const res of resources) m.addFunctionImport(res, "env", res, binaryen.createType(new Array(arity[res] || 0).fill(binaryen.i32)), binaryen.i32);
@@ -305,9 +376,10 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   // program-order index, and a closure carries that index (MAKECLOSURE / CALLV).
   const fnNames = Object.keys(program);
   const fnIndex = Object.fromEntries(fnNames.map((n, i) => [n, i]));
-  const usesClosures = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && (i[0] === "MAKECLOSURE" || i[0] === "CALLV")));
-  for (const [name, fn] of Object.entries(program)) compileFn(m, name, fn, handles, fnIndex);
+  const usesClosures = uses("MAKECLOSURE", "CALLV");
+  for (const [name, fn] of Object.entries(program)) compileFn(m, name, fn, handles, fnIndex, keyIds);
   if (usesArrays) addArrayRuntime(m);
+  if (usesObjects) addObjectRuntime(m);
   if (usesClosures) {
     m.addTable("0", fnNames.length, fnNames.length, binaryen.funcref);
     m.addActiveElementSegment("0", "fns", fnNames, m.i32.const(0));
