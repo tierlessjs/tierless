@@ -44,6 +44,9 @@ ratio                          : ~978x smaller
 | `npm run bench:sweep` | `bench-sweep.mjs` | the HN benchmark as a **scale curve** over thread size and RTT (writes `bench-sweep.csv`) |
 | `npm run bench:conduit` | `bench-conduit.mjs` | **Conduit feed benchmark**: REST over-fetch vs server-side assembly (the bandwidth win) |
 | `node conformance.mjs` | `conformance.mjs` | **conformance suite**: full-language fidelity vs Node, AND survival of every feature across a serialize/resume continuation migration |
+| `node difftest.mjs` | `difftest.mjs` | **differential tester**: ~217 semantic-corner snippets run through Waso *and* Node; completeness is measured, not asserted (214/217, 3 documented caveats) |
+| `node decorators.mjs` | `decorators.mjs` | **decorator/DI conformance** vs the TS `experimentalDecorators` transpile (Node can't run the syntax) — class/method/property/param decorators + type-based DI, surviving migration |
+| `node multimodule.mjs` | `multimodule.mjs` | **multi-module**: an import graph compiled into one program — namespacing, cross-module inheritance/DI, dependency-ordered init, and a multi-file program migrating as one |
 
 ### Two execution paths (by design)
 
@@ -51,8 +54,13 @@ Waso has **two interpreters**, on purpose, with different jobs:
 
 - **The JS path** (`waso-core.mjs` + the `waso-tsc.mjs` frontend) is the **language
   substrate**: it runs arbitrary JS values and is where all the language coverage
-  lives — closures, classes, generators, async, the heap/identity/migration work,
-  and the fidelity tests vs Node's own `eval` (`probe-realts.mjs`).
+  lives. It now spans essentially the whole language — closures, classes +
+  inheritance, generators, async, destructuring, BigInt/Symbol, getters/setters,
+  the metaprogramming surface (**Proxy, Reflect + metadata, decorators, type-based
+  DI**), and **multi-module programs** (an import graph compiled into one program
+  via a real TS type checker) — all proven to survive serialize/resume migration,
+  and measured for fidelity against Node's own `eval` (`probe-realts.mjs`, plus the
+  conformance / differential / decorator / multi-module suites below).
 - **The WASM path** (`waso.wat`) is the **minimal proof that the continuation can
   live in linear memory** — a byte-slice of wasm memory that crosses a real pipe
   between two processes. It is deliberately **i32-only**: no heap objects, closures,
@@ -169,19 +177,24 @@ depth; Conduit = bandwidth on fan-out filtering + joins.
 
 ```
 initial-design.md     the design document (the spec)
+NOTES-frontend.md     frontend dev log (chronological) + "pick up here" / caveats
 app.ts                the demo application, authored as ordinary TypeScript
-waso-compile.mjs      reference frontend: TypeScript subset -> Waso IR
+waso-tsc.mjs          JS-path frontend: full-language TS -> Waso IR, via a ts.Program
+                      + type checker; loadModule (1 file) / loadProgram (import graph)
+waso-core.mjs         JS-interpreter runtime + language semantics (the substrate)
+waso-heap.mjs         identity-preserving, cycle-safe continuation wire codec
+waso-compile.mjs      wasm-path frontend: the i32 TS subset -> the wasm IR
 waso.wat              the interpreter, as a WebAssembly module (build -> waso.wasm)
 build-wasm.mjs        compiles waso.wat -> waso.wasm via wabt
 waso-wasm-core.mjs    wasm runtime: instances, capture/restore, heap, policy bits
 waso-wasm.mjs         wasm demo, single process (two instances)
 waso-wasm-2p-*.mjs    wasm demo, two OS processes (slice crosses a pipe)
-waso-core.mjs         JS-interpreter runtime (the original spike's core)
 waso-spike.mjs        JS demo, single process
 waso-2p-*.mjs         JS demo, two OS processes
 waso-frame.mjs        length-prefixed framing (JSON header + binary attachment)
 waso-policy.mjs       §6 migrate-vs-fetch cost model
-test.mjs              runs every demo and asserts the headline claims
+test.mjs              runs every demo + suite and asserts the headline claims
+conformance.mjs / difftest.mjs / decorators.mjs / multimodule.mjs   the four test suites
 ```
 
 ## What this prototype is not (honest limits)
@@ -196,9 +209,21 @@ test.mjs              runs every demo and asserts the headline claims
 - **No cross-process handle *fetch*.** The demos' access patterns never deref a
   remote handle; that protocol (and the chatty per-element case it enables) is
   modeled in `waso-policy.mjs` but not implemented as live transport.
-- **No browser, no source maps, single entry program.** The frontend is a subset
-  parser, not a typechecker.
+- **No browser; no source maps yet.** Every IR instruction already carries its TS
+  position (`describeContinuation`), but portable file/line metadata isn't emitted
+  yet (§10.6).
+- **Frontend scope.** The frontend *is* now a real `ts.Program` with a type checker,
+  and compiles **multi-file programs** (named imports/exports of functions, classes,
+  consts). Not yet wired: `export default`, `export *`/re-exports, `import * as M`.
+  A handful of intentional, documented behavioural caveats (TDZ non-enforcement;
+  dynamic accessor keys; dynamic `new`/`Reflect.construct` on *top-level* classes;
+  `emitDecoratorMetadata` across imported type *aliases*) live in
+  [`NOTES-frontend.md`](./NOTES-frontend.md) — each affects only buggy or exotic code.
 
 These line up with the design doc's own open questions (§10). The point of the
 prototype is the load-bearing claim — small, serializable, migratable
-continuations, with placement inferred from resources — and that holds.
+continuations, with placement inferred from resources — and that holds. The
+frontend has since grown to cover essentially the whole language plus the
+metaprogramming surface and multi-module programs; **`NOTES-frontend.md`** is the
+chronological log and the "pick up here" pointer (next: a multi-file, framework-
+shaped sample app).

@@ -370,6 +370,124 @@ using X freezes to bytes, ships, and thaws correctly").
   graphs/live handlers alive across the wire). 56 checks; max continuation 682 B.
   This is the reusable template for any other language that targets the IR.
 
+## #4 step 21 (done — completeness-first sweep + differential testing)
+Switched from "support the common case" to "MEASURE completeness against Node, fix
+every divergence." New `difftest.mjs` runs ~217 semantic-corner snippets through
+both Waso and Node and flags any divergence (it can't be asserted, only measured).
+Now 214/217, with 3 *documented* caveats (see below). What got fixed:
+- **Dynamic `this`**: methods read `this` from the call-site receiver (frame.thisVal),
+  not a value baked at definition. Fixes method borrowing, plain-fn-as-method,
+  dynamic dispatch. Arrows stay lexical; a non-arrow owner snapshots its dynamic
+  this as the MAKECLOSURE "T" env source, so arrows inside borrowed methods are
+  correct. frame.thisVal travels in serializeContinuation (an identity-shared root)
+  — caught by a migration test where a borrowed async method reads `this` only
+  after a checkpoint.
+- **Function.prototype.call/apply/bind** on user closures (shared `enter` helper +
+  a flattened bound-closure rep honored by every call path). **ToPrimitive** for
+  coercing ops (`'' + new P()` calls the instance's valueOf/toString).
+- **Error semantics**: instanceof against built-ins (ISAB op), `class X extends Error`
+  (message/name/chain), `new TypeError/RangeError/...`. **typeof** "function" for
+  closures and class objects (a __classobj__ marker keeps instances "object").
+- **Iterator-protocol array destructuring** (`[a,b] = set/gen`, TOARRAY op).
+  **Accessor inheritance** matches JS prototype shadowing; getter-only write is a
+  no-op. **Map/Set.forEach**, **JSON.stringify** drops functions, computed
+  object-literal accessors. Fixed an unbounded-recursion OOM (`static b = C.a+1`).
+- **Latent HOF-name collision**: methods named find/map/filter/forEach/... (a
+  repository's `.find()`, Map/Set.forEach) were force-dispatched to the array-HOF
+  inliner; `hof` now guards on isArray at runtime and short-circuits no-callback.
+- A throw inside a nested synchronous run (proxy trap, toString coercion) now
+  routes into the caller's try/catch instead of escaping as WasoUncaught.
+
+## #4 step 22 (done — metaprogramming: Proxy, Reflect, decorators, DI)
+The framework story (Vue/Nest/Angular). `decorators.mjs` (25 checks) diffs against
+the TS `experimentalDecorators` transpile (Node can't run decorator syntax in plain
+JS, so the *reference* is the compiler's own lowering).
+- **Proxy**: get/set/has/deleteProperty/ownKeys traps. A wrapper carries a
+  non-enumerable `__proxy__ = {target, handler}`; every property op checks proxyOf
+  first and drives the matching trap synchronously (HASKEY op for `in`, KEYS for
+  for-in/Object.keys). Plain objects pay one `__proxy__` read — benchmarks
+  unchanged. Proxies migrate (handler closures travel; traps keep firing).
+- **Reflect**: get/set/has/deleteProperty/ownKeys/apply/construct (reuse the
+  trap-aware ops), plus a **metadata store** (defineMetadata/getMetadata/...). Metadata
+  lives ON the target as a non-enumerable `__meta__` Map, so it travels through the
+  codec instead of a side WeakMap.
+- **Decorators** (legacy): **class** decorators run at module load, bottom-up, with
+  the class object as target; a non-null return rebinds it. **method** decorators get
+  a real {value,writable,enumerable,configurable} descriptor and can wrap/replace
+  (instance methods become ONE shared closure via dynamic this, stashed at
+  __dm_<name> for `new` to attach); **property/parameter** decorators run for their
+  side effects. Classes with decorators build their class object EAGERLY at module
+  load. `Class.prototype` aliases the class object (we collapse prototype/constructor).
+- **emitDecoratorMetadata**: a decorated class with an explicit ctor carries
+  `design:paramtypes` — param types resolved to runtime constructors (same-module
+  classes + serializable builtins syntactically; interfaces/unions → Object).
+- **Dynamic `new C(...)`** (C a runtime class value) and **Reflect.construct**: each
+  top-level class object carries a `__construct__` callable (the instance-assembly +
+  ctor call factored into a per-class `%new_<cname>` builder, shared with the inline
+  `new ClassName` path). This is what lets a DI container instantiate by type, end to
+  end: `resolve(C) = new C(...getMetadata("design:paramtypes",C).map(resolve))`.
+
+## #4 step 23 (done — multi-module + a real type checker)
+A Waso program can now span multiple files. The frontend compiles a **`ts.Program`**
+(in-memory host, `noLib` so it's fast — ~0.8ms/program) and has a real **type
+checker**. `multimodule.mjs` (11 checks) proves imports, namespacing, dependency
+ordering, AND that a multi-module program migrates as ONE.
+- `compileProgram(files, {entry, entryFile})` compiles an import graph into one
+  PROGRAM. `compileModule(source)` is now a thin wrapper (single, unprefixed module
+  — back-compat, the whole pre-existing suite stays green).
+- Each module is **namespaced** (entry keeps "" so its entry-fn name is stable);
+  the per-module compile logic is factored into `compileInto(sf, checker, opts)`
+  threading a `prefix` applied to out keys, module-binding registry keys, and class
+  unames. Single-module behaviour is identical (prefix "").
+- **Imports resolve through the checker**: getSymbolAtLocation + getAliasedSymbol →
+  the exporting declaration → its namespaced global. A module eagerly compiles its
+  exports so importers reference them by name (fns via MAKECLOSURE, classes via
+  their %builder/__construct__, consts via the per-tier registry).
+- `new ImportedClass()` flows through the dynamic-construct path; imported
+  `instanceof` and `design:paramtypes` resolve to the namespaced uname. **Cross-module
+  inheritance** works: `classes` is SHARED across the program, so a derived class
+  references an imported base compiled by the base's own module (top-level class
+  methods capture only module bindings + `this`, so no cross-context closure issue).
+- Module inits run in **dependency (topological) order** from a master "%moduleinit"
+  (each module's init is `%init$<prefix>`); the entry runs after, all per tier.
+
+## Public API (waso-tsc.mjs)
+- `loadModule(PROGRAM, source, {entry, resources})` — single module (existing).
+- `loadProgram(PROGRAM, files, {entry, entryFile, resources})` — `files` is
+  Map<absPath, source>; the rest mirrors loadModule.
+- `compileModule` / `compileProgram` return the frag without mutating a PROGRAM.
+- Test suites (all in `test.mjs`): `difftest.mjs` (vs Node, completeness),
+  `conformance.mjs` (fidelity + migration), `decorators.mjs` (vs TS transpile),
+  `multimodule.mjs` (imports + migration). difftest 214/217, conformance 77,
+  decorators 25, multimodule 11.
+
+## Documented caveats (intentional — affect only buggy/exotic code)
+- **TDZ non-enforcement**: reading a let/const before its decl yields undefined, not
+  a ReferenceError (would cost a sentinel check on every let/const read).
+- **Dynamic accessor keys**: `Object.defineProperty` accessors / computed-name
+  accessors aren't fired by a *static* `obj.x` read (those are branchless); computed
+  access `obj[k]` works. Belongs with a future reactivity push.
+- **Dynamic `new` / `Reflect.construct` target TOP-LEVEL classes** (a local class's
+  methods can close over enclosing scope the class-object builder can't reach); the
+  inline `new LocalClass()` path is unaffected.
+- **emitDecoratorMetadata across *imported type aliases***: same-module + imported
+  *classes* resolve via the checker; following an imported `type X = ...` alias to its
+  ultimate type would need deeper checker use. Class types (the DI case) work.
+
+## Pick up here (next)
+- **Sample app** (the agreed next direction, after a PR): a small Nest/Angular-shaped
+  app SPANNING FILES — DI graph, decorated controllers/providers, a request that
+  migrates mid-handler. Goal: shake out what real framework code hits now that
+  imports + decorators + DI work. Likely surfaces: lifecycle hooks, async providers,
+  guard/interceptor chains, request scoping.
+- **Remaining ES-module surface**: default exports (`export default`), `export *` /
+  re-exports (`export { x } from`), namespace imports (`import * as M`). Current
+  support is named imports/exports of fns/classes/consts. The import resolver is
+  checker-based so these are mostly wiring in `compileProgram`'s declRef + emitImport.
+- **Source maps** (still open, §10.6): every IR instruction already carries a TS
+  position (lineColOf → describeContinuation); the unfinished part is real
+  file/line metadata surviving into a portable map. Design in, don't bolt on.
+
 ## Don't forget
 - **Source maps**: NJS captured the stack but deferred line/file metadata. Our
   §10.6. Design it into the transform from the start, don't bolt on.
