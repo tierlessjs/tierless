@@ -1,14 +1,14 @@
-// Waso — regression runner. Executes every demo and asserts the headline
+// Stackmix — regression runner. Executes every demo and asserts the headline
 // claims hold (not just exit 0). Run: node test.mjs   (or: npm test)
 
 import { spawnSync } from "node:child_process";
 
 const cases = [
-  { file: "waso-spike.mjs",          needs: ["matches plain JS result? YES", "x smaller"] },
-  { file: "waso-2p-client.mjs",      needs: ["Dataset never crossed the pipe? YES"] },
-  { file: "waso-wasm.mjs",           needs: ["matches plain JS (2000)? YES", "2 frame(s)"] },
-  { file: "waso-wasm-2p-client.mjs", needs: ["matches plain JS (2000)? YES", "2 frame(s)", "Dataset never crossed the pipe? YES"] },
-  { file: "waso-policy.mjs",         needs: ["informed rule-> FETCH", "verified correct"] },
+  { file: "stackmix-spike.mjs",          needs: ["matches plain JS result? YES", "x smaller"] },
+  { file: "stackmix-2p-client.mjs",      needs: ["Dataset never crossed the pipe? YES"] },
+  { file: "stackmix-wasm.mjs",           needs: ["matches plain JS (2000)? YES", "2 frame(s)"] },
+  { file: "stackmix-wasm-2p-client.mjs", needs: ["matches plain JS (2000)? YES", "2 frame(s)", "Dataset never crossed the pipe? YES"] },
+  { file: "stackmix-policy.mjs",         needs: ["informed rule-> FETCH", "verified correct"] },
   { file: "bench-hn.mjs",            needs: ["2 rt", "identical 254-node threads? YES"] },
   { file: "bench-sweep.mjs",         needs: ["Correctness across all sizes: YES"] },
   { file: "bench-conduit.mjs",       needs: ["less data", "identical feeds? YES"] },
@@ -16,10 +16,10 @@ const cases = [
   { file: "probe-fetch.mjs",         needs: ["all PASS — a migrated continuation"] },
   { file: "probe-deref.mjs",         needs: ["Result: ALL PASS"] },
   { file: "probe-async.mjs",         needs: ["all PASS — await is just a suspension"] },
-  { file: "waso-fetch-2p-client.mjs", needs: ["On-demand (big data crossed only on deref)? YES"] },
+  { file: "stackmix-fetch-2p-client.mjs", needs: ["On-demand (big data crossed only on deref)? YES"] },
   { file: "probe-frontend.mjs",      needs: ["all PASS — closures"] },
-  { file: "waso-app-2p-client.mjs",  needs: ["Real TS migrated across processes and computed correctly? YES"] },
-  { file: "probe-realts.mjs",        needs: ["all PASS — Waso compiles real JS"] },
+  { file: "stackmix-app-2p-client.mjs",  needs: ["Real TS migrated across processes and computed correctly? YES"] },
+  { file: "probe-realts.mjs",        needs: ["all PASS — Stackmix compiles real JS"] },
   { file: "conformance.mjs",         needs: ["Result: ALL PASS"] },
   { file: "difftest.mjs",            needs: ["NO DIVERGENCES"] },
   { file: "decorators.mjs",          needs: ["Result: ALL PASS"] },

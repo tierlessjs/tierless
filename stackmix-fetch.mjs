@@ -1,4 +1,4 @@
-// Waso — cross-tier handle fetch (Layer-2 de-risk, step 2).
+// Stackmix — cross-tier handle fetch (Layer-2 de-risk, step 2).
 //
 // A continuation that migrates carries handles to objects that stayed on the
 // owning tier (§5). Until now, dereferencing such a handle on the other tier
@@ -16,12 +16,12 @@
 // snapshot is refetched after the master changes. Readers mutate only their own
 // snapshot copy; write-back/shared-write is explicitly out of scope for v1.
 
-import { encodeGraph, decodeGraph, isHandle } from "./waso-heap.mjs";
+import { encodeGraph, decodeGraph, isHandle } from "./stackmix-heap.mjs";
 
 // A tier-local heap of versioned objects. The owner is the single writer.
 export class Heap {
   constructor(tierId) { this.tierId = tierId; this.objs = new Map(); this.ver = new Map(); this.next = 1; }
-  put(obj) { const id = `${this.tierId}#${this.next++}`; this.objs.set(id, obj); this.ver.set(id, 1); return { __waso_handle__: true, owner: this.tierId, id }; }
+  put(obj) { const id = `${this.tierId}#${this.next++}`; this.objs.set(id, obj); this.ver.set(id, 1); return { __stackmix_handle__: true, owner: this.tierId, id }; }
   get(id) { return this.objs.get(id); }
   version(id) { return this.ver.get(id); }
   mutate(id, fn) { fn(this.objs.get(id)); this.ver.set(id, this.ver.get(id) + 1); } // single-writer; invalidates readers

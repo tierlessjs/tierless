@@ -6,7 +6,7 @@
 // + the JSON transport the two-process demo uses) those cases and reports what
 // breaks. It is meant to FAIL — it documents exactly what the heap work fixes.
 
-import { serializeContinuation, deserializeContinuation, contBytes, Tier } from "./waso-core.mjs";
+import { serializeContinuation, deserializeContinuation, contBytes, Tier } from "./stackmix-core.mjs";
 
 const tier = new Tier("server", {});
 const ship = (locals) => {
@@ -41,7 +41,7 @@ function tree(n, b = 4) {
 }
 for (const n of [50, 5000]) {
   const { bytes, back } = ship([tree(n)]);
-  const isHandle = back.frames[0].locals[0]?.__waso_handle__ === true;
+  const isHandle = back.frames[0].locals[0]?.__stackmix_handle__ === true;
   console.log(`3. local references a ${n}-node graph: continuation = ${bytes} B` +
     (isHandle ? "  (became a §5 handle — graph stayed tier-local)" : "  (whole graph inlined into the continuation)"));
 }
@@ -51,10 +51,10 @@ console.log(`      other tier has a handle it cannot traverse (cross-process der
 // ============================================================================
 // SECTION B — the same cases through the identity/cycle-safe graph codec.
 // ============================================================================
-import { encodeGraph, decodeGraph, isHandle } from "./waso-heap.mjs";
+import { encodeGraph, decodeGraph, isHandle } from "./stackmix-heap.mjs";
 const roundtrip = (values, opts) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph(values, opts))));
 
-console.log(`\n--- with the graph codec (waso-heap.mjs) ---\n`);
+console.log(`\n--- with the graph codec (stackmix-heap.mjs) ---\n`);
 let pass = true;
 const check = (name, cond) => { console.log(`   ${cond ? "PASS" : "FAIL"}  ${name}`); pass &&= cond; };
 

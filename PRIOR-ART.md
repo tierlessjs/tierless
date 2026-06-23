@@ -1,15 +1,15 @@
 # Prior art — serialized continuations & durable/migratable computation
 
-Reference notes for where Waso sits. Two questions matter: (1) does anyone
+Reference notes for where Stackmix sits. Two questions matter: (1) does anyone
 serialize a continuation to bytes and resume it elsewhere? (yes — several), and
-(2) is anyone doing Waso's *specific* combination? (no). Plus one adjacent
+(2) is anyone doing Stackmix's *specific* combination? (no). Plus one adjacent
 family (replay) that solves a related-but-different problem and that we are
 deliberately **not** using.
 
-## A. Serialize-the-continuation (what Waso does)
+## A. Serialize-the-continuation (what Stackmix does)
 
 Systems that capture execution state and move/persist it as data — the same
-mechanism as Waso (design doc §4.2/§4.4).
+mechanism as Stackmix (design doc §4.2/§4.4).
 
 | System | Substrate | What it serializes | Placement | Tiering |
 |---|---|---|---|---|
@@ -25,7 +25,7 @@ Takeaways / what to steal:
   validates our note to move the wire format off JSON to a compact binary.
 - **Golem's incremental-delta snapshotting** is the reference for making capture
   cheap (don't re-serialize the whole state each time).
-- **Racket's pluggable "stuffers"** seam matches our `waso-heap`/`waso-fetch`
+- **Racket's pluggable "stuffers"** seam matches our `stackmix-heap`/`stackmix-fetch`
   split — keep serialization swappable.
 - **Unison's content-addressing** is the known answer to our open code-identity
   gotcha (resume-by-offset breaks under version skew; content-addressed code
@@ -41,14 +41,14 @@ state (Temporal "Event History", Restate "Journal"; DBOS commits each step
 result to Postgres). This imposes a determinism constraint on workflow code
 (no `Date.now()`, no ambient I/O outside logged steps).
 
-**Why it doesn't fit Waso (yet):**
-- Waso's core need is to move a *live* computation from one tier to another
+**Why it doesn't fit Stackmix (yet):**
+- Stackmix's core need is to move a *live* computation from one tier to another
   *mid-call* — ship the current stack across the wire and continue. Replay
   reconstructs state by re-running history; to "migrate" you'd replay the entire
   prior history on the other tier, and that history includes effects (DOM reads,
   client state) that can't be re-executed on the server. Replay gives you
   *resume-after-crash on a comparable host*, not *cross-tier transport now*.
-- It also assumes deterministic, log-shaped workflows; Waso wants ordinary code
+- It also assumes deterministic, log-shaped workflows; Stackmix wants ordinary code
   with placement inferred from resources, not a workflow DSL.
 
 **Where it might matter later (not now):** if a long-running migrated
@@ -56,13 +56,13 @@ computation needs to survive a crash, replay/journaling is the proven durability
 story — and it's *orthogonal* to migration. So: noted, set aside. We are not
 building on replay; serialization is the mechanism for the tier-migration need.
 
-## C. Waso's unoccupied cell (design doc §9)
+## C. Stackmix's unoccupied cell (design doc §9)
 
 No system combines all of: **live continuation migration** + **placement
 inferred from resource dependencies** (not declared) + **lazy placement** +
 **client↔server tiering** + **JS/TS on WASM**. Each ingredient exists separately
 (Unison = migration+content-addressing; RSC/Eliom = tiering; Golem = WASM state
-snapshot for failover), but the combination is the open space Waso occupies.
+snapshot for failover), but the combination is the open space Stackmix occupies.
 
 ## Sources
 - GraalVM Espresso — Serialization of Continuations: https://www.graalvm.org/jdk25/reference-manual/espresso/continuations/serialization/

@@ -6,8 +6,8 @@
 // coherent when the owner mutates. Proves a migrated continuation can use a
 // handle to data that stayed on the other tier — the piece that was unbuilt.
 
-import { PROGRAM, run } from "./waso-core.mjs";
-import { Heap, Channel, makeHost } from "./waso-fetch.mjs";
+import { PROGRAM, run } from "./stackmix-core.mjs";
+import { Heap, Channel, makeHost } from "./stackmix-fetch.mjs";
 
 // A straight-line program that dereferences its handle local twice, then once
 // more, returning the field each time via the operand stack:

@@ -1,8 +1,8 @@
-// Waso wasm, two-process demo — CLIENT tier + orchestrator (parent process).
+// Stackmix wasm, two-process demo — CLIENT tier + orchestrator (parent process).
 //
-//   node waso-wasm-2p-client.mjs        (or: npm run wasm:2p)
+//   node stackmix-wasm-2p-client.mjs        (or: npm run wasm:2p)
 //
-// The full stack: app.ts -> Waso IR -> wasm, oscillating between two REAL OS
+// The full stack: app.ts -> Stackmix IR -> wasm, oscillating between two REAL OS
 // processes, where the continuation crossing the pipe is an actual slice of
 // wasm linear memory (a raw binary frame attachment). The two processes share
 // no memory, so the dataset (8 MB in the server's HEAP_BIG) can only reach this
@@ -12,12 +12,12 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { compile } from "./waso-compile.mjs";
+import { compile } from "./stackmix-compile.mjs";
 import {
   assemble, makeInstance, setEntryState, capture, restore, Suspend, frameCount,
   makeRenderHandler, fmt, RESULT, RESOURCES, THRESHOLD, N, MOD, wasmByteLength,
-} from "./waso-wasm-core.mjs";
-import { writeFrame, readFrames } from "./waso-frame.mjs";
+} from "./stackmix-wasm-core.mjs";
+import { writeFrame, readFrames } from "./stackmix-frame.mjs";
 
 const appSrc = readFileSync(fileURLToPath(new URL("./app.ts", import.meta.url)), "utf8");
 const { asm } = compile(appSrc);
@@ -28,7 +28,7 @@ const client = await makeInstance("client", bytecode, { [RESOURCES["DOM.renderLi
 setEntryState(client.memory, THRESHOLD); // cold start on the client
 
 // Spawn the server process.
-const serverPath = fileURLToPath(new URL("./waso-wasm-2p-server.mjs", import.meta.url));
+const serverPath = fileURLToPath(new URL("./stackmix-wasm-2p-server.mjs", import.meta.url));
 const child = spawn(process.execPath, [serverPath], { stdio: ["pipe", "pipe", "inherit"] });
 
 let parentToChild = 0, childToParent = 0, biggestToClient = 0;
@@ -83,9 +83,9 @@ function report(value) {
   const resName = (id) => Object.keys(RESOURCES).find((k) => RESOURCES[k] === id);
   const s2c = migrations.find((m) => m.from === "server" && m.to === "client");
 
-  console.log("\nWaso: app.ts -> wasm, continuation slice crossing a pipe between two OS processes\n");
+  console.log("\nStackmix: app.ts -> wasm, continuation slice crossing a pipe between two OS processes\n");
   console.log(`Authored: app.ts (compiled to ${asm.filter(Array.isArray).length} IR instrs)`);
-  console.log(`Module:   waso.wasm (${wasmByteLength()} bytes), one module, one instance per process`);
+  console.log(`Module:   stackmix.wasm (${wasmByteLength()} bytes), one module, one instance per process`);
   console.log(`Program:  render(threshold=${THRESHOLD})  cold-started on the CLIENT process`);
   console.log(`Dataset:  ${meta.n.toLocaleString()} ints, living ONLY in the server process = ${fmt(datasetBytes)}\n`);
 

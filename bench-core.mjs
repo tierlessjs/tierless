@@ -1,4 +1,4 @@
-// Waso — shared HN benchmark core. Used by bench-hn.mjs (the 2x2 single run)
+// Stackmix — shared HN benchmark core. Used by bench-hn.mjs (the 2x2 single run)
 // and bench-sweep.mjs (the scale curve) so the mechanism can't drift.
 //
 // Two IR traversals (sequential per-item, concurrent per-level), a synthetic
@@ -8,7 +8,7 @@
 import {
   PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation,
   contBytes, initialFrames, Tier,
-} from "./waso-core.mjs";
+} from "./stackmix-core.mjs";
 
 export const DEFAULT_RTT = 50; // ms, client <-> server round trip (dominates)
 export const DEFAULT_API = 2;  // ms, server <-> its API/DB per round (co-located)
@@ -159,8 +159,8 @@ export async function runMatrix(thread, opts = {}) {
   return {
     restSeq:  await runStrategy("fetch",   "loadThread",           thread, opts),
     restConc: await runStrategy("fetch",   "loadThreadConcurrent", thread, opts),
-    wasoSeq:  await runStrategy("migrate", "loadThread",           thread, opts),
-    wasoConc: await runStrategy("migrate", "loadThreadConcurrent", thread, opts),
+    stackmixSeq:  await runStrategy("migrate", "loadThread",           thread, opts),
+    stackmixConc: await runStrategy("migrate", "loadThreadConcurrent", thread, opts),
   };
 }
 

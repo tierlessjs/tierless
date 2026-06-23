@@ -1,6 +1,6 @@
-// Waso — reference TypeScript frontend (design principle #1: "author writes
-// ordinary TypeScript"). Lowers a small but real subset of TS to the Waso asm
-// array that waso-wasm-core's assembler turns into bytecode. The IR is the true
+// Stackmix — reference TypeScript frontend (design principle #1: "author writes
+// ordinary TypeScript"). Lowers a small but real subset of TS to the Stackmix asm
+// array that stackmix-wasm-core's assembler turns into bytecode. The IR is the true
 // interface; this is just the reference lowering, using the TypeScript compiler
 // API to parse (we parse the AST; we don't typecheck).
 //
@@ -16,7 +16,7 @@
 //   resource calls (db.query / DOM.renderList) -> RES; everything else is local.
 
 import ts from "typescript";
-import { RESOURCES } from "./waso-wasm-core.mjs";
+import { RESOURCES } from "./stackmix-wasm-core.mjs";
 
 const BINOP = {
   [ts.SyntaxKind.LessThanToken]: "LT",
@@ -44,7 +44,7 @@ export function compile(source, entryName = "render") {
   const label = (s) => `${s}${labelN++}`;
   const emit = (...ins) => out.push(ins);
   const mark = (l) => out.push(l);
-  const fail = (node, msg) => { throw new Error(`waso-compile: ${msg}: \`${node.getText(sf)}\``); };
+  const fail = (node, msg) => { throw new Error(`stackmix-compile: ${msg}: \`${node.getText(sf)}\``); };
 
   // Compile an expression; returns true if it leaves exactly one value on the
   // operand stack (false for statement-shaped exprs like `arr.push(v)`/`i++`).

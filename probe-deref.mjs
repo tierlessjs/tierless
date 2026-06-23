@@ -1,4 +1,4 @@
-// Waso — deref-miss re-runnability probe.
+// Stackmix — deref-miss re-runnability probe.
 //
 // A continuation can reference a remote heap object as a §5 handle. Touching it on a
 // tier that doesn't have it resident makes host.deref return a Miss, which the
@@ -9,13 +9,13 @@
 // asserts the op suspends, resumes, and computes the right answer with its stack intact.
 //
 // The transport that actually fetches a remote handle isn't wired yet (it's modeled in
-// waso-policy.mjs), but the re-runnable invariant is real and load-bearing for it — so
+// stackmix-policy.mjs), but the re-runnable invariant is real and load-bearing for it — so
 // it's tested here directly rather than left to a future integration.
 
-import { PROGRAM, run, Suspend, Miss } from "./waso-core.mjs";
+import { PROGRAM, run, Suspend, Miss } from "./stackmix-core.mjs";
 
 let pass = 0, fail = 0; const fails = [];
-const HANDLE = { __waso_handle__: true, owner: "srv", id: 0, kind: "object" };
+const HANDLE = { __stackmix_handle__: true, owner: "srv", id: 0, kind: "object" };
 
 // Run a hand-written program whose locals hold HANDLE; host.deref misses the FIRST
 // time it's asked for HANDLE (forcing a Suspend), then resolves to `real`. Asserts the
@@ -36,7 +36,7 @@ function reRun(name, code, locals, real, expect) {
   if (ok) pass++; else { fail++; fails.push(name); console.log(`  FAIL  ${name}`); console.log(`        suspended=${suspended} err=${err ? (err.message || err) : "-"} got=${JSON.stringify(got)} expect=${JSON.stringify(expect)}`); }
 }
 
-console.log("Waso deref-miss re-runnability — a handle miss mid-op suspends, resumes, stays correct\n");
+console.log("Stackmix deref-miss re-runnability — a handle miss mid-op suspends, resumes, stays correct\n");
 
 // BIN: a handle OPERAND must resolve to its value (was: operated on the raw wrapper).
 reRun("BIN + on a handle operand", [["LOAD", 0], ["PUSH", 10], ["BIN", "+"], ["RET"]], [HANDLE], 5, 15);

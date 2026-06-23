@@ -8,7 +8,7 @@
 //     return p.bio.length;          // on the client: deref p (remote handle) -> FETCH
 //   }
 // locals: 0 id, 1 p
-import { PROGRAM } from "./waso-core.mjs";
+import { PROGRAM } from "./stackmix-core.mjs";
 
 PROGRAM.profileView = {
   nlocals: 2,

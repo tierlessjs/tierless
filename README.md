@@ -1,4 +1,4 @@
-# Waso — prototype
+# Stackmix — prototype
 
 A working prototype of the ideas in [`initial-design.md`](./initial-design.md):
 **one program that runs across client and server, with the runtime moving
@@ -9,7 +9,7 @@ other side.
 
 This is the design doc's §11 first prototype and several steps past it. It does
 **not** require the in-flight WASM stack-switching proposal (§8): capture happens
-in Waso's own IR, where the continuation is *Waso's* data structure — readable
+in Stackmix's own IR, where the continuation is *Stackmix's* data structure — readable
 and serializable — exactly as the doc argues.
 
 ```
@@ -35,24 +35,24 @@ ratio                          : ~978x smaller
 
 | Command | File(s) | What it proves |
 |---|---|---|
-| `npm run spike` | `waso-spike.mjs` | continuation ≪ dataset; single process, JS interpreter (§4.4, §11) |
-| `npm run 2p` | `waso-2p-*.mjs` | survives real serialization across two OS processes; the `undefined`→`null` JSON gotcha handled |
-| `npm run wasm` | `waso-wasm.mjs` | **TypeScript → Waso IR → wasm**; the continuation is a slice of wasm linear memory (§4.2) |
-| `npm run wasm:2p` | `waso-wasm-2p-*.mjs` | the full stack: the linear-memory slice crosses a real pipe between two processes |
-| `npm run policy` | `waso-policy.mjs` | migrate-vs-fetch cost model with real measured sizes (§6) |
+| `npm run spike` | `stackmix-spike.mjs` | continuation ≪ dataset; single process, JS interpreter (§4.4, §11) |
+| `npm run 2p` | `stackmix-2p-*.mjs` | survives real serialization across two OS processes; the `undefined`→`null` JSON gotcha handled |
+| `npm run wasm` | `stackmix-wasm.mjs` | **TypeScript → Stackmix IR → wasm**; the continuation is a slice of wasm linear memory (§4.2) |
+| `npm run wasm:2p` | `stackmix-wasm-2p-*.mjs` | the full stack: the linear-memory slice crosses a real pipe between two processes |
+| `npm run policy` | `stackmix-policy.mjs` | migrate-vs-fetch cost model with real measured sizes (§6) |
 | `npm run bench:hn` | `bench-hn.mjs` | **HN waterfall benchmark**: REST round trips vs continuation migration (`--real` for wall-clock) |
 | `npm run bench:sweep` | `bench-sweep.mjs` | the HN benchmark as a **scale curve** over thread size and RTT (writes `bench-sweep.csv`) |
 | `npm run bench:conduit` | `bench-conduit.mjs` | **Conduit feed benchmark**: REST over-fetch vs server-side assembly (the bandwidth win) |
 | `node conformance.mjs` | `conformance.mjs` | **conformance suite**: full-language fidelity vs Node, AND survival of every feature across a serialize/resume continuation migration |
-| `node difftest.mjs` | `difftest.mjs` | **differential tester**: ~217 semantic-corner snippets run through Waso *and* Node; completeness is measured, not asserted (214/217, 3 documented caveats) |
+| `node difftest.mjs` | `difftest.mjs` | **differential tester**: ~217 semantic-corner snippets run through Stackmix *and* Node; completeness is measured, not asserted (214/217, 3 documented caveats) |
 | `node decorators.mjs` | `decorators.mjs` | **decorator/DI conformance** vs the TS `experimentalDecorators` transpile (Node can't run the syntax) — class/method/property/param decorators + type-based DI, surviving migration |
 | `node multimodule.mjs` | `multimodule.mjs` | **multi-module**: an import graph compiled into one program — namespacing, cross-module inheritance/DI, dependency-ordered init, and a multi-file program migrating as one |
 
 ### Two execution paths (by design)
 
-Waso has **two interpreters**, on purpose, with different jobs:
+Stackmix has **two interpreters**, on purpose, with different jobs:
 
-- **The JS path** (`waso-core.mjs` + the `waso-tsc.mjs` frontend) is the **language
+- **The JS path** (`stackmix-core.mjs` + the `stackmix-tsc.mjs` frontend) is the **language
   substrate**: it runs arbitrary JS values and is where all the language coverage
   lives. It now spans essentially the whole language — closures, classes +
   inheritance, generators, async, destructuring, BigInt/Symbol, getters/setters,
@@ -61,7 +61,7 @@ Waso has **two interpreters**, on purpose, with different jobs:
   via a real TS type checker) — all proven to survive serialize/resume migration,
   and measured for fidelity against Node's own `eval` (`probe-realts.mjs`, plus the
   conformance / differential / decorator / multi-module suites below).
-- **The WASM path** (`waso.wat`) is the **minimal proof that the continuation can
+- **The WASM path** (`stackmix.wat`) is the **minimal proof that the continuation can
   live in linear memory** — a byte-slice of wasm memory that crosses a real pipe
   between two processes. It is deliberately **i32-only**: no heap objects, closures,
   strings, or BigInt. Extending it to the full language is *not* the point; the JS
@@ -80,7 +80,7 @@ placement (all four cells executed, not modeled):
 ```
                        per-item (sequential)     per-level (concurrent)
   client (REST, stay)   13208ms / 254 rt            312ms /   6 rt
-  Waso   (migrate)        608ms /   2 rt            112ms /   2 rt
+  Stackmix   (migrate)        608ms /   2 rt            112ms /   2 rt
 ```
 
 Two independent levers, both on identical traversal source:
@@ -89,9 +89,9 @@ Two independent levers, both on identical traversal source:
   on the server, its per-level rounds are cheap server↔API hops, not client↔server
   RTTs.
 
-**Waso (migrate + concurrent) = 112ms** beats naive REST (13208ms, **118×**) and
+**Stackmix (migrate + concurrent) = 112ms** beats naive REST (13208ms, **118×**) and
 even a hand-tuned parallel client (312ms, **2.8×**) — because the client still
-pays one RTT per tree level (6 levels here) while Waso pays 2 client RTTs total,
+pays one RTT per tree level (6 levels here) while Stackmix pays 2 client RTTs total,
 regardless of depth. `--real` injects real sleeps; measured **12.8s → 0.10s**.
 
 This is the "minimal change to an existing app" story: the obvious sequential
@@ -105,16 +105,16 @@ cannot.)
 and latency as the thread grows and as RTT varies:
 
 ```
-  nodes  depth │   REST (naive)      parallel client    Waso (migrate)  │  vs REST   vs client
+  nodes  depth │   REST (naive)      parallel client    Stackmix (migrate)  │  vs REST   vs client
      10      2 │    10rt   520ms    3rt   156ms   2rt   106ms │      5x      1.5x
     300      5 │   300rt   15.6s    6rt   312ms   2rt   112ms │    139x      2.8x
   10000      9 │ 10000rt  520.0s   10rt   520ms   2rt   120ms │   4333x      4.3x
 ```
 
-REST round trips grow O(nodes); the parallel client O(depth)≈log(nodes); Waso
-stays **2, flat**. So Waso's win vs naive grows without bound, and it holds
+REST round trips grow O(nodes); the parallel client O(depth)≈log(nodes); Stackmix
+stays **2, flat**. So Stackmix's win vs naive grows without bound, and it holds
 ~depth/2 even against the optimal client — and the gap widens as RTT rises,
-since Waso's cost is ~constant in round trips while both client strategies
+since Stackmix's cost is ~constant in round trips while both client strategies
 scale linearly with the network.
 
 ### A second benchmark — Conduit (`npm run bench:conduit`)
@@ -123,18 +123,18 @@ HN proves the **latency/round-trip** win on a deep waterfall (bytes were equal).
 The RealWorld/Conduit home feed proves a different one — **bandwidth/over-fetch**.
 The feed is filtered by a predicate the public API doesn't support, so a REST
 client must drag every article body to the client to filter and join locally,
-plus an N+1 round trip per article for its author. Waso runs the same assembly
+plus an N+1 round trip per article for its author. Stackmix runs the same assembly
 on the server and ships back only the small projected feed:
 
 ```
   strategy               round trips    bytes      latency
   REST (over-fetch)       202 rt     4.08 MB    10504ms
-  Waso (migrate)            2 rt     11.3 KB      504ms
+  Stackmix (migrate)            2 rt     11.3 KB      504ms
        -> 362x less data, 21x faster, identical result
 ```
 
 A bespoke server endpoint could also avoid the over-fetch — but that's new
-boilerplate for every filter you didn't anticipate (the design doc's §2). Waso
+boilerplate for every filter you didn't anticipate (the design doc's §2). Stackmix
 runs the filter inline because it's already where the data is. Together the two
 benchmarks cover both axes of the value: HN = round trips/latency on sequential
 depth; Conduit = bandwidth on fan-out filtering + joins.
@@ -162,45 +162,45 @@ depth; Conduit = bandwidth on fan-out filtering + joins.
   demo shows `db.query` migrating 1 frame (`render`) and `DOM.renderList`
   migrating 2 frames (`render → show`).
 - **Heap model (§5).** Heaps are tier-local. The continuation wire format
-  (`waso-heap.mjs`) is an identity-preserving, cycle-safe graph codec: shared
+  (`stackmix-heap.mjs`) is an identity-preserving, cycle-safe graph codec: shared
   references stay shared and cycles survive the round trip, while a subgraph
   larger than a threshold becomes an opaque handle into the owning tier's heap
   instead of being copied. Dereferencing a handle on another tier fetches it
   across a channel with a version-invalidated cache (single-writer coherence,
-  `waso-fetch.mjs`). `probe-heap.mjs` / `probe-fetch.mjs` exercise these.
+  `stackmix-fetch.mjs`). `probe-heap.mjs` / `probe-fetch.mjs` exercise these.
 - **Migrate-vs-fetch (§6).** At a boundary the runtime can ship the continuation
-  *or* fetch the data and stay put. `waso-policy.mjs` prices both with real
+  *or* fetch the data and stay put. `stackmix-policy.mjs` prices both with real
   bytes and shows the decision flipping between regimes, degrading to the naive
   "always migrate" when uninformed and improving with measured sizes.
 
 ## Files
 
 ```
-initial-design.md     the design document (the spec)
-NOTES-frontend.md     frontend dev log (chronological) + "pick up here" / caveats
-app.ts                the demo application, authored as ordinary TypeScript
-waso-tsc.mjs          JS-path frontend: full-language TS -> Waso IR, via a ts.Program
-                      + type checker; loadModule (1 file) / loadProgram (import graph)
-waso-core.mjs         JS-interpreter runtime + language semantics (the substrate)
-waso-heap.mjs         identity-preserving, cycle-safe continuation wire codec
-waso-compile.mjs      wasm-path frontend: the i32 TS subset -> the wasm IR
-waso.wat              the interpreter, as a WebAssembly module (build -> waso.wasm)
-build-wasm.mjs        compiles waso.wat -> waso.wasm via wabt
-waso-wasm-core.mjs    wasm runtime: instances, capture/restore, heap, policy bits
-waso-wasm.mjs         wasm demo, single process (two instances)
-waso-wasm-2p-*.mjs    wasm demo, two OS processes (slice crosses a pipe)
-waso-spike.mjs        JS demo, single process
-waso-2p-*.mjs         JS demo, two OS processes
-waso-frame.mjs        length-prefixed framing (JSON header + binary attachment)
-waso-policy.mjs       §6 migrate-vs-fetch cost model
-test.mjs              runs every demo + suite and asserts the headline claims
+initial-design.md         the design document (the spec)
+NOTES-frontend.md         frontend dev log (chronological) + "pick up here" / caveats
+app.ts                    the demo application, authored as ordinary TypeScript
+stackmix-tsc.mjs          JS-path frontend: full-language TS -> Stackmix IR, via a ts.Program
+                          + type checker; loadModule (1 file) / loadProgram (import graph)
+stackmix-core.mjs         JS-interpreter runtime + language semantics (the substrate)
+stackmix-heap.mjs         identity-preserving, cycle-safe continuation wire codec
+stackmix-compile.mjs      wasm-path frontend: the i32 TS subset -> the wasm IR
+stackmix.wat              the interpreter, as a WebAssembly module (build -> stackmix.wasm)
+build-wasm.mjs            compiles stackmix.wat -> stackmix.wasm via wabt
+stackmix-wasm-core.mjs    wasm runtime: instances, capture/restore, heap, policy bits
+stackmix-wasm.mjs         wasm demo, single process (two instances)
+stackmix-wasm-2p-*.mjs    wasm demo, two OS processes (slice crosses a pipe)
+stackmix-spike.mjs        JS demo, single process
+stackmix-2p-*.mjs         JS demo, two OS processes
+stackmix-frame.mjs        length-prefixed framing (JSON header + binary attachment)
+stackmix-policy.mjs       §6 migrate-vs-fetch cost model
+test.mjs                  runs every demo + suite and asserts the headline claims
 conformance.mjs / difftest.mjs / decorators.mjs / multimodule.mjs   the four test suites
 ```
 
 ## What this prototype is not (honest limits)
 
 - **No native wasm stack capture.** By design (§8) — that isn't serializable and
-  isn't in browsers. Capture is at the interpreter level, in Waso's own IR.
+  isn't in browsers. Capture is at the interpreter level, in Stackmix's own IR.
 - **Numeric data in the wasm path.** Flat `i32`s, to keep values trivial in
   linear memory; the TS subset is numbers / number-arrays. No strings, objects,
   or the explicit `shared.*` distributed-object machinery (§5).
@@ -213,7 +213,7 @@ conformance.mjs / difftest.mjs / decorators.mjs / multimodule.mjs   the four tes
   leaves the stack/ip intact and the re-run is correct — verified directly in
   `probe-deref.mjs` (a handle miss mid-op suspends, resumes, and keeps its args).
   The remaining piece is the *live wire transport* that fetches the handle across a
-  channel; its cost model is in `waso-policy.mjs`. (This is a real, supported path,
+  channel; its cost model is in `stackmix-policy.mjs`. (This is a real, supported path,
   not a non-goal — only the transport is unbuilt.)
 - **No browser; no source maps yet.** Every IR instruction already carries its TS
   position (`describeContinuation`), but portable file/line metadata isn't emitted

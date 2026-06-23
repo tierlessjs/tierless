@@ -1,7 +1,7 @@
 // Capstone — SERVER tier (child process). Owns db.items / db.title. Runs the
 // migrated continuation of a program compiled from real TypeScript.
-import { Tier, run, Suspend, serializeContinuation, deserializeContinuation } from "./waso-core.mjs";
-import { writeFrame, readFrames } from "./waso-frame.mjs";
+import { Tier, run, Suspend, serializeContinuation, deserializeContinuation } from "./stackmix-core.mjs";
+import { writeFrame, readFrames } from "./stackmix-frame.mjs";
 import { N } from "./app-thread.mjs"; // also registers the compiled program into PROGRAM
 
 const server = new Tier("server", {

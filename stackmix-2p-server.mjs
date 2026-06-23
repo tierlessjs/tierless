@@ -1,6 +1,6 @@
-// Waso — two-process demo, SERVER tier (child process).
+// Stackmix — two-process demo, SERVER tier (child process).
 //
-// Spawned by waso-2p-client.mjs. Owns db.query and the large dataset. Reads
+// Spawned by stackmix-2p-client.mjs. Owns db.query and the large dataset. Reads
 // continuation frames from stdin, resumes them on the server tier, and writes
 // the result (or the next continuation) back on stdout. All logging goes to
 // stderr so it can never corrupt the binary frame stream on stdout.
@@ -8,8 +8,8 @@
 import {
   Tier, run, Suspend, serializeContinuation, deserializeContinuation,
   wireHandles, makeDataset, fmt,
-} from "./waso-core.mjs";
-import { writeFrame, readFrames } from "./waso-frame.mjs";
+} from "./stackmix-core.mjs";
+import { writeFrame, readFrames } from "./stackmix-frame.mjs";
 
 const N = 100_000;
 const PEOPLE = makeDataset(N);

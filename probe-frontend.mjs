@@ -6,15 +6,15 @@
 // serialization boundary MID-AWAIT — its captured environment travels as data,
 // its code by reference. That's the #4 thesis in miniature.
 
-import { PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation, initialFrames, isClosure, awaitable } from "./waso-core.mjs";
-import { loadModule, describeContinuation } from "./waso-tsc.mjs";
+import { PROGRAM, run, Suspend, serializeContinuation, deserializeContinuation, initialFrames, isClosure, awaitable } from "./stackmix-core.mjs";
+import { loadModule, describeContinuation } from "./stackmix-tsc.mjs";
 
 let pass = true;
 const check = (name, cond) => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}`); pass &&= cond; };
 
 // ---- Section A: the gap in the old (wasm-IR) frontend ----------------------
 console.log("Probe: #4 frontend (closures + await)\n--- A. the gap ---");
-const { compile: oldCompile } = await import("./waso-compile.mjs");
+const { compile: oldCompile } = await import("./stackmix-compile.mjs");
 let gap = false;
 try { oldCompile("function f(){ const g = (x) => x + 1; return g(2); }"); }
 catch { gap = true; }

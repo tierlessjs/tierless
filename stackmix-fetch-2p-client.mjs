@@ -1,6 +1,6 @@
 // Cross-process fetch demo — CLIENT tier + orchestrator (parent process).
 //
-//   node waso-fetch-2p-client.mjs
+//   node stackmix-fetch-2p-client.mjs
 //
 // The capstone: a continuation migrates between two real OS processes, and when
 // the client dereferences a handle to data that stayed on the server, the
@@ -11,9 +11,9 @@
 
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { Tier, run, Suspend, Miss, serializeContinuation, deserializeContinuation, initialFrames, contBytes, fmt } from "./waso-core.mjs";
-import { decodeGraph } from "./waso-heap.mjs";
-import { writeFrame, readFrames } from "./waso-frame.mjs";
+import { Tier, run, Suspend, Miss, serializeContinuation, deserializeContinuation, initialFrames, contBytes, fmt } from "./stackmix-core.mjs";
+import { decodeGraph } from "./stackmix-heap.mjs";
+import { writeFrame, readFrames } from "./stackmix-frame.mjs";
 import "./app-profile.mjs";
 
 const rendered = [];
@@ -24,7 +24,7 @@ const client = new Tier("client", { "render": ([name]) => { rendered.push(name);
 const cache = new Map();
 const host = { deref(h) { if (h.owner === client.id) return client.heap.get(h.id); return cache.has(h.id) ? cache.get(h.id) : new Miss(h); } };
 
-const child = spawn(process.execPath, [fileURLToPath(new URL("./waso-fetch-2p-server.mjs", import.meta.url))], { stdio: ["pipe", "pipe", "inherit"] });
+const child = spawn(process.execPath, [fileURLToPath(new URL("./stackmix-fetch-2p-server.mjs", import.meta.url))], { stdio: ["pipe", "pipe", "inherit"] });
 let toServer = 0, fromServer = 0, fetchBytes = 0, migrateBackBytes = 0;
 const send = (obj, bin) => { toServer += writeFrame(child.stdin, obj, bin); };
 let resolveNext = null;
@@ -72,7 +72,7 @@ async function main() {
 function finish(value) {
   send({ type: "shutdown" }); child.stdin.end();
   const BIO = 120_000;
-  console.log("\nWaso — cross-process on-demand fetch (async suspension + heap + real pipe)\n");
+  console.log("\nStackmix — cross-process on-demand fetch (async suspension + heap + real pipe)\n");
   console.log(`Program: profileView(7) cold-started on the CLIENT; profile.bio = ${fmt(BIO)} lives on the server`);
   console.log(`Flow: migrate to server (db.profile) -> migrate back to client (render) -> deref p.bio -> fetch\n`);
   console.log(`  migrate-back continuation (server->client) : ${fmt(migrateBackBytes)}  (profile stayed as a handle)`);
