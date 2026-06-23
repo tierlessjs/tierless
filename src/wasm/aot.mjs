@@ -50,6 +50,9 @@ const CLOSTAG = -2;
 // store [cap, k0, v0, k1, v1, ...] of (internedKeyId, taggedValue) pairs. Keys
 // are interned to small ints at compile time, so property access is an id match.
 const OBJTAG = -3, INITCAP_OBJ = 2;
+// A string: [STRTAG, byteLength, ...bytes] (one byte per char, padded to a word).
+// "+" and "===" become polymorphic — string-aware — through the runtime helpers.
+const STRTAG = -4;
 
 // Host-side array helpers: build/read a growable array in an instance's linear
 // memory (so resources can pass number[] across the boundary). Layout matches
@@ -95,6 +98,17 @@ export function decodeValue(v) {
   switch (v) { case UNDEF: return undefined; case NULL: return null; case TRUE: return true; case FALSE: return false; }
   return (v & 1) === 0 ? v >> 1 : { ptr: pointerAddr(v) };
 }
+// Like decodeValue but reads the heap, so a string comes back as a JS string.
+export function readValue(memory, v) {
+  if (!isPointer(v) || v === UNDEF || v === NULL || v === TRUE || v === FALSE) return decodeValue(v);
+  const dv = new DataView(memory.buffer), addr = pointerAddr(v);
+  if (dv.getInt32(addr, true) === STRTAG) {
+    const len = dv.getInt32(addr + 4, true); let s = "";
+    for (let i = 0; i < len; i++) s += String.fromCharCode(dv.getUint8(addr + 8 + i));
+    return s;
+  }
+  return { ptr: addr };
+}
 // Map an IR PUSH literal to its tagged immediate (floats/strings: a later slice).
 function immediate(x) {
   if (x === undefined) return UNDEF;
@@ -128,7 +142,7 @@ function leaderSet(code) {
 
 const maxStack = (code) => { let h = 0, max = 0; for (const ins of code) { h += delta(ins); if (h > max) max = h; } return max; };
 
-function compileFn(m, name, fn, handles, fnIndex, keyIds) {
+function compileFn(m, name, fn, handles, fnIndex, keyIds, strings) {
   const I32 = binaryen.i32;
   const argc = fn.argc || 0, nl = fn.nlocals;
   const code = resolveLabels(fn.code);
@@ -160,7 +174,18 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds) {
     let h = 0, result = null, term = { kind: "fall", next: end };
     for (const ins of code.slice(start, end)) {
       switch (ins[0]) {
-        case "PUSH": stmts.push(m.local.set(scratch(h), m.i32.const(immediate(ins[1])))); h++; break; // tagged immediate
+        case "PUSH": {
+          if (typeof ins[1] === "string") {    // string literal: build [STRTAG, len, ...bytes] on the heap inline
+            const s = ins[1], tmp = scratch(h + 1);
+            stmts.push(m.local.set(tmp, m.i32.load(0, 4, m.i32.const(BUMP_ADDR))));
+            stmts.push(m.i32.store(0, 4, get(tmp), m.i32.const(STRTAG)));
+            stmts.push(m.i32.store(4, 4, get(tmp), m.i32.const(s.length)));
+            for (let k = 0; k < s.length; k++) stmts.push(m.i32.store8(8 + k, 1, get(tmp), m.i32.const(s.charCodeAt(k))));
+            stmts.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(tmp), m.i32.const(8 + ((s.length + 3) & ~3)))));
+            stmts.push(m.local.set(scratch(h), m.i32.or(get(tmp), m.i32.const(1)))); h++; break;
+          }
+          stmts.push(m.local.set(scratch(h), m.i32.const(immediate(ins[1])))); h++; break; // tagged immediate
+        }
         case "LOAD": stmts.push(m.local.set(scratch(h), get(loc(ins[1])))); h++; break;
         case "STORE": h--; stmts.push(m.local.set(loc(ins[1]), get(scratch(h)))); break;
         case "LOADENV": stmts.push(m.local.set(scratch(h), m.i32.load(8 + ins[1] * 4, 4, m.i32.and(get(ENV), m.i32.const(~3))))); h++; break; // env[idx] from the closure
@@ -187,17 +212,20 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds) {
           const callArgs = ins[0] === "CALL" ? [m.i32.const(0), ...args] : args;
           stmts.push(m.local.set(scratch(h), m.call(ins[1], callArgs, I32))); h++; break;
         }
-        case "BIN": {                          // tsc.mjs binary op; operand tags handled like the dedicated ops
-          h -= 2; const a = get(scratch(h)), b = get(scratch(h + 1)), op = ins[1]; let e;
-          if (op === "+") e = m.i32.add(a, b);
-          else if (op === "-") e = m.i32.sub(a, b);
-          else if (op === "*") e = m.i32.mul(m.i32.shr_s(a, m.i32.const(1)), b);
-          else if (op === "<") e = bool(m.i32.lt_s(a, b));
-          else if (op === "<=") e = bool(m.i32.le_s(a, b));
-          else if (op === ">") e = bool(m.i32.gt_s(a, b));
-          else if (op === ">=") e = bool(m.i32.ge_s(a, b));
-          else if (op === "===" || op === "==") e = bool(m.i32.eq(a, b));     // tagged identity == JS === for these primitives
-          else if (op === "!==" || op === "!=") e = bool(m.i32.ne(a, b));
+        case "BIN": {                          // tsc.mjs binary op. With strings present, + and === are polymorphic (JS semantics)
+          h -= 2; const sa = scratch(h), sb = scratch(h + 1), op = ins[1];
+          const a = () => get(sa), b = () => get(sb); let e;                  // thunks: a fresh local.get per use (no IR-node sharing)
+          if (op === "+") e = strings                                         // numeric fast path when both are fixnums; else concat/coerce
+            ? m.if(m.i32.eqz(m.i32.and(m.i32.or(a(), b()), m.i32.const(1))), m.i32.add(a(), b()), m.call("__add", [a(), b()], I32))
+            : m.i32.add(a(), b());
+          else if (op === "-") e = m.i32.sub(a(), b());
+          else if (op === "*") e = m.i32.mul(m.i32.shr_s(a(), m.i32.const(1)), b());
+          else if (op === "<") e = bool(m.i32.lt_s(a(), b()));
+          else if (op === "<=") e = bool(m.i32.le_s(a(), b()));
+          else if (op === ">") e = bool(m.i32.gt_s(a(), b()));
+          else if (op === ">=") e = bool(m.i32.ge_s(a(), b()));
+          else if (op === "===" || op === "==") e = strings ? bool(m.call("__eq", [a(), b()], I32)) : bool(m.i32.eq(a(), b())); // __eq: strings by value
+          else if (op === "!==" || op === "!=") e = strings ? bool(m.i32.eqz(m.call("__eq", [a(), b()], I32))) : bool(m.i32.ne(a(), b()));
           else throw new Error("aot: unsupported BIN " + op);
           stmts.push(m.local.set(scratch(h), e)); h++; break;
         }
@@ -383,6 +411,85 @@ function addObjectRuntime(m) {
   ], binaryen.none));
 }
 
+// Runtime helpers for strings (added only when a program has a string literal).
+// A string is [STRTAG, byteLength, ...bytes]; "+" and "===" dispatch here.
+function addStringRuntime(m) {
+  const I32 = binaryen.i32;
+  const g = (i) => m.local.get(i, I32);
+  const c = (n) => m.i32.const(n);
+  const ld = (off, p) => m.i32.load(off, 4, p);
+  const st = (off, p, v) => m.i32.store(off, 4, p, v);
+  const ld8 = (off, p) => m.i32.load8_u(off, 1, p);
+  const st8 = (off, p, v) => m.i32.store8(off, 1, p, v);
+  const bump = () => m.i32.load(0, 4, c(BUMP_ADDR));
+  const setBump = (v) => m.i32.store(0, 4, c(BUMP_ADDR), v);
+  const addr = (i) => m.i32.and(g(i), c(~3));                            // raw heap address of a tagged pointer in local i
+  const isStr = (i) => m.if(m.i32.and(g(i), c(1)), m.i32.eq(ld(0, addr(i)), c(STRTAG)), c(0)); // string? (guarded load: only deref a pointer)
+  const pad = (lenExpr) => m.i32.and(m.i32.add(lenExpr, c(3)), c(~3));   // byte count rounded up to a word
+
+  // __numstr(v) -> string of a tagged fixnum.  locals: 1=n,2=neg,3=len,4=q,5=str,6=i
+  m.addFunction("__numstr", binaryen.createType([I32]), I32, [I32, I32, I32, I32, I32, I32], m.block(null, [
+    m.local.set(1, m.i32.shr_s(g(0), c(1))),                            // n = untag
+    m.if(m.i32.eqz(g(1)), m.block(null, [                              // n == 0 -> "0"
+      m.local.set(5, bump()), st(0, g(5), c(STRTAG)), st(4, g(5), c(1)), st8(8, g(5), c(48)), setBump(m.i32.add(g(5), c(12))),
+      m.return(m.i32.or(g(5), c(1))),
+    ], binaryen.none)),
+    m.local.set(2, m.i32.lt_s(g(1), c(0))),                            // neg?
+    m.if(g(2), m.local.set(1, m.i32.sub(c(0), g(1)))),                 // n = -n
+    m.local.set(3, c(0)), m.local.set(4, g(1)),                        // count digits (do-while: n != 0 here)
+    m.loop("C", m.block(null, [m.local.set(3, m.i32.add(g(3), c(1))), m.local.set(4, m.i32.div_u(g(4), c(10))), m.br_if("C", g(4))])),
+    m.local.set(3, m.i32.add(g(3), g(2))),                            // len = digits + sign
+    m.local.set(5, bump()), st(0, g(5), c(STRTAG)), st(4, g(5), g(3)), setBump(m.i32.add(g(5), m.i32.add(c(8), pad(g(3))))),
+    m.if(g(2), st8(8, g(5), c(45))),                                  // '-'
+    m.local.set(6, g(3)), m.local.set(4, g(1)),                       // fill digits from the end
+    m.loop("F", m.block(null, [
+      m.local.set(6, m.i32.sub(g(6), c(1))),
+      st8(8, m.i32.add(g(5), g(6)), m.i32.add(c(48), m.i32.rem_u(g(4), c(10)))),
+      m.local.set(4, m.i32.div_u(g(4), c(10))),
+      m.br_if("F", m.i32.ne(g(4), c(0))),
+    ])),
+    m.return(m.i32.or(g(5), c(1))),
+  ], binaryen.none));
+
+  // __tostr(v) -> string.  string: itself; fixnum: __numstr; else: "" (coercion of bool/null is a later slice)
+  m.addFunction("__tostr", binaryen.createType([I32]), I32, [I32], m.block(null, [
+    m.if(isStr(0), m.return(g(0))),
+    m.if(m.i32.eqz(m.i32.and(g(0), c(1))), m.return(m.call("__numstr", [g(0)], I32))),
+    m.local.set(1, bump()), st(0, g(1), c(STRTAG)), st(4, g(1), c(0)), setBump(m.i32.add(g(1), c(8))),
+    m.return(m.i32.or(g(1), c(1))),
+  ], binaryen.none));
+
+  // __concat(sa, sb) -> string.  locals: 2=la,3=lb,4=len,5=str
+  m.addFunction("__concat", binaryen.createType([I32, I32]), I32, [I32, I32, I32, I32], m.block(null, [
+    m.local.set(2, ld(4, addr(0))), m.local.set(3, ld(4, addr(1))), m.local.set(4, m.i32.add(g(2), g(3))),
+    m.local.set(5, bump()), st(0, g(5), c(STRTAG)), st(4, g(5), g(4)), setBump(m.i32.add(g(5), m.i32.add(c(8), pad(g(4))))),
+    m.memory.copy(m.i32.add(g(5), c(8)), m.i32.add(addr(0), c(8)), g(2)),
+    m.memory.copy(m.i32.add(m.i32.add(g(5), c(8)), g(2)), m.i32.add(addr(1), c(8)), g(3)),
+    m.return(m.i32.or(g(5), c(1))),
+  ], binaryen.none));
+
+  // __add(a, b): at least one operand is non-fixnum. Either a string -> concat; else best-effort numeric.
+  m.addFunction("__add", binaryen.createType([I32, I32]), I32, [], m.block(null, [
+    m.if(m.i32.or(isStr(0), isStr(1)), m.return(m.call("__concat", [m.call("__tostr", [g(0)], I32), m.call("__tostr", [g(1)], I32)], I32))),
+    m.return(m.i32.add(g(0), g(1))),
+  ], binaryen.none));
+
+  // __eq(a, b) -> 0/1.  identical bits, or equal strings by value.  locals: 2=la,3=i
+  m.addFunction("__eq", binaryen.createType([I32, I32]), I32, [I32, I32], m.block(null, [
+    m.if(m.i32.eq(g(0), g(1)), m.return(c(1))),                       // identical bits: fixnums, same pointer, same singleton
+    m.if(m.i32.eqz(m.i32.and(isStr(0), isStr(1))), m.return(c(0))),   // different and not both strings -> not equal
+    m.local.set(2, ld(4, addr(0))),
+    m.if(m.i32.ne(g(2), ld(4, addr(1))), m.return(c(0))),             // different lengths
+    m.local.set(3, c(0)),
+    m.loop("E", m.block(null, [
+      m.if(m.i32.ge_u(g(3), g(2)), m.return(c(1))),                   // all bytes matched
+      m.if(m.i32.ne(ld8(8, m.i32.add(addr(0), g(3))), ld8(8, m.i32.add(addr(1), g(3)))), m.return(c(0))),
+      m.local.set(3, m.i32.add(g(3), c(1))), m.br("E"),
+    ])),
+    m.unreachable(),
+  ], binaryen.none));
+}
+
 // program: { name: { argc?, nlocals, code } }. resources: import names a RES may
 // call. Returns wasm bytes, Asyncify-instrumented unless asyncify:false.
 //
@@ -396,7 +503,8 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const uses = (...ops) => Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ops.includes(i[0])));
   const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN");
   const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP");
-  if (usesArrays || usesObjects) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow paths
+  const usesStrings = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "PUSH" && typeof i[1] === "string"));
+  if (usesArrays || usesObjects || usesStrings) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow/concat paths
   // Property keys are interned to small ints at compile time, so GETPROP/SETPROP
   // are id matches in the object runtime (no string bytes in linear memory yet).
   const keyIds = new Map();
@@ -410,9 +518,10 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const fnNames = Object.keys(program);
   const fnIndex = Object.fromEntries(fnNames.map((n, i) => [n, i]));
   const usesClosures = uses("MAKECLOSURE", "CALLV");
-  for (const [name, fn] of Object.entries(program)) compileFn(m, name, fn, handles, fnIndex, keyIds);
+  for (const [name, fn] of Object.entries(program)) compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings);
   if (usesArrays) addArrayRuntime(m);
   if (usesObjects) addObjectRuntime(m);
+  if (usesStrings) addStringRuntime(m);
   if (usesClosures) {
     m.addTable("0", fnNames.length, fnNames.length, binaryen.funcref);
     m.addActiveElementSegment("0", "fns", fnNames, m.i32.const(0));
