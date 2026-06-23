@@ -64,6 +64,15 @@ const programs = [
     function* range(a, b) { for (let i = a; i < b; i = i + 1) { yield i; } }
     function* g() { yield* range(1, 5); }
     function main() { let s = 0; for (const x of g()) { s = s + x; } return s; }`],                 // 1+2+3+4 = 10
+  ["throw() into a generator propagates to an outer catch", `
+    function* g() { yield 1; yield 2; }
+    function main() { const it = g(); it.next(); try { it.throw(42); return 0 - 1; } catch (e) { return e; } }`], // 42
+  ["throw() is caught inside the generator, which recovers", `
+    function* c() { try { yield 1; } catch (e) { yield e + 100; } yield 3; }
+    function main() { const it = c(); it.next(); return it.throw(5).value; }`],                     // caught 5 -> yield 105
+  ["a caught throw() lets the generator continue", `
+    function* c() { try { yield 1; } catch (e) { yield e; } yield 3; }
+    function main() { const it = c(); it.next(); it.throw(9); return it.next().value; }`],          // ...then yield 3
 ];
 
 function interp(src) {

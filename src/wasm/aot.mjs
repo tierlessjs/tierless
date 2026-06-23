@@ -132,11 +132,11 @@ function immediate(x) {
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
 }
 
-const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1 };
+const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1 };
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" ? -ins[2] : DELTA[ins[0]] ?? 0;
 // Ops that run user code and can therefore propagate an exception — so a block ends
 // after one, and the next checks the pending-exception flag.
-const CALL_OPS = new Set(["CALL", "CALLV", "CALLMETHOD", "CALLDYN", "CALLVS", "GETPROPA", "SETPROPA"]);
+const CALL_OPS = new Set(["CALL", "CALLV", "CALLMETHOD", "CALLDYN", "CALLVS", "GETPROPA", "SETPROPA", "GENNEXT", "GENTHROW"]);
 
 // Labeled asm -> instruction list with JMP/JMPF targets resolved to indices.
 function resolveLabels(rawCode) {
@@ -200,7 +200,8 @@ function blockHeights(code, leaders) {
       else if (entry[s] !== h) throw new Error(`aot: inconsistent stack height entering block @${leaders[s]} (${entry[s]} vs ${h})`);
     }
   }
-  return { entryH: entry, maxAbs, blockHandler };
+  const entryHandler = entryHand.map((hs) => (hs && hs.length ? hs[hs.length - 1] : null)); // active handler when a block is entered (for a resume point inside a try)
+  return { entryH: entry, maxAbs, blockHandler, entryHandler };
 }
 
 function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, exceptions) {
@@ -374,6 +375,9 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
         }
         case "GENRET": {                       // [gen, value] -> [{value, done:true}]; abandon the generator (no finally yet)
           h -= 2; stmts.push(m.local.set(scratch(h), m.call("__genret", [get(scratch(h)), get(scratch(h + 1))], I32))); h++; break;
+        }
+        case "GENTHROW": {                     // [gen, value] -> [{value, done}]; throw into the generator at its paused yield
+          h -= 2; stmts.push(m.local.set(scratch(h), m.call("__genthrow", [get(scratch(h)), get(scratch(h + 1))], I32))); h++; break;
         }
         case "NEWOBJ": stmts.push(m.local.set(scratch(h), m.call("__newobj", [], I32))); h++; break;
         case "GETPROP": {                      // [obj] -> [obj.key]; key interned to an id
@@ -735,8 +739,9 @@ function emitGenTrampoline(m, name, fn, bodyIdx) {
     m.i32.store(0, 4, g(tmp), c(GENTAG)), m.i32.store(4, 4, g(tmp), c(bodyIdx)),
     m.i32.store(8, 4, g(tmp), c(0)), m.i32.store(12, 4, g(tmp), c(0)),                 // ip = 0, done = 0
   ];
-  for (let k = 0; k < argc; k++) out.push(m.i32.store(20 + k * 4, 4, g(tmp), g(k + 1))); // slots[k] = arg_k (param k+1); offset 16 holds the sent value
-  out.push(m.i32.store(0, 4, c(BUMP_ADDR), m.i32.add(g(tmp), c(20 + nl * 4))));         // bump past the object (extra slots are fresh 0)
+  // object: [GENTAG, bodyIdx, ip, done, sent@16, mode@20, ...slots@24]  (mode 1 = resume via .throw())
+  for (let k = 0; k < argc; k++) out.push(m.i32.store(24 + k * 4, 4, g(tmp), g(k + 1))); // slots[k] = arg_k (param k+1)
+  out.push(m.i32.store(0, 4, c(BUMP_ADDR), m.i32.add(g(tmp), c(24 + nl * 4))));         // bump past the object (extra slots are fresh 0)
   out.push(m.return(m.i32.or(g(tmp), c(1))));
   m.addFunction(name, binaryen.createType(new Array(argc + 1).fill(I32)), I32, [I32], m.block(null, out, binaryen.none));
 }
@@ -754,28 +759,44 @@ function compileGenBody(m, bodyName, fn, keyIds, fnIndex) {
   const get = (i) => m.local.get(i, I32);
   const genAddr = () => m.i32.and(get(0), m.i32.const(~3));                            // param 0 = the generator object
 
+  const genHasExc = code.some((ins) => ins[0] === "PUSHTRY" || ins[0] === "THROW"); // a try/catch inside the generator body
   const Lset = new Set([0]);             // basic-block leaders (YIELD's successor is a resume point)
   code.forEach((ins, i) => {
     if (ins[0] === "JMP" || ins[0] === "JMPF") { Lset.add(ins[1]); if (i + 1 < code.length) Lset.add(i + 1); }
     else if ((ins[0] === "RET" || ins[0] === "YIELD") && i + 1 < code.length) Lset.add(i + 1);
+    else if (genHasExc && ins[0] === "PUSHTRY") Lset.add(ins[1]);
+    else if (genHasExc && (ins[0] === "THROW" || CALL_OPS.has(ins[0])) && i + 1 < code.length) Lset.add(i + 1);
   });
   const leaders = [...Lset].filter((x) => x >= 0 && x < code.length).sort((a, b) => a - b);
   const blockOf = (ip) => leaders.indexOf(ip);
-  const { entryH, maxAbs } = blockHeights(code, leaders); // YIELD is delta 0, so a resume block enters with the sent value on top
+  const { entryH, maxAbs, blockHandler, entryHandler } = blockHeights(code, leaders); // YIELD is delta 0, so a resume block enters with the sent value on top
   const maxH = maxAbs + 1, scratch = (k) => 1 + nl + k, ipLocal = 1 + nl + maxH;
   const bool = (cond) => m.select(cond, m.i32.const(TRUE), m.i32.const(FALSE));
   const falsy = (i) => m.i32.or(m.i32.or(m.i32.eqz(get(i)), m.i32.eq(get(i), m.i32.const(UNDEF))), m.i32.or(m.i32.eq(get(i), m.i32.const(NULL)), m.i32.eq(get(i), m.i32.const(FALSE))));
   const goto = (b) => [m.local.set(ipLocal, m.i32.const(b)), m.br("L")]; // intra-call jump: update the dispatch local, re-dispatch
   const saveIp = (b) => m.i32.store(8, 4, genAddr(), m.i32.const(b));     // persist the resume point into the object (across calls)
   const setDone = (d) => m.i32.store(12, 4, genAddr(), m.i32.const(d));
-  const saveLocals = () => { const out = []; for (let i = 0; i < nl; i++) out.push(m.i32.store(20 + i * 4, 4, genAddr(), get(loc(i)))); return out; };
+  // Exception transfer inside the dispatch: a caught throw is just a goto to the
+  // catch block (value preserved in scratch(sp)); an uncaught one raises + ends.
+  const excFlag = () => m.i32.load(0, 4, m.i32.const(EXC_FLAG));
+  const raise = (valExpr) => [m.i32.store(0, 4, m.i32.const(EXC_VALUE), valExpr), m.i32.store(0, 4, m.i32.const(EXC_FLAG), m.i32.const(1))];
+  const propagate = () => [setDone(1), m.return(m.i32.const(0))];        // uncaught: done + return; the EXC flag stays set for the driver
+  const toCatch = (hand) => [m.local.set(scratch(hand.sp), m.i32.load(0, 4, m.i32.const(EXC_VALUE))), m.i32.store(0, 4, m.i32.const(EXC_FLAG), m.i32.const(0)), ...goto(blockOf(hand.catch))]; // value onto stack, clear flag, jump to the catch
+  const saveLocals = () => { const out = []; for (let i = 0; i < nl; i++) out.push(m.i32.store(24 + i * 4, 4, genAddr(), get(loc(i)))); return out; };
 
   const rendered = [];                   // per block: [...stmts, ...terminator]
   for (let bi = 0; bi < leaders.length; bi++) {
     const start = leaders[bi], end = bi + 1 < leaders.length ? leaders[bi + 1] : code.length;
     const resume = start > 0 && code[start - 1][0] === "YIELD"; // entered on resume: the sent value sits on top of the operand stack
     const stmts = []; let h = entryH[bi], term = [];
-    if (resume) stmts.push(m.local.set(scratch(h - 1), m.i32.load(16, 4, genAddr()))); // next(v): v becomes the yield expression's value
+    if (resume) {                          // resumed via next(v) [mode 0] or .throw(e) [mode 1]
+      const hand = entryHandler[bi];       // the yield's enclosing try, if any
+      const throwArm = hand
+        ? m.block(null, [...raise(m.i32.load(16, 4, genAddr())), ...toCatch(hand)], binaryen.none) // caught: route into the gen-body catch
+        : m.block(null, [...raise(m.i32.load(16, 4, genAddr())), ...propagate()], binaryen.none);  // uncaught: propagate out of the generator
+      stmts.push(m.if(m.i32.eq(m.i32.load(20, 4, genAddr()), m.i32.const(1)), throwArm));
+      stmts.push(m.local.set(scratch(h - 1), m.i32.load(16, 4, genAddr()))); // mode 0: v becomes the yield expression's value
+    }
     for (const ins of code.slice(start, end)) {
       switch (ins[0]) {
         case "PUSH": stmts.push(m.local.set(scratch(h), m.i32.const(immediate(ins[1])))); h++; break;
@@ -816,12 +837,19 @@ function compileGenBody(m, bodyName, fn, keyIds, fnIndex) {
           stmts.push(m.local.set(scratch(h), m.call_indirect("0", fnv, args, binaryen.createType(new Array(argc + 1).fill(I32)), I32))); h++; break;
         }
         case "GENNEXT": { h -= 2; stmts.push(m.local.set(scratch(h), m.call("__gennext", [get(scratch(h)), get(scratch(h + 1))], I32))); h++; break; }
+        case "PUSHTRY": case "POPTRY": break;  // handler scope resolved at compile time (blockHeights)
+        case "THROW": { h--; const hand = blockHandler[bi]; term = hand ? goto(blockOf(hand.catch)) : [...raise(get(scratch(h))), ...propagate()]; break; } // local catch -> jump there (value preserved); else propagate
         case "JMP": term = goto(blockOf(ins[1])); break;
         case "JMPF": h--; term = [m.if(falsy(scratch(h)), m.block(null, goto(blockOf(ins[1])), binaryen.none))]; break;
         case "YIELD": h--; term = [...saveLocals(), saveIp(blockOf(end)), setDone(0), m.return(get(scratch(h)))]; break; // suspend: resume at the next block
         case "RET": h--; term = [setDone(1), m.return(get(scratch(h)))]; break;
         default: throw new Error("aot: opcode " + ins[0] + " not supported in a generator body yet");
       }
+    }
+    // A call ends a block (with gen-body exceptions): check the pending-exception flag.
+    if (genHasExc && !term.length && CALL_OPS.has(code[end - 1][0])) {
+      const hand = blockHandler[bi];
+      term = [m.if(excFlag(), m.block(null, hand ? toCatch(hand) : propagate(), binaryen.none))];
     }
     rendered.push([...stmts, ...term]); // a "fall" terminator is empty — control flows naturally to the next block's code
   }
@@ -832,7 +860,7 @@ function compileGenBody(m, bodyName, fn, keyIds, fnIndex) {
   for (let bi = 0; bi < N - 1; bi++) node = m.block("b" + (bi + 1), [node, ...rendered[bi]], binaryen.none);
   const dispatch = m.block("D", [node, ...rendered[N - 1]], binaryen.none);
   const prologue = [];
-  for (let i = 0; i < nl; i++) prologue.push(m.local.set(loc(i), m.i32.load(20 + i * 4, 4, genAddr())));
+  for (let i = 0; i < nl; i++) prologue.push(m.local.set(loc(i), m.i32.load(24 + i * 4, 4, genAddr())));
   prologue.push(m.local.set(ipLocal, m.i32.load(8, 4, genAddr())));
   const body = m.block(null, [...prologue, m.loop("L", m.block(null, [dispatch, m.unreachable()], binaryen.none))], binaryen.none);
   m.addFunction(bodyName, binaryen.createType([I32]), I32, new Array(nl + maxH + 1).fill(I32), body);
@@ -851,13 +879,19 @@ function addGenRuntime(m, valueKey, doneKey) {
     m.local.set(3, m.call("__setprop", [g(3), c(doneKey), doneExpr], I32)),
     m.return(g(3)),
   ], binaryen.none);
-  // __gennext(gen, sent) -> {value, done}.  locals: 2=ret, 3=obj
-  m.addFunction("__gennext", binaryen.createType([I32, I32]), I32, [I32, I32], m.block(null, [
+  // Resume the body once (mode 0 = next, 1 = throw); if it raised an uncaught
+  // exception, propagate (the EXC flag is left set for the caller's check).
+  const drive = (mode) => m.block(null, [
     m.if(m.i32.load(12, 4, genAddr()), mkResult(c(UNDEF), c(TRUE))),                    // already finished
-    m.i32.store(16, 4, genAddr(), g(1)),                                               // the sent value (becomes the paused yield's value)
+    m.i32.store(16, 4, genAddr(), g(1)), m.i32.store(20, 4, genAddr(), c(mode)),       // the value passed to next()/throw(), and the resume mode
     m.local.set(2, m.call_indirect("0", m.i32.load(4, 4, genAddr()), [g(0)], binaryen.createType([I32]), I32)), // run to the next yield/return
+    m.if(m.i32.load(0, 4, c(EXC_FLAG)), m.return(c(0))),                               // body threw uncaught -> propagate
     mkResult(g(2), m.select(m.i32.load(12, 4, genAddr()), c(TRUE), c(FALSE))),          // value + done (the body set done)
-  ], binaryen.none));
+  ], binaryen.none);
+  // __gennext(gen, sent) -> {value, done}.  locals: 2=ret, 3=obj
+  m.addFunction("__gennext", binaryen.createType([I32, I32]), I32, [I32, I32], drive(0));
+  // __genthrow(gen, value) -> {value, done}.  it.throw(e): resume the body in throw mode.
+  m.addFunction("__genthrow", binaryen.createType([I32, I32]), I32, [I32, I32], drive(1));
   // __genret(gen, value) -> {value, done:true}.  it.return(v): abandon the generator (finally blocks are a later slice).
   m.addFunction("__genret", binaryen.createType([I32, I32]), I32, [I32, I32], m.block(null, [
     m.i32.store(12, 4, genAddr(), c(1)),                                               // mark done
