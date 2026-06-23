@@ -14,9 +14,10 @@ latest `0.x` release receives security fixes.
 
 ## Reporting a Vulnerability
 
-Please report security issues privately by emailing
-**bright.fulton@gmail.com**. Do not open public issues, pull requests, or
-discussions for security reports.
+Please report security issues privately through GitHub's
+[private vulnerability reporting](https://github.com/bfulton/stackmix/security/advisories/new)
+(the repository's **Security** tab → **Report a vulnerability**). Do not open
+public issues, pull requests, or discussions for security reports.
 
 When reporting, include as much detail as you can: affected version or commit,
 a description of the issue, and a minimal reproduction if possible.
