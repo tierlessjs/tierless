@@ -39,10 +39,16 @@ export const BUMP_ADDR = 8;
 export const HEAP_BASE = 64;
 
 // Tagged-value helpers (also used to read/write values across the host boundary).
+// Pointers use two low bits: bit 0 = pointer, bit 1 = remote (a §5 handle whose
+// object stayed on the owning tier). Heap addresses are 4-aligned, so both bits
+// are free. A resident pointer is (addr|1); a handle is (addr|3).
 export const tagInt = (n) => (n << 1);
 export const untagInt = (v) => (v >> 1);
 export const isPointer = (v) => (v & 1) === 1;
-export const pointerAddr = (v) => (v & ~1);
+export const isRemote = (v) => (v & 3) === 3;
+export const pointerAddr = (v) => (v & ~3);
+export const makeResident = (addr) => (addr | 1);
+export const makeHandle = (addr) => (addr | 3);
 
 const DELTA = { PUSH: 1, LOAD: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3 };
 const delta = (ins) => (ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : DELTA[ins[0]] ?? 0);
@@ -115,9 +121,9 @@ function compileFn(m, name, fn) {
           stmts.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(scratch(h + 1)), m.i32.mul(m.i32.add(nRaw(), m.i32.const(1)), m.i32.const(4))))); // *bump = tmp + (n+1)*4
           stmts.push(m.local.set(scratch(h), m.i32.or(get(scratch(h + 1)), m.i32.const(1)))); h++; break;         // result = tmp | 1 (tagged pointer)
         }
-        case "AGET": { h -= 2; const addr = m.i32.and(get(scratch(h)), m.i32.const(~1)), idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1));
+        case "AGET": { h -= 2; const addr = m.i32.and(get(scratch(h)), m.i32.const(~3)), idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1));
           stmts.push(m.local.set(scratch(h), m.i32.load(4, 4, m.i32.add(addr, m.i32.mul(idx, m.i32.const(4)))))); h++; break; } // field = mem[addr + 4 + idx*4] (skip length header)
-        case "ASET": { h -= 3; const addr = m.i32.and(get(scratch(h)), m.i32.const(~1)), idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1)), v = get(scratch(h + 2));
+        case "ASET": { h -= 3; const addr = m.i32.and(get(scratch(h)), m.i32.const(~3)), idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1)), v = get(scratch(h + 2));
           stmts.push(m.i32.store(4, 4, m.i32.add(addr, m.i32.mul(idx, m.i32.const(4))), v)); break; } // mem[addr + 4 + idx*4] = val
         case "JMP": term = { kind: "jmp", target: ins[1] }; break;
         case "JMPF": h--; term = { kind: "jmpf", target: ins[1], cond: scratch(h), next: end }; break;
