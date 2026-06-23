@@ -182,13 +182,15 @@ export function compile(source, entryName = "render") {
   }
 
   let entryLocals = null;
+  const fns_ = [];
   for (const f of ordered) {
     mark("fn:" + f.name.text);                 // entry's label resolves to offset 0
     locals = new Map();                         // fresh frame
     f.parameters.forEach((p) => local(p.name.text)); // params: slots 0..k-1
     stmt(f.body);
     if (out[out.length - 1]?.[0] !== "RET") { emit("PUSH", 0); emit("RET"); } // implicit return 0
+    fns_.push({ name: f.name.text, argc: f.parameters.length }); // per-function arity (for the AOT bridge)
     if (f === entry) entryLocals = Object.fromEntries(locals);
   }
-  return { asm: out, locals: entryLocals };
+  return { asm: out, locals: entryLocals, fns: fns_ };
 }
