@@ -52,6 +52,14 @@ export { encodeGraph, decodeGraph } from "./runtime/heap.mjs";
 export { writeFrame, readFrames } from "./runtime/frame.mjs";
 export { Heap, Channel, makeHost } from "./runtime/fetch.mjs";
 
+// WebSocket transport (browser <-> server continuation migration + §5 fetch).
+// `serveWss` (the Node `ws` server binder) is a server-only deep import,
+// `#stackmix/runtime/wss-server.mjs`, so importing this barrel in a browser
+// never pulls in `ws`.
+export {
+  encodeMessage, decodeMessage, wsPort, makePeer, makeWssHost, drive, serve, connectWss,
+} from "./runtime/wss.mjs";
+
 // --- Compiler (TypeScript -> Stackmix IR) ------------------------------------
 export {
   compileModule, compileProgram, loadModule, loadProgram, describeContinuation,

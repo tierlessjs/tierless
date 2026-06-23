@@ -217,6 +217,48 @@ export declare class Channel {
 }
 export declare function makeHost(localTier: Tier, channel: Channel): Host;
 
+// --- WebSocket transport (browser <-> server) --------------------------------
+
+/** A duplex message port: the seam the migration protocol runs over. */
+export interface Port {
+  send(obj: unknown, bin?: Uint8Array): void;
+  onMessage(cb: (obj: any, bin: Uint8Array | null) => void): void;
+  onClose(cb: () => void): void;
+  close(): void;
+}
+
+/** A handler's reply to an inbound request. */
+export interface PeerReply {
+  obj: unknown;
+  bin?: Uint8Array;
+}
+
+/** RPC correlation over a port: request/await-reply plus inbound dispatch. */
+export interface Peer {
+  request(payload: unknown, bin?: Uint8Array): Promise<{ obj: any; bin: Uint8Array | null }>;
+  on(type: string, handler: (payload: any, bin: Uint8Array | null) => PeerReply | Promise<PeerReply>): void;
+  close(): void;
+}
+
+/** Options shared by `drive` / `serve` / `connectWss`. */
+export interface DriveOptions {
+  entry: string;
+  args?: unknown[];
+  host?: Host;
+}
+
+export declare function encodeMessage(obj: unknown, bin?: Uint8Array): Uint8Array;
+export declare function decodeMessage(data: Uint8Array | ArrayBuffer): { obj: any; bin: Uint8Array | null };
+export declare function wsPort(ws: any): Port;
+export declare function makePeer(port: Port): Peer;
+export declare function makeWssHost(tier: Tier): Host & { cache: Map<string, unknown> };
+export declare function drive(rt: Runtime, tier: Tier, peer: Peer, opts: DriveOptions): Promise<unknown>;
+export declare function serve(rt: Runtime, tier: Tier, peer: Peer, opts?: { host?: Host }): Peer;
+export declare function connectWss(
+  url: string,
+  opts: DriveOptions & { rt: Runtime; tier: Tier; WebSocketImpl?: any },
+): { peer: Peer; run(): Promise<unknown>; close(): void };
+
 // --- Compiler (TypeScript -> Stackmix IR) ------------------------------------
 
 export declare function compileModule(source: string, opts?: LoadOptions): Program;

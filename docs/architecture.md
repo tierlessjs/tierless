@@ -33,7 +33,7 @@ src/                  the framework (what ships)
     build.mjs         interpreter.wat -> interpreter.wasm (via wabt)
 bin/stackmix.mjs      the CLI (compile / run / new)
 types/index.d.ts      hand-written type declarations for the public API
-examples/             runnable demos (spike, two-process, wasm, hn-thread, ...)
+examples/             runnable demos (spike, wss, wasm, hn-thread, ...)
 bench/                the HN waterfall + Conduit over-fetch benchmarks
 test/                 conformance, differential, decorator, multi-module suites + probes
 templates/basic/      the `stackmix new` scaffold

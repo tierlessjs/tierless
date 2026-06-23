@@ -1,4 +1,6 @@
-// Length-prefixed framing for the two-process demos. Each frame carries a JSON
+// Length-prefixed framing for the stdio pipe demos (wasm-two-process, hn-thread).
+// The WebSocket transport (wss.mjs) has its own browser-safe per-message codec.
+// Each frame carries a JSON
 // header and an optional raw binary attachment (used to ship a wasm
 // linear-memory slice without base64 inflation).
 //

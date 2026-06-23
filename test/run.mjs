@@ -12,7 +12,7 @@ const node = (rel, extra = []) => spawnSync(process.execPath, [rel, ...extra], {
 
 const cases = [
   { file: "examples/spike/index.mjs",             needs: ["matches plain JS result? YES", "x smaller"] },
-  { file: "examples/two-process/client.mjs",      needs: ["Dataset never crossed the pipe? YES"] },
+  { file: "examples/wss/client.mjs",              needs: ["Ran over a real WebSocket (browser<->server)? YES"] },
   { file: "examples/wasm/index.mjs",              needs: ["matches plain JS (2000)? YES", "2 frame(s)"] },
   { file: "examples/wasm-two-process/client.mjs", needs: ["matches plain JS (2000)? YES", "2 frame(s)", "Dataset never crossed the pipe? YES"] },
   { file: "examples/policy/index.mjs",            needs: ["informed rule-> FETCH", "verified correct"] },
@@ -23,7 +23,6 @@ const cases = [
   { file: "test/probes/fetch.mjs",                needs: ["all PASS — a migrated continuation"] },
   { file: "test/probes/deref.mjs",                needs: ["Result: ALL PASS"] },
   { file: "test/probes/async.mjs",                needs: ["all PASS — await is just a suspension"] },
-  { file: "examples/handle-fetch/client.mjs",     needs: ["On-demand (big data crossed only on deref)? YES"] },
   { file: "test/probes/frontend.mjs",             needs: ["all PASS — closures"] },
   { file: "examples/hn-thread/client.mjs",        needs: ["Real TS migrated across processes and computed correctly? YES"] },
   { file: "test/probes/realts.mjs",               needs: ["all PASS — Stackmix compiles real JS"] },

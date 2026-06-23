@@ -3,14 +3,14 @@
 // The demos only ever captured cursor-shaped state (ints, flat arrays). A real
 // TS continuation holds locals that point into an object graph with sharing,
 // mutation, and cycles. This feeds our ACTUAL serializer (serializeContinuation
-// + the JSON transport the two-process demo uses) those cases and reports what
+// + the JSON transport the cross-tier path uses) those cases and reports what
 // breaks. It is meant to FAIL — it documents exactly what the heap work fixes.
 
 import { serializeContinuation, deserializeContinuation, Tier } from "#stackmix/runtime/core.mjs";
 
 const tier = new Tier("server", {});
 const ship = (locals) => {
-  // exactly what the two-process path does: encode -> JSON bytes -> parse -> decode
+  // exactly what the cross-tier path does: encode -> JSON bytes -> parse -> decode
   const wire = serializeContinuation({ frames: [{ fn: "f", ip: 0, locals, stack: [] }], pending: null }, tier);
   const json = JSON.stringify(wire);
   return { back: deserializeContinuation(JSON.parse(json)), bytes: Buffer.byteLength(json) };

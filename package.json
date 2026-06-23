@@ -59,19 +59,19 @@
     "lint": "eslint .",
     "build:wasm": "node src/wasm/build.mjs",
     "spike": "node examples/spike/index.mjs",
-    "2p": "node examples/two-process/client.mjs",
+    "wss": "node examples/wss/client.mjs",
     "wasm": "node src/wasm/build.mjs && node examples/wasm/index.mjs",
     "wasm:2p": "node src/wasm/build.mjs && node examples/wasm-two-process/client.mjs",
     "policy": "node src/wasm/build.mjs && node examples/policy/index.mjs",
     "bench:hn": "node bench/hn.mjs",
     "bench:sweep": "node bench/sweep.mjs",
     "bench:conduit": "node bench/conduit.mjs",
-    "fetch:2p": "node examples/handle-fetch/client.mjs",
     "app:2p": "node examples/hn-thread/client.mjs"
   },
   "dependencies": {
     "typescript": "^5.9.3",
-    "wabt": "^1.0.39"
+    "wabt": "^1.0.39",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",

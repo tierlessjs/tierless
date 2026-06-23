@@ -146,7 +146,7 @@ original vision and open questions, [`docs/design.md`](./docs/design.md).
 src/         the framework (runtime/, compiler/, wasm/, index.mjs)
 bin/         the stackmix CLI
 types/       hand-written public type declarations
-examples/    runnable demos (spike, two-process, wasm, hn-thread, handle-fetch, ...)
+examples/    runnable demos (spike, wss, wasm, hn-thread, ...)
 bench/       the HN and Conduit benchmarks
 test/        conformance, differential, decorator, multi-module suites + probes
 templates/   the `stackmix new` scaffold

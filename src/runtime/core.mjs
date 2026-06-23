@@ -1,8 +1,8 @@
 // Stackmix — shared core (IR, interpreter, wire format)
 //
-// Used by both the single-process spike (examples/spike/index.mjs) and the two-process
-// version (examples/two-process/client.mjs / examples/two-process/server.mjs) so the mechanism can't
-// drift between them. See examples/spike/index.mjs's header for the design-doc mapping.
+// Used by the single-process spike (examples/spike/index.mjs) and the WebSocket
+// transport (src/runtime/wss.mjs, examples/wss) so the mechanism can't drift
+// between them. See examples/spike/index.mjs's header for the design-doc mapping.
 
 // ---------------------------------------------------------------------------
 // IR  (WASM-shaped: a stack machine with explicit, numbered locals)

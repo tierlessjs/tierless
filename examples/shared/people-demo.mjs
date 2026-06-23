@@ -1,4 +1,4 @@
-// Shared fixture for the people/render demos (examples/spike, examples/two-process).
+// Shared fixture for the people/render demo (examples/spike).
 //
 // The program is the hand-lowered IR of this "ordinary TypeScript":
 //

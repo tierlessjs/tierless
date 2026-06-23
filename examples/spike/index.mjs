@@ -5,7 +5,7 @@
 // stays tier-local. Here the two tiers are isolated runtime instances in one
 // process (the doc explicitly allows "two WASM instances"); every migration
 // still goes through the real wire format, so the measured bytes are genuine.
-// For a true OS-process boundary, see examples/two-process/client.mjs.
+// For migration over a real WebSocket (browser <-> server), see examples/wss/client.mjs.
 //
 //   node examples/spike/index.mjs
 
