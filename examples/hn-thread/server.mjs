@@ -1,30 +1,22 @@
-// Capstone — SERVER tier (child process). Owns db.items / db.title. Runs the
-// migrated continuation of a program compiled from real TypeScript.
-import { Tier, Suspend, serializeContinuation, deserializeContinuation, writeFrame, readFrames } from "#stackmix";
+// Capstone — SERVER tier. Owns db.items / db.title and runs migrated
+// continuations of a program compiled from real TypeScript. Exposed as
+// startServer() so the client can stand one up in-process over a loopback ws;
+// also runnable standalone (`node examples/hn-thread/server.mjs`).
+import { Tier } from "#stackmix";
+import { serveWss } from "#stackmix/runtime/wss-server.mjs";
 import { N, buildRuntime } from "./thread.mjs";
 
-const rt = buildRuntime();
+export function startServer(port = 0) {
+  const wss = serveWss({ port }, () => ({
+    rt: buildRuntime(),
+    tier: new Tier("server", {
+      "db.items": () => Array.from({ length: N }, (_, i) => i),
+      "db.title": ([id]) => "Title #" + id,
+    }),
+  }));
+  return new Promise((resolve) => wss.on("listening", () => resolve({ wss, port: wss.address().port })));
+}
 
-const server = new Tier("server", {
-  "db.items": () => Array.from({ length: N }, (_, i) => i),
-  "db.title": ([id]) => "Title #" + id,
-});
-const host = { deref(h) { if (h.owner === "server") return server.heap.get(h.id); throw new Error("server can't deref " + h.owner); } };
-
-readFrames(process.stdin, (msg) => {
-  if (msg.type === "shutdown") process.exit(0);
-  if (msg.type !== "resume") return;
-  const got = deserializeContinuation(msg.wire);
-  let frames = got.frames;
-  try {
-    if (got.pending) frames[frames.length - 1].stack.push(server.resources[got.pending.name](got.pending.args));
-    const res = rt.run(server, frames, host);
-    writeFrame(process.stdout, { type: "done", value: res.value });
-  } catch (e) {
-    if (!(e instanceof Suspend)) { writeFrame(process.stdout, { type: "error", message: String(e && e.message || e) }); return; }
-    const wire = serializeContinuation({ frames: e.frames, pending: e.pending }, server); // ui.render -> back to client
-    writeFrame(process.stdout, { type: "suspend", wire });
-  }
-});
-process.stdin.resume();
-console.error("server: ready (db.items/db.title)");
+if (import.meta.url === `file://${process.argv[1]}`) {
+  startServer(Number(process.env.PORT) || 0).then(({ port }) => console.log("PORT " + port));
+}

@@ -22,11 +22,12 @@ where it goes next. Items are grouped, not strictly ordered; see
 
 ## Runtime & transport
 
-- **Cross-process handle fetch — wire the transport.** The invariant is honored
-  (a deref-miss suspends and re-runs correctly; verified in
-  `test/probes/deref.mjs`), and the cost model exists (`examples/policy`). The
-  remaining piece is the live transport that fetches a §5 handle across a channel
-  on demand.
+- **Cross-process handle fetch — wired (WebSocket).** Done: a deref-miss suspends
+  and re-runs correctly (`test/probes/deref.mjs`), the cost model exists
+  (`examples/policy`), and a §5 handle is now fetched on demand across a real
+  WebSocket — `src/runtime/wss.mjs`, exercised end-to-end in `examples/wss`. The
+  migrate/fetch loop is shared by both ends, so fetch works either direction
+  (client→server is the one a demo exercises). Next: the binary wire format below.
 - **Binary wire format.** The continuation wire is JSON today. Espresso's
   Kryo-vs-Java result (~half the size) motivates moving to a compact binary
   encoding; keep the `heap`/`fetch` seam so serialization stays swappable.
@@ -38,7 +39,10 @@ where it goes next. Items are grouped, not strictly ordered; see
 
 ## Platform
 
-- **Browser target.** No browser host yet; the JS path is Node-only today.
+- **Browser target.** The *transport* is now browser-ready — `connectWss` runs on
+  the browser's native `WebSocket` and the wire codec is `Buffer`-free — but
+  nothing runs in an actual browser yet: no DOM-resource host, no bundle, no
+  headless-browser test. That last mile is the remaining browser-target work.
 - **Full-language WASM path** is explicitly *not* planned — the JS path covers the
   language; the wasm path exists only to prove the linear-memory capture
   mechanism.

@@ -112,8 +112,8 @@ Stackmix has two interpreters with different jobs:
   programs — all proven to survive serialize/resume migration and measured for
   fidelity against Node's own evaluator.
 - **The WASM path** (`wasm/interpreter.wat`) is the minimal proof that the
-  continuation can live in linear memory — a byte-slice that crosses a real pipe
-  between two processes. It is deliberately i32-only; extending it to the full
+  continuation can live in linear memory — a byte-slice that crosses a real
+  WebSocket between two instances. It is deliberately i32-only; extending it to the full
   language is not the point. The two are separate tracks, not a coverage gap.
 
 ## Known limitations and intentional caveats
@@ -135,11 +135,13 @@ TypeScript frontend, not an accidental gap:
   works); following an imported `type X = ...` alias to its ultimate type does
   not.
 
+The cross-process continuation-migration and §5 handle-fetch transport is now
+wired over a real WebSocket (`src/runtime/wss.mjs`, exercised in `examples/wss`).
 Broader prototype limits (no native wasm stack capture by design; numeric-only
-wasm path; fixed working-heap size; cross-process handle *fetch* transport not yet
-wired; no browser target or portable source maps yet) are described in the README
-and tracked in [`../ROADMAP.md`](../ROADMAP.md). They line up with the design
-doc's own open questions (`§10`).
+wasm path; fixed working-heap size; no in-browser host — DOM resources, bundling —
+or portable source maps yet) are described in the README and tracked in
+[`../ROADMAP.md`](../ROADMAP.md). They line up with the design doc's own open
+questions (`§10`).
 
 ## Evolving the structure
 

@@ -135,7 +135,7 @@ Run them yourself: `npm run bench:hn`, `npm run bench:sweep`, `npm run bench:con
   (it spans essentially the whole language — closures, classes, generators, async,
   decorators + DI, multi-module programs — all proven to survive migration). A
   minimal WASM interpreter proves the same continuation can live in linear memory
-  and cross a real pipe between processes.
+  and cross a real WebSocket between instances.
 
 For the full picture see [`docs/architecture.md`](./docs/architecture.md); for the
 original vision and open questions, [`docs/design.md`](./docs/design.md).

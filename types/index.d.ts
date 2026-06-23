@@ -202,12 +202,6 @@ export declare function encodeGraph(
 ): { roots: number[]; objs: unknown[] };
 export declare function decodeGraph(graph: { roots: number[]; objs: unknown[] }): unknown[];
 
-export declare function writeFrame(stream: NodeJS.WritableStream, obj: unknown, bin?: Buffer): number;
-export declare function readFrames(
-  stream: NodeJS.ReadableStream,
-  onFrame: (msg: any, bin: Buffer, len: number) => void,
-): void;
-
 export declare class Heap {
   put(obj: unknown): string;
   get(id: string): unknown;

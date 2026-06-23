@@ -49,7 +49,6 @@ export {
 
 // --- Wire / heap / transport -------------------------------------------------
 export { encodeGraph, decodeGraph } from "./runtime/heap.mjs";
-export { writeFrame, readFrames } from "./runtime/frame.mjs";
 export { Heap, Channel, makeHost } from "./runtime/fetch.mjs";
 
 // WebSocket transport (browser <-> server continuation migration + §5 fetch).

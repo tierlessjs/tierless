@@ -121,15 +121,21 @@ async function runLocal(rt, tier, host, peer, frames, pending) {
 // Drive a program from this (browser) tier: run locally, and whenever a resource
 // forces a move, ship the continuation to the server and resume its reply. Big
 // data never travels — it stays a §5 handle, fetched only if actually touched.
-export async function drive(rt, tier, peer, { entry, args = [], host = makeWssHost(tier) }) {
+// `onMigrate(dir, wire)` (optional) observes each crossing for reporting/tracing:
+// dir is "out" (this tier -> peer) or "back" (peer -> this tier), wire the
+// serialized continuation. It does not affect control flow.
+export async function drive(rt, tier, peer, { entry, args = [], host = makeWssHost(tier), onMigrate } = {}) {
   let frames = initialFrames(entry, args), pending = null;
   while (true) {
     const r = await runLocal(rt, tier, host, peer, frames, pending);
     if (r.done) return r.value;
-    const { obj } = await peer.request({ type: "resume", wire: serializeContinuation(r.cont, tier) });
+    const wire = serializeContinuation(r.cont, tier);
+    if (onMigrate) onMigrate("out", wire);
+    const { obj } = await peer.request({ type: "resume", wire });
     if (obj.type === "done") return obj.value;
     if (obj.type === "error") throw new Error("server: " + obj.message);
     if (obj.type !== "suspend") throw new Error("unexpected reply " + obj.type);
+    if (onMigrate) onMigrate("back", obj.wire);
     const got = deserializeContinuation(obj.wire);
     frames = got.frames; pending = got.pending;
   }
@@ -156,7 +162,7 @@ export function serve(rt, tier, peer, { host = makeWssHost(tier) } = {}) {
 // Browser entry: open a ws connection to the server and run `entry` from this
 // tier over it. `WebSocketImpl` defaults to the browser's global WebSocket; the
 // Node test injects the `ws` client so CI exercises this exact path.
-export function connectWss(url, { rt, tier, entry, args = [], host, WebSocketImpl = globalThis.WebSocket }) {
+export function connectWss(url, { rt, tier, entry, args = [], host, onMigrate, WebSocketImpl = globalThis.WebSocket }) {
   const ws = new WebSocketImpl(url);
   const peer = makePeer(wsPort(ws));
   const on = (event, fn) => (typeof ws.on === "function" ? ws.on(event, fn) : ws.addEventListener(event, fn));
@@ -166,7 +172,7 @@ export function connectWss(url, { rt, tier, entry, args = [], host, WebSocketImp
   });
   return {
     peer,
-    async run() { await ready; return drive(rt, tier, peer, { entry, args, host }); },
+    async run() { await ready; return drive(rt, tier, peer, { entry, args, host, onMigrate }); },
     close() { peer.close(); },
   };
 }
