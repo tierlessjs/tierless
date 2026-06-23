@@ -43,6 +43,9 @@ export const RESIDENT_BASE = 8192; // receiver-local bitmap: has a given handle 
 // separate backing store [capacity, ...slots], so push() can grow the backing
 // (via memory.copy) without moving the header — the array's identity is stable.
 const ARRTAG = -1, INITCAP = 4;
+// A closure (tsc.mjs lowers every function to one): a heap object [CLOSTAG,
+// fnTableIndex, ...captured env]. CALLV calls through the function table.
+const CLOSTAG = -2;
 
 // Host-side array helpers: build/read a growable array in an instance's linear
 // memory (so resources can pass number[] across the boundary). Layout matches
@@ -76,8 +79,8 @@ export const pointerAddr = (v) => (v & ~3);
 export const makeResident = (addr) => (addr | 1);
 export const makeHandle = (addr) => (addr | 3);
 
-const DELTA = { PUSH: 1, LOAD: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0 };
-const delta = (ins) => (ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : DELTA[ins[0]] ?? 0);
+const DELTA = { PUSH: 1, LOAD: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1 };
+const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : DELTA[ins[0]] ?? 0;
 
 // Labeled asm -> instruction list with JMP/JMPF targets resolved to indices.
 function resolveLabels(rawCode) {
@@ -99,7 +102,7 @@ function leaderSet(code) {
 
 const maxStack = (code) => { let h = 0, max = 0; for (const ins of code) { h += delta(ins); if (h > max) max = h; } return max; };
 
-function compileFn(m, name, fn, handles) {
+function compileFn(m, name, fn, handles, fnIndex) {
   const I32 = binaryen.i32;
   const argc = fn.argc || 0, nl = fn.nlocals;
   const code = resolveLabels(fn.code);
@@ -141,6 +144,36 @@ function compileFn(m, name, fn, handles) {
           const ac = ins[2] || 0; h -= ac;
           const args = []; for (let j = 0; j < ac; j++) args.push(get(scratch(h + j)));
           stmts.push(m.local.set(scratch(h), m.call(ins[1], args, I32))); h++; break;
+        }
+        case "BIN": {                          // tsc.mjs binary op; operand tags handled like the dedicated ops
+          h -= 2; const a = get(scratch(h)), b = get(scratch(h + 1)), op = ins[1]; let e;
+          if (op === "+") e = m.i32.add(a, b);
+          else if (op === "-") e = m.i32.sub(a, b);
+          else if (op === "*") e = m.i32.mul(m.i32.shr_s(a, m.i32.const(1)), b);
+          else if (op === "<") e = m.i32.shl(m.i32.lt_s(a, b), m.i32.const(1));
+          else if (op === "<=") e = m.i32.shl(m.i32.le_s(a, b), m.i32.const(1));
+          else if (op === ">") e = m.i32.shl(m.i32.gt_s(a, b), m.i32.const(1));
+          else if (op === ">=") e = m.i32.shl(m.i32.ge_s(a, b), m.i32.const(1));
+          else if (op === "===" || op === "==") e = m.i32.shl(m.i32.eq(a, b), m.i32.const(1));
+          else if (op === "!==" || op === "!=") e = m.i32.shl(m.i32.ne(a, b), m.i32.const(1));
+          else throw new Error("aot: unsupported BIN " + op);
+          stmts.push(m.local.set(scratch(h), e)); h++; break;
+        }
+        case "MAKECLOSURE": {                  // box a function as a closure [CLOSTAG, fnIndex] (captures: not yet)
+          if ((ins[2] || []).length) throw new Error("aot: closures with captures not yet supported");
+          if (ins[3]) throw new Error("aot: generator closures not yet supported");
+          const idx = fnIndex[ins[1]]; if (idx === undefined) throw new Error("aot: MAKECLOSURE of unknown fn " + ins[1]);
+          stmts.push(m.local.set(scratch(h + 1), m.i32.load(0, 4, m.i32.const(BUMP_ADDR))));                      // tmp = bump
+          stmts.push(m.i32.store(0, 4, get(scratch(h + 1)), m.i32.const(CLOSTAG)));
+          stmts.push(m.i32.store(4, 4, get(scratch(h + 1)), m.i32.const(idx)));                                   // fn table index
+          stmts.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(scratch(h + 1)), m.i32.const(8))));
+          stmts.push(m.local.set(scratch(h), m.i32.or(get(scratch(h + 1)), m.i32.const(1)))); h++; break;         // tagged closure pointer
+        }
+        case "CALLV": {                        // call a closure value: stack is [closure, arg0..arg_{argc-1}]
+          const argc = ins[1]; h -= argc + 1;
+          const fn = m.i32.load(4, 4, m.i32.and(get(scratch(h)), m.i32.const(~3)));                              // closure[1] = fn table index
+          const args = []; for (let k = 0; k < argc; k++) args.push(get(scratch(h + 1 + k)));
+          stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, args, binaryen.createType(new Array(argc).fill(I32)), I32))); h++; break;
         }
         case "ALLOC": {                        // pop n (tagged); allocate [len | n fields]; push a tagged pointer
           h--; const nRaw = () => m.i32.shr_s(get(scratch(h)), m.i32.const(1));
@@ -241,8 +274,17 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && i[0] === "RES") arity[i[1]] = i[2] || 0;
   for (const res of resources) m.addFunctionImport(res, "env", res, binaryen.createType(new Array(arity[res] || 0).fill(binaryen.i32)), binaryen.i32);
   if (handles) m.addFunctionImport("__fetch", "env", "__fetch", binaryen.createType([binaryen.i32]), binaryen.i32); // §5 deref-miss suspends here
-  for (const [name, fn] of Object.entries(program)) compileFn(m, name, fn, handles);
+  // Closures call through a function table: every user function sits at its
+  // program-order index, and a closure carries that index (MAKECLOSURE / CALLV).
+  const fnNames = Object.keys(program);
+  const fnIndex = Object.fromEntries(fnNames.map((n, i) => [n, i]));
+  const usesClosures = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && (i[0] === "MAKECLOSURE" || i[0] === "CALLV")));
+  for (const [name, fn] of Object.entries(program)) compileFn(m, name, fn, handles, fnIndex);
   if (usesArrays) addArrayRuntime(m);
+  if (usesClosures) {
+    m.addTable("0", fnNames.length, fnNames.length, binaryen.funcref);
+    m.addActiveElementSegment("0", "fns", fnNames, m.i32.const(0));
+  }
   m.addFunctionExport(entry, entry);
   if (!m.validate()) { const txt = m.emitText(); throw new Error("aot: module did not validate\n" + txt); }
   if (asyncify) m.runPasses(["asyncify"]); // unwind/rewind frames to/from linear memory

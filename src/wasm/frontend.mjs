@@ -12,6 +12,7 @@
 import { compile } from "./compile.mjs";
 import { RESOURCES } from "./core.mjs";
 import { compileToWasm } from "./aot.mjs";
+import { compileModule } from "../compiler/tsc.mjs";
 
 const RES_NAME = Object.fromEntries(Object.entries(RESOURCES).map(([k, v]) => [v, k])); // id -> name
 
@@ -42,6 +43,22 @@ export function bridge(source, entry) {
 // RES actually references.
 export function compileTsToWasm(source, { entry = "main", resources, handles = false } = {}) {
   const program = bridge(source, entry);
-  const used = [...new Set(Object.values(program).flatMap((f) => f.code.filter((i) => Array.isArray(i) && i[0] === "RES").map((i) => i[1])))];
+  const used = usedResources(program);
   return compileToWasm(program, { entry, resources: resources || used, handles });
 }
+
+// The closure path: compile via the full TS frontend (tsc.mjs), whose IR lowers
+// every function to a closure (MAKECLOSURE / CALLV) and binary ops to BIN — the
+// real frontend, vs. compile.mjs's numeric subset. The module-init stub
+// (`%moduleinit`) only binds module-level names, which this subset never reads
+// (resources are RES, not bindings), so it's dropped. `resources` must list the
+// resource calls so tsc.mjs lowers them to RES rather than ordinary calls.
+export function compileModuleToWasm(source, { entry = "main", resources = [], handles = false } = {}) {
+  const frag = compileModule(source, { entry, resources });
+  const program = {};
+  for (const [name, fn] of Object.entries(frag)) if (name !== "%moduleinit") program[name] = fn;
+  return compileToWasm(program, { entry, resources: usedResources(program), handles });
+}
+
+const usedResources = (program) =>
+  [...new Set(Object.values(program).flatMap((f) => f.code.filter((i) => Array.isArray(i) && i[0] === "RES").map((i) => i[1])))];

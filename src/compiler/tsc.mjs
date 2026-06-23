@@ -962,7 +962,7 @@ function compileInto(sf, checker, { resources = [], entry = null, prefix = "", o
     const last = asm[asm.length - 1];
     if (!(Array.isArray(last) && last[0] === "RET")) { emit("PUSH", undefined); emit("RET"); } // fall off the end -> undefined
     const { code, pos } = assemble();
-    return { nlocals: topSlot, code, pos, freeIds: envIds };
+    return { nlocals: topSlot, code, pos, freeIds: envIds, argc: node.parameters ? node.parameters.length : 0 };
   }
 
   if (entry) compileTop(entry);
@@ -1006,7 +1006,7 @@ function compileInto(sf, checker, { resources = [], entry = null, prefix = "", o
   return { initName: hasInit ? initName : null };
 }
 
-const fragOf = (out) => { const frag = {}; for (const [k, v] of Object.entries(out)) frag[k] = { nlocals: v.nlocals, code: v.code, pos: v.pos }; return frag; };
+const fragOf = (out) => { const frag = {}; for (const [k, v] of Object.entries(out)) frag[k] = { nlocals: v.nlocals, code: v.code, pos: v.pos, argc: v.argc || 0 }; return frag; };
 
 export function compileModule(source, { resources = [], entry = "main", file = "/app.ts" } = {}) {
   const program = makeProgram(new Map([[file, source]]));
