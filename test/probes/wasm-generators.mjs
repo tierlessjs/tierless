@@ -40,6 +40,12 @@ const programs = [
   ["empty generator is immediately done", `
     function* g() { return; }
     function main() { const it = g(); return it.next().done ? 1 : 0; }`],                       // 1
+  ["two-way next(): a sent value becomes the yield's value", `
+    function* echo() { const a = yield 1; const b = yield a; return b; }
+    function main() { const it = echo(); it.next(); return it.next(5).value; }`],                // 5
+  ["two-way next(): running accumulator fed by next()", `
+    function* adder() { let t = 0; while (true) { const x = yield t; t = t + x; } }
+    function main() { const it = adder(); it.next(); it.next(10); return it.next(20).value; }`],  // 0 then +10 +20 -> 30
 ];
 
 function interp(src) {

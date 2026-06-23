@@ -312,8 +312,8 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings) {
         }
         case "TYPEOF": stmts.push(m.local.set(scratch(h - 1), m.call("__typeof", [get(scratch(h - 1))], I32))); break; // value -> type string
         case "ITER": break;                    // normalize an iterable -> iterator; a generator is already its own iterator (no-op)
-        case "GENNEXT": {                      // [gen, sentValue] -> [{value, done}]; drive the generator (sent value ignored for now)
-          h -= 2; stmts.push(m.local.set(scratch(h), m.call("__gennext", [get(scratch(h))], I32))); h++; break;
+        case "GENNEXT": {                      // [gen, sentValue] -> [{value, done}]; drive the generator one step
+          h -= 2; stmts.push(m.local.set(scratch(h), m.call("__gennext", [get(scratch(h)), get(scratch(h + 1))], I32))); h++; break;
         }
         case "NEWOBJ": stmts.push(m.local.set(scratch(h), m.call("__newobj", [], I32))); h++; break;
         case "GETPROP": {                      // [obj] -> [obj.key]; key interned to an id
@@ -610,8 +610,8 @@ function emitGenTrampoline(m, name, fn, bodyIdx) {
     m.i32.store(0, 4, g(tmp), c(GENTAG)), m.i32.store(4, 4, g(tmp), c(bodyIdx)),
     m.i32.store(8, 4, g(tmp), c(0)), m.i32.store(12, 4, g(tmp), c(0)),                 // ip = 0, done = 0
   ];
-  for (let k = 0; k < argc; k++) out.push(m.i32.store(16 + k * 4, 4, g(tmp), g(k + 1))); // slots[k] = arg_k (param k+1)
-  out.push(m.i32.store(0, 4, c(BUMP_ADDR), m.i32.add(g(tmp), c(16 + nl * 4))));         // bump past the object (extra slots are fresh 0)
+  for (let k = 0; k < argc; k++) out.push(m.i32.store(20 + k * 4, 4, g(tmp), g(k + 1))); // slots[k] = arg_k (param k+1); offset 16 holds the sent value
+  out.push(m.i32.store(0, 4, c(BUMP_ADDR), m.i32.add(g(tmp), c(20 + nl * 4))));         // bump past the object (extra slots are fresh 0)
   out.push(m.return(m.i32.or(g(tmp), c(1))));
   m.addFunction(name, binaryen.createType(new Array(argc + 1).fill(I32)), I32, [I32], m.block(null, out, binaryen.none));
 }
@@ -633,7 +633,7 @@ function compileGenBody(m, bodyName, fn) {
   const goto = (b) => [m.local.set(ipLocal, m.i32.const(b)), m.br("L")]; // intra-call jump: update the dispatch local, re-dispatch
   const saveIp = (b) => m.i32.store(8, 4, genAddr(), m.i32.const(b));     // persist the resume point into the object (across calls)
   const setDone = (d) => m.i32.store(12, 4, genAddr(), m.i32.const(d));
-  const saveLocals = () => { const out = []; for (let i = 0; i < nl; i++) out.push(m.i32.store(16 + i * 4, 4, genAddr(), get(loc(i)))); return out; };
+  const saveLocals = () => { const out = []; for (let i = 0; i < nl; i++) out.push(m.i32.store(20 + i * 4, 4, genAddr(), get(loc(i)))); return out; };
 
   const Lset = new Set([0]);             // basic-block leaders (YIELD's successor is a resume point)
   code.forEach((ins, i) => {
@@ -646,9 +646,9 @@ function compileGenBody(m, bodyName, fn) {
   const rendered = [];                   // per block: [...stmts, ...terminator]
   for (let bi = 0; bi < leaders.length; bi++) {
     const start = leaders[bi], end = bi + 1 < leaders.length ? leaders[bi + 1] : code.length;
-    const resume = start > 0 && code[start - 1][0] === "YIELD"; // entered on resume: a sent value sits on the operand stack
+    const resume = start > 0 && code[start - 1][0] === "YIELD"; // entered on resume: the sent value sits on the operand stack
     const stmts = []; let h = resume ? 1 : 0, term = [];
-    if (resume) stmts.push(m.local.set(scratch(0), m.i32.const(UNDEF))); // sent value (two-way next() is a later slice)
+    if (resume) stmts.push(m.local.set(scratch(0), m.i32.load(16, 4, genAddr()))); // the value passed to next() becomes the yield expression's value
     for (const ins of code.slice(start, end)) {
       switch (ins[0]) {
         case "PUSH": stmts.push(m.local.set(scratch(h), m.i32.const(immediate(ins[1])))); h++; break;
@@ -686,7 +686,7 @@ function compileGenBody(m, bodyName, fn) {
   for (let bi = 0; bi < N - 1; bi++) node = m.block("b" + (bi + 1), [node, ...rendered[bi]], binaryen.none);
   const dispatch = m.block("D", [node, ...rendered[N - 1]], binaryen.none);
   const prologue = [];
-  for (let i = 0; i < nl; i++) prologue.push(m.local.set(loc(i), m.i32.load(16 + i * 4, 4, genAddr())));
+  for (let i = 0; i < nl; i++) prologue.push(m.local.set(loc(i), m.i32.load(20 + i * 4, 4, genAddr())));
   prologue.push(m.local.set(ipLocal, m.i32.load(8, 4, genAddr())));
   const body = m.block(null, [...prologue, m.loop("L", m.block(null, [dispatch, m.unreachable()], binaryen.none))], binaryen.none);
   m.addFunction(bodyName, binaryen.createType([I32]), I32, new Array(nl + maxH + 1).fill(I32), body);
@@ -698,18 +698,19 @@ function addGenRuntime(m, valueKey, doneKey) {
   const g = (i) => m.local.get(i, I32);
   const c = (n) => m.i32.const(n);
   const genAddr = () => m.i32.and(g(0), c(~3));
-  // {value, done} result object.  locals: 2 = the object
+  // {value, done} result object.  locals: 3 = the object
   const mkResult = (valExpr, doneExpr) => m.block(null, [
-    m.local.set(2, m.call("__newobj", [], I32)),
-    m.local.set(2, m.call("__setprop", [g(2), c(valueKey), valExpr], I32)),
-    m.local.set(2, m.call("__setprop", [g(2), c(doneKey), doneExpr], I32)),
-    m.return(g(2)),
+    m.local.set(3, m.call("__newobj", [], I32)),
+    m.local.set(3, m.call("__setprop", [g(3), c(valueKey), valExpr], I32)),
+    m.local.set(3, m.call("__setprop", [g(3), c(doneKey), doneExpr], I32)),
+    m.return(g(3)),
   ], binaryen.none);
-  // __gennext(gen) -> {value, done}.  locals: 1=ret, 2=obj
-  m.addFunction("__gennext", binaryen.createType([I32]), I32, [I32, I32], m.block(null, [
+  // __gennext(gen, sent) -> {value, done}.  locals: 2=ret, 3=obj
+  m.addFunction("__gennext", binaryen.createType([I32, I32]), I32, [I32, I32], m.block(null, [
     m.if(m.i32.load(12, 4, genAddr()), mkResult(c(UNDEF), c(TRUE))),                    // already finished
-    m.local.set(1, m.call_indirect("0", m.i32.load(4, 4, genAddr()), [g(0)], binaryen.createType([I32]), I32)), // run to the next yield/return
-    mkResult(g(1), m.select(m.i32.load(12, 4, genAddr()), c(TRUE), c(FALSE))),          // value + done (the body set done)
+    m.i32.store(16, 4, genAddr(), g(1)),                                               // the sent value (becomes the paused yield's value)
+    m.local.set(2, m.call_indirect("0", m.i32.load(4, 4, genAddr()), [g(0)], binaryen.createType([I32]), I32)), // run to the next yield/return
+    mkResult(g(2), m.select(m.i32.load(12, 4, genAddr()), c(TRUE), c(FALSE))),          // value + done (the body set done)
   ], binaryen.none));
 }
 
