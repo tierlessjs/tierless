@@ -28,6 +28,9 @@ const programs = [
   ["a generator closes over an outer variable", `
     function make(base) { return function* () { yield base; yield base + 1; yield base + 2; }; }
     function main() { let s = 0; for (const x of make(100)()) { s = s + x; } return s; }`],   // 100+101+102 = 303
+  ["a generator builds and consumes an array internally", `
+    function* squares(n) { const a = []; for (let i = 1; i <= n; i++) { a.push(i); } for (const x of a) { yield x * x; } }
+    function main() { let s = 0; for (const v of squares(4)) { s = s + v; } return s; }`],     // 1+4+9+16 = 30
   ["range generator, for-of sum", `
     function* range(a, b) { for (let i = a; i < b; i = i + 1) { yield i; } }
     function main() { let s = 0; for (const x of range(1, 5)) { s = s + x; } return s; }`],    // 1+2+3+4 = 10

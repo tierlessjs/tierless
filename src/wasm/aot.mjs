@@ -1990,6 +1990,14 @@ function compileGenBody(m, bodyName, fn, keyIds, fnIndex, maxargs) {
         case "LOADENV": stmts.push(m.local.set(scratch(h), m.i32.load(8 + ins[1] * 4, 4, m.i32.and(get(envLocal), m.i32.const(~3))))); h++; break; // env[idx] — a captured outer var
         case "LOADTHIS": stmts.push(m.local.set(scratch(h), m.i32.load(8 + ins[1] * 4, 4, m.i32.and(get(envLocal), m.i32.const(~3))))); h++; break; // `this`: a generator method captures the instance into env
         case "STORE": h--; stmts.push(m.local.set(loc(ins[1]), get(scratch(h)))); break;
+        // Array data ops (no control flow / no suspension) — identical to compileFn.
+        case "NEWARR": stmts.push(m.local.set(scratch(h), m.call("__newarr", [], I32))); h++; break;
+        case "ARRPUSH": { h -= 2; stmts.push(m.drop(m.call("__arrpush", [get(scratch(h)), get(scratch(h + 1))], I32))); break; }
+        case "APPENDALL": { h -= 1; stmts.push(m.drop(m.call("__appendall", [get(scratch(h - 1)), get(scratch(h))], I32))); break; } // [...src]
+        case "TOARRAY": stmts.push(m.local.set(scratch(h - 1), m.call("__toarray", [get(scratch(h - 1))], I32))); break;
+        case "ARRGET": { h -= 2; const backing = m.i32.load(8, 4, m.i32.and(get(scratch(h)), m.i32.const(~3))), idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1));
+          stmts.push(m.local.set(scratch(h), m.i32.load(4, 4, m.i32.add(backing, m.i32.mul(idx, m.i32.const(4)))))); h++; break; }
+        case "ARRLEN": stmts.push(m.local.set(scratch(h - 1), m.i32.shl(m.i32.load(4, 4, m.i32.and(get(scratch(h - 1)), m.i32.const(~3))), m.i32.const(1)))); break;
         case "POP": h--; break;
         case "DUP": stmts.push(m.local.set(scratch(h), get(scratch(h - 1)))); h++; break;
         case "NEG": stmts.push(m.local.set(scratch(h - 1), m.i32.sub(m.i32.const(0), get(scratch(h - 1))))); break;
