@@ -91,10 +91,25 @@ sound enough for v1; precise maps are the upgrade if false positives ever matter
    nesting) to JS values; a `decode` compile flag that exports `__keystr`. Run the real
    `realts`/`conformance`/`difftest` corpora through `aot.mjs` vs Node → the true parity
    number and the complete gap list. This walk is the host-side prototype of `__serialize`.
-2. **Close the gaps** the parity run surfaces. Known so far: `**` on numbers;
-   `LOADTHIS` in a generator body; one closure-capture kind; `.values()`; string literals
-   reaching `immediate()` in some position; two runtime faults (`memory access out of
-   bounds`, `table index out of bounds`). One gap per commit where possible.
+2. **Close the gaps** the parity run surfaces. Measured `readDeep`-vs-Node over the
+   58-case `realts` corpus: **38 pass, 2 mismatch, 10 error, 8 skipped** (skips are
+   non-integer entry args the measurement harness can't marshal, not compiler gaps).
+   The complete gap list, one per commit where possible:
+   - `aot: ** on numbers not yet supported` — exponent on plain numbers (f64 pow / host).
+   - `aot: opcode LOADTHIS not supported in a generator body yet` (×2) — `this` inside a
+     generator method; thread the receiver through the saved gen locals.
+   - `aot: closure capture kind T not yet supported` — arrow lexical `this` + private fields.
+   - `aot: unsupported host method values` — `.values()` (Map/Set/Object).
+   - `aot: unsupported literal "first"/"cleanup"` (×3) — a string literal reaching
+     `immediate()` in some position (likely a const array / switch-case / default slot).
+   - `memory access out of bounds` — runtime fault (for-of over a string is a suspect).
+   - `table index is out of bounds` — runtime fault (a generator/tagged-template indirect call).
+   - mismatch: getters leak into enumeration — a `get` accessor appears in JSON/keys
+     (native shows `summary`; Node omits it; accessor keys must be non-enumerable).
+   - mismatch: local class declaration drops methods-as-data — native loses `add`/`speak`
+     fields that Node keeps (some local-class lowering interaction).
+   The ERR cases cluster on generators, object-literals-with-methods/getters, tagged
+   templates/`String.raw`, arrow-`this`+private-fields, and stdlib (`Object.values`).
 3. **In-module reachability walk + relocatable encode/decode** for a settled (non-suspended)
    heap value. Prove `__serialize` → fresh instance → `__deserialize` round-trips against
    the deep-decoder.
