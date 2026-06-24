@@ -38,6 +38,7 @@ const cases = [
   { file: "test/probes/wasm-builtins.mjs",        needs: ["the AOT compiler runs the scalar host stdlib"] },
   { file: "test/probes/wasm-string-methods.mjs",  needs: ["the AOT compiler runs string and array instance methods"] },
   { file: "test/probes/wasm-destructure.mjs",     needs: ["the AOT compiler runs array destructuring and object spread"] },
+  { file: "test/probes/wasm-keys.mjs",            needs: ["the AOT compiler runs for-in and Object.keys"] },
   { file: "test/probes/wasm-captures.mjs",        needs: ["the AOT compiler runs capturing closures"] },
   { file: "test/probes/wasm-strings.mjs",         needs: ["the AOT compiler runs strings"] },
   { file: "test/probes/wasm-classes.mjs",         needs: ["the AOT compiler runs classes"] },
