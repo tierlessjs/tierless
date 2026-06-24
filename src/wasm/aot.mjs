@@ -132,8 +132,8 @@ function immediate(x) {
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
 }
 
-const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1, INDEX: -1, SETINDEX: -3 };
-const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" ? -ins[2] : DELTA[ins[0]] ?? 0;
+const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1, INDEX: -1, SETINDEX: -3, ISARRAY: 0, GLOBAL: 1, CALLMS: -1, APPENDALL: -1 };
+const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" || ins[0] === "CALLM" ? -ins[2] : ins[0] === "CALLG" ? 1 - ins[2] : DELTA[ins[0]] ?? 0;
 // Ops that run user code and can therefore propagate an exception — so a block ends
 // after one, and the next checks the pending-exception flag.
 const CALL_OPS = new Set(["CALL", "CALLV", "CALLMETHOD", "CALLDYN", "CALLVS", "GETPROPA", "SETPROPA", "GENNEXT", "GENTHROW"]);
@@ -204,7 +204,7 @@ function blockHeights(code, leaders) {
   return { entryH: entry, maxAbs, blockHandler, entryHandler };
 }
 
-function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, exceptions) {
+function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, exceptions, maxargs) {
   const I32 = binaryen.i32;
   const argc = fn.argc || 0, nl = fn.nlocals;
   const code = resolveLabels(fn.code);
@@ -213,18 +213,27 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
   const maxH = maxAbs + 1;           // +1 scratch headroom for ALLOC / build temps
   // Calling convention: WASM local 0 is the closure environment — the receiver of
   // a CALLV, the implicit (unused) arg of a direct CALL, and where LOADENV /
-  // capturing MAKECLOSUREs read and write. So IR local i is WASM local i+1, and
-  // the operand-stack scratch slots live above the IR locals.
-  const ENV = 0;
-  const loc = (i) => i + 1;
-  const scratch = (k) => 1 + nl + k;
-  const labelHelper = 1 + nl + maxH; // the Relooper's scratch local
+  // capturing MAKECLOSUREs read and write. Every table-reachable function shares
+  // ONE signature — env + `maxargs` slots — so an indirect call (a HOF callback,
+  // a method) never mismatches the callee's arity; missing args are passed
+  // undefined, extras ignored. The P param slots are env + maxargs; an argument i
+  // lives in param 1+i, and the non-arg IR locals + scratch sit above all params.
+  const ENV = 0, P = 1 + maxargs;
+  const loc = (i) => (i < argc ? 1 + i : P + (i - argc));
+  const scratch = (k) => P + (nl - argc) + k;
+  const labelHelper = P + (nl - argc) + maxH; // the Relooper's scratch local
+  const callType = () => binaryen.createType(new Array(P).fill(I32)); // the uniform table signature
+  const padTo = (args) => { while (args.length < P) args.push(m.i32.const(UNDEF)); return args; };
   const get = (i) => m.local.get(i, I32);
   const bool = (cond) => m.select(cond, m.i32.const(TRUE), m.i32.const(FALSE));   // i32 0/1 -> tagged boolean
   // JS truthiness of the value in local `i`: falsy is 0, undefined, null, false.
   // Takes the local index (not an expression) so each use is a fresh local.get —
   // a Binaryen IR node can't be shared between parents.
   const falsy = (i) => m.i32.or(m.i32.or(m.i32.eqz(get(i)), m.i32.eq(get(i), m.i32.const(UNDEF))), m.i32.or(m.i32.eq(get(i), m.i32.const(NULL)), m.i32.eq(get(i), m.i32.const(FALSE))));
+  // Is the value in local `i` an array? A tagged pointer (low bits == 01) whose
+  // heap tag word is ARRTAG. The address is masked to one page so a non-pointer
+  // operand can't fault the tag load (the low-bits test then masks the result).
+  const isArr = (i) => m.i32.and(m.i32.eq(m.i32.and(get(i), m.i32.const(3)), m.i32.const(1)), m.i32.eq(m.i32.load(0, 4, m.i32.and(get(i), m.i32.const(0xfffc))), m.i32.const(ARRTAG)));
   // Build a string literal [STRTAG, len, ...bytes] into local `slot`, using that
   // slot as its own address temp (raw addr while writing, tagged at the end).
   const buildStrInto = (slot, s) => {
@@ -292,9 +301,10 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
         case "CALL": case "RES": {
           const ac = ins[2] || 0; h -= ac;
           const args = []; for (let j = 0; j < ac; j++) args.push(get(scratch(h + j)));
-          // user functions take the env as param 0 (a direct call has no closure, so 0);
-          // resources are host imports, called with their natural arity.
-          const callArgs = ins[0] === "CALL" ? [m.i32.const(0), ...args] : args;
+          // user functions take the env as param 0 (a direct call has no closure, so 0)
+          // and are padded to the uniform arity; resources are host imports, called
+          // with their natural arity.
+          const callArgs = ins[0] === "CALL" ? padTo([m.i32.const(0), ...args]) : args;
           stmts.push(m.local.set(scratch(h), m.call(ins[1], callArgs, I32))); h++; break;
         }
         case "BIN": {                          // tsc.mjs binary op. With strings present, + and === are polymorphic (JS semantics)
@@ -344,7 +354,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
           const argc = ins[1]; h -= argc + 1;
           const fn = m.i32.load(4, 4, m.i32.and(get(scratch(h)), m.i32.const(~3)));                              // closure[1] = fn table index
           const args = [get(scratch(h))]; for (let k = 0; k < argc; k++) args.push(get(scratch(h + 1 + k)));    // env (the closure itself) is param 0
-          stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, args, binaryen.createType(new Array(argc + 1).fill(I32)), I32))); h++; break;
+          stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, padTo(args), callType(), I32))); h++; break;
         }
         case "CALLDYN": {                      // recv[key](args): dynamic dispatch. Supported receiver is an array
           const argc = ins[1]; h -= argc + 2;  // (a closure held in a collection, e.g. fns[j]()); the array element IS the closure.
@@ -354,7 +364,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
           stmts.push(m.local.set(recv, callee));                                                                 // stash the closure in the receiver slot
           const fn = m.i32.load(4, 4, m.i32.and(get(recv), m.i32.const(~3)));
           const args = [get(recv)]; for (let k = 0; k < argc; k++) args.push(get(scratch(h + 2 + k)));           // env (the closure) is param 0; `this` (recv) is dropped (no method use yet)
-          stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, args, binaryen.createType(new Array(argc + 1).fill(I32)), I32))); h++; break;
+          stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, padTo(args), callType(), I32))); h++; break;
         }
         case "TYPEOF": stmts.push(m.local.set(scratch(h - 1), m.call("__typeof", [get(scratch(h - 1))], I32))); break; // value -> type string
         case "ITER": break;                    // normalize an iterable -> iterator; a generator is already its own iterator (no-op)
@@ -368,15 +378,14 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
         case "ISNULLISH": stmts.push(m.local.set(scratch(h - 1), bool(m.i32.or(m.i32.eq(get(scratch(h - 1)), m.i32.const(UNDEF)), m.i32.eq(get(scratch(h - 1)), m.i32.const(NULL)))))); break;
         case "CALLVS": {                       // call a closure with a spread args array: [closure, argsArray] -> result
           h -= 2; const closeSlot = scratch(h), argsSlot = scratch(h + 1);
-          const fn = () => m.i32.load(4, 4, m.i32.and(get(closeSlot), m.i32.const(~3)));
+          const fn = m.i32.load(4, 4, m.i32.and(get(closeSlot), m.i32.const(~3)));
           const len = () => m.i32.load(4, 4, m.i32.and(get(argsSlot), m.i32.const(~3)));
           const elem = (i) => m.i32.load(4 + i * 4, 4, m.i32.load(8, 4, m.i32.and(get(argsSlot), m.i32.const(~3)))); // backing[i]
-          let chain = m.call_indirect("0", fn(), [get(closeSlot)], binaryen.createType([I32]), I32); // 0 args
-          for (let k = 1; k <= 4; k++) {       // dispatch on the actual arg count (a target up to 4 params)
-            const args = [get(closeSlot)]; for (let j = 0; j < k; j++) args.push(elem(j));
-            chain = m.if(m.i32.eq(len(), m.i32.const(k)), m.call_indirect("0", fn(), args, binaryen.createType(new Array(k + 1).fill(I32)), I32), chain);
-          }
-          stmts.push(m.local.set(scratch(h), chain)); h++; break;
+          // Uniform arity: pass exactly `maxargs` args — backing[j] while in range,
+          // undefined past the spread's length. (No function binds beyond maxargs.)
+          const args = [get(closeSlot)];
+          for (let j = 0; j < maxargs; j++) args.push(m.select(m.i32.gt_s(len(), m.i32.const(j)), elem(j), m.i32.const(UNDEF)));
+          stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, args, callType(), I32))); h++; break;
         }
         case "GENNEXT": {                      // [gen, sentValue] -> [{value, done}]; drive the generator one step
           h -= 2; stmts.push(m.local.set(scratch(h), m.call("__gennext", [get(scratch(h)), get(scratch(h + 1))], I32))); h++; break;
@@ -411,7 +420,35 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
           stmts.push(m.local.set(scratch(h), m.call("__getprop", [get(scratch(h)), m.i32.const(keyIds.get(ins[1]))], I32))); // recv[name] = method closure
           const fn = m.i32.load(4, 4, m.i32.and(get(scratch(h)), m.i32.const(~3)));
           const args = [get(scratch(h))]; for (let k = 0; k < argc; k++) args.push(get(scratch(h + 1 + k)));
-          stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, args, binaryen.createType(new Array(argc + 1).fill(I32)), I32))); h++; break;
+          stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, padTo(args), callType(), I32))); h++; break;
+        }
+        case "ISARRAY": stmts.push(m.local.set(scratch(h - 1), bool(isArr(scratch(h - 1))))); break; // Array.isArray, lowered by the HOF inliner
+        case "GLOBAL": stmts.push(m.local.set(scratch(h), m.i32.const(UNDEF))); h++; break;          // stdlib namespace (Math/Number/Array): a placeholder receiver — CALLM/CALLMS dispatch on the static method name
+        case "CALLM": {                        // host method on a stdlib namespace: dispatch at compile time on the method name (the receiver is the GLOBAL placeholder)
+          const mname = ins[1], n = ins[2]; h -= n + 1;       // stack: [recv, arg0..arg_{n-1}]
+          const a = (k) => get(scratch(h + 1 + k));           // k-th argument (a fresh node each call)
+          if (mname === "max" || mname === "min") {           // variadic fold; accumulate in the now-free receiver slot
+            const cmp = mname === "max" ? (x, y) => m.i32.gt_s(x, y) : (x, y) => m.i32.lt_s(x, y);
+            stmts.push(m.local.set(scratch(h), a(0)));
+            for (let k = 1; k < n; k++) stmts.push(m.local.set(scratch(h), m.select(cmp(a(k), get(scratch(h))), a(k), get(scratch(h)))));
+            h++; break;
+          }
+          let res;
+          switch (mname) {
+            case "abs": res = m.select(m.i32.lt_s(a(0), m.i32.const(0)), m.i32.sub(m.i32.const(0), a(0)), a(0)); break; // |n<<1| = (|n|)<<1
+            case "floor": case "ceil": case "round": case "trunc": res = a(0); break;                  // integer-valued model: identity
+            case "sign": res = m.select(m.i32.lt_s(a(0), m.i32.const(0)), m.i32.const(immediate(-1)), m.select(m.i32.eqz(a(0)), m.i32.const(immediate(0)), m.i32.const(immediate(1)))); break;
+            case "isInteger": case "isFinite": res = bool(m.i32.eqz(m.i32.and(a(0), m.i32.const(1)))); break; // a tagged int has low bit 0
+            case "isNaN": res = m.i32.const(FALSE); break;                                              // no NaN in this model
+            case "isArray": res = bool(isArr(scratch(h + 1))); break;
+            default: throw new Error("aot: unsupported host method " + mname);
+          }
+          stmts.push(m.local.set(scratch(h), res)); h++; break;
+        }
+        case "CALLMS": {                       // host method with spread args: [recv, argsArray] -> result (Math.max(...a) / Math.min(...a))
+          h -= 2; const fn = ins[1] === "max" ? "__maxarr" : ins[1] === "min" ? "__minarr" : null;
+          if (!fn) throw new Error("aot: unsupported spread host method " + ins[1]);
+          stmts.push(m.local.set(scratch(h), m.call(fn, [get(scratch(h + 1))], I32))); h++; break;
         }
         case "ISA": {                          // obj instanceof <name>: is the name string in obj.__class__?
           stmts.push(...buildStrInto(scratch(h), ins[1]));   // name string into the free slot above the operand
@@ -441,6 +478,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
           stmts.push(m.i32.store(4, 4, m.i32.add(addr, m.i32.mul(idx, m.i32.const(4))), v)); break; } // mem[addr + 4 + idx*4] = val
         case "NEWARR": stmts.push(m.local.set(scratch(h), m.call("__newarr", [], I32))); h++; break;
         case "ARRPUSH": { h -= 2; stmts.push(m.drop(m.call("__arrpush", [get(scratch(h)), get(scratch(h + 1))], I32))); break; } // arr.push(v)
+        case "APPENDALL": { h -= 1; stmts.push(m.drop(m.call("__appendall", [get(scratch(h - 1)), get(scratch(h))], I32))); break; } // [...src]: spread src into the array below it
         case "ARRGET": { h -= 2; const backing = m.i32.load(8, 4, m.i32.and(get(scratch(h)), m.i32.const(~3))); const idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1));
           stmts.push(m.local.set(scratch(h), m.i32.load(4, 4, m.i32.add(backing, m.i32.mul(idx, m.i32.const(4)))))); h++; break; } // arr[idx] = backing[idx]
         case "ARRLEN": stmts.push(m.local.set(scratch(h - 1), m.i32.shl(m.i32.load(4, 4, m.i32.and(get(scratch(h - 1)), m.i32.const(~3))), m.i32.const(1)))); break; // tagInt(length)
@@ -493,8 +531,8 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
   }
 
   const body = r.renderAndDispose(refOf.get(0), labelHelper);
-  const varTypes = new Array((nl - argc) + maxH + 1).fill(I32);               // IR locals beyond params + scratch + label helper
-  m.addFunction(name, binaryen.createType(new Array(argc + 1).fill(I32)), I32, varTypes, body); // +1 leading param: the env
+  const varTypes = new Array((nl - argc) + maxH + 1).fill(I32);               // non-arg IR locals + scratch + label helper (the args live in the P param slots)
+  m.addFunction(name, callType(), I32, varTypes, body);                      // uniform signature: env + maxargs
 }
 
 // Runtime helpers for growable arrays (added only when a program uses them).
@@ -530,7 +568,7 @@ function addArrayRuntime(m) {
 
 // Runtime helpers for string-keyed objects (added only when a program uses them).
 // An object is a stable header [OBJTAG, count, backing] + backing [cap, (key,val)...].
-function addObjectRuntime(m) {
+function addObjectRuntime(m, lenId) {
   const I32 = binaryen.i32;
   const g = (i) => m.local.get(i, I32);
   const c = (n) => m.i32.const(n);
@@ -549,7 +587,12 @@ function addObjectRuntime(m) {
 
   // __getprop(obj, key) -> value or undefined.  params 0=obj,1=key; locals 2=addr,3=backing,4=count,5=i
   m.addFunction("__getprop", binaryen.createType([I32, I32]), I32, [I32, I32, I32, I32], m.block(null, [
-    m.local.set(2, m.i32.and(g(0), c(~3))), m.local.set(3, ld(8, g(2))), m.local.set(4, ld(4, g(2))), m.local.set(5, c(0)),
+    m.local.set(2, m.i32.and(g(0), c(~3))),
+    // Arrays and strings expose .length (header word [tag, length, ...]); any other
+    // key on them reads as undefined. Objects fall through to the key-pair scan.
+    m.if(m.i32.or(m.i32.eq(ld(0, g(2)), c(ARRTAG)), m.i32.eq(ld(0, g(2)), c(STRTAG))),
+      m.return(m.select(m.i32.eq(g(1), c(lenId)), m.i32.shl(ld(4, g(2)), c(1)), c(UNDEF)))),
+    m.local.set(3, ld(8, g(2))), m.local.set(4, ld(4, g(2))), m.local.set(5, c(0)),
     m.loop("L", m.block(null, [
       m.if(m.i32.ge_u(g(5), g(4)), m.return(c(UNDEF))),            // i >= count -> undefined (missing key)
       m.if(m.i32.eq(ld(4, pair(3, 5)), g(1)), m.return(ld(8, pair(3, 5)))), // key match -> value
@@ -578,6 +621,60 @@ function addObjectRuntime(m) {
     st(4, g(3), m.i32.add(g(5), c(1))),                           // count++
     m.return(g(0)),
   ], binaryen.none));
+}
+
+// Host-builtin runtime: the Math.max(...a)/min spread folds and the spread
+// primitive APPENDALL. Each is emitted only when the program needs it.
+function addBuiltinRuntime(m, { spread, append, valueId, doneId }) {
+  const I32 = binaryen.i32;
+  const g = (i) => m.local.get(i, I32);
+  const c = (n) => m.i32.const(n);
+  const ld = (off, p) => m.i32.load(off, 4, p);
+  // Spread folds for Math.max(...a)/Math.min(...a): reduce a backing store to its
+  // extreme. An empty spread has no representable result (no ±Infinity) -> undefined.
+  if (spread) {
+    const elem = (i) => ld(4, m.i32.add(g(1), m.i32.mul(g(i), c(4)))); // backing[i] = [cap, ...slots]
+    const fold = (name, cmp) => m.addFunction(name, binaryen.createType([I32]), I32, [I32, I32, I32, I32], m.block(null, [
+      m.local.set(1, ld(8, m.i32.and(g(0), c(~3)))),   // backing
+      m.local.set(2, ld(4, m.i32.and(g(0), c(~3)))),   // length
+      m.if(m.i32.eqz(g(2)), m.return(c(UNDEF))),
+      m.local.set(4, elem(3)),                          // best = backing[0]  (i==local3, still 0)
+      m.local.set(3, c(1)),
+      m.loop("L", m.block(null, [
+        m.if(m.i32.ge_s(g(3), g(2)), m.return(g(4))),
+        m.local.set(4, m.select(cmp(elem(3), g(4)), elem(3), g(4))),
+        m.local.set(3, m.i32.add(g(3), c(1))), m.br("L"),
+      ])),
+      m.unreachable(),
+    ], binaryen.none));
+    fold("__maxarr", (x, y) => m.i32.gt_s(x, y));
+    fold("__minarr", (x, y) => m.i32.lt_s(x, y));
+  }
+  // __appendall(tgt, src) -> tgt: spread every element of src into the array tgt.
+  // Source is an array (copy the backing) or, when generators are in use, a
+  // generator (drive it to exhaustion). params 0=tgt,1=src; locals 2=addr,...
+  if (append) {
+    const body = [
+      m.local.set(2, m.i32.and(g(1), c(~3))),
+      m.if(m.i32.eq(ld(0, g(2)), c(ARRTAG)), m.block(null, [
+        m.local.set(3, ld(8, g(2))), m.local.set(4, ld(4, g(2))), m.local.set(5, c(0)),
+        m.loop("L", m.block(null, [
+          m.if(m.i32.ge_s(g(5), g(4)), m.return(g(0))),
+          m.drop(m.call("__arrpush", [g(0), ld(4, m.i32.add(g(3), m.i32.mul(g(5), c(4))))], I32)),
+          m.local.set(5, m.i32.add(g(5), c(1))), m.br("L"),
+        ])),
+      ], binaryen.none)),
+    ];
+    if (valueId != null) body.push(                    // generator source: __gennext until done
+      m.if(m.i32.eq(ld(0, g(2)), c(GENTAG)), m.loop("G", m.block(null, [
+        m.local.set(6, m.call("__gennext", [g(1), c(UNDEF)], I32)),
+        m.if(m.i32.eq(m.call("__getprop", [g(6), c(doneId)], I32), c(TRUE)), m.return(g(0))),
+        m.drop(m.call("__arrpush", [g(0), m.call("__getprop", [g(6), c(valueId)], I32)], I32)),
+        m.br("G"),
+      ]))));
+    body.push(m.return(g(0)));
+    m.addFunction("__appendall", binaryen.createType([I32, I32]), I32, [I32, I32, I32, I32, I32], m.block(null, body, binaryen.none));
+  }
 }
 
 // Runtime helpers for strings (added only when a program has a string literal).
@@ -706,13 +803,16 @@ function addClassRuntime(m) {
 // mapping a property name to a { get, set } pair of closures (each captures the
 // instance). A read/write checks that map and fires the accessor, else falls
 // back to a plain field access.
-function addAccessorRuntime(m, accKey, getKey, setKey) {
+function addAccessorRuntime(m, accKey, getKey, setKey, maxargs) {
   const I32 = binaryen.i32;
   const g = (i) => m.local.get(i, I32);
   const c = (n) => m.i32.const(n);
   const ld = (off, p) => m.i32.load(off, 4, p);
   const addr = (i) => m.i32.and(g(i), c(~3));
   const isTag = (i, tag) => m.i32.and(m.i32.and(g(i), c(1)), m.i32.eq(ld(0, addr(i)), c(tag))); // a pointer to [tag, ...]?
+  const P = 1 + maxargs;                                                                // the uniform table signature
+  const accType = binaryen.createType(new Array(P).fill(I32));
+  const pad = (args) => { while (args.length < P) args.push(c(UNDEF)); return args; };   // accessors are table-reachable user fns
 
   // __getpropa(obj, propKey, accKey, getKey) -> value.  locals: 4=accMap,5=entry,6=getter
   m.addFunction("__getpropa", binaryen.createType([I32, I32, I32, I32]), I32, [I32, I32, I32], m.block(null, [
@@ -722,7 +822,7 @@ function addAccessorRuntime(m, accKey, getKey, setKey) {
     m.if(m.i32.eqz(isTag(5, OBJTAG)), m.return(m.call("__getprop", [g(0), g(1)], I32))),
     m.local.set(6, m.call("__getprop", [g(5), g(3)], I32)),                             // .get
     m.if(m.i32.eqz(isTag(6, CLOSTAG)), m.return(m.call("__getprop", [g(0), g(1)], I32))),
-    m.return(m.call_indirect("0", ld(4, addr(6)), [g(6)], binaryen.createType([I32]), I32)), // getter(env = the getter closure)
+    m.return(m.call_indirect("0", ld(4, addr(6)), pad([g(6)]), accType, I32)), // getter(env = the getter closure)
   ], binaryen.none));
 
   // __setpropa(obj, propKey, v, accKey, setKey) -> obj.  locals: 5=accMap,6=entry,7=setter
@@ -734,7 +834,7 @@ function addAccessorRuntime(m, accKey, getKey, setKey) {
     m.if(m.i32.eqz(isTag(6, OBJTAG)), plain()),
     m.local.set(7, m.call("__getprop", [g(6), g(4)], I32)),                             // .set
     m.if(m.i32.eqz(isTag(7, CLOSTAG)), plain()),
-    m.drop(m.call_indirect("0", ld(4, addr(7)), [g(7), g(2)], binaryen.createType([I32, I32]), I32)), // setter(env, v)
+    m.drop(m.call_indirect("0", ld(4, addr(7)), pad([g(7), g(2)]), accType, I32)), // setter(env, v)
     m.return(g(0)),
   ], binaryen.none));
 }
@@ -802,11 +902,11 @@ function addIndexRuntime(m, keyIds) {
 // original name and is what CALLV calls: it allocates a generator object holding
 // the body's table index and the initial args, and returns it (so no CALLV
 // change is needed — a generator call just returns an object). locals: tmp.
-function emitGenTrampoline(m, name, fn, bodyIdx) {
+function emitGenTrampoline(m, name, fn, bodyIdx, maxargs) {
   const I32 = binaryen.i32;
   const g = (i) => m.local.get(i, I32);
   const c = (n) => m.i32.const(n);
-  const argc = fn.argc || 0, nl = fn.nlocals, tmp = argc + 1; // params 0..argc (env + args); tmp local after them
+  const argc = fn.argc || 0, nl = fn.nlocals, P = 1 + maxargs, tmp = P; // params 0..P-1 (env + maxargs); tmp local after them
   const out = [
     m.local.set(tmp, m.i32.load(0, 4, c(BUMP_ADDR))),                                  // tmp = bump
     m.i32.store(0, 4, g(tmp), c(GENTAG)), m.i32.store(4, 4, g(tmp), c(bodyIdx)),
@@ -816,7 +916,7 @@ function emitGenTrampoline(m, name, fn, bodyIdx) {
   for (let k = 0; k < argc; k++) out.push(m.i32.store(24 + k * 4, 4, g(tmp), g(k + 1))); // slots[k] = arg_k (param k+1)
   out.push(m.i32.store(0, 4, c(BUMP_ADDR), m.i32.add(g(tmp), c(24 + nl * 4))));         // bump past the object (extra slots are fresh 0)
   out.push(m.return(m.i32.or(g(tmp), c(1))));
-  m.addFunction(name, binaryen.createType(new Array(argc + 1).fill(I32)), I32, [I32], m.block(null, out, binaryen.none));
+  m.addFunction(name, binaryen.createType(new Array(P).fill(I32)), I32, [I32], m.block(null, out, binaryen.none)); // uniform signature: env + maxargs
 }
 
 // The dispatch BODY (`name$gen`), called by GENNEXT through the generator object.
@@ -825,7 +925,7 @@ function emitGenTrampoline(m, name, fn, bodyIdx) {
 // value, done=0) or RET (done=1, return the value). A second, self-contained
 // codegen path: a generator is inherently resumable, so it can't use the
 // straight-line Relooper body. Numeric bodies for now (the common generator).
-function compileGenBody(m, bodyName, fn, keyIds, fnIndex) {
+function compileGenBody(m, bodyName, fn, keyIds, fnIndex, maxargs) {
   const I32 = binaryen.i32;
   const nl = fn.nlocals, code = resolveLabels(fn.code);
   const loc = (i) => i + 1;
@@ -911,7 +1011,8 @@ function compileGenBody(m, bodyName, fn, keyIds, fnIndex) {
           const argc = ins[1]; h -= argc + 1;
           const fnv = m.i32.load(4, 4, m.i32.and(get(scratch(h)), m.i32.const(~3)));
           const args = [get(scratch(h))]; for (let k = 0; k < argc; k++) args.push(get(scratch(h + 1 + k)));
-          stmts.push(m.local.set(scratch(h), m.call_indirect("0", fnv, args, binaryen.createType(new Array(argc + 1).fill(I32)), I32))); h++; break;
+          while (args.length < 1 + maxargs) args.push(m.i32.const(UNDEF));              // pad to the uniform table signature
+          stmts.push(m.local.set(scratch(h), m.call_indirect("0", fnv, args, binaryen.createType(new Array(1 + maxargs).fill(I32)), I32))); h++; break;
         }
         case "GENNEXT": { h -= 2; stmts.push(m.local.set(scratch(h), m.call("__gennext", [get(scratch(h)), get(scratch(h + 1))], I32))); h++; break; }
         case "PUSHTRY": case "POPTRY": break;  // handler scope resolved at compile time (blockHeights)
@@ -997,7 +1098,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const usesIndex = uses("INDEX", "SETINDEX");             // computed member access -> the index runtime (+ key interning)
   const usesExceptions = uses("THROW", "PUSHTRY");         // try/catch/throw: sentinel-return unwinding
   const usesConstArray = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "PUSH" && Array.isArray(i[1])));
-  const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN") || usesConstArray; // __class__ name lists build arrays
+  const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL") || usesConstArray; // __class__ name lists build arrays; APPENDALL pushes
   const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA") || usesClasses || usesGenerators || usesIndex; // instances, method dispatch, {value,done}, computed access
   const usesStrings = usesClasses || usesIndex || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq)
   if (usesArrays || usesObjects || usesStrings) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow/concat paths
@@ -1007,6 +1108,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && (i[0] === "GETPROP" || i[0] === "SETPROP" || i[0] === "SETHIDDEN" || i[0] === "CALLMETHOD" || i[0] === "GETPROPA" || i[0] === "SETPROPA") && !keyIds.has(i[1])) keyIds.set(i[1], keyIds.size + 1);
   if (usesGenerators) for (const k of ["value", "done"]) if (!keyIds.has(k)) keyIds.set(k, keyIds.size + 1); // GENNEXT builds {value, done}
   if (usesAccessors) for (const k of ["__accessors__", "get", "set"]) if (!keyIds.has(k)) keyIds.set(k, keyIds.size + 1); // accessor lookups
+  if (usesObjects && !keyIds.has("length")) keyIds.set("length", keyIds.size + 1);                          // __getprop dispatches array/string .length on this id
   // Class names get a registry slot each (for the memoized class object used by statics).
   const clsIds = new Map();
   for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && (i[0] === "CLSGET" || i[0] === "CLSPUT") && !clsIds.has(i[1])) clsIds.set(i[1], clsIds.size);
@@ -1021,16 +1123,29 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const fnNames = [...Object.keys(program), ...gens.map((g) => g + "$gen")];
   const fnIndex = Object.fromEntries(fnNames.map((n, i) => [n, i]));
   const usesClosures = fnNames.length > 0 && uses("MAKECLOSURE", "CALLV", "CALLVS", "CALLDYN", "CALLMETHOD", "GETPROPA", "SETPROPA"); // all call through the function table
+  // Every table-reachable function shares one signature (env + maxargs) so an
+  // indirect call never mismatches the callee's declared arity — a HOF callback
+  // declared `x => ...` can be called with (value, index), extra args ignored.
+  let maxargs = 0;
+  for (const fn of Object.values(program)) {
+    maxargs = Math.max(maxargs, fn.argc || 0);
+    for (const i of fn.code) if (Array.isArray(i)) {
+      if (i[0] === "CALLV" || i[0] === "CALLDYN") maxargs = Math.max(maxargs, i[1]);
+      else if (i[0] === "CALLMETHOD" || i[0] === "CALL") maxargs = Math.max(maxargs, i[0] === "CALL" ? (i[2] || 0) : i[2]);
+    }
+  }
+  if (usesAccessors) maxargs = Math.max(maxargs, 1); // a setter call passes (env, value): the uniform signature must hold both even if no setter exists (SETPROPA falls back to a plain store)
   for (const [name, fn] of Object.entries(program)) {
-    if (gens.includes(name)) { emitGenTrampoline(m, name, fn, fnIndex[name + "$gen"]); compileGenBody(m, name + "$gen", fn, keyIds, fnIndex); } // generator: trampoline + dispatch body
-    else compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings, clsIds, usesExceptions);
+    if (gens.includes(name)) { emitGenTrampoline(m, name, fn, fnIndex[name + "$gen"], maxargs); compileGenBody(m, name + "$gen", fn, keyIds, fnIndex, maxargs); } // generator: trampoline + dispatch body
+    else compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings, clsIds, usesExceptions, maxargs);
   }
   if (usesArrays) addArrayRuntime(m);
-  if (usesObjects) addObjectRuntime(m);
+  if (usesObjects) addObjectRuntime(m, keyIds.get("length"));
+  if (uses("CALLMS", "APPENDALL")) addBuiltinRuntime(m, { spread: uses("CALLMS"), append: uses("APPENDALL"), valueId: usesGenerators ? keyIds.get("value") : null, doneId: usesGenerators ? keyIds.get("done") : null });
   if (usesStrings) addStringRuntime(m);
   if (usesClasses) addClassRuntime(m);
   if (usesIndex) addIndexRuntime(m, keyIds);
-  if (usesAccessors) addAccessorRuntime(m, keyIds.get("__accessors__"), keyIds.get("get"), keyIds.get("set"));
+  if (usesAccessors) addAccessorRuntime(m, keyIds.get("__accessors__"), keyIds.get("get"), keyIds.get("set"), maxargs);
   if (usesGenerators) addGenRuntime(m, keyIds.get("value"), keyIds.get("done"));
   if (usesClosures) {
     m.addTable("0", fnNames.length, fnNames.length, binaryen.funcref);
