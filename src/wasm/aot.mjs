@@ -757,6 +757,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
             }
             case "parse": { if (n !== 1) throw new Error("aot: JSON.parse with a reviver not supported"); res = m.call("__json_parse", [a(0)], I32); break; } // JSON.parse(str): the host parses and rebuilds the value tree via the runtime's own constructors (interpreter handles a reviver)
             case "values": res = m.call("__values", [a(0)], I32); break;                       // Object.values(obj) -> array of own enumerable values
+            case "assign": { for (let k = 1; k < n; k++) stmts.push(m.drop(m.call("__assignall", [a(0), a(k)], I32))); res = a(0); break; } // Object.assign(target, ...sources) -> target
             default: throw new Error("aot: unsupported host method " + mname);
           }
           stmts.push(m.local.set(scratch(h), res)); h++; break;
@@ -2184,6 +2185,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const usesAccessors = uses("GETPROPA", "SETPROPA") || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "SETHIDDEN" && i[1] === "__accessors__")); // static get/set access OR an accessor *definition* (computed access a[k] still fires it via __index)
   const usesJsonParse = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CALLM" && i[1] === "parse")); // JSON.parse(str): the host rebuilds the value tree via the runtime's own exported constructors
   const usesValues = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CALLM" && i[1] === "values" && i[2] >= 1)); // Object.values(obj) -> __values (needs __keystr + arrays)
+  const usesObjAssign = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CALLM" && i[1] === "assign")); // Object.assign(target, ...sources) -> reuse __assignall
   const usesIndex = uses("INDEX", "SETINDEX") || usesJsonParse;             // computed member access -> the index runtime (+ key interning, which JSON.parse reuses to intern object keys)
   const usesReject = uses("MKREJECT");                      // Promise.reject -> a rejection cell; awaiting it throws
   const usesExceptions = uses("THROW", "PUSHTRY") || usesReject; // try/catch/throw: sentinel-return unwinding (a rejected await needs it too)
@@ -2273,7 +2275,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   if (usesArrays) addArrayRuntime(m);
   if (usesObjects) addObjectRuntime(m, keyIds.get("length"), keyIds.get("size"));
   if (usesMapSet) addMapSetRuntime(m);
-  if (uses("CALLMS", "APPENDALL", "TOARRAY", "ASSIGNALL")) addBuiltinRuntime(m, { spread: uses("CALLMS"), append: uses("APPENDALL"), toarray: uses("TOARRAY"), assignall: uses("ASSIGNALL"), valueId: usesGenerators ? keyIds.get("value") : null, doneId: usesGenerators ? keyIds.get("done") : null });
+  if (uses("CALLMS", "APPENDALL", "TOARRAY", "ASSIGNALL") || usesObjAssign) addBuiltinRuntime(m, { spread: uses("CALLMS"), append: uses("APPENDALL"), toarray: uses("TOARRAY"), assignall: uses("ASSIGNALL") || usesObjAssign, valueId: usesGenerators ? keyIds.get("value") : null, doneId: usesGenerators ? keyIds.get("done") : null });
   if (usesFloat) addFloatRuntime(m);
   if (usesStrings) addStringRuntime(m, usesFloat, usesBig);
   if (usesReject) addPromiseRuntime(m);

@@ -15,6 +15,7 @@ import { BUMP_ADDR, HEAP_BASE, decodeValue } from "#stackmix/wasm/aot.mjs";
 
 const programs = [
   ["literal + read two fields", `function main() { const p = { x: 3, y: 4 }; return p.x + p.y; }`],
+  ["Object.assign merges sources into the target", `function main() { const t = Object.assign({ a: 1 }, { b: 2 }, { c: 3 }); return t.a + t.b + t.c; }`], // 6
   ["mutate a field", `function main() { const o = { n: 1 }; o.n = o.n + 10; return o.n; }`],
   ["object passed to a function", `
     function dist(p) { return p.x + p.y; }
