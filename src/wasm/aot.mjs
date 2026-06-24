@@ -392,7 +392,7 @@ function binExpr(m, op, a, b, strings, floats, bigs) {
     const cmpSym = { "<": (x) => m.i32.lt_s(x, m.i32.const(0)), "<=": (x) => m.i32.le_s(x, m.i32.const(0)), ">": (x) => m.i32.gt_s(x, m.i32.const(0)), ">=": (x) => m.i32.ge_s(x, m.i32.const(0)) };
     const num = () => {
       if (op === "/") return m.call("__divf", [a(), b()], I32);
-      if (op === "+") return (floats || strings) ? m.if(bothInt(), intAdd(), m.call("__add", [a(), b()], I32)) : intAdd();
+      if (op === "+") return (floats || strings) ? m.if(bothInt(), intAdd(), m.call(strings ? "__add" : "__addf", [a(), b()], I32)) : intAdd(); // strings -> concat-or-numeric (__add); floats-only -> pure-numeric (__addf, no string runtime)
       if (op === "-") return floats ? m.if(bothInt(), intSub(), m.call("__subf", [a(), b()], I32)) : intSub();
       if (op === "*") return floats ? m.if(bothInt(), intMul(), m.call("__mulf", [a(), b()], I32)) : intMul();
       const ci = { "<": m.i32.lt_s, "<=": m.i32.le_s, ">": m.i32.gt_s, ">=": m.i32.ge_s }[op];
@@ -1385,9 +1385,12 @@ function addFloatRuntime(m) {
   ], binaryen.none));
 
   // Arithmetic / comparison slow paths (one operand isn't a fixnum). + concatenates
-  // when a string is involved, so it stays in __add (string runtime); the rest are
-  // numeric here.
+  // when a string is involved, so with strings it routes to __add (string runtime);
+  // __addf is the pure-numeric + for a program that coerces (boolean/null/undefined ->
+  // number) but has no strings — so the coercion path needs no string runtime / host
+  // import. The rest are numeric here.
   const bin = (name, f) => m.addFunction(name, binaryen.createType([I32, I32]), I32, [], m.block(null, [m.return(f())], binaryen.none));
+  bin("__addf", () => boxf(m.f64.add(numf(g(0)), numf(g(1)))));
   bin("__subf", () => boxf(m.f64.sub(numf(g(0)), numf(g(1)))));
   bin("__mulf", () => boxf(m.f64.mul(numf(g(0)), numf(g(1)))));
   bin("__divf", () => boxf(m.f64.div(numf(g(0)), numf(g(1)))));
@@ -1414,7 +1417,6 @@ function addStringRuntime(m, floats, bigs) {
   const c = (n) => m.i32.const(n);
   const ld = (off, p) => m.i32.load(off, 4, p);
   const st = (off, p, v) => m.i32.store(off, 4, p, v);
-  const ld8 = (off, p) => m.i32.load8_u(off, 1, p);
   const st8 = (off, p, v) => m.i32.store8(off, 1, p, v);
   const bump = () => m.i32.load(0, 4, c(BUMP_ADDR));
   const setBump = (v) => m.i32.store(0, 4, c(BUMP_ADDR), v);
@@ -1498,8 +1500,21 @@ function addStringRuntime(m, floats, bigs) {
     m.if(m.i32.eq(ld(0, addr(0)), c(CLOSTAG)), retStr("function")),
     retStr("object"),                                                 // arrays / objects
   ], binaryen.none));
+}
 
-  // __eq(a, b) -> 0/1.  identical bits, or equal strings by value.  locals: 2=la,3=i
+// __eq(a, b) -> 0/1: identical bits, equal floats by value, equal bigints, or equal
+// strings by value. Lives apart from the string runtime because float and bigint
+// equality need it WITHOUT strings (a program that coerces booleans/null into
+// arithmetic pulls in the float runtime but no strings — see arithCoerce). Added
+// whenever floats, bigints, or strings are present. locals: 2=la, 3=i.
+function addEqRuntime(m, floats, bigs) {
+  const I32 = binaryen.i32;
+  const g = (i) => m.local.get(i, I32);
+  const c = (n) => m.i32.const(n);
+  const ld = (off, p) => m.i32.load(off, 4, p);
+  const ld8 = (off, p) => m.i32.load8_u(off, 1, p);
+  const addr = (i) => m.i32.and(g(i), c(~3));
+  const isStr = (i) => m.if(m.i32.and(g(i), c(1)), m.i32.eq(ld(0, addr(i)), c(STRTAG)), c(0));
   m.addFunction("__eq", binaryen.createType([I32, I32]), I32, [I32, I32], m.block(null, [
     // Boxed floats compare BY VALUE first — before the identical-bits fast path —
     // because NaN must never equal itself, even when both operands are the SAME
@@ -2267,15 +2282,34 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const usesNumPow = hasNum((i) => i[0] === "BIN" && i[1] === "**"); // number ** number -> host Math.pow (result may be fractional/out-of-range -> the float runtime boxes it)
   const callg = new Set(Object.values(program).flatMap((fn) => fn.code.filter((i) => Array.isArray(i) && i[0] === "CALLG").map((i) => i[1]))); // bare global calls present (Number/String/Boolean/parseInt/parseFloat/isNaN/isFinite)
   const usesParseInt = callg.has("parseInt"), usesParseFloat = callg.has("parseFloat");
-  const usesFloat = hasNum((i) => i[0] === "PUSH" && typeof i[1] === "number" && !Number.isInteger(i[1]))
+  // Arithmetic and relational operators COERCE non-fixnum operands exactly like the
+  // interpreter (true->1, false/null->0, undefined->NaN, string->parse, object->NaN).
+  // That coercion lives on the float runtime's slow path, reached when the bothInt
+  // fast path fails. So any program where an arithmetic/relational op could see a
+  // non-fixnum operand needs that runtime — otherwise the raw integer op runs on an
+  // odd-tagged singleton and yields garbage (a boolean reinterpreted as a pointer).
+  // The only safe exception is a program whose every instruction is provably
+  // fixnum-only: integer literals, integer arithmetic/bitwise, and control flow —
+  // no variable/property/call reads, comparisons (booleans), or other literals that
+  // could introduce a boolean/null/undefined/string/float.
+  const ARITHOP = (i) => ["ADD", "SUB", "MUL", "LT", "LE", "GT", "GE"].includes(i[0]) || (i[0] === "BIN" && ["+", "-", "*", "<", "<=", ">", ">="].includes(i[1]));
+  const FIXNUMONLY = (i) => (i[0] === "PUSH" && typeof i[1] === "number" && Number.isInteger(i[1])) || ["ADD", "SUB", "MUL", "INC", "DEC", "NEG", "BITNOT", "JMP", "JMPF", "RET", "POP", "DUP", "STORE"].includes(i[0]) || (i[0] === "BIN" && ["+", "-", "*", "%", "&", "|", "^", "<<", ">>", ">>>"].includes(i[1]));
+  const arithCoerce = hasNum(ARITHOP) && !Object.values(program).every((fn) => fn.code.every((i) => !Array.isArray(i) || FIXNUMONLY(i)));
+  // realFloat = an actual double is in play (literal, division, float->string coercion,
+  // JSON number, **, Number()/isNaN/isFinite). It forces the STRING runtime too, since a
+  // real float can be concatenated / stringified. arithCoerce is weaker: it only needs the
+  // pure-numeric coercion path (__numf/__boxf/__addf, all host-free) so a boolean/null/
+  // undefined operand becomes a number — no strings, no host import. usesFloat = either.
+  const realFloat = hasNum((i) => i[0] === "PUSH" && typeof i[1] === "number" && !Number.isInteger(i[1]))
     || hasNum((i) => i[0] === "BIN" && i[1] === "/")
     || (hasNum((i) => i[0] === "PUSH" && typeof i[1] === "string") && hasNum((i) => numOp.has(i[0]) || (i[0] === "BIN" && ["*", "-", "<", "<=", ">", ">="].includes(i[1]))))
     || usesJsonParse // a parsed JSON number can be a non-integer / out-of-fixnum-range double, so the float runtime (and float->string) must be present (also pulls in usesStrings below)
     || usesNumPow
     || callg.has("Number") || callg.has("isNaN") || callg.has("isFinite"); // these coerce through __numf/__boxf / f64 compares
+  const usesFloat = realFloat || arithCoerce;
   const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL", "ARGUMENTS", "GATHERREST", "TOARRAY", "KEYS") || usesConstArray || usesStrMeth || usesMapSet || usesJsonParse || usesValues; // __class__ name lists build arrays; APPENDALL/ARGUMENTS/GATHERREST/split/from/TOARRAY/KEYS push; Map entries + init use arrays; JSON.parse + Object.values build arrays
   const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA", "ASSIGNALL", "KEYS") || usesClasses || usesGenerators || usesIndex || usesValues; // instances, method dispatch, {value,done}, computed access, object spread, Object.values
-  const usesStrings = usesClasses || usesIndex || usesStrMeth || usesKeys || usesJson || usesMapSet || usesFloat || usesBig || callg.has("String") || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq); string methods + keys + json build strings; Map/Set compare keys via __eq; floats reuse __add/__concat; bigint toString/typeof; String() -> __tostr
+  const usesStrings = usesClasses || usesIndex || usesStrMeth || usesKeys || usesJson || usesMapSet || realFloat || usesBig || callg.has("String") || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq); string methods + keys + json build strings; Map/Set compare keys via __eq; a REAL float can concat/stringify (__add/__num_str); bigint toString/typeof; String() -> __tostr. (arithCoerce-only floats stay string-free — __addf is pure-numeric.)
   if (usesArrays || usesObjects || usesStrings) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow/concat paths
   // Property and method keys are interned to small ints at compile time, so
   // GETPROP/SETPROP/SETHIDDEN/CALLMETHOD are id matches in the object runtime.
@@ -2344,6 +2378,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   if (usesMapSet) addMapSetRuntime(m);
   if (uses("CALLMS", "APPENDALL", "TOARRAY", "ASSIGNALL") || usesObjAssign) addBuiltinRuntime(m, { spread: uses("CALLMS"), append: uses("APPENDALL"), toarray: uses("TOARRAY"), assignall: uses("ASSIGNALL") || usesObjAssign, valueId: usesGenerators ? keyIds.get("value") : null, doneId: usesGenerators ? keyIds.get("done") : null });
   if (usesFloat) addFloatRuntime(m);
+  if (usesFloat || usesBig || usesStrings) addEqRuntime(m, usesFloat, usesBig); // __eq: float/bigint value equality needs it even without the string runtime
   if (usesStrings) addStringRuntime(m, usesFloat, usesBig);
   if (usesReject) addPromiseRuntime(m);
   if (usesStrMeth) addStrMethRuntime(m, usesGenerators ? { value: keyIds.get("value"), done: keyIds.get("done") } : null);

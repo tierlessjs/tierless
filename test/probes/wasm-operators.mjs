@@ -22,6 +22,14 @@ const programs = [
   ["unsigned shift", `function main() { return 256 >>> 2; }`],                                    // 64
   ["modulo, including negative", `function main() { return (17 % 5) * 10 + (0 - 7) % 3; }`],       // 2*10 + (-1) = 19
   ["masking with ~", `function main() { return 13 & ~1; }`],                                      // 12
+  // Coercion: an arithmetic/relational operator turns a non-fixnum operand into a
+  // number exactly like the interpreter (true->1, false/null->0, undefined->NaN),
+  // instead of running a raw integer op on the odd-tagged singleton. Host-free.
+  ["booleans coerce to numbers in +", `function main() { return true + true + false + 1; }`],     // 1+1+0+1 = 3
+  ["null coerces to 0 in arithmetic", `function main() { return (1 + null) * 5 - null; }`],        // 1*5 - 0 = 5
+  ["a comparison result feeds arithmetic", `function main() { let n = 0; for (let i = 0; i < 5; i++) { n += (i > 2); } return n; }`], // true counts as 1 twice (i=3,4) -> 2
+  ["a relational operator coerces a boolean operand", `function main() { return (true < 2) === (false < 1); }`], // (1<2)===(0<1) -> true===true -> true
+  ["undefined coerces to NaN (never equal to itself)", `function main() { let x; const r = x + 1; return r !== r; }`], // NaN -> true
 ];
 
 function interp(src) {
