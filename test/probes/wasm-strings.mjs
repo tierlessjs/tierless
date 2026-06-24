@@ -34,6 +34,7 @@ const programs = [
   ["different lengths are not equal", `function main() { return "ab" === "abc"; }`],
   ["!== on strings", `function main() { return "a" !== "b"; }`],
   ["String.raw lowers to compile-time raw concatenation", `function main() { return String.raw\`a\\nb\` + "|" + String.raw\`x\${2 + 3}y\`; }`], // "a\\nb|x5y" — raw escapes preserved verbatim, the substitution coerced and concatenated (no runtime .raw)
+  ["an empty string is falsy; a non-empty one truthy", `function main() { const a = ("" ? "T" : "F"); const b = ("x" ? "T" : "F"); const c = ("" || "dflt"); const d = (!""); return a + b + "/" + c + "/" + d; }`], // "FT/dflt/true" — "" is falsy like the interpreter
   ["string through a function", `
     function greet(name) { return "hi " + name; }
     function main() { return greet("ann"); }`],

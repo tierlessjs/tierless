@@ -423,6 +423,27 @@ function binExpr(m, op, a, b, strings, floats, bigs) {
   throw new Error("aot: unsupported BIN " + op);
 }
 
+// JS falsiness: false, 0, -0, "", null, undefined, NaN. The cheap singleton/zero
+// checks (eqz, UNDEF, NULL, FALSE) cover all but the two HEAP cases — empty string
+// and NaN. Built from pure VALUE ops only (select / and / or), never an if-EXPRESSION:
+// asyncify rewrites if-as-value incorrectly, and falsy sits in hot branch conditions
+// of functions that asyncify may instrument. The heap deref is made unconditional but
+// SAFE by clamping the address to HEAP_BASE when the value isn't a real heap pointer
+// (low bit set AND >= HEAP_BASE — so an odd singleton like UNDEF=0x1 reads the clamp,
+// and its garbage tag is masked by the isHeap guard). Shared by both codegens (i = a
+// scratch slot, get = its local.get). -0 already canonicalizes to fixnum 0.
+function falsyOf(m, i, get) {
+  const v = () => get(i);
+  const I = (n) => m.i32.const(n);
+  const isHeap = () => m.i32.and(m.i32.and(v(), I(1)), m.i32.ge_u(v(), I(HEAP_BASE)));
+  const at = () => m.select(isHeap(), m.i32.and(v(), I(~3)), I(HEAP_BASE)); // a guaranteed-valid address
+  const tag = () => m.i32.load(0, 4, at());
+  const emptyStr = m.i32.and(m.i32.eq(tag(), I(STRTAG)), m.i32.eqz(m.i32.load(4, 4, at())));        // "" -> byteLength 0
+  const isNaN = m.i32.and(m.i32.eq(tag(), I(FLOATTAG)), m.f64.ne(m.f64.load(4, 4, at()), m.f64.load(4, 4, at()))); // NaN != itself
+  const cheap = m.i32.or(m.i32.or(m.i32.eqz(v()), m.i32.eq(v(), I(UNDEF))), m.i32.or(m.i32.eq(v(), I(NULL)), m.i32.eq(v(), I(FALSE))));
+  return m.i32.or(cheap, m.i32.and(isHeap(), m.i32.or(emptyStr, isNaN)));
+}
+
 const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1, INDEX: -1, SETINDEX: -3, ISARRAY: 0, GLOBAL: 1, CALLMS: -1, APPENDALL: -1, ARGUMENTS: 1, GATHERREST: 0, TOARRAY: 0, ASSIGNALL: -1, DELPROP: 0, KEYS: 0, JSONSTR: -2, AWAITALL: 0, MKREJECT: 0 };
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" || ins[0] === "CALLM" ? -ins[2] : ins[0] === "CALLG" || ins[0] === "CTORG" ? 1 - (ins[2] || 0) : DELTA[ins[0]] ?? 0;
 // Ops that run user code and can therefore propagate an exception — so a block ends
@@ -524,7 +545,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
   // JS truthiness of the value in local `i`: falsy is 0, undefined, null, false.
   // Takes the local index (not an expression) so each use is a fresh local.get —
   // a Binaryen IR node can't be shared between parents.
-  const falsy = (i) => m.i32.or(m.i32.or(m.i32.eqz(get(i)), m.i32.eq(get(i), m.i32.const(UNDEF))), m.i32.or(m.i32.eq(get(i), m.i32.const(NULL)), m.i32.eq(get(i), m.i32.const(FALSE))));
+  const falsy = (i) => falsyOf(m, i, get); // JS falsiness incl. "" and NaN (shared helper)
   // Is the value in local `i` an array? A tagged pointer (low bits == 01) whose
   // heap tag word is ARRTAG. The address is masked to one page so a non-pointer
   // operand can't fault the tag load (the low-bits test then masks the result).
@@ -2041,7 +2062,7 @@ function compileGenBody(m, bodyName, fn, keyIds, fnIndex, maxargs, strings, floa
   const { entryH, maxAbs, blockHandler, entryHandler } = blockHeights(code, leaders); // YIELD is delta 0, so a resume block enters with the sent value on top
   const maxH = maxAbs + 1, scratch = (k) => 1 + nl + k, ipLocal = 1 + nl + maxH, envLocal = ipLocal + 1; // envLocal holds the closure env (restored each call from env@(24+nl*4))
   const bool = (cond) => m.select(cond, m.i32.const(TRUE), m.i32.const(FALSE));
-  const falsy = (i) => m.i32.or(m.i32.or(m.i32.eqz(get(i)), m.i32.eq(get(i), m.i32.const(UNDEF))), m.i32.or(m.i32.eq(get(i), m.i32.const(NULL)), m.i32.eq(get(i), m.i32.const(FALSE))));
+  const falsy = (i) => falsyOf(m, i, get); // JS falsiness incl. "" and NaN (shared helper)
   const goto = (b) => [m.local.set(ipLocal, m.i32.const(b)), m.br("L")]; // intra-call jump: update the dispatch local, re-dispatch
   const saveIp = (b) => m.i32.store(8, 4, genAddr(), m.i32.const(b));     // persist the resume point into the object (across calls)
   const setDone = (d) => m.i32.store(12, 4, genAddr(), m.i32.const(d));
