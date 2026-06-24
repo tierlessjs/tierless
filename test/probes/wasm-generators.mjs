@@ -22,6 +22,12 @@ const programs = [
   ["string and float literals in a generator body", `
     function* g() { yield "first"; yield 1.5; yield "last"; }
     function main() { let s = ""; for (const x of g()) { s = s + x + ","; } return s; }`],   // "first,1.5,last," — literals built on the heap inside the gen body
+  ["a generator method reads this", `
+    class Counter { constructor(n) { this.n = n; } *upto() { for (let i = 0; i < this.n; i++) { yield i * 10; } } }
+    function main() { const c = new Counter(4); let s = 0; for (const x of c.upto()) { s = s + x; } return s; }`], // 0+10+20+30 = 60
+  ["a generator closes over an outer variable", `
+    function make(base) { return function* () { yield base; yield base + 1; yield base + 2; }; }
+    function main() { let s = 0; for (const x of make(100)()) { s = s + x; } return s; }`],   // 100+101+102 = 303
   ["range generator, for-of sum", `
     function* range(a, b) { for (let i = a; i < b; i = i + 1) { yield i; } }
     function main() { let s = 0; for (const x of range(1, 5)) { s = s + x; } return s; }`],    // 1+2+3+4 = 10

@@ -1924,9 +1924,10 @@ function emitGenTrampoline(m, name, fn, bodyIdx, maxargs) {
     m.i32.store(0, 4, g(tmp), c(GENTAG)), m.i32.store(4, 4, g(tmp), c(bodyIdx)),
     m.i32.store(8, 4, g(tmp), c(0)), m.i32.store(12, 4, g(tmp), c(0)),                 // ip = 0, done = 0
   ];
-  // object: [GENTAG, bodyIdx, ip, done, sent@16, mode@20, ...slots@24]  (mode 1 = resume via .throw())
+  // object: [GENTAG, bodyIdx, ip, done, sent@16, mode@20, ...slots@24, env@(24+nl*4)]  (mode 1 = resume via .throw())
   for (let k = 0; k < argc; k++) out.push(m.i32.store(24 + k * 4, 4, g(tmp), g(k + 1))); // slots[k] = arg_k (param k+1)
-  out.push(m.i32.store(0, 4, c(BUMP_ADDR), m.i32.add(g(tmp), c(24 + nl * 4))));         // bump past the object (extra slots are fresh 0)
+  out.push(m.i32.store(24 + nl * 4, 4, g(tmp), g(0)));                                  // env (param 0): a generator method reads `this`/captures through it
+  out.push(m.i32.store(0, 4, c(BUMP_ADDR), m.i32.add(g(tmp), c(28 + nl * 4))));         // bump past the object (extra slots are fresh 0)
   out.push(m.return(m.i32.or(g(tmp), c(1))));
   m.addFunction(name, binaryen.createType(new Array(P).fill(I32)), I32, [I32], m.block(null, out, binaryen.none)); // uniform signature: env + maxargs
 }
@@ -1955,7 +1956,7 @@ function compileGenBody(m, bodyName, fn, keyIds, fnIndex, maxargs) {
   const leaders = [...Lset].filter((x) => x >= 0 && x < code.length).sort((a, b) => a - b);
   const blockOf = (ip) => leaders.indexOf(ip);
   const { entryH, maxAbs, blockHandler, entryHandler } = blockHeights(code, leaders); // YIELD is delta 0, so a resume block enters with the sent value on top
-  const maxH = maxAbs + 1, scratch = (k) => 1 + nl + k, ipLocal = 1 + nl + maxH;
+  const maxH = maxAbs + 1, scratch = (k) => 1 + nl + k, ipLocal = 1 + nl + maxH, envLocal = ipLocal + 1; // envLocal holds the closure env (restored each call from env@(24+nl*4))
   const bool = (cond) => m.select(cond, m.i32.const(TRUE), m.i32.const(FALSE));
   const falsy = (i) => m.i32.or(m.i32.or(m.i32.eqz(get(i)), m.i32.eq(get(i), m.i32.const(UNDEF))), m.i32.or(m.i32.eq(get(i), m.i32.const(NULL)), m.i32.eq(get(i), m.i32.const(FALSE))));
   const goto = (b) => [m.local.set(ipLocal, m.i32.const(b)), m.br("L")]; // intra-call jump: update the dispatch local, re-dispatch
@@ -1986,6 +1987,8 @@ function compileGenBody(m, bodyName, fn, keyIds, fnIndex, maxargs) {
       switch (ins[0]) {
         case "PUSH": stmts.push(...pushLit(m, scratch(h), ins[1])); h++; break;
         case "LOAD": stmts.push(m.local.set(scratch(h), get(loc(ins[1])))); h++; break;
+        case "LOADENV": stmts.push(m.local.set(scratch(h), m.i32.load(8 + ins[1] * 4, 4, m.i32.and(get(envLocal), m.i32.const(~3))))); h++; break; // env[idx] — a captured outer var
+        case "LOADTHIS": stmts.push(m.local.set(scratch(h), m.i32.load(8 + ins[1] * 4, 4, m.i32.and(get(envLocal), m.i32.const(~3))))); h++; break; // `this`: a generator method captures the instance into env
         case "STORE": h--; stmts.push(m.local.set(loc(ins[1]), get(scratch(h)))); break;
         case "POP": h--; break;
         case "DUP": stmts.push(m.local.set(scratch(h), get(scratch(h - 1)))); h++; break;
@@ -2053,8 +2056,9 @@ function compileGenBody(m, bodyName, fn, keyIds, fnIndex, maxargs) {
   const prologue = [];
   for (let i = 0; i < nl; i++) prologue.push(m.local.set(loc(i), m.i32.load(24 + i * 4, 4, genAddr())));
   prologue.push(m.local.set(ipLocal, m.i32.load(8, 4, genAddr())));
+  prologue.push(m.local.set(envLocal, m.i32.load(24 + nl * 4, 4, genAddr()))); // restore the closure env (constant across yields)
   const body = m.block(null, [...prologue, m.loop("L", m.block(null, [dispatch, m.unreachable()], binaryen.none))], binaryen.none);
-  m.addFunction(bodyName, binaryen.createType([I32]), I32, new Array(nl + maxH + 1).fill(I32), body);
+  m.addFunction(bodyName, binaryen.createType([I32]), I32, new Array(nl + maxH + 2).fill(I32), body);
 }
 
 // Runtime: drive a generator one step (added when a program uses generators).
