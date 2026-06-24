@@ -207,6 +207,8 @@ export function stdlibHost() {
     __num_str: (v) => { const d = dv(); return allocStr(dv(), String(d.getFloat64((v & ~3) + 4, true))); }, // a boxed double -> its JS string (shortest round-trip, exponent rules — the platform's own)
     __num_pow: (a, b) => { const d = dv(), r = Math.pow(readNum(d, a), readNum(d, b)); return Number.isInteger(r) && Math.abs(r) < 0x40000000 ? r << 1 : allocFloat(dv(), r); }, // a ** b for numbers, normalized like __boxf
     __json_parse: (strPtr) => encode(JSON.parse(readStr(dv(), strPtr))), // the host's own JSON.parse, rebuilt in the heap via the exported constructors
+    __parse_int: (s, radix) => { const r = parseInt(readStr(dv(), s), radix >> 1); return Number.isInteger(r) && Math.abs(r) < 0x40000000 ? r << 1 : allocFloat(dv(), r); }, // radix 0 -> auto-detect
+    __parse_float: (s) => { const r = parseFloat(readStr(dv(), s)); return Number.isInteger(r) && Math.abs(r) < 0x40000000 ? r << 1 : allocFloat(dv(), r); },
   };
   return { imports, bind: (inst) => { mem = inst.exports.memory; table = inst.exports.__table; exp = inst.exports; } };
 }
@@ -824,6 +826,21 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
         case "DEC": stmts.push(m.local.set(scratch(h - 1), m.i32.sub(get(scratch(h - 1)), m.i32.const(2)))); break; // -- : tagged -1
         case "NOT": stmts.push(m.local.set(scratch(h - 1), bool(falsy(scratch(h - 1))))); break; // !x : true iff x is falsy
         case "BITNOT": stmts.push(m.local.set(scratch(h - 1), m.i32.sub(m.i32.const(-2), get(scratch(h - 1))))); break; // ~(2n) = 2(~n) = -2 - 2n
+        case "CALLG": {                        // a bare callable global: Number/String/Boolean coercion (in-module), parseInt/parseFloat (host parsing), isNaN/isFinite
+          const gname = ins[1], gc = ins[2] || 0; h -= gc;
+          const ga = (k) => get(scratch(h + k));
+          const F64 = binaryen.f64, numf = (e) => m.call("__numf", [e], F64), Inf = m.f64.const(Infinity);
+          let res;
+          if (gname === "Number") res = m.call("__boxf", [numf(ga(0))], I32);
+          else if (gname === "String") res = m.call("__tostr", [ga(0)], I32);
+          else if (gname === "Boolean") { const tg = (off) => m.i32.load(off, 4, m.i32.and(ga(0), m.i32.const(0xfffc))); const emptyStr = m.i32.and(m.i32.eq(m.i32.and(ga(0), m.i32.const(3)), m.i32.const(1)), m.i32.and(m.i32.eq(tg(0), m.i32.const(STRTAG)), m.i32.eqz(tg(4)))); res = m.select(m.i32.or(falsy(scratch(h)), emptyStr), m.i32.const(FALSE), m.i32.const(TRUE)); } // false iff falsy or an empty string
+          else if (gname === "parseInt") res = m.call("__parse_int", [ga(0), gc >= 2 ? ga(1) : m.i32.const(0)], I32);
+          else if (gname === "parseFloat") res = m.call("__parse_float", [ga(0)], I32);
+          else if (gname === "isNaN") res = m.select(m.f64.ne(numf(ga(0)), numf(ga(0))), m.i32.const(TRUE), m.i32.const(FALSE)); // NaN !== NaN
+          else if (gname === "isFinite") res = m.select(m.i32.and(m.f64.eq(numf(ga(0)), numf(ga(0))), m.f64.lt(m.f64.abs(numf(ga(0))), Inf)), m.i32.const(TRUE), m.i32.const(FALSE));
+          else throw new Error("aot: unsupported global call " + gname);
+          stmts.push(m.local.set(scratch(h), res)); h++; break;
+        }
         case "PUSHTRY": case "POPTRY": break;  // handler scope is resolved at compile time (blockHeights); no runtime code
         case "THROW": h--; term = { kind: "throw", handler: blockHandler[bi], value: scratch(h) }; break;
         case "JMP": term = { kind: "jmp", target: ins[1] }; break;
@@ -2213,14 +2230,17 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const usesBig = uses("TOBIG") || hasNum((i) => i[0] === "PUSH" && typeof i[1] === "bigint"); // a bigint literal or BigInt() -> the bignum runtime
   const numOp = new Set(["MUL", "SUB", "NEG", "LT", "LE", "GT", "GE"]);
   const usesNumPow = hasNum((i) => i[0] === "BIN" && i[1] === "**"); // number ** number -> host Math.pow (result may be fractional/out-of-range -> the float runtime boxes it)
+  const callg = new Set(Object.values(program).flatMap((fn) => fn.code.filter((i) => Array.isArray(i) && i[0] === "CALLG").map((i) => i[1]))); // bare global calls present (Number/String/Boolean/parseInt/parseFloat/isNaN/isFinite)
+  const usesParseInt = callg.has("parseInt"), usesParseFloat = callg.has("parseFloat");
   const usesFloat = hasNum((i) => i[0] === "PUSH" && typeof i[1] === "number" && !Number.isInteger(i[1]))
     || hasNum((i) => i[0] === "BIN" && i[1] === "/")
     || (hasNum((i) => i[0] === "PUSH" && typeof i[1] === "string") && hasNum((i) => numOp.has(i[0]) || (i[0] === "BIN" && ["*", "-", "<", "<=", ">", ">="].includes(i[1]))))
     || usesJsonParse // a parsed JSON number can be a non-integer / out-of-fixnum-range double, so the float runtime (and float->string) must be present (also pulls in usesStrings below)
-    || usesNumPow;
+    || usesNumPow
+    || callg.has("Number") || callg.has("isNaN") || callg.has("isFinite"); // these coerce through __numf/__boxf / f64 compares
   const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL", "ARGUMENTS", "GATHERREST", "TOARRAY", "KEYS") || usesConstArray || usesStrMeth || usesMapSet || usesJsonParse || usesValues; // __class__ name lists build arrays; APPENDALL/ARGUMENTS/GATHERREST/split/from/TOARRAY/KEYS push; Map entries + init use arrays; JSON.parse + Object.values build arrays
   const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA", "ASSIGNALL", "KEYS") || usesClasses || usesGenerators || usesIndex || usesValues; // instances, method dispatch, {value,done}, computed access, object spread, Object.values
-  const usesStrings = usesClasses || usesIndex || usesStrMeth || usesKeys || usesJson || usesMapSet || usesFloat || usesBig || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq); string methods + keys + json build strings; Map/Set compare keys via __eq; floats reuse __add/__concat; bigint toString/typeof
+  const usesStrings = usesClasses || usesIndex || usesStrMeth || usesKeys || usesJson || usesMapSet || usesFloat || usesBig || callg.has("String") || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq); string methods + keys + json build strings; Map/Set compare keys via __eq; floats reuse __add/__concat; bigint toString/typeof; String() -> __tostr
   if (usesArrays || usesObjects || usesStrings) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow/concat paths
   // Property and method keys are interned to small ints at compile time, so
   // GETPROP/SETPROP/SETHIDDEN/CALLMETHOD are id matches in the object runtime.
@@ -2255,6 +2275,8 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   if (usesFloat && usesStrings) m.addFunctionImport("__num_str", "env", "__num_str", binaryen.createType([binaryen.i32]), binaryen.i32); // boxed double -> string (the host's Number->string); referenced only by __tostr, which exists only with strings
   if (usesNumPow) m.addFunctionImport("__num_pow", "env", "__num_pow", binaryen.createType([binaryen.i32, binaryen.i32]), binaryen.i32); // number ** number -> Math.pow (host), boxed back into the value model
   if (usesJsonParse) m.addFunctionImport("__json_parse", "env", "__json_parse", binaryen.createType([binaryen.i32]), binaryen.i32); // JSON.parse(str) -> value tree (the host's own JSON.parse, rebuilt through the exported constructors below)
+  if (usesParseInt) m.addFunctionImport("__parse_int", "env", "__parse_int", binaryen.createType([binaryen.i32, binaryen.i32]), binaryen.i32);   // parseInt(str, radix) — the host's own parser
+  if (usesParseFloat) m.addFunctionImport("__parse_float", "env", "__parse_float", binaryen.createType([binaryen.i32]), binaryen.i32);            // parseFloat(str)
   // Closures call through a function table: every user function sits at its
   // program-order index, and a closure carries that index (MAKECLOSURE / CALLV).
   // A generator function adds a second entry — its dispatch body `name$gen`.

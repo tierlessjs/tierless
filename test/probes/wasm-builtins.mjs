@@ -12,10 +12,13 @@
 
 import { createRuntime, initialFrames } from "#stackmix";
 import { compileModuleToWasm } from "#stackmix/wasm/frontend.mjs";
-import { BUMP_ADDR, HEAP_BASE, readValue } from "#stackmix/wasm/aot.mjs";
+import { BUMP_ADDR, HEAP_BASE, readValue, stdlibHost } from "#stackmix/wasm/aot.mjs";
 
 const programs = [
   ["Math.abs / floor / max / min", `function main() { return Math.abs(-7) + Math.floor(3) + Math.max(3, 1, 4) + Math.min(9, 2, 5); }`], // 7+3+4+2 = 16
+  ["Number / String / Boolean coercion", `function main() { return Number("7") + 1 + "/" + String(42) + "/" + (Boolean("") ? "T" : "F") + (Boolean("x") ? "T" : "F"); }`], // "8/42/FT"
+  ["parseInt with radix and trailing junk", `function main() { return parseInt("42px") + parseInt("ff", 16); }`], // 42 + 255 = 297
+  ["parseFloat / isNaN / isFinite", `function main() { return parseFloat("3.14xyz") + (isNaN(0 / 0) ? 100 : 0) + (isFinite(9) ? 1000 : 0); }`], // 3.14 + 100 + 1000 = 1103.14
   ["Math.sign", `function main() { return Math.sign(-9) * 100 + Math.sign(0) * 10 + Math.sign(42); }`],                                    // -100 + 0 + 1 = -99
   ["Math.max/min over many args", `function main() { return Math.max(1, 9, 2, 8, 3, 7) - Math.min(5, 4, 6, 2, 9); }`],                     // 9 - 2 = 7
   ["Array.isArray on an array and a non-array", `function main() { return (Array.isArray([1, 2]) ? 1 : 0) * 10 + (Array.isArray(5) ? 1 : 0); }`], // 10
@@ -51,7 +54,9 @@ function interp(src) {
   return rt.run({ id: "t" }, initialFrames("main", []), { deref: (x) => x }).value;
 }
 function native(src) {
-  const inst = new WebAssembly.Instance(new WebAssembly.Module(compileModuleToWasm(src, { entry: "main", resources: [] })), { env: {} });
+  const sh = stdlibHost(); // parseInt/parseFloat (and Number->string) are delegated to the host
+  const inst = new WebAssembly.Instance(new WebAssembly.Module(compileModuleToWasm(src, { entry: "main", resources: [] })), { env: sh.imports });
+  sh.bind(inst);
   new DataView(inst.exports.memory.buffer).setInt32(BUMP_ADDR, HEAP_BASE, true);
   return readValue(inst.exports.memory, inst.exports.main());
 }
