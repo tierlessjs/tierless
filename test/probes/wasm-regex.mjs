@@ -1,5 +1,5 @@
 // Probe: the AOT compiler runs regular expressions — and matches the interpreter.
-// Matching is delegated to the host's real RegExp (regexHost): the compiled module
+// Matching is delegated to the host's real RegExp (stdlibHost): the compiled module
 // imports __re_test/__re_match/__re_replace, which read the pattern/flags/input out
 // of linear memory, run a genuine RegExp, and write the result back. So semantics
 // are exactly ECMAScript's, and a pattern built at runtime (new RegExp(s)) works
@@ -9,7 +9,7 @@
 
 import { createRuntime, initialFrames } from "#stackmix";
 import { compileModuleToWasm } from "#stackmix/wasm/frontend.mjs";
-import { BUMP_ADDR, HEAP_BASE, readValue, regexHost } from "#stackmix/wasm/aot.mjs";
+import { BUMP_ADDR, HEAP_BASE, readValue, stdlibHost } from "#stackmix/wasm/aot.mjs";
 
 const programs = [
   ["test: a digit is present", `function main() { return /\\d/.test("abc123"); }`],                            // true
@@ -45,9 +45,9 @@ function interp(src) {
   return rt.run({ id: "t" }, initialFrames("main", []), { deref: (x) => x }).value;
 }
 function native(src) {
-  const rh = regexHost(); // regex is delegated to the host's RegExp; bind it to the instance after instantiation
-  const inst = new WebAssembly.Instance(new WebAssembly.Module(compileModuleToWasm(src, { entry: "main", resources: [] })), { env: rh.imports });
-  rh.bind(inst);
+  const sh = stdlibHost(); // regex is delegated to the host's RegExp; bind it to the instance after instantiation
+  const inst = new WebAssembly.Instance(new WebAssembly.Module(compileModuleToWasm(src, { entry: "main", resources: [] })), { env: sh.imports });
+  sh.bind(inst);
   new DataView(inst.exports.memory.buffer).setInt32(BUMP_ADDR, HEAP_BASE, true);
   return readValue(inst.exports.memory, inst.exports.main());
 }

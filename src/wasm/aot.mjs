@@ -90,12 +90,19 @@ const MAPTAG = -8, SETTAG = -9;
 // here; a whole-valued result in tagged-int range normalizes back to a fixnum so
 // === and the bitwise ops keep working. Integer arithmetic stays on the fast path.
 const FLOATTAG = -10;
-// A BigInt: [BIGTAG, nlimbs, ...limbs] — a non-negative magnitude in base-2^32,
-// little-endian, normalized (zero is nlimbs=0). Sign is omitted (the realts surface
-// is non-negative). Arbitrary precision; limb arithmetic runs in i64.
+// A BigInt: [BIGTAG, sign, nlimbs, ...limbs] — sign (0 = non-negative, 1 = negative)
+// and an arbitrary-precision magnitude in base-2^32, little-endian, normalized (zero
+// is sign=0, nlimbs=0). The wasm side only builds literals and reads them back; every
+// operation (+ - * / % ** & | ^ << >> compare toString) is delegated to the host's
+// native BigInt (see stdlibHost), so semantics are exactly ECMAScript's — including
+// negatives and true multi-limb division, which the in-module version never had.
 const BIGTAG = -11;
+// BigInt ops are delegated to the host: __big_bin(op, a, b) switches on this code
+// (unary inc/neg ignore b). Shared by the compiler (which emits the code) and the
+// host (which switches on it) so the two can never drift.
+const BIGOPS = { add: 0, sub: 1, mul: 2, div: 3, mod: 4, pow: 5, and: 6, or: 7, xor: 8, shl: 9, shr: 10, inc: 11, neg: 12 };
 // A regex: [REGEXTAG, sourceStr, flagsStr]. Matching is delegated to the host's
-// real RegExp (see regexHost) — the pattern is just a string the host reads, so
+// real RegExp (see stdlibHost) — the pattern is just a string the host reads, so
 // runtime-built patterns (new RegExp(s)) work the same as literals, and semantics
 // are exactly ECMAScript's. The host reads source/flags/input from linear memory,
 // runs RegExp, and writes the result (bool / string array / string) back.
@@ -122,19 +129,40 @@ export function hostArrayValues(memory, taggedPtr) {
   return out;
 }
 
-// The host side of regex: a real RegExp run against strings read out of the
-// instance's linear memory. Imported as __re_test/__re_match/__re_replace and bound
-// to the instance's memory + table after instantiation (regex never runs during
-// instantiation, so the late binding is safe). Results are written back into the
-// heap via the bump pointer and returned as tagged values. This is the model for
-// any pure, synchronous, complex stdlib: delegate to the host, marshal at the edge.
-export function regexHost() {
+// The host side of the delegated stdlib: pure, synchronous, complex operations
+// (regex, BigInt) handed to the platform's own RegExp / BigInt instead of being
+// hand-rolled in wasm. Each import reads its operands out of the instance's linear
+// memory, runs the real operation, and writes the result back through the bump
+// pointer. Bound to the instance's memory + table after instantiation (none of these
+// run during instantiation, so the late binding is safe). This is the model for any
+// pure, synchronous, complex stdlib: delegate to the host, marshal at the edge.
+export function stdlibHost() {
   let mem, table;
   const dv = () => new DataView(mem.buffer);
   const readStr = (d, t) => { const a = t & ~3, n = d.getInt32(a + 4, true); let s = ""; for (let i = 0; i < n; i++) s += String.fromCharCode(d.getUint8(a + 8 + i)); return s; };
   const allocStr = (d, s) => { const b = d.getInt32(BUMP_ADDR, true); d.setInt32(b, STRTAG, true); d.setInt32(b + 4, s.length, true); for (let i = 0; i < s.length; i++) d.setUint8(b + 8 + i, s.charCodeAt(i) & 0xff); d.setInt32(BUMP_ADDR, b + 8 + ((s.length + 3) & ~3), true); return b | 1; };
   const allocArr = (d, items) => { const cap = Math.max(items.length, 1), bk = d.getInt32(BUMP_ADDR, true); d.setInt32(bk, cap, true); for (let i = 0; i < items.length; i++) d.setInt32(bk + 4 + i * 4, items[i], true); const h = bk + (cap + 1) * 4; d.setInt32(h, ARRTAG, true); d.setInt32(h + 4, items.length, true); d.setInt32(h + 8, bk, true); d.setInt32(BUMP_ADDR, h + 12, true); return h | 1; };
   const readRe = (d, p) => { const a = p & ~3; return new RegExp(readStr(d, d.getInt32(a + 4, true)), readStr(d, d.getInt32(a + 8, true))); };
+  // BigInt marshaling: [BIGTAG, sign, nlimbs, ...limbs] <-> a JS BigInt.
+  const isBig = (d, t) => (t & 1) === 1 && (t & ~3) >= HEAP_BASE && d.getInt32(t & ~3, true) === BIGTAG;
+  const isStr = (d, t) => (t & 1) === 1 && (t & ~3) >= HEAP_BASE && d.getInt32(t & ~3, true) === STRTAG;
+  const readBig = (d, t) => { const a = t & ~3, sign = d.getInt32(a + 4, true), n = d.getInt32(a + 8, true); let v = 0n; for (let i = n - 1; i >= 0; i--) v = (v << 32n) | BigInt(d.getUint32(a + 12 + i * 4, true)); return sign ? -v : v; };
+  const writeBig = (d, val) => {
+    const neg = val < 0n; let x = neg ? -val : val; const limbs = [];
+    while (x > 0n) { limbs.push(Number(x & 0xffffffffn) >>> 0); x >>= 32n; }
+    const b = d.getInt32(BUMP_ADDR, true);
+    d.setInt32(b, BIGTAG, true); d.setInt32(b + 4, neg ? 1 : 0, true); d.setInt32(b + 8, limbs.length, true);
+    for (let i = 0; i < limbs.length; i++) d.setUint32(b + 12 + i * 4, limbs[i], true);
+    d.setInt32(BUMP_ADDR, b + 12 + limbs.length * 4, true);
+    return b | 1;
+  };
+  const readNum = (d, t) => ((t & 1) === 0 ? t >> 1 : d.getFloat64((t & ~3) + 4, true)); // a fixnum or a boxed double
+  const BINOP = { // every binary/unary op the compiler delegates (BIGOPS); unary inc/neg ignore y
+    [BIGOPS.add]: (x, y) => x + y, [BIGOPS.sub]: (x, y) => x - y, [BIGOPS.mul]: (x, y) => x * y,
+    [BIGOPS.div]: (x, y) => x / y, [BIGOPS.mod]: (x, y) => x % y, [BIGOPS.pow]: (x, y) => x ** y,
+    [BIGOPS.and]: (x, y) => x & y, [BIGOPS.or]: (x, y) => x | y, [BIGOPS.xor]: (x, y) => x ^ y,
+    [BIGOPS.shl]: (x, y) => x << y, [BIGOPS.shr]: (x, y) => x >> y, [BIGOPS.inc]: (x) => x + 1n, [BIGOPS.neg]: (x) => -x,
+  };
   const imports = {
     __re_test: (re, str) => { const d = dv(); return readRe(d, re).test(readStr(d, str)) ? TRUE : FALSE; },
     __re_match: (re, str) => { const d = dv(); const m = readStr(d, str).match(readRe(d, re)); if (m === null) return NULL; return allocArr(d, m.map((x) => (x == null ? UNDEF : allocStr(d, x)))); },
@@ -144,6 +172,22 @@ export function regexHost() {
       if (isFn) { const f = table.get(d.getInt32((repl & ~3) + 4, true)); out = s.replace(rx, (mm) => { const mp = allocStr(dv(), mm), args = [repl, mp]; while (args.length < f.length) args.push(UNDEF); return readStr(dv(), f(...args)); }); } // host drives the loop, calls back into the wasm closure per match
       else { const r = readStr(d, repl); out = s.replace(rx, () => r); }
       return allocStr(dv(), out);
+    },
+    __big_bin: (op, a, b) => { const d = dv(); const r = BINOP[op](readBig(d, a), readBig(d, b)); return writeBig(dv(), r); }, // re-fetch dv: writeBig allocates
+    __big_cmp: (a, b) => { const d = dv(), x = readBig(d, a), y = readBig(d, b); return x < y ? -1 : x > y ? 1 : 0; },
+    __big_str: (a) => { const d = dv(); return allocStr(dv(), readBig(d, a).toString()); },
+    __big_from: (taggedInt) => { const d = dv(); return writeBig(d, BigInt(taggedInt >> 1)); }, // BigInt(fixnum)
+    __big_eq: (a, b) => { // loose ==: bigint vs bigint / number / numeric string, else value-equal strings, else identical bits
+      if (a === b) return 1;
+      const d = dv(), ab = isBig(d, a), bb = isBig(d, b);
+      if (ab || bb) {
+        if (ab && bb) return readBig(d, a) === readBig(d, b) ? 1 : 0;
+        const big = ab ? readBig(d, a) : readBig(d, b), other = ab ? b : a;
+        if (isStr(d, other)) { try { return big === BigInt(readStr(d, other)) ? 1 : 0; } catch { return 0; } } // "1" == 1n
+        const nv = readNum(d, other);                                  // a fixnum or boxed double
+        return Number.isInteger(nv) && big === BigInt(nv) ? 1 : 0;      // a bigint never loosely equals a non-integer
+      }
+      return isStr(d, a) && isStr(d, b) && readStr(d, a) === readStr(d, b) ? 1 : 0;
     },
   };
   return { imports, bind: (inst) => { mem = inst.exports.memory; table = inst.exports.__table; } };
@@ -184,8 +228,9 @@ export function readValue(memory, v) {
   }
   if (dv.getInt32(addr, true) === FLOATTAG) return dv.getFloat64(addr + 4, true);
   if (dv.getInt32(addr, true) === BIGTAG) {
-    let v = 0n; for (let i = dv.getInt32(addr + 4, true) - 1; i >= 0; i--) v = (v << 32n) | BigInt(dv.getUint32(addr + 8 + i * 4, true));
-    return v;
+    const sign = dv.getInt32(addr + 4, true), n = dv.getInt32(addr + 8, true);
+    let v = 0n; for (let i = n - 1; i >= 0; i--) v = (v << 32n) | BigInt(dv.getUint32(addr + 12 + i * 4, true));
+    return sign ? -v : v;
   }
   if (dv.getInt32(addr, true) === REGEXTAG) {
     const rd = (t) => { const a = t & ~3, n = dv.getInt32(a + 4, true); let s = ""; for (let i = 0; i < n; i++) s += String.fromCharCode(dv.getUint8(a + 8 + i)); return s; };
@@ -321,15 +366,16 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
     out.push(m.local.set(slot, m.i32.or(get(slot), m.i32.const(1))));
     return out;
   };
-  // Build a bigint [BIGTAG, nlimbs, ...limbs] into local `slot` from a JS BigInt
-  // literal (non-negative magnitude; base-2^32 little-endian).
+  // Build a bigint [BIGTAG, sign, nlimbs, ...limbs] into local `slot` from a JS
+  // BigInt literal (base-2^32 little-endian magnitude; sign 0/1). Every operation
+  // on it is then delegated to the host (stdlibHost) — this only lays out the cell.
   const buildBigInto = (slot, val) => {
-    let x = val < 0n ? -val : val; const limbs = [];
+    const neg = val < 0n; let x = neg ? -val : val; const limbs = [];
     while (x > 0n) { limbs.push(Number(x & 0xffffffffn) | 0); x >>= 32n; }
     const out = [m.local.set(slot, m.i32.load(0, 4, m.i32.const(BUMP_ADDR))),
-      m.i32.store(0, 4, get(slot), m.i32.const(BIGTAG)), m.i32.store(4, 4, get(slot), m.i32.const(limbs.length))];
-    for (let k = 0; k < limbs.length; k++) out.push(m.i32.store(8 + k * 4, 4, get(slot), m.i32.const(limbs[k])));
-    out.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(slot), m.i32.const(8 + limbs.length * 4))));
+      m.i32.store(0, 4, get(slot), m.i32.const(BIGTAG)), m.i32.store(4, 4, get(slot), m.i32.const(neg ? 1 : 0)), m.i32.store(8, 4, get(slot), m.i32.const(limbs.length))];
+    for (let k = 0; k < limbs.length; k++) out.push(m.i32.store(12 + k * 4, 4, get(slot), m.i32.const(limbs[k])));
+    out.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(slot), m.i32.const(12 + limbs.length * 4))));
     out.push(m.local.set(slot, m.i32.or(get(slot), m.i32.const(1))));
     return out;
   };
@@ -371,8 +417,8 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
       return floats ? m.if(bothInt(), bool(ci(a(), b())), m.call(cf, [a(), b()], I32)) : bool(ci(a(), b()));
     };
     if (bigs) {                                                                                // bigint operands (JS forbids mixing with Number, so checking a suffices)
-      const bf = { "+": "__bigadd", "*": "__bigmul", "/": "__bigdiv" }[op];
-      const bigE = bf ? m.call(bf, [a(), b()], I32) : cmpSym[op] ? bool(cmpSym[op](m.call("__bigcmp", [a(), b()], I32))) : null;
+      const bc = { "+": BIGOPS.add, "-": BIGOPS.sub, "*": BIGOPS.mul, "/": BIGOPS.div }[op];   // delegated to the host's BigInt
+      const bigE = bc !== undefined ? m.call("__big_bin", [m.i32.const(bc), a(), b()], I32) : cmpSym[op] ? bool(cmpSym[op](m.call("__big_cmp", [a(), b()], I32))) : null;
       if (bigE) return m.if(isBigE(a), bigE, num());
     }
     return num();
@@ -439,20 +485,20 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
         case "BIN": {                          // tsc.mjs binary op. With strings present, + and === are polymorphic (JS semantics)
           h -= 2; const sa = scratch(h), sb = scratch(h + 1), op = ins[1];
           const a = () => get(sa), b = () => get(sb); let e;                  // thunks: a fresh local.get per use (no IR-node sharing)
-          const big = (fn, intExpr) => bigs ? m.if(isBigE(a), m.call(fn, [a(), b()], I32), intExpr) : intExpr; // bigint dispatch, else the integer op
+          const big = (code, intExpr) => bigs ? m.if(isBigE(a), m.call("__big_bin", [m.i32.const(code), a(), b()], I32), intExpr) : intExpr; // delegate to the host's BigInt, else the integer op
           if (op === "+" || op === "-" || op === "*" || op === "/" || op === "<" || op === "<=" || op === ">" || op === ">=") e = arith(op, a, b);
           else if (op === "===") e = (strings || floats || bigs) ? bool(m.call("__eq", [a(), b()], I32)) : bool(m.i32.eq(a(), b())); // __eq: strings/floats/bigints by value
           else if (op === "!==") e = (strings || floats || bigs) ? bool(m.i32.eqz(m.call("__eq", [a(), b()], I32))) : bool(m.i32.ne(a(), b()));
-          else if (op === "==") e = bigs ? bool(m.call("__looseeq", [a(), b()], I32)) : (strings || floats) ? bool(m.call("__eq", [a(), b()], I32)) : bool(m.i32.eq(a(), b())); // loose: bigint vs number compares values
-          else if (op === "!=") e = bigs ? bool(m.i32.eqz(m.call("__looseeq", [a(), b()], I32))) : (strings || floats) ? bool(m.i32.eqz(m.call("__eq", [a(), b()], I32))) : bool(m.i32.ne(a(), b()));
-          else if (op === "**") { if (!bigs) throw new Error("aot: ** on numbers not yet supported"); e = m.if(isBigE(a), m.call("__bigpow", [a(), b()], I32), m.i32.const(UNDEF)); }
-          // bitwise: tagged ints distribute over & | ^ and (signed) %; shifts untag the amount and re-tag.
-          else if (op === "&") e = big("__bigand", m.i32.and(a(), b()));
-          else if (op === "|") e = big("__bigor", m.i32.or(a(), b()));
-          else if (op === "^") e = big("__bigxor", m.i32.xor(a(), b()));
-          else if (op === "%") e = big("__bigmod", m.i32.rem_s(a(), b()));
-          else if (op === "<<") e = big("__bigshl", m.i32.shl(a(), m.i32.shr_s(b(), m.i32.const(1))));
-          else if (op === ">>") e = m.i32.shl(m.i32.shr_s(m.i32.shr_s(a(), m.i32.const(1)), m.i32.shr_s(b(), m.i32.const(1))), m.i32.const(1));
+          else if (op === "==") e = bigs ? bool(m.call("__big_eq", [a(), b()], I32)) : (strings || floats) ? bool(m.call("__eq", [a(), b()], I32)) : bool(m.i32.eq(a(), b())); // loose: the host coerces bigint vs number/string
+          else if (op === "!=") e = bigs ? bool(m.i32.eqz(m.call("__big_eq", [a(), b()], I32))) : (strings || floats) ? bool(m.i32.eqz(m.call("__eq", [a(), b()], I32))) : bool(m.i32.ne(a(), b()));
+          else if (op === "**") { if (!bigs) throw new Error("aot: ** on numbers not yet supported"); e = m.if(isBigE(a), m.call("__big_bin", [m.i32.const(BIGOPS.pow), a(), b()], I32), m.i32.const(UNDEF)); }
+          // bitwise: tagged ints distribute over & | ^ and (signed) %; shifts untag the amount and re-tag. A bigint operand routes to the host.
+          else if (op === "&") e = big(BIGOPS.and, m.i32.and(a(), b()));
+          else if (op === "|") e = big(BIGOPS.or, m.i32.or(a(), b()));
+          else if (op === "^") e = big(BIGOPS.xor, m.i32.xor(a(), b()));
+          else if (op === "%") e = big(BIGOPS.mod, m.i32.rem_s(a(), b()));
+          else if (op === "<<") e = big(BIGOPS.shl, m.i32.shl(a(), m.i32.shr_s(b(), m.i32.const(1))));
+          else if (op === ">>") e = big(BIGOPS.shr, m.i32.shl(m.i32.shr_s(m.i32.shr_s(a(), m.i32.const(1)), m.i32.shr_s(b(), m.i32.const(1))), m.i32.const(1)));
           else if (op === ">>>") e = m.i32.shl(m.i32.shr_u(m.i32.shr_s(a(), m.i32.const(1)), m.i32.shr_s(b(), m.i32.const(1))), m.i32.const(1));
           else throw new Error("aot: unsupported BIN " + op);
           stmts.push(m.local.set(scratch(h), e)); h++; break;
@@ -594,7 +640,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
           h++; break;
         }
         case "ISARRAY": stmts.push(m.local.set(scratch(h - 1), bool(isArr(scratch(h - 1))))); break; // Array.isArray, lowered by the HOF inliner
-        case "TOBIG": stmts.push(m.local.set(scratch(h - 1), m.call("__tobig", [get(scratch(h - 1))], I32))); break; // BigInt(intValue)
+        case "TOBIG": stmts.push(m.local.set(scratch(h - 1), m.call("__big_from", [get(scratch(h - 1))], I32))); break; // BigInt(intValue) -> host BigInt
         case "GLOBAL": stmts.push(m.local.set(scratch(h), m.i32.const(UNDEF))); h++; break;          // stdlib namespace (Math/Number/Array): a placeholder receiver — CALLM/CALLMS dispatch on the static method name
         case "CALLM": {                        // host method on a stdlib namespace: dispatch at compile time on the method name (the receiver is the GLOBAL placeholder)
           const mname = ins[1], n = ins[2]; h -= n + 1;       // stack: [recv, arg0..arg_{n-1}]
@@ -630,7 +676,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
             case "slice": res = m.call("__slice", [get(scratch(h)), a(0), n >= 2 ? a(1) : m.i32.shl(m.i32.load(4, 4, m.i32.and(get(scratch(h)), m.i32.const(~3))), m.i32.const(1))], I32); break; // default end = length
             case "from": res = m.call("__arrayfrom", [a(0)], I32); break;                               // Array.from(arg0)
             case "flat": res = m.call("__arrflat", [get(scratch(h))], I32); break;                      // one-level flatten
-            case "toString": res = bigs ? m.if(isBigE(() => get(scratch(h))), m.call("__bigstr", [get(scratch(h))], I32), m.call("__tostr", [get(scratch(h))], I32)) : m.call("__tostr", [get(scratch(h))], I32); break; // bigint -> base-10, else number -> string
+            case "toString": res = bigs ? m.if(isBigE(() => get(scratch(h))), m.call("__big_str", [get(scratch(h))], I32), m.call("__tostr", [get(scratch(h))], I32)) : m.call("__tostr", [get(scratch(h))], I32); break; // bigint -> host base-10, else number -> string
             case "test": res = m.call("__re_test", [get(scratch(h)), a(0)], I32); break;                 // /re/.test(s): receiver is the regex, arg the string — delegated to the host RegExp
             case "match": res = m.call("__re_match", [a(0), get(scratch(h))], I32); break;              // s.match(/re/): receiver the string, arg the regex
             case "replace": res = m.call("__re_replace", [a(0), get(scratch(h)), a(1), m.i32.and(m.i32.eq(m.i32.and(a(1), m.i32.const(3)), m.i32.const(1)), m.i32.eq(m.i32.load(0, 4, m.i32.and(a(1), m.i32.const(0xfffc))), m.i32.const(CLOSTAG)))], I32); break; // s.replace(/re/, str|fn); the host calls back through the table for a fn
@@ -695,8 +741,12 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
         case "ARRGET": { h -= 2; const backing = m.i32.load(8, 4, m.i32.and(get(scratch(h)), m.i32.const(~3))); const idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1));
           stmts.push(m.local.set(scratch(h), m.i32.load(4, 4, m.i32.add(backing, m.i32.mul(idx, m.i32.const(4)))))); h++; break; } // arr[idx] = backing[idx]
         case "ARRLEN": stmts.push(m.local.set(scratch(h - 1), m.i32.shl(m.i32.load(4, 4, m.i32.and(get(scratch(h - 1)), m.i32.const(~3))), m.i32.const(1)))); break; // tagInt(length)
-        case "NEG": stmts.push(m.local.set(scratch(h - 1), floats ? m.if(m.i32.eqz(m.i32.and(get(scratch(h - 1)), m.i32.const(1))), m.i32.sub(m.i32.const(0), get(scratch(h - 1))), m.call("__negf", [get(scratch(h - 1))], I32)) : m.i32.sub(m.i32.const(0), get(scratch(h - 1))))); break; // -(n<<1) = (-n)<<1; a float/string coerces
-        case "INC": stmts.push(m.local.set(scratch(h - 1), bigs ? m.if(isBigE(() => get(scratch(h - 1))), m.call("__biginc", [get(scratch(h - 1))], I32), m.i32.add(get(scratch(h - 1)), m.i32.const(2))) : m.i32.add(get(scratch(h - 1)), m.i32.const(2)))); break; // ++ : tagged +1 (or +1n)
+        case "NEG": {                          // -(n<<1) = (-n)<<1; a float/string coerces; a bigint negates on the host
+          const v = () => get(scratch(h - 1));
+          const nonBig = floats ? m.if(m.i32.eqz(m.i32.and(v(), m.i32.const(1))), m.i32.sub(m.i32.const(0), v()), m.call("__negf", [v()], I32)) : m.i32.sub(m.i32.const(0), v());
+          stmts.push(m.local.set(scratch(h - 1), bigs ? m.if(isBigE(v), m.call("__big_bin", [m.i32.const(BIGOPS.neg), v(), v()], I32), nonBig) : nonBig)); break;
+        }
+        case "INC": stmts.push(m.local.set(scratch(h - 1), bigs ? m.if(isBigE(() => get(scratch(h - 1))), m.call("__big_bin", [m.i32.const(BIGOPS.inc), get(scratch(h - 1)), get(scratch(h - 1))], I32), m.i32.add(get(scratch(h - 1)), m.i32.const(2))) : m.i32.add(get(scratch(h - 1)), m.i32.const(2)))); break; // ++ : tagged +1 (or +1n on the host)
         case "DEC": stmts.push(m.local.set(scratch(h - 1), m.i32.sub(get(scratch(h - 1)), m.i32.const(2)))); break; // -- : tagged -1
         case "NOT": stmts.push(m.local.set(scratch(h - 1), bool(falsy(scratch(h - 1))))); break; // !x : true iff x is falsy
         case "BITNOT": stmts.push(m.local.set(scratch(h - 1), m.i32.sub(m.i32.const(-2), get(scratch(h - 1))))); break; // ~(2n) = 2(~n) = -2 - 2n
@@ -1121,246 +1171,6 @@ function addBuiltinRuntime(m, { spread, append, toarray, assignall, valueId, don
   ], binaryen.none));
 }
 
-// Runtime for BigInt (added when a program has a bigint literal or BigInt()). A
-// bigint is [BIGTAG, nlimbs, ...limbs] — a non-negative magnitude in base-2^32,
-// little-endian, normalized (no leading zero limbs; zero is nlimbs=0). The realts
-// surface is entirely non-negative, so sign is omitted. limb math uses i64.
-function addBigRuntime(m) {
-  const I32 = binaryen.i32, I64 = binaryen.i64;
-  const g = (i) => m.local.get(i, I32);
-  const gL = (i) => m.local.get(i, I64);
-  const c = (n) => m.i32.const(n);
-  const cL = (n) => m.i64.const(BigInt(n));                       // small unsigned i64 const (high word 0)
-  const ld = (off, p) => m.i32.load(off, 4, p);
-  const bump = () => m.i32.load(0, 4, c(BUMP_ADDR));
-  const setBump = (v) => m.i32.store(0, 4, c(BUMP_ADDR), v);
-  const lmb = (p, k) => m.i32.load(8, 4, m.i32.add(g(p), m.i32.mul(g(k), c(4))));   // limb k of bigint at raw addr in local p (k a local)
-  const lmbE = (p, ke) => m.i32.load(8, 4, m.i32.add(g(p), m.i32.mul(ke, c(4))));   // ...with k an expression
-  const setlmb = (p, ke, v) => m.i32.store(8, 4, m.i32.add(g(p), m.i32.mul(ke, c(4))), v);
-  const lo = (e) => m.i32.wrap(e);
-  const hi = (e) => m.i32.wrap(m.i64.shr_u(e, cL(32)));
-  const u64 = (e) => m.i64.extend_u(e);
-  const fn = (name, np, nl, body) => m.addFunction(name, binaryen.createType(new Array(np).fill(I32)), I32, nl, m.block(null, body, binaryen.none));
-  const raw = (i) => m.i32.and(g(i), c(~3));
-
-  // __bignorm(p): strip leading zero limbs at raw addr p, return p tagged. local 1=n
-  fn("__bignorm", 1, [I32], [
-    m.local.set(1, ld(4, g(0))),
-    m.loop("L", m.block(null, [m.if(m.i32.and(m.i32.gt_s(g(1), c(0)), m.i32.eqz(lmbE(0, m.i32.sub(g(1), c(1))))), m.block(null, [m.local.set(1, m.i32.sub(g(1), c(1))), m.br("L")]))])),
-    m.i32.store(4, 4, g(0), g(1)), m.return(m.i32.or(g(0), c(1))),
-  ]);
-
-  // __bigadd(a,b). params 0=a,1=b; locals 2=pa,3=pb,4=la,5=lb,6=n,7=i,8=p; i64 9=carry,10=s
-  fn("__bigadd", 2, [I32, I32, I32, I32, I32, I32, I32, I64, I64], [
-    m.local.set(2, raw(0)), m.local.set(3, raw(1)), m.local.set(4, ld(4, g(2))), m.local.set(5, ld(4, g(3))),
-    m.local.set(6, m.select(m.i32.gt_s(g(4), g(5)), g(4), g(5))),
-    m.local.set(8, bump()), m.i32.store(0, 4, g(8), c(BIGTAG)),
-    m.local.set(9, cL(0)), m.local.set(7, c(0)),
-    m.loop("L", m.block(null, [
-      m.if(m.i32.le_s(g(7), g(6)), m.block(null, [
-        m.local.set(10, m.i64.add(m.i64.add(
-          u64(m.select(m.i32.lt_s(g(7), g(4)), lmb(2, 7), c(0))),
-          u64(m.select(m.i32.lt_s(g(7), g(5)), lmb(3, 7), c(0)))), gL(9))),
-        setlmb(8, g(7), lo(gL(10))), m.local.set(9, m.i64.shr_u(gL(10), cL(32))),
-        m.local.set(7, m.i32.add(g(7), c(1))), m.br("L"),
-      ])),
-    ])),
-    m.i32.store(4, 4, g(8), m.i32.add(g(6), c(1))),
-    setBump(m.i32.add(g(8), m.i32.add(c(8), m.i32.mul(m.i32.add(g(6), c(1)), c(4))))),
-    m.return(m.call("__bignorm", [g(8)], I32)),
-  ]);
-
-  // __bigmul(a,b) schoolbook. params 0=a,1=b; locals 2=pa,3=pb,4=la,5=lb,6=p,7=i,8=j,9=nr; i64 10=carry,11=prod
-  fn("__bigmul", 2, [I32, I32, I32, I32, I32, I32, I32, I32, I64, I64], [
-    m.local.set(2, raw(0)), m.local.set(3, raw(1)), m.local.set(4, ld(4, g(2))), m.local.set(5, ld(4, g(3))),
-    m.local.set(9, m.i32.add(g(4), g(5))),
-    m.local.set(6, bump()), m.i32.store(0, 4, g(6), c(BIGTAG)),
-    m.local.set(7, c(0)), m.loop("Z", m.block(null, [m.if(m.i32.lt_s(g(7), g(9)), m.block(null, [setlmb(6, g(7), c(0)), m.local.set(7, m.i32.add(g(7), c(1))), m.br("Z")]))])),
-    m.local.set(7, c(0)),
-    m.loop("I", m.block(null, [
-      m.if(m.i32.lt_s(g(7), g(4)), m.block(null, [
-        m.local.set(10, cL(0)), m.local.set(8, c(0)),
-        m.loop("J", m.block(null, [
-          m.if(m.i32.lt_s(g(8), g(5)), m.block(null, [
-            m.local.set(11, m.i64.add(m.i64.add(m.i64.mul(u64(lmb(2, 7)), u64(lmb(3, 8))), u64(lmbE(6, m.i32.add(g(7), g(8))))), gL(10))),
-            setlmb(6, m.i32.add(g(7), g(8)), lo(gL(11))), m.local.set(10, m.i64.shr_u(gL(11), cL(32))),
-            m.local.set(8, m.i32.add(g(8), c(1))), m.br("J"),
-          ])),
-        ])),
-        setlmb(6, m.i32.add(g(7), g(5)), lo(gL(10))),
-        m.local.set(7, m.i32.add(g(7), c(1))), m.br("I"),
-      ])),
-    ])),
-    m.i32.store(4, 4, g(6), g(9)),
-    setBump(m.i32.add(g(6), m.i32.add(c(8), m.i32.mul(g(9), c(4))))),
-    m.return(m.call("__bignorm", [g(6)], I32)),
-  ]);
-
-  // Divide a by a single-limb divisor d -> quotient (returnRem 0) or remainder bigint
-  // (returnRem 1). params 0=a,1=d; locals 3=pa,4=la,5=i,6=p; i64 7=rem,8=cur
-  const divsmall = (name, returnRem) => fn(name, 2, [I32, I32, I32, I32, I32, I64, I64], [
-    m.local.set(3, raw(0)), m.local.set(4, ld(4, g(3))), m.local.set(7, cL(0)),
-    ...(returnRem ? [] : [m.local.set(6, bump()), m.i32.store(0, 4, g(6), c(BIGTAG))]),
-    m.local.set(5, m.i32.sub(g(4), c(1))),
-    m.loop("L", m.block(null, [
-      m.if(m.i32.ge_s(g(5), c(0)), m.block(null, [
-        m.local.set(8, m.i64.or(m.i64.shl(gL(7), cL(32)), u64(lmb(3, 5)))),
-        ...(returnRem ? [] : [setlmb(6, g(5), lo(m.i64.div_u(gL(8), u64(g(1)))))]),
-        m.local.set(7, m.i64.rem_u(gL(8), u64(g(1)))),
-        m.local.set(5, m.i32.sub(g(5), c(1))), m.br("L"),
-      ])),
-    ])),
-    ...(returnRem
-      ? [m.local.set(6, bump()), m.i32.store(0, 4, g(6), c(BIGTAG)), m.i32.store(4, 4, g(6), m.select(m.i64.eqz(gL(7)), c(0), c(1))), setlmb(6, c(0), lo(gL(7))), setBump(m.i32.add(g(6), c(12))), m.return(m.i32.or(g(6), c(1)))]
-      : [m.i32.store(4, 4, g(6), g(4)), setBump(m.i32.add(g(6), m.i32.add(c(8), m.i32.mul(g(4), c(4))))), m.return(m.call("__bignorm", [g(6)], I32))]),
-  ]);
-  divsmall("__bigdivq", 0);
-  divsmall("__bigdivr", 1);
-  // Division / mod by a one-limb divisor (every realts case). params 0=a,1=b
-  fn("__bigdiv", 2, [], [m.return(m.call("__bigdivq", [g(0), m.i32.load(8, 4, raw(1))], I32))]);
-  fn("__bigmod", 2, [], [m.return(m.call("__bigdivr", [g(0), m.i32.load(8, 4, raw(1))], I32))]);
-
-  // __bigcmp(a,b) -> -1/0/1. params 0=a,1=b; locals 2=pa,3=pb,4=la,5=lb,6=i
-  fn("__bigcmp", 2, [I32, I32, I32, I32, I32], [
-    m.local.set(2, raw(0)), m.local.set(3, raw(1)), m.local.set(4, ld(4, g(2))), m.local.set(5, ld(4, g(3))),
-    m.if(m.i32.ne(g(4), g(5)), m.return(m.select(m.i32.gt_s(g(4), g(5)), c(1), c(-1)))),
-    m.local.set(6, m.i32.sub(g(4), c(1))),
-    m.loop("L", m.block(null, [
-      m.if(m.i32.ge_s(g(6), c(0)), m.block(null, [
-        m.if(m.i32.ne(lmb(2, 6), lmb(3, 6)), m.return(m.select(m.i32.gt_u(lmb(2, 6), lmb(3, 6)), c(1), c(-1)))),
-        m.local.set(6, m.i32.sub(g(6), c(1))), m.br("L"),
-      ])),
-    ])),
-    m.return(c(0)),
-  ]);
-
-  // __looseeq(a,b) -> tagged bool for ==: a bigint compares by value against another
-  // bigint or a number; otherwise identical bits.
-  const isB = (i) => m.i32.and(m.i32.eq(m.i32.and(g(i), c(3)), c(1)), m.i32.eq(m.i32.load(0, 4, m.i32.and(g(i), c(0xfffc))), c(BIGTAG)));
-  const eq0 = (e) => m.select(m.i32.eqz(e), c(TRUE), c(FALSE));
-  fn("__looseeq", 2, [], [
-    m.if(m.i32.and(isB(0), isB(1)), m.return(eq0(m.call("__bigcmp", [g(0), g(1)], I32)))),
-    m.if(m.i32.and(isB(0), m.i32.eqz(m.i32.and(g(1), c(1)))), m.return(eq0(m.call("__bigcmp", [g(0), m.call("__tobig", [g(1)], I32)], I32)))),
-    m.if(m.i32.and(isB(1), m.i32.eqz(m.i32.and(g(0), c(1)))), m.return(eq0(m.call("__bigcmp", [m.call("__tobig", [g(0)], I32), g(1)], I32)))),
-    m.return(m.select(m.i32.eq(g(0), g(1)), c(TRUE), c(FALSE))),
-  ]);
-
-  // __bigfromu(x) -> bigint of unsigned i32 magnitude x. local 1=p
-  fn("__bigfromu", 1, [I32], [
-    m.local.set(1, bump()), m.i32.store(0, 4, g(1), c(BIGTAG)), m.i32.store(4, 4, g(1), m.select(m.i32.eqz(g(0)), c(0), c(1))),
-    m.i32.store(8, 4, g(1), g(0)), setBump(m.i32.add(g(1), c(12))), m.return(m.i32.or(g(1), c(1))),
-  ]);
-  fn("__tobig", 1, [], [m.return(m.call("__bigfromu", [m.i32.shr_s(g(0), c(1))], I32))]);
-  fn("__biginc", 1, [], [m.return(m.call("__bigadd", [g(0), m.call("__bigfromu", [c(1)], I32)], I32))]);
-
-  // __bigpow(a,e) -> a**e (e read as a small int). params 0=a,1=e; locals 2=base,3=expo,4=result
-  fn("__bigpow", 2, [I32, I32, I32], [
-    m.local.set(3, m.select(m.i32.eqz(ld(4, raw(1))), c(0), m.i32.load(8, 4, raw(1)))),
-    m.local.set(2, g(0)), m.local.set(4, m.call("__bigfromu", [c(1)], I32)),
-    m.loop("L", m.block(null, [
-      m.if(m.i32.gt_s(g(3), c(0)), m.block(null, [
-        m.if(m.i32.and(g(3), c(1)), m.local.set(4, m.call("__bigmul", [g(4), g(2)], I32))),
-        m.local.set(3, m.i32.shr_u(g(3), c(1))),
-        m.if(m.i32.gt_s(g(3), c(0)), m.local.set(2, m.call("__bigmul", [g(2), g(2)], I32))),
-        m.br("L"),
-      ])),
-    ])),
-    m.return(g(4)),
-  ]);
-
-  // __bigshl(a,e) -> a << e bits (e small). params 0=a,1=e; locals 2=pa,3=la,4=k,5=words,6=bits,7=p,8=nr,9=i; i64 10=acc
-  fn("__bigshl", 2, [I32, I32, I32, I32, I32, I32, I32, I32, I64], [
-    m.local.set(2, raw(0)), m.local.set(3, ld(4, g(2))),
-    m.local.set(4, m.select(m.i32.eqz(ld(4, raw(1))), c(0), m.i32.load(8, 4, raw(1)))),
-    m.local.set(5, m.i32.shr_u(g(4), c(5))), m.local.set(6, m.i32.and(g(4), c(31))),
-    m.local.set(8, m.i32.add(m.i32.add(g(3), g(5)), c(1))),
-    m.local.set(7, bump()), m.i32.store(0, 4, g(7), c(BIGTAG)),
-    m.local.set(9, c(0)), m.loop("Z", m.block(null, [m.if(m.i32.lt_s(g(9), g(8)), m.block(null, [setlmb(7, g(9), c(0)), m.local.set(9, m.i32.add(g(9), c(1))), m.br("Z")]))])),
-    m.local.set(9, c(0)),
-    m.loop("L", m.block(null, [
-      m.if(m.i32.lt_s(g(9), g(3)), m.block(null, [
-        m.local.set(10, m.i64.shl(u64(lmb(2, 9)), u64(g(6)))),
-        setlmb(7, m.i32.add(g(9), g(5)), m.i32.or(lmbE(7, m.i32.add(g(9), g(5))), lo(gL(10)))),
-        setlmb(7, m.i32.add(m.i32.add(g(9), g(5)), c(1)), m.i32.or(lmbE(7, m.i32.add(m.i32.add(g(9), g(5)), c(1))), hi(gL(10)))),
-        m.local.set(9, m.i32.add(g(9), c(1))), m.br("L"),
-      ])),
-    ])),
-    m.i32.store(4, 4, g(7), g(8)),
-    setBump(m.i32.add(g(7), m.i32.add(c(8), m.i32.mul(g(8), c(4))))),
-    m.return(m.call("__bignorm", [g(7)], I32)),
-  ]);
-
-  // Bitwise (non-negative, per-limb). params 0=a,1=b; locals 2=pa,3=pb,4=la,5=lb,6=n,7=p,8=i
-  const bitop = (name, opf, useMin) => fn(name, 2, [I32, I32, I32, I32, I32, I32, I32], [
-    m.local.set(2, raw(0)), m.local.set(3, raw(1)), m.local.set(4, ld(4, g(2))), m.local.set(5, ld(4, g(3))),
-    m.local.set(6, useMin ? m.select(m.i32.lt_s(g(4), g(5)), g(4), g(5)) : m.select(m.i32.gt_s(g(4), g(5)), g(4), g(5))),
-    m.local.set(7, bump()), m.i32.store(0, 4, g(7), c(BIGTAG)), m.local.set(8, c(0)),
-    m.loop("L", m.block(null, [
-      m.if(m.i32.lt_s(g(8), g(6)), m.block(null, [
-        setlmb(7, g(8), opf(m.select(m.i32.lt_s(g(8), g(4)), lmb(2, 8), c(0)), m.select(m.i32.lt_s(g(8), g(5)), lmb(3, 8), c(0)))),
-        m.local.set(8, m.i32.add(g(8), c(1))), m.br("L"),
-      ])),
-    ])),
-    m.i32.store(4, 4, g(7), g(6)), setBump(m.i32.add(g(7), m.i32.add(c(8), m.i32.mul(g(6), c(4))))),
-    m.return(m.call("__bignorm", [g(7)], I32)),
-  ]);
-  bitop("__bigand", (x, y) => m.i32.and(x, y), 1);
-  bitop("__bigor", (x, y) => m.i32.or(x, y), 0);
-  bitop("__bigxor", (x, y) => m.i32.xor(x, y), 0);
-
-  // __strlit1(byte) -> a one-char string.
-  fn("__strlit1", 1, [I32], [m.local.set(1, bump()), m.i32.store(0, 4, g(1), c(STRTAG)), m.i32.store(4, 4, g(1), c(1)), m.i32.store8(8, 1, g(1), g(0)), setBump(m.i32.add(g(1), c(12))), m.return(m.i32.or(g(1), c(1)))]);
-  // __emit9(str, len, chunk, top) -> new len: append `chunk` (top: no leading zeros;
-  // else exactly 9 digits). locals 4=buf,5=place,6=d,7=started
-  fn("__emit9", 4, [I32, I32, I32, I32], [
-    m.local.set(4, m.i32.add(g(0), c(8))), m.local.set(7, m.i32.eqz(g(3))),
-    m.local.set(5, c(100000000)),
-    m.loop("L", m.block(null, [
-      m.if(m.i32.gt_s(g(5), c(0)), m.block(null, [
-        m.local.set(6, m.i32.div_u(g(2), g(5))), m.local.set(2, m.i32.rem_u(g(2), g(5))),
-        m.if(m.i32.or(g(7), m.i32.ne(g(6), c(0))), m.block(null, [
-          m.i32.store8(0, 1, m.i32.add(g(4), g(1)), m.i32.add(g(6), c(48))), m.local.set(1, m.i32.add(g(1), c(1))), m.local.set(7, c(1)),
-        ])),
-        m.local.set(5, m.i32.div_u(g(5), c(10))), m.br("L"),
-      ])),
-    ])),
-    m.return(g(1)),
-  ]);
-  // __bigstr(a) -> base-10 string. params 0=a; locals 2=pa,3=la,4=work,5=i,6=nchunks,
-  // 7=chunks,9=chunk,10=str,11=slen; i64 12=rem,13=cur
-  fn("__bigstr", 1, [I32, I32, I32, I32, I32, I32, I32, I32, I32, I64, I64], [
-    m.local.set(2, raw(0)), m.local.set(3, ld(4, g(2))),
-    m.if(m.i32.eqz(g(3)), m.return(m.call("__strlit1", [c(48)], I32))),
-    m.local.set(4, bump()), m.local.set(5, c(0)),
-    m.loop("C", m.block(null, [m.if(m.i32.lt_s(g(5), g(3)), m.block(null, [m.i32.store(0, 4, m.i32.add(g(4), m.i32.mul(g(5), c(4))), lmb(2, 5)), m.local.set(5, m.i32.add(g(5), c(1))), m.br("C")]))])),
-    setBump(m.i32.add(g(4), m.i32.mul(g(3), c(4)))),
-    m.local.set(7, bump()), m.local.set(6, c(0)),
-    m.loop("D", m.block(null, [
-      m.local.set(10, m.i64.const(0n)), m.local.set(5, m.i32.sub(g(3), c(1))),  // rem=0, i=la-1
-      m.loop("Q", m.block(null, [m.if(m.i32.ge_s(g(5), c(0)), m.block(null, [
-        m.local.set(11, m.i64.or(m.i64.shl(gL(10), cL(32)), u64(m.i32.load(0, 4, m.i32.add(g(4), m.i32.mul(g(5), c(4))))))),
-        m.i32.store(0, 4, m.i32.add(g(4), m.i32.mul(g(5), c(4))), lo(m.i64.div_u(gL(11), cL(1000000000)))),
-        m.local.set(10, m.i64.rem_u(gL(11), cL(1000000000))),
-        m.local.set(5, m.i32.sub(g(5), c(1))), m.br("Q"),
-      ]))])),
-      m.i32.store(0, 4, m.i32.add(g(7), m.i32.mul(g(6), c(4))), lo(gL(10))), m.local.set(6, m.i32.add(g(6), c(1))),
-      m.loop("T", m.block(null, [m.if(m.i32.and(m.i32.gt_s(g(3), c(0)), m.i32.eqz(m.i32.load(0, 4, m.i32.add(g(4), m.i32.mul(m.i32.sub(g(3), c(1)), c(4)))))), m.block(null, [m.local.set(3, m.i32.sub(g(3), c(1))), m.br("T")]))])),
-      m.if(m.i32.gt_s(g(3), c(0)), m.br("D")),
-    ])),
-    setBump(m.i32.add(g(7), m.i32.mul(g(6), c(4)))),
-    m.local.set(9, bump()), m.i32.store(0, 4, g(9), c(STRTAG)), m.local.set(8, c(0)),
-    m.local.set(5, m.i32.sub(g(6), c(1))),
-    m.loop("E", m.block(null, [
-      m.if(m.i32.ge_s(g(5), c(0)), m.block(null, [
-        m.local.set(8, m.call("__emit9", [g(9), g(8), m.i32.load(0, 4, m.i32.add(g(7), m.i32.mul(g(5), c(4)))), m.i32.eq(g(5), m.i32.sub(g(6), c(1)))], I32)),
-        m.local.set(5, m.i32.sub(g(5), c(1))), m.br("E"),
-      ])),
-    ])),
-    m.i32.store(4, 4, g(9), g(8)), setBump(m.i32.add(g(9), m.i32.add(c(8), m.i32.and(m.i32.add(g(8), c(3)), c(~3))))),
-    m.return(m.i32.or(g(9), c(1))),
-  ]);
-}
-
 // Runtime for floating-point (added when a program has a non-integer number).
 // Numbers are coerced to f64, computed, then normalized back: a whole result in
 // tagged-int range becomes a fixnum, otherwise it is boxed [FLOATTAG, f64].
@@ -1546,8 +1356,8 @@ function addStringRuntime(m, floats, bigs) {
     m.if(m.i32.eq(g(0), g(1)), m.return(c(1))),                       // identical bits: fixnums, same pointer, same singleton
     ...(floats ? [m.if(m.i32.and(m.i32.and(m.i32.eq(m.i32.and(g(0), c(3)), c(1)), m.i32.eq(ld(0, addr(0)), c(FLOATTAG))), m.i32.and(m.i32.eq(m.i32.and(g(1), c(3)), c(1)), m.i32.eq(ld(0, addr(1)), c(FLOATTAG)))), // both boxed floats -> compare by value
       m.return(m.select(m.f64.eq(m.f64.load(4, 4, addr(0)), m.f64.load(4, 4, addr(1))), c(1), c(0))))] : []),
-    ...(bigs ? [m.if(m.i32.and(m.i32.and(m.i32.eq(m.i32.and(g(0), c(3)), c(1)), m.i32.eq(ld(0, addr(0)), c(BIGTAG))), m.i32.and(m.i32.eq(m.i32.and(g(1), c(3)), c(1)), m.i32.eq(ld(0, addr(1)), c(BIGTAG)))), // both bigints -> value compare
-      m.return(m.select(m.i32.eqz(m.call("__bigcmp", [g(0), g(1)], I32)), c(1), c(0))))] : []),
+    ...(bigs ? [m.if(m.i32.and(m.i32.and(m.i32.eq(m.i32.and(g(0), c(3)), c(1)), m.i32.eq(ld(0, addr(0)), c(BIGTAG))), m.i32.and(m.i32.eq(m.i32.and(g(1), c(3)), c(1)), m.i32.eq(ld(0, addr(1)), c(BIGTAG)))), // both bigints -> host value compare
+      m.return(m.select(m.i32.eqz(m.call("__big_cmp", [g(0), g(1)], I32)), c(1), c(0))))] : []),
     m.if(m.i32.eqz(m.i32.and(isStr(0), isStr(1))), m.return(c(0))),   // different and not both strings -> not equal
     m.local.set(2, ld(4, addr(0))),
     m.if(m.i32.ne(g(2), ld(4, addr(1))), m.return(c(0))),             // different lengths
@@ -2291,11 +2101,19 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && i[0] === "RES") arity[i[1]] = i[2] || 0;
   for (const res of resources) m.addFunctionImport(res, "env", res, binaryen.createType(new Array(arity[res] || 0).fill(binaryen.i32)), binaryen.i32);
   if (handles) m.addFunctionImport("__fetch", "env", "__fetch", binaryen.createType([binaryen.i32]), binaryen.i32); // §5 deref-miss suspends here
-  if (usesRegex) { // regex is delegated to the host's RegExp (regexHost provides these)
+  if (usesRegex) { // regex is delegated to the host's RegExp (stdlibHost provides these)
     const i2 = binaryen.createType([binaryen.i32, binaryen.i32]);
     m.addFunctionImport("__re_test", "env", "__re_test", i2, binaryen.i32);
     m.addFunctionImport("__re_match", "env", "__re_match", i2, binaryen.i32);
     m.addFunctionImport("__re_replace", "env", "__re_replace", binaryen.createType([binaryen.i32, binaryen.i32, binaryen.i32, binaryen.i32]), binaryen.i32);
+  }
+  if (usesBig) { // BigInt is delegated to the host's native BigInt (stdlibHost provides these)
+    const i1 = binaryen.createType([binaryen.i32]), i2 = binaryen.createType([binaryen.i32, binaryen.i32]), i3 = binaryen.createType([binaryen.i32, binaryen.i32, binaryen.i32]);
+    m.addFunctionImport("__big_bin", "env", "__big_bin", i3, binaryen.i32);   // (op, a, b) -> bigint
+    m.addFunctionImport("__big_cmp", "env", "__big_cmp", i2, binaryen.i32);   // (a, b) -> -1/0/1
+    m.addFunctionImport("__big_eq", "env", "__big_eq", i2, binaryen.i32);     // loose == -> 0/1
+    m.addFunctionImport("__big_str", "env", "__big_str", i1, binaryen.i32);   // -> base-10 string
+    m.addFunctionImport("__big_from", "env", "__big_from", i1, binaryen.i32); // BigInt(fixnum) -> bigint
   }
   // Closures call through a function table: every user function sits at its
   // program-order index, and a closure carries that index (MAKECLOSURE / CALLV).
@@ -2329,7 +2147,6 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   if (usesMapSet) addMapSetRuntime(m);
   if (uses("CALLMS", "APPENDALL", "TOARRAY", "ASSIGNALL")) addBuiltinRuntime(m, { spread: uses("CALLMS"), append: uses("APPENDALL"), toarray: uses("TOARRAY"), assignall: uses("ASSIGNALL"), valueId: usesGenerators ? keyIds.get("value") : null, doneId: usesGenerators ? keyIds.get("done") : null });
   if (usesFloat) addFloatRuntime(m);
-  if (usesBig) addBigRuntime(m);
   if (usesStrings) addStringRuntime(m, usesFloat, usesBig);
   if (usesReject) addPromiseRuntime(m);
   if (usesStrMeth) addStrMethRuntime(m, usesGenerators ? { value: keyIds.get("value"), done: keyIds.get("done") } : null);
