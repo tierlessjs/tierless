@@ -46,7 +46,7 @@ const CLSREG_BASE = 24;
 // the thrown value, in the ctrl region [0, 8). A throw with no local handler
 // sets these and returns; each call site checks the flag and unwinds. Cleared
 // when a handler catches, so it is 0 at any suspend point (no mid-throw migrate).
-const EXC_FLAG = 0, EXC_VALUE = 4;
+export const EXC_FLAG = 0, EXC_VALUE = 4; // exported so a host harness (e.g. the test262 runner) can detect an uncaught throw and read the thrown value
 // The count of arguments actually passed to the current call, at ctrl word 12 (the
 // gap between EXC_VALUE/BUMP_ADDR and the asyncify struct at 16). The uniform call
 // signature pads missing args with undefined, so this is how `arguments` and a

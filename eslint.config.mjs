@@ -13,6 +13,7 @@ export default [
       "**/*.wat",
       "**/*.wasm",
       "**/*.csv",
+      "test/test262/vendor/**", // fetched Test262 corpus (not ours to lint)
     ],
   },
   js.configs.recommended,

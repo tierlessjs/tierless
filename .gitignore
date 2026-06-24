@@ -6,3 +6,6 @@ src/wasm/interpreter.wasm
 # bench output
 bench-sweep.csv
 *.tsbuildinfo
+
+# fetched test262 corpus (vendored on demand by test/test262/fetch262.mjs)
+test/test262/vendor/
