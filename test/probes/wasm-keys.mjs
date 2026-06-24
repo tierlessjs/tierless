@@ -15,6 +15,9 @@ const programs = [
   ["for-in concatenates keys in insertion order", `function main() { const o = { x: 1, y: 2, z: 3 }; let s = ""; for (const k in o) { s += k; } return s; }`], // "xyz"
   ["for-in sums values by computed access", `function main() { const o = { a: 10, b: 20, c: 30 }; let s = 0; for (const k in o) { s += o[k]; } return s; }`], // 60
   ["Object.keys length", `function main() { const o = { a: 1, b: 2, c: 3, d: 4 }; return Object.keys(o).length; }`], // 4
+  ["a name that is a hidden method elsewhere is still an enumerable data key", `
+    class Adder { add(x) { return x + 1; } speak() { return "hi"; } }
+    function main() { const o = { add: new Adder().add(5), speak: "data", other: 9 }; return Object.keys(o).join(",") + "=" + o.add + "/" + o.speak; }`], // "add,speak,other=6/data" — add/speak are hidden methods on Adder but data keys here (per-object hiddenness)
   ["Object.values returns the values array", `function main() { return Object.values({ a: 1, b: 2, c: 3 }).join(","); }`], // "1,2,3"
   ["Object.keys and Object.values agree", `function main() { const o = { p: 10, q: 20 }; return Object.keys(o).join("") + "=" + (Object.values(o)[0] + Object.values(o)[1]); }`], // "pq=30"
   ["Object.keys joined", `function main() { const o = { first: 1, second: 2, third: 3 }; return Object.keys(o).join(","); }`], // "first,second,third"

@@ -65,7 +65,11 @@ const CLOSTAG = -2;
 // A string-keyed object: a stable header [OBJTAG, count, backing] plus a backing
 // store [cap, k0, v0, k1, v1, ...] of (internedKeyId, taggedValue) pairs. Keys
 // are interned to small ints at compile time, so property access is an id match.
-const OBJTAG = -3, INITCAP_OBJ = 2;
+// A non-enumerable (SETHIDDEN) pair stores its key with HIDDEN_FLAG set — so
+// hiddenness is PER PAIR, not per key id: a name can be a hidden method on one
+// object and an enumerable data key on another (property matching masks the flag off,
+// enumeration skips pairs that have it).
+const OBJTAG = -3, INITCAP_OBJ = 2, HIDDEN_FLAG = 0x40000000;
 // A string: [STRTAG, byteLength, ...bytes] (one byte per char, padded to a word).
 // "+" and "===" become polymorphic — string-aware — through the runtime helpers.
 const STRTAG = -4;
@@ -286,7 +290,7 @@ export function readDeep(memory, v, keystr) {
     if (tag === OBJTAG) {
       const out = {}; seen.set(addr, out);
       const count = dv.getInt32(addr + 4, true), backing = dv.getInt32(addr + 8, true);
-      for (let i = 0; i < count; i++) { const key = keystr ? keystr(dv.getInt32(backing + 4 + 8 * i, true)) : null; if (key == null) continue; out[key] = rec(dv.getInt32(backing + 8 + 8 * i, true)); }
+      for (let i = 0; i < count; i++) { const raw = dv.getInt32(backing + 4 + 8 * i, true); if (raw & HIDDEN_FLAG) continue; const key = keystr ? keystr(raw & ~HIDDEN_FLAG) : null; if (key == null) continue; out[key] = rec(dv.getInt32(backing + 8 + 8 * i, true)); }
       return out;
     }
     if (tag === MAPTAG) {
@@ -667,8 +671,9 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
           const v = m.call("__getprop", [get(scratch(h - 1)), m.i32.const(keyIds.get(ins[1]))], I32);
           stmts.push(m.local.set(scratch(h - 1), v)); break;
         }
-        case "SETPROP": case "SETHIDDEN": {    // [obj, val] -> [obj]; obj.key = val (hidden = same store; non-enumerable only matters for reflection)
-          h -= 2; const r = m.call("__setprop", [get(scratch(h)), m.i32.const(keyIds.get(ins[1])), get(scratch(h + 1))], I32);
+        case "SETPROP": case "SETHIDDEN": {    // [obj, val] -> [obj]; obj.key = val. SETHIDDEN marks the pair non-enumerable (HIDDEN_FLAG) — per object, not per key id.
+          h -= 2; const kid = ins[0] === "SETHIDDEN" ? keyIds.get(ins[1]) | HIDDEN_FLAG : keyIds.get(ins[1]);
+          const r = m.call("__setprop", [get(scratch(h)), m.i32.const(kid), get(scratch(h + 1))], I32);
           stmts.push(m.local.set(scratch(h), r)); h++; break;
         }
         case "GETPROPA": {                     // accessor-aware read: fire a getter if obj.__accessors__[key].get exists
@@ -951,7 +956,7 @@ function addObjectRuntime(m, lenId, sizeId) {
     m.local.set(3, ld(8, g(2))), m.local.set(4, ld(4, g(2))), m.local.set(5, c(0)),
     m.loop("L", m.block(null, [
       m.if(m.i32.ge_u(g(5), g(4)), m.return(c(UNDEF))),            // i >= count -> undefined (missing key)
-      m.if(m.i32.eq(ld(4, pair(3, 5)), g(1)), m.return(ld(8, pair(3, 5)))), // key match -> value
+      m.if(m.i32.eq(m.i32.and(ld(4, pair(3, 5)), c(~HIDDEN_FLAG)), m.i32.and(g(1), c(~HIDDEN_FLAG))), m.return(ld(8, pair(3, 5)))), // key match (ignoring the hidden flag) -> value
       m.local.set(5, m.i32.add(g(5), c(1))), m.br("L"),
     ])),
     m.unreachable(),
@@ -963,7 +968,7 @@ function addObjectRuntime(m, lenId, sizeId) {
     m.block("append", [
       m.loop("L", m.block(null, [
         m.br_if("append", m.i32.ge_u(g(6), g(5))),                // no existing key -> append
-        m.if(m.i32.eq(ld(4, pair(4, 6)), g(1)), m.block(null, [st(8, pair(4, 6), g(2)), m.return(g(0))])), // overwrite in place
+        m.if(m.i32.eq(m.i32.and(ld(4, pair(4, 6)), c(~HIDDEN_FLAG)), m.i32.and(g(1), c(~HIDDEN_FLAG))), m.block(null, [st(8, pair(4, 6), g(2)), m.return(g(0))])), // overwrite in place (key match ignores the hidden flag; the stored flag is kept)
         m.local.set(6, m.i32.add(g(6), c(1))), m.br("L"),
       ])),
     ]),
@@ -985,7 +990,7 @@ function addObjectRuntime(m, lenId, sizeId) {
     m.local.set(2, m.i32.and(g(0), c(~3))), m.local.set(3, ld(8, g(2))), m.local.set(4, ld(4, g(2))), m.local.set(5, c(0)),
     m.loop("L", m.block(null, [
       m.if(m.i32.ge_u(g(5), g(4)), m.return(c(TRUE))),             // not found -> delete of a missing key is still true
-      m.if(m.i32.eq(ld(4, pair(3, 5)), g(1)), m.block(null, [
+      m.if(m.i32.eq(m.i32.and(ld(4, pair(3, 5)), c(~HIDDEN_FLAG)), m.i32.and(g(1), c(~HIDDEN_FLAG))), m.block(null, [
         m.memory.copy(m.i32.add(pair(3, 5), c(4)), m.i32.add(pair(3, 5), c(12)), m.i32.mul(m.i32.sub(m.i32.sub(g(4), g(5)), c(1)), c(8))), // shift pairs i+1.. (8 bytes earlier) onto i
         st(4, g(2), m.i32.sub(g(4), c(1))),                        // count--
         m.return(c(TRUE)),
@@ -1037,8 +1042,10 @@ function addKeysRuntime(m) {
     m.local.set(1, m.call("__newarr", [], I32)), m.local.set(2, ld(8, m.i32.and(g(0), c(~3)))), m.local.set(3, ld(4, m.i32.and(g(0), c(~3)))), m.local.set(4, c(0)),
     m.loop("L", m.block(null, [
       m.if(m.i32.ge_u(g(4), g(3)), m.return(g(1))),
-      m.local.set(5, m.call("__keystr", [ld(4, m.i32.add(g(2), m.i32.mul(g(4), c(8))))], I32)), // key id -> string (pair i key at backing + 8i + 4)
-      m.if(m.i32.ne(g(5), c(0)), m.drop(m.call("__arrpush", [g(1), g(5)], I32))),
+      m.if(m.i32.eqz(m.i32.and(ld(4, m.i32.add(g(2), m.i32.mul(g(4), c(8)))), c(HIDDEN_FLAG))), m.block(null, [ // enumerable pair (HIDDEN_FLAG clear)?
+        m.local.set(5, m.call("__keystr", [m.i32.and(ld(4, m.i32.add(g(2), m.i32.mul(g(4), c(8)))), c(~HIDDEN_FLAG))], I32)), // key id -> string
+        m.if(m.i32.ne(g(5), c(0)), m.drop(m.call("__arrpush", [g(1), g(5)], I32))),
+      ], binaryen.none)),
       m.local.set(4, m.i32.add(g(4), c(1))), m.br("L"),
     ])),
     m.unreachable(),
@@ -1054,7 +1061,7 @@ function addValuesRuntime(m) {
     m.local.set(1, m.call("__newarr", [], I32)), m.local.set(2, ld(8, m.i32.and(g(0), c(~3)))), m.local.set(3, ld(4, m.i32.and(g(0), c(~3)))), m.local.set(4, c(0)),
     m.loop("L", m.block(null, [
       m.if(m.i32.ge_u(g(4), g(3)), m.return(g(1))),
-      m.if(m.i32.ne(m.call("__keystr", [ld(4, m.i32.add(g(2), m.i32.mul(g(4), c(8))))], I32), c(0)), // enumerable? (key id resolves)
+      m.if(m.i32.eqz(m.i32.and(ld(4, m.i32.add(g(2), m.i32.mul(g(4), c(8)))), c(HIDDEN_FLAG))),       // enumerable pair?
         m.drop(m.call("__arrpush", [g(1), ld(8, m.i32.add(g(2), m.i32.mul(g(4), c(8))))], I32))),    // push the value
       m.local.set(4, m.i32.add(g(4), c(1))), m.br("L"),
     ])),
@@ -1128,12 +1135,15 @@ function addJsonRuntime(m) {
       m.local.set(2, lit("{")), m.local.set(3, ld(8, g(1))), m.local.set(4, ld(4, g(1))), m.local.set(5, c(0)), m.local.set(7, c(0)),
       m.loop("O", m.block(null, [
         m.if(m.i32.ge_s(g(5), g(4)), m.return(cc(g(2), lit("}")))),
-        m.local.set(6, m.call("__keystr", [ld(4, m.i32.add(g(3), m.i32.mul(g(5), c(8))))], I32)), // pair i key id -> string or 0
-        m.if(m.i32.ne(g(6), c(0)), m.block(null, [
-          m.if(g(7), m.local.set(2, cc(g(2), lit(",")))),
-          m.local.set(2, cc(cc(cc(g(2), m.call("__jsonquote", [g(6)], I32)), lit(":")), m.call("__jsonstr", [ld(8, m.i32.add(g(3), m.i32.mul(g(5), c(8))))], I32))),
-          m.local.set(7, c(1)),
-        ])),
+        m.local.set(6, ld(4, m.i32.add(g(3), m.i32.mul(g(5), c(8))))),         // raw stored key
+        m.if(m.i32.eqz(m.i32.and(g(6), c(HIDDEN_FLAG))), m.block(null, [        // enumerable pair (HIDDEN_FLAG clear)?
+          m.local.set(6, m.call("__keystr", [m.i32.and(g(6), c(~HIDDEN_FLAG))], I32)), // key id -> string or 0
+          m.if(m.i32.ne(g(6), c(0)), m.block(null, [
+            m.if(g(7), m.local.set(2, cc(g(2), lit(",")))),
+            m.local.set(2, cc(cc(cc(g(2), m.call("__jsonquote", [g(6)], I32)), lit(":")), m.call("__jsonstr", [ld(8, m.i32.add(g(3), m.i32.mul(g(5), c(8))))], I32))),
+            m.local.set(7, c(1)),
+          ])),
+        ], binaryen.none)),
         m.local.set(5, m.i32.add(g(5), c(1))), m.br("O"),
       ])),
     ], binaryen.none)),
@@ -1276,7 +1286,8 @@ function addBuiltinRuntime(m, { spread, append, toarray, assignall, valueId, don
     m.local.set(2, ld(8, m.i32.and(g(1), c(~3)))), m.local.set(3, ld(4, m.i32.and(g(1), c(~3)))), m.local.set(4, c(0)),
     m.loop("L", m.block(null, [
       m.if(m.i32.ge_s(g(4), g(3)), m.return(g(0))),
-      m.drop(m.call("__setprop", [g(0), ld(4, m.i32.add(g(2), m.i32.mul(g(4), c(8)))), ld(8, m.i32.add(g(2), m.i32.mul(g(4), c(8))))], I32)), // tgt[key_i] = val_i
+      m.if(m.i32.eqz(m.i32.and(ld(4, m.i32.add(g(2), m.i32.mul(g(4), c(8)))), c(HIDDEN_FLAG))),       // copy only enumerable pairs (spread / assign)
+        m.drop(m.call("__setprop", [g(0), ld(4, m.i32.add(g(2), m.i32.mul(g(4), c(8)))), ld(8, m.i32.add(g(2), m.i32.mul(g(4), c(8))))], I32))), // tgt[key_i] = val_i
       m.local.set(4, m.i32.add(g(4), c(1))), m.br("L"),
     ])),
     m.unreachable(),
@@ -2313,10 +2324,8 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   if (usesReject) addPromiseRuntime(m);
   if (usesStrMeth) addStrMethRuntime(m, usesGenerators ? { value: keyIds.get("value"), done: keyIds.get("done") } : null);
   const buildKeystr = usesKeys || usesJson || usesValues || (decode && usesObjects); // `decode` forces the id->string table so readDeep can name object keys; Object.values needs it to pick enumerable pairs
-  if (buildKeystr) { // __keystr: enumerable keys are those never set via SETHIDDEN (so __class__, instance methods, and __accessors__ are skipped)
-    const hidden = new Set();
-    for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && i[0] === "SETHIDDEN") hidden.add(i[1]);
-    addKeyStr(m, [...keyIds].filter(([k]) => !hidden.has(k)), keyIds.size, usesIndex); // usesIndex => the __keyid pool exists, so dynamic keys can be recovered
+  if (buildKeystr) { // __keystr maps EVERY key id -> its string; enumeration skips non-enumerable pairs by the per-pair HIDDEN_FLAG, so the same name can be a hidden method on one object and a data key on another
+    addKeyStr(m, [...keyIds], keyIds.size, usesIndex); // usesIndex => the __keyid pool exists, so dynamic keys can be recovered
     if (usesKeys) addKeysRuntime(m);
     if (usesValues) addValuesRuntime(m);
     if (usesJson) addJsonRuntime(m);
