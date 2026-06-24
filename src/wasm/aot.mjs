@@ -73,6 +73,11 @@ const STRTAG = -4;
 // function compiles to a trampoline (called normally, returns one of these) plus a
 // dispatch body (resumed by GENNEXT) that saves/restores its locals here at YIELD.
 const GENTAG = -5;
+// A rejected promise: [REJTAG, value]. Promise.reject(v) (MKREJECT) builds one;
+// awaiting it (AWAIT / Promise.all) throws v through the exception protocol. (In
+// this synchronous model a resolved promise is its value, so only rejection is
+// reified.)
+const REJTAG = -6;
 
 // Host-side array helpers: build/read a growable array in an instance's linear
 // memory (so resources can pass number[] across the boundary). Layout matches
@@ -139,11 +144,11 @@ function immediate(x) {
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
 }
 
-const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1, INDEX: -1, SETINDEX: -3, ISARRAY: 0, GLOBAL: 1, CALLMS: -1, APPENDALL: -1, ARGUMENTS: 1, GATHERREST: 0, TOARRAY: 0, ASSIGNALL: -1, DELPROP: 0, KEYS: 0, JSONSTR: -2 };
+const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1, INDEX: -1, SETINDEX: -3, ISARRAY: 0, GLOBAL: 1, CALLMS: -1, APPENDALL: -1, ARGUMENTS: 1, GATHERREST: 0, TOARRAY: 0, ASSIGNALL: -1, DELPROP: 0, KEYS: 0, JSONSTR: -2, AWAITALL: 0, MKREJECT: 0 };
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" || ins[0] === "CALLM" ? -ins[2] : ins[0] === "CALLG" ? 1 - ins[2] : DELTA[ins[0]] ?? 0;
 // Ops that run user code and can therefore propagate an exception — so a block ends
 // after one, and the next checks the pending-exception flag.
-const CALL_OPS = new Set(["CALL", "CALLV", "CALLMETHOD", "CALLDYN", "CALLVS", "GETPROPA", "SETPROPA", "GENNEXT", "GENTHROW"]);
+const CALL_OPS = new Set(["CALL", "CALLV", "CALLMETHOD", "CALLDYN", "CALLVS", "GETPROPA", "SETPROPA", "GENNEXT", "GENTHROW", "AWAIT", "AWAITALL"]);
 
 // Labeled asm -> instruction list with JMP/JMPF targets resolved to indices.
 function resolveLabels(rawCode) {
@@ -211,7 +216,7 @@ function blockHeights(code, leaders) {
   return { entryH: entry, maxAbs, blockHandler, entryHandler };
 }
 
-function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, exceptions, maxargs, needsArgc) {
+function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, exceptions, maxargs, needsArgc, reject) {
   const I32 = binaryen.i32;
   const argc = fn.argc || 0, nl = fn.nlocals;
   const code = resolveLabels(fn.code);
@@ -382,7 +387,9 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
         }
         case "TYPEOF": stmts.push(m.local.set(scratch(h - 1), m.call("__typeof", [get(scratch(h - 1))], I32))); break; // value -> type string
         case "ITER": break;                    // normalize an iterable -> iterator; a generator is already its own iterator (no-op)
-        case "AWAIT": break;                    // await of a plain value is identity (async between user functions is synchronous here)
+        case "AWAIT": if (reject) stmts.push(m.local.set(scratch(h - 1), m.call("__awaitchk", [get(scratch(h - 1))], I32))); break; // await: identity, but a rejected promise throws
+        case "AWAITALL": if (reject) stmts.push(m.local.set(scratch(h - 1), m.call("__awaitall", [get(scratch(h - 1))], I32))); break; // Promise.all: the resolved array (already on the stack), but a rejection throws
+        case "MKREJECT": stmts.push(m.local.set(scratch(h - 1), m.call("__mkreject", [get(scratch(h - 1))], I32))); break; // Promise.reject(v) -> a rejection cell
         case "CLSGET": {                       // class-object registry read: cached class object for a name, else undefined
           const at = m.i32.const(CLSREG_BASE + clsIds.get(ins[1]) * 4);
           stmts.push(m.local.set(scratch(h), m.i32.load(0, 4, at)));
@@ -807,6 +814,46 @@ function addJsonRuntime(m) {
       ])),
     ], binaryen.none)),
     m.return(lit("null")),                                                    // closures / class objects -> null (JS drops functions)
+  ], binaryen.none));
+}
+
+// Runtime for Promise.reject and awaiting a rejection (added when a program uses
+// MKREJECT). In this synchronous model a resolved promise is just its value, so
+// only a rejection is reified — a [REJTAG, value] cell — and awaiting it raises
+// the value through the exception protocol (EXC_FLAG/EXC_VALUE at ctrl 0/4).
+function addPromiseRuntime(m) {
+  const I32 = binaryen.i32;
+  const g = (i) => m.local.get(i, I32);
+  const c = (n) => m.i32.const(n);
+  const ld = (off, p) => m.i32.load(off, 4, p);
+  const st = (off, p, v) => m.i32.store(off, 4, p, v);
+  const bump = () => m.i32.load(0, 4, c(BUMP_ADDR));
+  const isRej = (i) => m.i32.and(m.i32.eq(m.i32.and(g(i), c(3)), c(1)), m.i32.eq(ld(0, m.i32.and(g(i), c(0xfffc))), c(REJTAG))); // a pointer to [REJTAG, ...]?
+  const raise = (valExpr) => [st(EXC_VALUE, c(0), valExpr), st(EXC_FLAG, c(0), c(1)), m.return(c(0))]; // set the pending exception, return a dummy
+
+  // __mkreject(v) -> [REJTAG, v] tagged.  local 1 = cell
+  m.addFunction("__mkreject", binaryen.createType([I32]), I32, [I32], m.block(null, [
+    m.local.set(1, bump()), st(0, g(1), c(REJTAG)), st(4, g(1), g(0)), m.i32.store(0, 4, c(BUMP_ADDR), m.i32.add(g(1), c(8))),
+    m.return(m.i32.or(g(1), c(1))),
+  ], binaryen.none));
+
+  // __awaitchk(v) -> v, or raise its value if v is a rejection.
+  m.addFunction("__awaitchk", binaryen.createType([I32]), I32, [I32], m.block(null, [
+    m.if(isRej(0), m.block(null, raise(ld(4, m.i32.and(g(0), c(~3)))), binaryen.none)),
+    m.return(g(0)),
+  ], binaryen.none));
+
+  // __awaitall(arr) -> arr, or raise the first element that is a rejection.
+  // params 0=arr; locals 1=backing,2=count,3=i,4=e
+  m.addFunction("__awaitall", binaryen.createType([I32]), I32, [I32, I32, I32, I32], m.block(null, [
+    m.local.set(1, ld(8, m.i32.and(g(0), c(~3)))), m.local.set(2, ld(4, m.i32.and(g(0), c(~3)))), m.local.set(3, c(0)),
+    m.loop("L", m.block(null, [
+      m.if(m.i32.ge_s(g(3), g(2)), m.return(g(0))),
+      m.local.set(4, ld(4, m.i32.add(g(1), m.i32.mul(g(3), c(4))))),
+      m.if(isRej(4), m.block(null, raise(ld(4, m.i32.and(g(4), c(~3)))), binaryen.none)),
+      m.local.set(3, m.i32.add(g(3), c(1))), m.br("L"),
+    ])),
+    m.unreachable(),
   ], binaryen.none));
 }
 
@@ -1524,7 +1571,8 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const usesGenerators = gens.length > 0 || uses("GENNEXT", "YIELD"); // gen runtime + {value, done} objects
   const usesAccessors = uses("GETPROPA", "SETPROPA");      // getters/setters need the accessor runtime
   const usesIndex = uses("INDEX", "SETINDEX");             // computed member access -> the index runtime (+ key interning)
-  const usesExceptions = uses("THROW", "PUSHTRY");         // try/catch/throw: sentinel-return unwinding
+  const usesReject = uses("MKREJECT");                      // Promise.reject -> a rejection cell; awaiting it throws
+  const usesExceptions = uses("THROW", "PUSHTRY") || usesReject; // try/catch/throw: sentinel-return unwinding (a rejected await needs it too)
   const usesConstArray = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "PUSH" && Array.isArray(i[1])));
   const STRMETHS = new Set(["toUpperCase", "toLowerCase", "trim", "split", "slice", "join", "from", "charCodeAt", "charAt", "flat"]); // CALLM names handled by the string/array-method runtime
   const usesStrMeth = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CALLM" && STRMETHS.has(i[1])));
@@ -1574,12 +1622,13 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const needsArgc = uses("ARGUMENTS", "GATHERREST"); // `arguments` / rest params recover the real arg count from ARGC_ADDR
   for (const [name, fn] of Object.entries(program)) {
     if (gens.includes(name)) { emitGenTrampoline(m, name, fn, fnIndex[name + "$gen"], maxargs); compileGenBody(m, name + "$gen", fn, keyIds, fnIndex, maxargs); } // generator: trampoline + dispatch body
-    else compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings, clsIds, usesExceptions, maxargs, needsArgc);
+    else compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings, clsIds, usesExceptions, maxargs, needsArgc, usesReject);
   }
   if (usesArrays) addArrayRuntime(m);
   if (usesObjects) addObjectRuntime(m, keyIds.get("length"));
   if (uses("CALLMS", "APPENDALL", "TOARRAY", "ASSIGNALL")) addBuiltinRuntime(m, { spread: uses("CALLMS"), append: uses("APPENDALL"), toarray: uses("TOARRAY"), assignall: uses("ASSIGNALL"), valueId: usesGenerators ? keyIds.get("value") : null, doneId: usesGenerators ? keyIds.get("done") : null });
   if (usesStrings) addStringRuntime(m);
+  if (usesReject) addPromiseRuntime(m);
   if (usesStrMeth) addStrMethRuntime(m, usesGenerators ? { value: keyIds.get("value"), done: keyIds.get("done") } : null);
   if (usesKeys || usesJson) { // __keystr: enumerable keys are those never set via SETHIDDEN (so __class__, instance methods, and __accessors__ are skipped)
     const hidden = new Set();
