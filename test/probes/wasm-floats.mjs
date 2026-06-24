@@ -44,6 +44,12 @@ const programs = [
   ["a float joins inside an array", `function main() { return [1.5, 2.25, 3].join(","); }`],               // "1.5,2.25,3"
   ["rounding error shows the real digits", `function main() { return "" + (0.1 + 0.2); }`],                 // "0.30000000000000004"
   ["a tiny float uses exponent notation", `function main() { return "" + (1 / 8 / 1000000); }`],            // "1.25e-7"
+  // ** on numbers is Math.pow on the host, boxed back into the model (whole & in range -> fixnum).
+  ["integer exponent", `function main() { return 2 ** 10; }`],                                               // 1024
+  ["a fractional exponent (square root)", `function main() { return 2 ** 0.5; }`],                            // 1.4142135623730951
+  ["a fractional base", `function main() { return 1.5 ** 2; }`],                                              // 2.25
+  ["a negative exponent", `function main() { return 10 ** -1; }`],                                            // 0.1
+  ["a power past the fixnum range stays a number", `function main() { return 2 ** 53; }`],                    // 9007199254740992
 ];
 
 function interp(src) {

@@ -205,6 +205,7 @@ export function stdlibHost() {
       return isStr(d, a) && isStr(d, b) && readStr(d, a) === readStr(d, b) ? 1 : 0;
     },
     __num_str: (v) => { const d = dv(); return allocStr(dv(), String(d.getFloat64((v & ~3) + 4, true))); }, // a boxed double -> its JS string (shortest round-trip, exponent rules — the platform's own)
+    __num_pow: (a, b) => { const d = dv(), r = Math.pow(readNum(d, a), readNum(d, b)); return Number.isInteger(r) && Math.abs(r) < 0x40000000 ? r << 1 : allocFloat(dv(), r); }, // a ** b for numbers, normalized like __boxf
     __json_parse: (strPtr) => encode(JSON.parse(readStr(dv(), strPtr))), // the host's own JSON.parse, rebuilt in the heap via the exported constructors
   };
   return { imports, bind: (inst) => { mem = inst.exports.memory; table = inst.exports.__table; exp = inst.exports; } };
@@ -557,7 +558,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
           else if (op === "!==") e = (strings || floats || bigs) ? bool(m.i32.eqz(m.call("__eq", [a(), b()], I32))) : bool(m.i32.ne(a(), b()));
           else if (op === "==") e = bigs ? bool(m.call("__big_eq", [a(), b()], I32)) : (strings || floats) ? bool(m.call("__eq", [a(), b()], I32)) : bool(m.i32.eq(a(), b())); // loose: the host coerces bigint vs number/string
           else if (op === "!=") e = bigs ? bool(m.i32.eqz(m.call("__big_eq", [a(), b()], I32))) : (strings || floats) ? bool(m.i32.eqz(m.call("__eq", [a(), b()], I32))) : bool(m.i32.ne(a(), b()));
-          else if (op === "**") { if (!bigs) throw new Error("aot: ** on numbers not yet supported"); e = m.if(isBigE(a), m.call("__big_bin", [m.i32.const(BIGOPS.pow), a(), b()], I32), m.i32.const(UNDEF)); }
+          else if (op === "**") { const np = m.call("__num_pow", [a(), b()], I32); e = bigs ? m.if(isBigE(a), m.call("__big_bin", [m.i32.const(BIGOPS.pow), a(), b()], I32), np) : np; } // bigint ** bigint stays exact on the host; number ** number is Math.pow (host), boxed
           // bitwise: tagged ints distribute over & | ^ and (signed) %; shifts untag the amount and re-tag. A bigint operand routes to the host.
           else if (op === "&") e = big(BIGOPS.and, m.i32.and(a(), b()));
           else if (op === "|") e = big(BIGOPS.or, m.i32.or(a(), b()));
@@ -2161,10 +2162,12 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const hasNum = (pred) => Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && pred(i)));
   const usesBig = uses("TOBIG") || hasNum((i) => i[0] === "PUSH" && typeof i[1] === "bigint"); // a bigint literal or BigInt() -> the bignum runtime
   const numOp = new Set(["MUL", "SUB", "NEG", "LT", "LE", "GT", "GE"]);
+  const usesNumPow = hasNum((i) => i[0] === "BIN" && i[1] === "**"); // number ** number -> host Math.pow (result may be fractional/out-of-range -> the float runtime boxes it)
   const usesFloat = hasNum((i) => i[0] === "PUSH" && typeof i[1] === "number" && !Number.isInteger(i[1]))
     || hasNum((i) => i[0] === "BIN" && i[1] === "/")
     || (hasNum((i) => i[0] === "PUSH" && typeof i[1] === "string") && hasNum((i) => numOp.has(i[0]) || (i[0] === "BIN" && ["*", "-", "<", "<=", ">", ">="].includes(i[1]))))
-    || usesJsonParse; // a parsed JSON number can be a non-integer / out-of-fixnum-range double, so the float runtime (and float->string) must be present (also pulls in usesStrings below)
+    || usesJsonParse // a parsed JSON number can be a non-integer / out-of-fixnum-range double, so the float runtime (and float->string) must be present (also pulls in usesStrings below)
+    || usesNumPow;
   const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL", "ARGUMENTS", "GATHERREST", "TOARRAY", "KEYS") || usesConstArray || usesStrMeth || usesMapSet || usesJsonParse; // __class__ name lists build arrays; APPENDALL/ARGUMENTS/GATHERREST/split/from/TOARRAY/KEYS push; Map entries + init use arrays; JSON.parse builds arrays
   const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA", "ASSIGNALL", "KEYS") || usesClasses || usesGenerators || usesIndex; // instances, method dispatch, {value,done}, computed access, object spread
   const usesStrings = usesClasses || usesIndex || usesStrMeth || usesKeys || usesJson || usesMapSet || usesFloat || usesBig || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq); string methods + keys + json build strings; Map/Set compare keys via __eq; floats reuse __add/__concat; bigint toString/typeof
@@ -2200,6 +2203,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
     m.addFunctionImport("__big_from", "env", "__big_from", i1, binaryen.i32); // BigInt(fixnum) -> bigint
   }
   if (usesFloat && usesStrings) m.addFunctionImport("__num_str", "env", "__num_str", binaryen.createType([binaryen.i32]), binaryen.i32); // boxed double -> string (the host's Number->string); referenced only by __tostr, which exists only with strings
+  if (usesNumPow) m.addFunctionImport("__num_pow", "env", "__num_pow", binaryen.createType([binaryen.i32, binaryen.i32]), binaryen.i32); // number ** number -> Math.pow (host), boxed back into the value model
   if (usesJsonParse) m.addFunctionImport("__json_parse", "env", "__json_parse", binaryen.createType([binaryen.i32]), binaryen.i32); // JSON.parse(str) -> value tree (the host's own JSON.parse, rebuilt through the exported constructors below)
   // Closures call through a function table: every user function sits at its
   // program-order index, and a closure carries that index (MAKECLOSURE / CALLV).
