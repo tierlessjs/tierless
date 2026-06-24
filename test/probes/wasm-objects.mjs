@@ -34,6 +34,9 @@ const programs = [
     function mk(a, b) { return { lo: a, hi: b }; }
     function span(o) { return o.hi - o.lo; }
     function main() { return span(mk(3, 10)); }`],
+  ["delete removes a key", `function main() { const o = { a: 1, b: 2, c: 3 }; delete o.b; return (o.a || 0) + (o.b ? 100 : 0) + (o.c || 0); }`], // 4
+  ["delete returns true, even for a missing key", `function main() { const o = { x: 1 }; const r1 = delete o.x; const r2 = delete o.zzz; return (r1 ? 10 : 0) + (r2 ? 1 : 0) + (o.x ? 5 : 0); }`], // 11
+  ["delete the middle, the rest survive", `function main() { const o = { a: 1, b: 2, c: 3, d: 4 }; delete o.a; delete o.c; return o.b * 100 + o.d; }`], // 204
 ];
 
 function interp(src) {

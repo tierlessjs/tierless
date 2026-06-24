@@ -29,6 +29,8 @@ const programs = [
   ["Array.from copies an array", `function main() { const a = Array.from([5, 6, 7]); a[0] = 9; return a[0] * 100 + a.length; }`], // 903
   ["the slugify chain (trim/lower/split/join)", `function slugify(t) { return t.trim().toLowerCase().split(" ").join("-"); } function main() { return slugify("  Hello Big World  "); }`], // "hello-big-world"
   ["split then map then join", `function main() { return "1 2 3 4".split(" ").map((s) => s + "!").join(","); }`],        // "1!,2!,3!,4!"
+  ["Array.flat (one level)", `function main() { return [[1, 2], [3], [4, 5, 6]].flat().reduce((s, x) => s + x, 0); }`], // 21
+  ["flat then join, mixed elements", `function main() { return [1, [2, 3], 4].flat().join(","); }`],                    // "1,2,3,4"
 ];
 
 function interp(src) {

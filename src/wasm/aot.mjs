@@ -139,7 +139,7 @@ function immediate(x) {
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
 }
 
-const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1, INDEX: -1, SETINDEX: -3, ISARRAY: 0, GLOBAL: 1, CALLMS: -1, APPENDALL: -1, ARGUMENTS: 1, GATHERREST: 0, TOARRAY: 0, ASSIGNALL: -1 };
+const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1, INDEX: -1, SETINDEX: -3, ISARRAY: 0, GLOBAL: 1, CALLMS: -1, APPENDALL: -1, ARGUMENTS: 1, GATHERREST: 0, TOARRAY: 0, ASSIGNALL: -1, DELPROP: 0 };
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" || ins[0] === "CALLM" ? -ins[2] : ins[0] === "CALLG" ? 1 - ins[2] : DELTA[ins[0]] ?? 0;
 // Ops that run user code and can therefore propagate an exception — so a block ends
 // after one, and the next checks the pending-exception flag.
@@ -466,6 +466,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
             case "charAt": res = m.call("__strcharat", [get(scratch(h)), n >= 1 ? a(0) : m.i32.const(0)], I32); break;
             case "slice": res = m.call("__slice", [get(scratch(h)), a(0), n >= 2 ? a(1) : m.i32.shl(m.i32.load(4, 4, m.i32.and(get(scratch(h)), m.i32.const(~3))), m.i32.const(1))], I32); break; // default end = length
             case "from": res = m.call("__arrayfrom", [a(0)], I32); break;                               // Array.from(arg0)
+            case "flat": res = m.call("__arrflat", [get(scratch(h))], I32); break;                      // one-level flatten
             case "join": {
               let sep; if (n >= 1) sep = a(0); else { stmts.push(...buildStrInto(scratch(h + 1), ",")); sep = get(scratch(h + 1)); } // default separator ","
               res = m.call("__arrjoin", [get(scratch(h)), sep], I32); break;
@@ -519,6 +520,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
         case "NEWARR": stmts.push(m.local.set(scratch(h), m.call("__newarr", [], I32))); h++; break;
         case "ARRPUSH": { h -= 2; stmts.push(m.drop(m.call("__arrpush", [get(scratch(h)), get(scratch(h + 1))], I32))); break; } // arr.push(v)
         case "APPENDALL": { h -= 1; stmts.push(m.drop(m.call("__appendall", [get(scratch(h - 1)), get(scratch(h))], I32))); break; } // [...src]: spread src into the array below it
+        case "DELPROP": stmts.push(m.local.set(scratch(h - 1), m.call("__delprop", [get(scratch(h - 1)), m.i32.const(keyIds.get(ins[1]))], I32))); break; // delete obj.key -> true
         case "TOARRAY": stmts.push(m.local.set(scratch(h - 1), m.call("__toarray", [get(scratch(h - 1))], I32))); break; // array destructuring: materialize the iterable (identity for arrays)
         case "ASSIGNALL": { stmts.push(m.drop(m.call("__assignall", [get(scratch(h - 2)), get(scratch(h - 1))], I32))); h -= 1; break; } // {...src}: copy src's pairs into the target below it
         case "ARRGET": { h -= 2; const backing = m.i32.load(8, 4, m.i32.and(get(scratch(h)), m.i32.const(~3))); const idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1));
@@ -662,6 +664,23 @@ function addObjectRuntime(m, lenId) {
     st(4, pair(4, 5), g(1)), st(8, pair(4, 5), g(2)),             // backing pair[count] = (key, val)
     st(4, g(3), m.i32.add(g(5), c(1))),                           // count++
     m.return(g(0)),
+  ], binaryen.none));
+
+  // __delprop(obj, key) -> TRUE.  delete obj.key: find the pair, shift the rest
+  // down (pairs are contiguous from backing+4), decrement count. params 0=obj,
+  // 1=key; locals 2=addr,3=backing,4=count,5=i
+  m.addFunction("__delprop", binaryen.createType([I32, I32]), I32, [I32, I32, I32, I32], m.block(null, [
+    m.local.set(2, m.i32.and(g(0), c(~3))), m.local.set(3, ld(8, g(2))), m.local.set(4, ld(4, g(2))), m.local.set(5, c(0)),
+    m.loop("L", m.block(null, [
+      m.if(m.i32.ge_u(g(5), g(4)), m.return(c(TRUE))),             // not found -> delete of a missing key is still true
+      m.if(m.i32.eq(ld(4, pair(3, 5)), g(1)), m.block(null, [
+        m.memory.copy(m.i32.add(pair(3, 5), c(4)), m.i32.add(pair(3, 5), c(12)), m.i32.mul(m.i32.sub(m.i32.sub(g(4), g(5)), c(1)), c(8))), // shift pairs i+1.. (8 bytes earlier) onto i
+        st(4, g(2), m.i32.sub(g(4), c(1))),                        // count--
+        m.return(c(TRUE)),
+      ])),
+      m.local.set(5, m.i32.add(g(5), c(1))), m.br("L"),
+    ])),
+    m.unreachable(),
   ], binaryen.none));
 }
 
@@ -1032,6 +1051,28 @@ function addStrMethRuntime(m, genIds) {
     ]))));
   body.push(m.return(g(1)));
   fn("__arrayfrom", 1, 6, body);
+
+  // __arrflat(a) -> a new array flattened one level: an array element is spliced
+  // in, anything else is copied. params 0=a; locals 1=out,2=backing,3=len,4=i,
+  // 5=e,6=ib,7=il,8=j
+  fn("__arrflat", 1, 8, [
+    m.local.set(1, m.call("__newarr", [], I32)), m.local.set(2, ld(8, addr(0))), m.local.set(3, ld(4, addr(0))), m.local.set(4, c(0)),
+    m.loop("L", m.block(null, [
+      m.if(m.i32.ge_s(g(4), g(3)), m.return(g(1))),
+      m.local.set(5, ld(4, m.i32.add(g(2), m.i32.mul(g(4), c(4))))),                    // e = a[i]
+      m.if(m.i32.and(m.i32.eq(m.i32.and(g(5), c(3)), c(1)), m.i32.eq(ld(0, m.i32.and(g(5), c(0xfffc))), c(ARRTAG))), m.block(null, [ // e is an array -> splice
+        m.local.set(6, ld(8, m.i32.and(g(5), c(~3)))), m.local.set(7, ld(4, m.i32.and(g(5), c(~3)))), m.local.set(8, c(0)),
+        m.loop("I", m.block(null, [
+          m.if(m.i32.lt_s(g(8), g(7)), m.block(null, [
+            m.drop(m.call("__arrpush", [g(1), ld(4, m.i32.add(g(6), m.i32.mul(g(8), c(4))))], I32)),
+            m.local.set(8, m.i32.add(g(8), c(1))), m.br("I"),
+          ])),
+        ])),
+      ], binaryen.none), m.drop(m.call("__arrpush", [g(1), g(5)], I32))),                // else copy the element
+      m.local.set(4, m.i32.add(g(4), c(1))), m.br("L"),
+    ])),
+    m.unreachable(),
+  ]);
 }
 
 // Runtime helper for instanceof (added when a program uses ISA). A user class
@@ -1359,7 +1400,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const usesIndex = uses("INDEX", "SETINDEX");             // computed member access -> the index runtime (+ key interning)
   const usesExceptions = uses("THROW", "PUSHTRY");         // try/catch/throw: sentinel-return unwinding
   const usesConstArray = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "PUSH" && Array.isArray(i[1])));
-  const STRMETHS = new Set(["toUpperCase", "toLowerCase", "trim", "split", "slice", "join", "from", "charCodeAt", "charAt"]); // CALLM names handled by the string/array-method runtime
+  const STRMETHS = new Set(["toUpperCase", "toLowerCase", "trim", "split", "slice", "join", "from", "charCodeAt", "charAt", "flat"]); // CALLM names handled by the string/array-method runtime
   const usesStrMeth = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CALLM" && STRMETHS.has(i[1])));
   const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL", "ARGUMENTS", "GATHERREST", "TOARRAY") || usesConstArray || usesStrMeth; // __class__ name lists build arrays; APPENDALL/ARGUMENTS/GATHERREST/split/from/TOARRAY push
   const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA", "ASSIGNALL") || usesClasses || usesGenerators || usesIndex; // instances, method dispatch, {value,done}, computed access, object spread
@@ -1368,7 +1409,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   // Property and method keys are interned to small ints at compile time, so
   // GETPROP/SETPROP/SETHIDDEN/CALLMETHOD are id matches in the object runtime.
   const keyIds = new Map();
-  for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && (i[0] === "GETPROP" || i[0] === "SETPROP" || i[0] === "SETHIDDEN" || i[0] === "CALLMETHOD" || i[0] === "GETPROPA" || i[0] === "SETPROPA") && !keyIds.has(i[1])) keyIds.set(i[1], keyIds.size + 1);
+  for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && (i[0] === "GETPROP" || i[0] === "SETPROP" || i[0] === "SETHIDDEN" || i[0] === "CALLMETHOD" || i[0] === "GETPROPA" || i[0] === "SETPROPA" || i[0] === "DELPROP") && !keyIds.has(i[1])) keyIds.set(i[1], keyIds.size + 1);
   if (usesGenerators) for (const k of ["value", "done"]) if (!keyIds.has(k)) keyIds.set(k, keyIds.size + 1); // GENNEXT builds {value, done}
   if (usesAccessors) for (const k of ["__accessors__", "get", "set"]) if (!keyIds.has(k)) keyIds.set(k, keyIds.size + 1); // accessor lookups
   if (usesObjects && !keyIds.has("length")) keyIds.set("length", keyIds.size + 1);                          // __getprop dispatches array/string .length on this id
