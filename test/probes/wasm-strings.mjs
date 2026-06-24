@@ -16,6 +16,8 @@ import { BUMP_ADDR, HEAP_BASE, readValue, stdlibHost } from "#stackmix/wasm/aot.
 
 const programs = [
   ["string literal", `function main() { return "hello"; }`],
+  ["for-of over a string yields characters", `function main() { let r = ""; for (const ch of "hello") { r = ch + r; } return r; }`], // "olleh"
+  ["for-of over a string counts a predicate", `function main() { let v = 0; for (const c of "education") { if (c === "a" || c === "e" || c === "i" || c === "o" || c === "u") { v = v + 1; } } return v; }`], // 5
   ["concat two literals", `function main() { return "ab" + "cd"; }`],
   ["concat chain", `function main() { return "a" + "b" + "c" + "d"; }`],
   ["coerce a number on the right", `function main() { return "n=" + 5; }`],

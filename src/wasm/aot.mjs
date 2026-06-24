@@ -2104,6 +2104,14 @@ function addGenRuntime(m, valueKey, doneKey, mapSet) {
     m.local.set(3, m.call("__setprop", [g(3), c(doneKey), doneExpr], I32)),
     m.return(g(3)),
   ], binaryen.none);
+  // __char1(s, i) -> a one-char string of byte i of string s (for-of over a string).
+  m.addFunction("__char1", binaryen.createType([I32, I32]), I32, [I32], m.block(null, [
+    m.local.set(2, m.i32.load(0, 4, c(BUMP_ADDR))),
+    m.i32.store(0, 4, g(2), c(STRTAG)), m.i32.store(4, 4, g(2), c(1)),
+    m.i32.store8(8, 1, g(2), m.i32.load8_u(8, 1, m.i32.add(m.i32.and(g(0), c(~3)), g(1)))),
+    m.i32.store(0, 4, c(BUMP_ADDR), m.i32.add(g(2), c(12))),
+    m.return(m.i32.or(g(2), c(1))),
+  ], binaryen.none));
   // Resume the body once (mode 0 = next, 1 = throw); if it raised an uncaught
   // exception, propagate (the EXC flag is left set for the caller's check).
   const drive = (mode) => m.block(null, [
@@ -2126,6 +2134,7 @@ function addGenRuntime(m, valueKey, doneKey, mapSet) {
     m.if(m.i32.ne(m.i32.and(g(0), c(3)), c(1)), m.return(g(0))),                              // not a pointer -> as-is
     m.local.set(2, m.i32.load(0, 4, m.i32.and(g(0), c(0xfffc)))),
     m.if(m.i32.eq(g(2), c(ARRTAG)), mkIter(c(0))),
+    m.if(m.i32.eq(g(2), c(STRTAG)), mkIter(c(4))),                                            // for-of over a string -> per-char iterator
     ...(mapSet ? [m.if(m.i32.eq(g(2), c(SETTAG)), mkIter(c(0))), m.if(m.i32.eq(g(2), c(MAPTAG)), mkIter(c(1)))] : []),
     m.return(g(0)),                                                                           // generator / existing iterator
   ], binaryen.none));
@@ -2151,6 +2160,7 @@ function addGenRuntime(m, valueKey, doneKey, mapSet) {
           mkResult(g(7), c(FALSE)),
         ], binaryen.none)),
       ] : []),
+      m.if(m.i32.eq(g(7), c(4)), mkResult(m.call("__char1", [m.i32.load(4, 4, g(4)), g(6)], I32), c(FALSE))), // string chars
       mkResult(elem1(), c(FALSE)),                                                             // kind 0: stride-1 value
     ], binaryen.none)),
     drive(0),
