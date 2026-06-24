@@ -31,6 +31,8 @@ const programs = [
   ["Math.abs of a float", `function main() { return Math.abs(-3.5) + Math.abs(3.5); }`],                   // 7
   ["floor of a division (integer division idiom)", `function main() { return Math.floor(17 / 5); }`],      // 3
   ["float equality by value", `function main() { return (3.14 === 3.14) === (1.5 !== 2.5); }`],            // true
+  ["NaN is never === to itself, even the same box", `function main() { const a = 0 / 0; return (a === a ? 1 : 0) * 10 + (a !== a ? 1 : 0); }`], // 0*10 + 1 = 1 — strict equality compares NaN by value, not by pointer identity
+  ["NaN propagates through arithmetic and stays !==", `function main() { const x = (1 / 0) - (1 / 0); return x === x ? "eq" : "ne"; }`],          // "ne" (Infinity - Infinity is NaN)
   ["float comparison", `function main() { return (3.14 < 3.15 ? 1 : 0) + (2.5 >= 2.5 ? 10 : 0); }`],       // 11
   ["Number.isInteger discriminates", `function main() { return (Number.isInteger(5.5) ? 1 : 0) * 10 + (Number.isInteger(6 / 2) ? 1 : 0); }`], // 0*10 + 1 = 1
   ["typeof a float is number", `function main() { return typeof 3.14 === "number" ? 1 : 0; }`],            // 1

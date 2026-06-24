@@ -1501,9 +1501,13 @@ function addStringRuntime(m, floats, bigs) {
 
   // __eq(a, b) -> 0/1.  identical bits, or equal strings by value.  locals: 2=la,3=i
   m.addFunction("__eq", binaryen.createType([I32, I32]), I32, [I32, I32], m.block(null, [
-    m.if(m.i32.eq(g(0), g(1)), m.return(c(1))),                       // identical bits: fixnums, same pointer, same singleton
+    // Boxed floats compare BY VALUE first — before the identical-bits fast path —
+    // because NaN must never equal itself, even when both operands are the SAME
+    // pointer (`a === a` for a boxed NaN). f64.eq gives that for free (NaN != NaN),
+    // and a FLOATTAG box is always non-integer (whole values canonicalize to fixnums).
     ...(floats ? [m.if(m.i32.and(m.i32.and(m.i32.eq(m.i32.and(g(0), c(3)), c(1)), m.i32.eq(ld(0, addr(0)), c(FLOATTAG))), m.i32.and(m.i32.eq(m.i32.and(g(1), c(3)), c(1)), m.i32.eq(ld(0, addr(1)), c(FLOATTAG)))), // both boxed floats -> compare by value
       m.return(m.select(m.f64.eq(m.f64.load(4, 4, addr(0)), m.f64.load(4, 4, addr(1))), c(1), c(0))))] : []),
+    m.if(m.i32.eq(g(0), g(1)), m.return(c(1))),                       // identical bits: fixnums, same pointer, same singleton
     ...(bigs ? [m.if(m.i32.and(m.i32.and(m.i32.eq(m.i32.and(g(0), c(3)), c(1)), m.i32.eq(ld(0, addr(0)), c(BIGTAG))), m.i32.and(m.i32.eq(m.i32.and(g(1), c(3)), c(1)), m.i32.eq(ld(0, addr(1)), c(BIGTAG)))), // both bigints -> host value compare
       m.return(m.select(m.i32.eqz(m.call("__big_cmp", [g(0), g(1)], I32)), c(1), c(0))))] : []),
     m.if(m.i32.eqz(m.i32.and(isStr(0), isStr(1))), m.return(c(0))),   // different and not both strings -> not equal
