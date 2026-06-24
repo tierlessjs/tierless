@@ -86,6 +86,10 @@ const ITERTAG = -7;
 // ...] (entries, like an object but keys are values compared by __eq, not interned
 // ids), a Set backing is [cap, v0,v1,...] (so it iterates exactly like an array).
 const MAPTAG = -8, SETTAG = -9;
+// A boxed double: [FLOATTAG, f64]. Non-integer numbers (and ±Infinity/NaN) live
+// here; a whole-valued result in tagged-int range normalizes back to a fixnum so
+// === and the bitwise ops keep working. Integer arithmetic stays on the fast path.
+const FLOATTAG = -10;
 
 // Host-side array helpers: build/read a growable array in an instance's linear
 // memory (so resources can pass number[] across the boundary). Layout matches
@@ -140,6 +144,7 @@ export function readValue(memory, v) {
     for (let i = 0; i < len; i++) s += String.fromCharCode(dv.getUint8(addr + 8 + i));
     return s;
   }
+  if (dv.getInt32(addr, true) === FLOATTAG) return dv.getFloat64(addr + 4, true);
   return { ptr: addr };
 }
 // Map an IR PUSH literal to its tagged immediate (floats/strings: a later slice).
@@ -224,7 +229,7 @@ function blockHeights(code, leaders) {
   return { entryH: entry, maxAbs, blockHandler, entryHandler };
 }
 
-function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, exceptions, maxargs, needsArgc, reject, mapSet) {
+function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, exceptions, maxargs, needsArgc, reject, mapSet, floats) {
   const I32 = binaryen.i32;
   const argc = fn.argc || 0, nl = fn.nlocals;
   const code = resolveLabels(fn.code);
@@ -268,6 +273,27 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
     out.push(m.local.set(slot, m.i32.or(get(slot), m.i32.const(1))));
     return out;
   };
+  // Build a boxed double [FLOATTAG, f64] into local `slot` (for a non-integer literal).
+  const buildFloatInto = (slot, x) => [
+    m.local.set(slot, m.i32.load(0, 4, m.i32.const(BUMP_ADDR))),
+    m.i32.store(0, 4, get(slot), m.i32.const(FLOATTAG)), m.f64.store(4, 8, get(slot), m.f64.const(x)),
+    m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(slot), m.i32.const(12))),
+    m.local.set(slot, m.i32.or(get(slot), m.i32.const(1))),
+  ];
+  // Arithmetic / comparison with the integer fast path kept and a float (or string,
+  // for +) fallback when a non-fixnum operand is present. a, b are thunks (a fresh
+  // local.get each use). + and === concatenate / compare strings via __add / __eq.
+  const arith = (op, a, b) => {
+    const bothInt = () => m.i32.eqz(m.i32.and(m.i32.or(a(), b()), m.i32.const(1)));
+    const intAdd = () => m.i32.add(a(), b()), intSub = () => m.i32.sub(a(), b()), intMul = () => m.i32.mul(m.i32.shr_s(a(), m.i32.const(1)), b());
+    if (op === "/") return m.call("__divf", [a(), b()], I32);                                   // division is always float-shaped
+    if (op === "+") return (floats || strings) ? m.if(bothInt(), intAdd(), m.call("__add", [a(), b()], I32)) : intAdd();
+    if (op === "-") return floats ? m.if(bothInt(), intSub(), m.call("__subf", [a(), b()], I32)) : intSub();
+    if (op === "*") return floats ? m.if(bothInt(), intMul(), m.call("__mulf", [a(), b()], I32)) : intMul();
+    const ci = { "<": m.i32.lt_s, "<=": m.i32.le_s, ">": m.i32.gt_s, ">=": m.i32.ge_s }[op];
+    const cf = { "<": "__ltf", "<=": "__lef", ">": "__gtf", ">=": "__gef" }[op];
+    return floats ? m.if(bothInt(), bool(ci(a(), b())), m.call(cf, [a(), b()], I32)) : bool(ci(a(), b()));
+  };
   // Exception protocol helpers.
   const excFlag = () => m.i32.load(0, 4, m.i32.const(EXC_FLAG));                                // pending?
   const raise = (valSlot) => [m.i32.store(0, 4, m.i32.const(EXC_VALUE), get(valSlot)), m.i32.store(0, 4, m.i32.const(EXC_FLAG), m.i32.const(1))]; // set EXC_VALUE + flag (propagate)
@@ -298,6 +324,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
             }
             h++; break;
           }
+          if (typeof v === "number" && !Number.isInteger(v)) { stmts.push(...buildFloatInto(scratch(h), v)); h++; break; } // non-integer literal -> boxed double
           stmts.push(m.local.set(scratch(h), m.i32.const(immediate(v)))); h++; break; // tagged immediate
         }
         case "LOAD": stmts.push(m.local.set(scratch(h), get(loc(ins[1])))); h++; break;
@@ -310,17 +337,9 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
         case "DUP": stmts.push(m.local.set(scratch(h), get(scratch(h - 1)))); h++; break; // duplicate the operand-stack top
         case "POP": h--; break;
         case "ADD": case "SUB": case "MUL": case "LT": case "LE": case "GT": case "GE": {
-          h -= 2; const a = get(scratch(h)), b = get(scratch(h + 1));
-          // tagged ints: a+b / a-b are already correctly tagged (2n±2m = 2(n±m));
-          // MUL untags one operand ((a>>1)*b = 2nm); comparisons are monotonic on
-          // tagged ints, so compare directly then map the 0/1 to a tagged boolean.
-          const e = ins[0] === "ADD" ? m.i32.add(a, b) : ins[0] === "SUB" ? m.i32.sub(a, b)
-            : ins[0] === "MUL" ? m.i32.mul(m.i32.shr_s(a, m.i32.const(1)), b)
-            : ins[0] === "LT" ? bool(m.i32.lt_s(a, b))
-            : ins[0] === "LE" ? bool(m.i32.le_s(a, b))
-            : ins[0] === "GT" ? bool(m.i32.gt_s(a, b))
-            : bool(m.i32.ge_s(a, b));
-          stmts.push(m.local.set(scratch(h), e)); h++; break;
+          h -= 2; const sa = scratch(h), sb = scratch(h + 1);
+          const sym = { ADD: "+", SUB: "-", MUL: "*", LT: "<", LE: "<=", GT: ">", GE: ">=" }[ins[0]];
+          stmts.push(m.local.set(scratch(h), arith(sym, () => get(sa), () => get(sb)))); h++; break;
         }
         case "CALL": case "RES": {
           const ac = ins[2] || 0; h -= ac;
@@ -335,17 +354,9 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
         case "BIN": {                          // tsc.mjs binary op. With strings present, + and === are polymorphic (JS semantics)
           h -= 2; const sa = scratch(h), sb = scratch(h + 1), op = ins[1];
           const a = () => get(sa), b = () => get(sb); let e;                  // thunks: a fresh local.get per use (no IR-node sharing)
-          if (op === "+") e = strings                                         // numeric fast path when both are fixnums; else concat/coerce
-            ? m.if(m.i32.eqz(m.i32.and(m.i32.or(a(), b()), m.i32.const(1))), m.i32.add(a(), b()), m.call("__add", [a(), b()], I32))
-            : m.i32.add(a(), b());
-          else if (op === "-") e = m.i32.sub(a(), b());
-          else if (op === "*") e = m.i32.mul(m.i32.shr_s(a(), m.i32.const(1)), b());
-          else if (op === "<") e = bool(m.i32.lt_s(a(), b()));
-          else if (op === "<=") e = bool(m.i32.le_s(a(), b()));
-          else if (op === ">") e = bool(m.i32.gt_s(a(), b()));
-          else if (op === ">=") e = bool(m.i32.ge_s(a(), b()));
-          else if (op === "===" || op === "==") e = strings ? bool(m.call("__eq", [a(), b()], I32)) : bool(m.i32.eq(a(), b())); // __eq: strings by value
-          else if (op === "!==" || op === "!=") e = strings ? bool(m.i32.eqz(m.call("__eq", [a(), b()], I32))) : bool(m.i32.ne(a(), b()));
+          if (op === "+" || op === "-" || op === "*" || op === "/" || op === "<" || op === "<=" || op === ">" || op === ">=") e = arith(op, a, b);
+          else if (op === "===" || op === "==") e = strings || floats ? bool(m.call("__eq", [a(), b()], I32)) : bool(m.i32.eq(a(), b())); // __eq: strings/floats by value
+          else if (op === "!==" || op === "!=") e = strings || floats ? bool(m.i32.eqz(m.call("__eq", [a(), b()], I32))) : bool(m.i32.ne(a(), b()));
           // bitwise: tagged ints distribute over & | ^ and (signed) %; shifts untag the amount and re-tag.
           else if (op === "&") e = m.i32.and(a(), b());
           else if (op === "|") e = m.i32.or(a(), b());
@@ -497,12 +508,19 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
             for (let k = 1; k < n; k++) stmts.push(m.local.set(scratch(h), m.select(cmp(a(k), get(scratch(h))), a(k), get(scratch(h)))));
             h++; break;
           }
+          const F64 = binaryen.f64, numf = (e) => m.call("__numf", [e], F64), boxf = (e) => m.call("__boxf", [e], I32);
           let res;
+          if (floats && (mname === "abs" || mname === "floor" || mname === "ceil" || mname === "round" || mname === "trunc")) { // float-aware Math (a fixnum round-trips to itself)
+            const f = mname === "abs" ? m.f64.abs(numf(a(0))) : mname === "floor" ? m.f64.floor(numf(a(0))) : mname === "ceil" ? m.f64.ceil(numf(a(0)))
+              : mname === "round" ? m.f64.floor(m.f64.add(numf(a(0)), m.f64.const(0.5))) : m.f64.trunc(numf(a(0))); // round = floor(x + 0.5) (JS, not banker's)
+            stmts.push(m.local.set(scratch(h), boxf(f))); h++; break;
+          }
           switch (mname) {
             case "abs": res = m.select(m.i32.lt_s(a(0), m.i32.const(0)), m.i32.sub(m.i32.const(0), a(0)), a(0)); break; // |n<<1| = (|n|)<<1
             case "floor": case "ceil": case "round": case "trunc": res = a(0); break;                  // integer-valued model: identity
             case "sign": res = m.select(m.i32.lt_s(a(0), m.i32.const(0)), m.i32.const(immediate(-1)), m.select(m.i32.eqz(a(0)), m.i32.const(immediate(0)), m.i32.const(immediate(1)))); break;
-            case "isInteger": case "isFinite": res = bool(m.i32.eqz(m.i32.and(a(0), m.i32.const(1)))); break; // a tagged int has low bit 0
+            case "isInteger": res = floats ? m.call("__isintf", [a(0)], I32) : bool(m.i32.eqz(m.i32.and(a(0), m.i32.const(1)))); break; // a fixnum is integer; a boxed float iff whole
+            case "isFinite": res = bool(m.i32.eqz(m.i32.and(a(0), m.i32.const(1)))); break; // a tagged int has low bit 0
             case "isNaN": res = m.i32.const(FALSE); break;                                              // no NaN in this model
             case "isArray": res = bool(isArr(scratch(h + 1))); break;
             // ---- string / array instance methods (receiver = scratch(h)) ----
@@ -576,7 +594,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
         case "ARRGET": { h -= 2; const backing = m.i32.load(8, 4, m.i32.and(get(scratch(h)), m.i32.const(~3))); const idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1));
           stmts.push(m.local.set(scratch(h), m.i32.load(4, 4, m.i32.add(backing, m.i32.mul(idx, m.i32.const(4)))))); h++; break; } // arr[idx] = backing[idx]
         case "ARRLEN": stmts.push(m.local.set(scratch(h - 1), m.i32.shl(m.i32.load(4, 4, m.i32.and(get(scratch(h - 1)), m.i32.const(~3))), m.i32.const(1)))); break; // tagInt(length)
-        case "NEG": stmts.push(m.local.set(scratch(h - 1), m.i32.sub(m.i32.const(0), get(scratch(h - 1))))); break; // -(n<<1) = (-n)<<1
+        case "NEG": stmts.push(m.local.set(scratch(h - 1), floats ? m.if(m.i32.eqz(m.i32.and(get(scratch(h - 1)), m.i32.const(1))), m.i32.sub(m.i32.const(0), get(scratch(h - 1))), m.call("__negf", [get(scratch(h - 1))], I32)) : m.i32.sub(m.i32.const(0), get(scratch(h - 1))))); break; // -(n<<1) = (-n)<<1; a float/string coerces
         case "INC": stmts.push(m.local.set(scratch(h - 1), m.i32.add(get(scratch(h - 1)), m.i32.const(2)))); break; // ++ : tagged +1
         case "DEC": stmts.push(m.local.set(scratch(h - 1), m.i32.sub(get(scratch(h - 1)), m.i32.const(2)))); break; // -- : tagged -1
         case "NOT": stmts.push(m.local.set(scratch(h - 1), bool(falsy(scratch(h - 1))))); break; // !x : true iff x is falsy
@@ -1002,9 +1020,107 @@ function addBuiltinRuntime(m, { spread, append, toarray, assignall, valueId, don
   ], binaryen.none));
 }
 
+// Runtime for floating-point (added when a program has a non-integer number).
+// Numbers are coerced to f64, computed, then normalized back: a whole result in
+// tagged-int range becomes a fixnum, otherwise it is boxed [FLOATTAG, f64].
+function addFloatRuntime(m) {
+  const I32 = binaryen.i32, F64 = binaryen.f64;
+  const g = (i) => m.local.get(i, I32);
+  const gf = (i) => m.local.get(i, F64);
+  const c = (n) => m.i32.const(n);
+  const cf = (x) => m.f64.const(x);
+  const ld = (off, p) => m.i32.load(off, 4, p);
+  const ld8 = (off, p) => m.i32.load8_u(off, 1, p);
+  const addr = (i) => m.i32.and(g(i), c(~3));
+  const numf = (e) => m.call("__numf", [e], F64);
+  const boxf = (e) => m.call("__boxf", [e], I32);
+
+  // __strtof64(s) -> f64: parse [+/-]digits[.digits]. params 0=s; i32 locals
+  // 1=i,2=len,3=neg,4=byte; f64 locals 5=int,6=frac,7=scale
+  m.addFunction("__strtof64", binaryen.createType([I32]), F64, [I32, I32, I32, I32, F64, F64, F64], m.block(null, [
+    m.local.set(2, ld(4, addr(0))), m.local.set(1, c(0)), m.local.set(3, c(0)),
+    m.if(m.i32.lt_s(g(1), g(2)), m.block(null, [
+      m.local.set(4, ld8(8, m.i32.add(addr(0), g(1)))),
+      m.if(m.i32.eq(g(4), c(45)), m.block(null, [m.local.set(3, c(1)), m.local.set(1, c(1))])),  // '-'
+      m.if(m.i32.eq(g(4), c(43)), m.local.set(1, c(1))),                                          // '+'
+    ], binaryen.none)),
+    m.local.set(5, cf(0)),
+    m.loop("I", m.block(null, [                                                                   // integer part
+      m.if(m.i32.lt_s(g(1), g(2)), m.block(null, [
+        m.local.set(4, ld8(8, m.i32.add(addr(0), g(1)))),
+        m.if(m.i32.and(m.i32.ge_s(g(4), c(48)), m.i32.le_s(g(4), c(57))), m.block(null, [
+          m.local.set(5, m.f64.add(m.f64.mul(gf(5), cf(10)), m.f64.convert_s.i32(m.i32.sub(g(4), c(48))))),
+          m.local.set(1, m.i32.add(g(1), c(1))), m.br("I"),
+        ])),
+      ])),
+    ])),
+    m.local.set(6, cf(0)), m.local.set(7, cf(1)),
+    m.if(m.i32.and(m.i32.lt_s(g(1), g(2)), m.i32.eq(ld8(8, m.i32.add(addr(0), g(1))), c(46))), m.block(null, [ // '.'
+      m.local.set(1, m.i32.add(g(1), c(1))),
+      m.loop("F", m.block(null, [
+        m.if(m.i32.lt_s(g(1), g(2)), m.block(null, [
+          m.local.set(4, ld8(8, m.i32.add(addr(0), g(1)))),
+          m.if(m.i32.and(m.i32.ge_s(g(4), c(48)), m.i32.le_s(g(4), c(57))), m.block(null, [
+            m.local.set(6, m.f64.add(m.f64.mul(gf(6), cf(10)), m.f64.convert_s.i32(m.i32.sub(g(4), c(48))))),
+            m.local.set(7, m.f64.mul(gf(7), cf(10))),
+            m.local.set(1, m.i32.add(g(1), c(1))), m.br("F"),
+          ])),
+        ])),
+      ])),
+    ], binaryen.none)),
+    m.local.set(5, m.f64.add(gf(5), m.f64.div(gf(6), gf(7)))),
+    m.return(m.select(m.f64.eq(m.f64.convert_s.i32(g(3)), cf(1)), m.f64.neg(gf(5)), gf(5), F64)),
+  ], binaryen.none));
+
+  // __numf(v) -> f64: coerce a value to a double (fixnum / boxed float / string /
+  // bool / null; undefined and objects -> NaN). param 0=v.
+  m.addFunction("__numf", binaryen.createType([I32]), F64, [], m.block(null, [
+    m.if(m.i32.eqz(m.i32.and(g(0), c(1))), m.return(m.f64.convert_s.i32(m.i32.shr_s(g(0), c(1))))), // fixnum
+    m.if(m.i32.eq(g(0), c(UNDEF)), m.return(cf(NaN))),
+    m.if(m.i32.eq(g(0), c(NULL)), m.return(cf(0))),
+    m.if(m.i32.eq(g(0), c(TRUE)), m.return(cf(1))),
+    m.if(m.i32.eq(g(0), c(FALSE)), m.return(cf(0))),
+    m.if(m.i32.eq(ld(0, addr(0)), c(FLOATTAG)), m.return(m.f64.load(4, 4, addr(0)))),
+    m.if(m.i32.eq(ld(0, addr(0)), c(STRTAG)), m.return(m.call("__strtof64", [g(0)], F64))),
+    m.return(cf(NaN)),
+  ], binaryen.none));
+
+  // __boxf(f) -> tagged: a whole value in tagged-int range becomes a fixnum, else
+  // a boxed [FLOATTAG, f64]. param 0=f (f64); local 1=p.
+  m.addFunction("__boxf", binaryen.createType([F64]), I32, [I32], m.block(null, [
+    m.if(m.i32.and(m.f64.eq(gf(0), m.f64.trunc(gf(0))), m.f64.lt(m.f64.abs(gf(0)), cf(1073741824))),
+      m.return(m.i32.shl(m.i32.trunc_s.f64(gf(0)), c(1)))),                                        // whole & |f| < 2^30 -> fixnum
+    m.local.set(1, m.i32.load(0, 4, c(BUMP_ADDR))),
+    m.i32.store(0, 4, g(1), c(FLOATTAG)), m.f64.store(4, 8, g(1), gf(0)),
+    m.i32.store(0, 4, c(BUMP_ADDR), m.i32.add(g(1), c(12))),
+    m.return(m.i32.or(g(1), c(1))),
+  ], binaryen.none));
+
+  // Arithmetic / comparison slow paths (one operand isn't a fixnum). + concatenates
+  // when a string is involved, so it stays in __add (string runtime); the rest are
+  // numeric here.
+  const bin = (name, f) => m.addFunction(name, binaryen.createType([I32, I32]), I32, [], m.block(null, [m.return(f())], binaryen.none));
+  bin("__subf", () => boxf(m.f64.sub(numf(g(0)), numf(g(1)))));
+  bin("__mulf", () => boxf(m.f64.mul(numf(g(0)), numf(g(1)))));
+  bin("__divf", () => boxf(m.f64.div(numf(g(0)), numf(g(1)))));
+  const cmp = (name, f) => m.addFunction(name, binaryen.createType([I32, I32]), I32, [], m.block(null, [m.return(m.select(f(numf(g(0)), numf(g(1))), c(TRUE), c(FALSE)))], binaryen.none));
+  cmp("__ltf", (x, y) => m.f64.lt(x, y));
+  cmp("__lef", (x, y) => m.f64.le(x, y));
+  cmp("__gtf", (x, y) => m.f64.gt(x, y));
+  cmp("__gef", (x, y) => m.f64.ge(x, y));
+  m.addFunction("__negf", binaryen.createType([I32]), I32, [], m.block(null, [m.return(boxf(m.f64.neg(numf(g(0)))))], binaryen.none));
+  // Number.isInteger: a fixnum is always an integer; a boxed float is iff whole.
+  m.addFunction("__isintf", binaryen.createType([I32]), I32, [], m.block(null, [
+    m.if(m.i32.eqz(m.i32.and(g(0), c(1))), m.return(c(TRUE))),
+    m.if(m.i32.and(m.i32.eq(m.i32.and(g(0), c(3)), c(1)), m.i32.eq(ld(0, addr(0)), c(FLOATTAG))),
+      m.return(m.select(m.f64.eq(m.f64.load(4, 4, addr(0)), m.f64.trunc(m.f64.load(4, 4, addr(0)))), c(TRUE), c(FALSE)))),
+    m.return(c(FALSE)),
+  ], binaryen.none));
+}
+
 // Runtime helpers for strings (added only when a program has a string literal).
 // A string is [STRTAG, byteLength, ...bytes]; "+" and "===" dispatch here.
-function addStringRuntime(m) {
+function addStringRuntime(m, floats) {
   const I32 = binaryen.i32;
   const g = (i) => m.local.get(i, I32);
   const c = (n) => m.i32.const(n);
@@ -1062,7 +1178,7 @@ function addStringRuntime(m) {
   // __add(a, b): at least one operand is non-fixnum. Either a string -> concat; else best-effort numeric.
   m.addFunction("__add", binaryen.createType([I32, I32]), I32, [], m.block(null, [
     m.if(m.i32.or(isStr(0), isStr(1)), m.return(m.call("__concat", [m.call("__tostr", [g(0)], I32), m.call("__tostr", [g(1)], I32)], I32))),
-    m.return(m.i32.add(g(0), g(1))),
+    m.return(floats ? m.call("__boxf", [m.f64.add(m.call("__numf", [g(0)], binaryen.f64), m.call("__numf", [g(1)], binaryen.f64))], I32) : m.i32.add(g(0), g(1))),
   ], binaryen.none));
 
   // __typeof(v) -> the JS typeof string.  local 1 holds the built string.
@@ -1077,6 +1193,7 @@ function addStringRuntime(m) {
     m.if(m.i32.or(m.i32.eq(g(0), c(TRUE)), m.i32.eq(g(0), c(FALSE))), retStr("boolean")),
     m.if(m.i32.eq(g(0), c(NULL)), retStr("object")),                   // typeof null === "object" (the JS quirk)
     m.if(m.i32.eqz(m.i32.and(g(0), c(1))), retStr("number")),         // fixnum
+    m.if(m.i32.eq(ld(0, addr(0)), c(FLOATTAG)), retStr("number")),    // boxed double
     m.if(m.i32.eq(ld(0, addr(0)), c(STRTAG)), retStr("string")),      // a pointer: dispatch on the heap tag
     m.if(m.i32.eq(ld(0, addr(0)), c(CLOSTAG)), retStr("function")),
     retStr("object"),                                                 // arrays / objects
@@ -1085,6 +1202,8 @@ function addStringRuntime(m) {
   // __eq(a, b) -> 0/1.  identical bits, or equal strings by value.  locals: 2=la,3=i
   m.addFunction("__eq", binaryen.createType([I32, I32]), I32, [I32, I32], m.block(null, [
     m.if(m.i32.eq(g(0), g(1)), m.return(c(1))),                       // identical bits: fixnums, same pointer, same singleton
+    ...(floats ? [m.if(m.i32.and(m.i32.and(m.i32.eq(m.i32.and(g(0), c(3)), c(1)), m.i32.eq(ld(0, addr(0)), c(FLOATTAG))), m.i32.and(m.i32.eq(m.i32.and(g(1), c(3)), c(1)), m.i32.eq(ld(0, addr(1)), c(FLOATTAG)))), // both boxed floats -> compare by value
+      m.return(m.select(m.f64.eq(m.f64.load(4, 4, addr(0)), m.f64.load(4, 4, addr(1))), c(1), c(0))))] : []),
     m.if(m.i32.eqz(m.i32.and(isStr(0), isStr(1))), m.return(c(0))),   // different and not both strings -> not equal
     m.local.set(2, ld(4, addr(0))),
     m.if(m.i32.ne(g(2), ld(4, addr(1))), m.return(c(0))),             // different lengths
@@ -1797,9 +1916,18 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const usesStrMeth = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CALLM" && STRMETHS.has(i[1])));
   const usesKeys = uses("KEYS");                            // Object.keys / for-in -> the keys runtime (reverse id->string + an array)
   const usesJson = uses("JSONSTR");                         // JSON.stringify -> the json runtime (shares __keystr)
+  // Floating point: a non-integer literal, a division (always float-shaped), or a
+  // string that could coerce to a number through arithmetic (unary +/- compile to
+  // *1 / NEG). Over-approximating is safe — the integer fast path is unchanged and
+  // the float runtime is dead unless a real double appears.
+  const hasNum = (pred) => Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && pred(i)));
+  const numOp = new Set(["MUL", "SUB", "NEG", "LT", "LE", "GT", "GE"]);
+  const usesFloat = hasNum((i) => i[0] === "PUSH" && typeof i[1] === "number" && !Number.isInteger(i[1]))
+    || hasNum((i) => i[0] === "BIN" && i[1] === "/")
+    || (hasNum((i) => i[0] === "PUSH" && typeof i[1] === "string") && hasNum((i) => numOp.has(i[0]) || (i[0] === "BIN" && ["*", "-", "<", "<=", ">", ">="].includes(i[1]))));
   const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL", "ARGUMENTS", "GATHERREST", "TOARRAY", "KEYS") || usesConstArray || usesStrMeth || usesMapSet; // __class__ name lists build arrays; APPENDALL/ARGUMENTS/GATHERREST/split/from/TOARRAY/KEYS push; Map entries + init use arrays
   const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA", "ASSIGNALL", "KEYS") || usesClasses || usesGenerators || usesIndex; // instances, method dispatch, {value,done}, computed access, object spread
-  const usesStrings = usesClasses || usesIndex || usesStrMeth || usesKeys || usesJson || usesMapSet || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq); string methods + keys + json build strings; Map/Set compare keys via __eq
+  const usesStrings = usesClasses || usesIndex || usesStrMeth || usesKeys || usesJson || usesMapSet || usesFloat || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq); string methods + keys + json build strings; Map/Set compare keys via __eq; floats reuse __add/__concat
   if (usesArrays || usesObjects || usesStrings) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow/concat paths
   // Property and method keys are interned to small ints at compile time, so
   // GETPROP/SETPROP/SETHIDDEN/CALLMETHOD are id matches in the object runtime.
@@ -1842,13 +1970,14 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const needsArgc = uses("ARGUMENTS", "GATHERREST"); // `arguments` / rest params recover the real arg count from ARGC_ADDR
   for (const [name, fn] of Object.entries(program)) {
     if (gens.includes(name)) { emitGenTrampoline(m, name, fn, fnIndex[name + "$gen"], maxargs); compileGenBody(m, name + "$gen", fn, keyIds, fnIndex, maxargs); } // generator: trampoline + dispatch body
-    else compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings, clsIds, usesExceptions, maxargs, needsArgc, usesReject, usesMapSet);
+    else compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings, clsIds, usesExceptions, maxargs, needsArgc, usesReject, usesMapSet, usesFloat);
   }
   if (usesArrays) addArrayRuntime(m);
   if (usesObjects) addObjectRuntime(m, keyIds.get("length"), keyIds.get("size"));
   if (usesMapSet) addMapSetRuntime(m);
   if (uses("CALLMS", "APPENDALL", "TOARRAY", "ASSIGNALL")) addBuiltinRuntime(m, { spread: uses("CALLMS"), append: uses("APPENDALL"), toarray: uses("TOARRAY"), assignall: uses("ASSIGNALL"), valueId: usesGenerators ? keyIds.get("value") : null, doneId: usesGenerators ? keyIds.get("done") : null });
-  if (usesStrings) addStringRuntime(m);
+  if (usesFloat) addFloatRuntime(m);
+  if (usesStrings) addStringRuntime(m, usesFloat);
   if (usesReject) addPromiseRuntime(m);
   if (usesStrMeth) addStrMethRuntime(m, usesGenerators ? { value: keyIds.get("value"), done: keyIds.get("done") } : null);
   if (usesKeys || usesJson) { // __keystr: enumerable keys are those never set via SETHIDDEN (so __class__, instance methods, and __accessors__ are skipped)
