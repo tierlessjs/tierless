@@ -1,14 +1,15 @@
 // Probe: the AOT compiler runs regular expressions — and matches the interpreter.
-// A regex literal's pattern is known at compile time, so it is compiled to a tiny
-// bytecode (literals, ., char classes incl. \d\w\s and negation, * + ?, |, groups,
-// ^ $, g/i flags) and matched by a backtracking VM at runtime. test returns a
-// boolean, match returns the array of matches (g) or null, and replace rebuilds the
-// string against a literal or a callback. Each program runs interpreted and
-// compiled to native wasm; the decoded native value must equal the interpreter's.
+// Matching is delegated to the host's real RegExp (regexHost): the compiled module
+// imports __re_test/__re_match/__re_replace, which read the pattern/flags/input out
+// of linear memory, run a genuine RegExp, and write the result back. So semantics
+// are exactly ECMAScript's, and a pattern built at runtime (new RegExp(s)) works
+// just like a literal. replace with a callback has the host drive the loop and call
+// back into the wasm closure per match (through the exported table). Each program
+// runs interpreted and compiled to native wasm; the decoded value must match.
 
 import { createRuntime, initialFrames } from "#stackmix";
 import { compileModuleToWasm } from "#stackmix/wasm/frontend.mjs";
-import { BUMP_ADDR, HEAP_BASE, readValue } from "#stackmix/wasm/aot.mjs";
+import { BUMP_ADDR, HEAP_BASE, readValue, regexHost } from "#stackmix/wasm/aot.mjs";
 
 const programs = [
   ["test: a digit is present", `function main() { return /\\d/.test("abc123"); }`],                            // true
@@ -33,6 +34,9 @@ const programs = [
       const s = "hello world 42";
       return (/\\d/.test(s) ? "Y" : "N") + " " + s.match(/[a-z]+/g).join(",") + " " + s.replace(/o/g, "0");
     }`], // "Y hello,world hell0 w0rld 42"
+  ["a runtime-built pattern (new RegExp)", `function main() { const p = "a" + "b"; const re = new RegExp(p + "+", "g"); return "xaabbbx".match(re).join(","); }`], // "abbb"
+  ["runtime flags decide global vs first", `function main() { const flags = "g"; return (new RegExp("o", flags).test("foo") ? "Y" : "N") + "/" + "foo".replace(new RegExp("o", flags), "0"); }`], // "Y/f00"
+  ["new RegExp from a variable, no flags", `function main() { const word = "cat"; return new RegExp(word).test("the cat sat") ? "found" : "no"; }`], // "found"
 ];
 
 function interp(src) {
@@ -41,7 +45,9 @@ function interp(src) {
   return rt.run({ id: "t" }, initialFrames("main", []), { deref: (x) => x }).value;
 }
 function native(src) {
-  const inst = new WebAssembly.Instance(new WebAssembly.Module(compileModuleToWasm(src, { entry: "main", resources: [] })), { env: {} });
+  const rh = regexHost(); // regex is delegated to the host's RegExp; bind it to the instance after instantiation
+  const inst = new WebAssembly.Instance(new WebAssembly.Module(compileModuleToWasm(src, { entry: "main", resources: [] })), { env: rh.imports });
+  rh.bind(inst);
   new DataView(inst.exports.memory.buffer).setInt32(BUMP_ADDR, HEAP_BASE, true);
   return readValue(inst.exports.memory, inst.exports.main());
 }
