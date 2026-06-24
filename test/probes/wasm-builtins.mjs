@@ -39,6 +39,10 @@ const programs = [
   ["rest parameter collects the tail", `function sum(first, ...rest) { let s = first; for (let i = 0; i < rest.length; i++) { s += rest[i]; } return s; } function main() { return sum(1, 2, 3, 4) * 10 + sum(7); }`], // 10*10 + 7 = 107
   ["rest gathers a spread call", `function f(a, b, ...rest) { return a + b + rest.length; } function main() { const more = [4, 5]; return f(1, 2, ...more, 6); }`], // 1+2+3 = 6
   ["only a rest parameter", `function tail(...xs) { return xs.length; } function main() { return tail() * 100 + tail(1, 2, 3); }`], // 0*100 + 3 = 3
+  ["for-of over an array", `function main() { const a = [1, 2, 3, 4]; let s = 0; for (const x of a) { s += x; } return s; }`], // 10
+  ["for-of with break", `function main() { const a = [10, 20, 30, 40]; let s = 0; for (const x of a) { if (x === 30) break; s += x; } return s; }`], // 30
+  ["nested for-of over arrays", `function main() { const a = [1, 2, 3]; let s = 0; for (const x of a) { for (const y of a) { s += x * y; } } return s; }`], // 36
+  ["for-of destructuring array pairs", `function main() { const pairs = [[1, 2], [3, 4], [5, 6]]; let s = 0; for (const [a, b] of pairs) { s += a * b; } return s; }`], // 2+12+30 = 44
 ];
 
 function interp(src) {

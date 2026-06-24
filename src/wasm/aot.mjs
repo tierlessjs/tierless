@@ -78,6 +78,10 @@ const GENTAG = -5;
 // this synchronous model a resolved promise is its value, so only rejection is
 // reified.)
 const REJTAG = -6;
+// A for-of iterator over an array (or other indexable collection): [ITERTAG, coll,
+// idx]. ITER wraps the collection in one; GENNEXT advances it. A generator is
+// already its own iterator, so ITER leaves a generator (and any iterator) as-is.
+const ITERTAG = -7;
 
 // Host-side array helpers: build/read a growable array in an instance's linear
 // memory (so resources can pass number[] across the boundary). Layout matches
@@ -386,7 +390,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
           stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, padTo(args), callType(), I32))); h++; break;
         }
         case "TYPEOF": stmts.push(m.local.set(scratch(h - 1), m.call("__typeof", [get(scratch(h - 1))], I32))); break; // value -> type string
-        case "ITER": break;                    // normalize an iterable -> iterator; a generator is already its own iterator (no-op)
+        case "ITER": stmts.push(m.local.set(scratch(h - 1), m.call("__iter", [get(scratch(h - 1))], I32))); break; // normalize an iterable -> iterator (an array gets wrapped; a generator passes through)
         case "AWAIT": if (reject) stmts.push(m.local.set(scratch(h - 1), m.call("__awaitchk", [get(scratch(h - 1))], I32))); break; // await: identity, but a rejected promise throws
         case "AWAITALL": if (reject) stmts.push(m.local.set(scratch(h - 1), m.call("__awaitall", [get(scratch(h - 1))], I32))); break; // Promise.all: the resolved array (already on the stack), but a rejection throws
         case "MKREJECT": stmts.push(m.local.set(scratch(h - 1), m.call("__mkreject", [get(scratch(h - 1))], I32))); break; // Promise.reject(v) -> a rejection cell
@@ -1457,7 +1461,8 @@ function compileGenBody(m, bodyName, fn, keyIds, fnIndex, maxargs) {
         case "DEC": stmts.push(m.local.set(scratch(h - 1), m.i32.sub(get(scratch(h - 1)), m.i32.const(2)))); break;
         case "NOT": stmts.push(m.local.set(scratch(h - 1), bool(falsy(scratch(h - 1))))); break;
         case "BITNOT": stmts.push(m.local.set(scratch(h - 1), m.i32.sub(m.i32.const(-2), get(scratch(h - 1))))); break;
-        case "ITER": case "AWAIT": break;     // no-ops (a generator is its own iterator; await of a plain value is identity)
+        case "ITER": stmts.push(m.local.set(scratch(h - 1), m.call("__iter", [get(scratch(h - 1))], I32))); break; // an array iterable gets wrapped; a generator passes through
+        case "AWAIT": break;                   // await of a plain value is identity
         case "BIN": {
           h -= 2; const a = get(scratch(h)), b = get(scratch(h + 1)), op = ins[1]; let e;
           if (op === "+") e = m.i32.add(a, b);
@@ -1541,8 +1546,29 @@ function addGenRuntime(m, valueKey, doneKey) {
     m.if(m.i32.load(0, 4, c(EXC_FLAG)), m.return(c(0))),                               // body threw uncaught -> propagate
     mkResult(g(2), m.select(m.i32.load(12, 4, genAddr()), c(TRUE), c(FALSE))),          // value + done (the body set done)
   ], binaryen.none);
-  // __gennext(gen, sent) -> {value, done}.  locals: 2=ret, 3=obj
-  m.addFunction("__gennext", binaryen.createType([I32, I32]), I32, [I32, I32], drive(0));
+  // __iter(v) -> an iterator. An array is wrapped in [ITERTAG, coll, idx=0]; a
+  // generator (or anything already an iterator) is returned as-is. locals: 1=p
+  m.addFunction("__iter", binaryen.createType([I32]), I32, [I32], m.block(null, [
+    m.if(m.i32.and(m.i32.eq(m.i32.and(g(0), c(3)), c(1)), m.i32.eq(m.i32.load(0, 4, m.i32.and(g(0), c(0xfffc))), c(ARRTAG))), m.block(null, [
+      m.local.set(1, m.i32.load(0, 4, c(BUMP_ADDR))),
+      m.i32.store(0, 4, g(1), c(ITERTAG)), m.i32.store(4, 4, g(1), g(0)), m.i32.store(8, 4, g(1), c(0)),
+      m.i32.store(0, 4, c(BUMP_ADDR), m.i32.add(g(1), c(12))),
+      m.return(m.i32.or(g(1), c(1))),
+    ], binaryen.none)),
+    m.return(g(0)),
+  ], binaryen.none));
+  // __gennext(gen, sent) -> {value, done}.  An ITERTAG iterator advances over its
+  // collection's backing; otherwise drive the generator body. locals: 2=ret,3=obj,
+  // 4=iterAddr,5=collAddr,6=idx
+  m.addFunction("__gennext", binaryen.createType([I32, I32]), I32, [I32, I32, I32, I32, I32], m.block(null, [
+    m.if(m.i32.and(m.i32.eq(m.i32.and(g(0), c(3)), c(1)), m.i32.eq(m.i32.load(0, 4, m.i32.and(g(0), c(0xfffc))), c(ITERTAG))), m.block(null, [
+      m.local.set(4, m.i32.and(g(0), c(~3))), m.local.set(5, m.i32.and(m.i32.load(4, 4, g(4)), c(~3))), m.local.set(6, m.i32.load(8, 4, g(4))),
+      m.if(m.i32.ge_s(g(6), m.i32.load(4, 4, g(5))), mkResult(c(UNDEF), c(TRUE))),           // idx >= count -> done
+      m.i32.store(8, 4, g(4), m.i32.add(g(6), c(1))),                                         // advance idx
+      mkResult(m.i32.load(4, 4, m.i32.add(m.i32.load(8, 4, g(5)), m.i32.mul(g(6), c(4)))), c(FALSE)), // value = backing[idx]
+    ], binaryen.none)),
+    drive(0),
+  ], binaryen.none));
   // __genthrow(gen, value) -> {value, done}.  it.throw(e): resume the body in throw mode.
   m.addFunction("__genthrow", binaryen.createType([I32, I32]), I32, [I32, I32], drive(1));
   // __genret(gen, value) -> {value, done:true}.  it.return(v): abandon the generator (finally blocks are a later slice).
@@ -1641,7 +1667,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   if (usesIndex) addIndexRuntime(m, keyIds);
   if (usesAccessors) addAccessorRuntime(m, keyIds.get("__accessors__"), keyIds.get("get"), keyIds.get("set"), maxargs);
   if (usesGenerators) addGenRuntime(m, keyIds.get("value"), keyIds.get("done"));
-  if (usesClosures) {
+  if (usesClosures || usesGenerators) { // the table holds every function (closures call through it; the gen runtime's call_indirect needs it to exist even with no closures)
     m.addTable("0", fnNames.length, fnNames.length, binaryen.funcref);
     m.addActiveElementSegment("0", "fns", fnNames, m.i32.const(0));
   }
