@@ -11,6 +11,9 @@ import { compileModuleToWasm } from "#stackmix/wasm/frontend.mjs";
 import { BUMP_ADDR, HEAP_BASE, readValue, stdlibHost } from "#stackmix/wasm/aot.mjs";
 
 const programs = [
+  ["computed access fires getters and setters", `
+    class Account { constructor(o, b) { this.owner = o; this.balance = b; } get summary() { return this.owner + ":" + this.balance; } set summary(v) { this.owner = v; } }
+    function main() { const a = new Account("ann", 100); const k = "summary"; const got = a[k]; a[k] = "bob"; return got + "/" + a.owner + "/" + Object.keys(a).join(","); }`], // "ann:100/bob/owner,balance" — getter/setter fire, no leaked "summary" key
   ["constant array index", `function main() { const a = [1, 2, 3]; return a[0] + a[2]; }`],        // 1 + 3 = 4
   ["variable array index in a loop", `function main() { const a = [10, 20, 30]; let s = 0; for (let i = 0; i < 3; i++) { s += a[i]; } return s; }`], // 60
   ["array element assignment", `function main() { const a = [1, 2, 3]; a[1] = 9; return a[0] + a[1] + a[2]; }`], // 13

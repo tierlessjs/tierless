@@ -1857,7 +1857,7 @@ function addAccessorRuntime(m, accKey, getKey, setKey, maxargs) {
 // program's static keys and then interns any new key by value — so a key never
 // seen statically still gets a unique id (no collisions), and a key shared with
 // static access (GETPROP "x") resolves to the same id.
-function addIndexRuntime(m, keyIds) {
+function addIndexRuntime(m, keyIds, acc) {
   const I32 = binaryen.i32, MAXKEYS = 64;
   const g = (i) => m.local.get(i, I32), c = (n) => m.i32.const(n);
   const ld = (off, p) => m.i32.load(off, 4, p), st = (off, p, v) => m.i32.store(off, 4, p, v);
@@ -1893,10 +1893,12 @@ function addIndexRuntime(m, keyIds) {
   m.addFunction("__index", binaryen.createType([I32, I32]), I32, [I32], m.block(null, [
     m.local.set(2, addr(0)),
     m.if(m.i32.eq(ld(0, g(2)), c(ARRTAG)), m.return(ld(4, m.i32.add(ld(8, g(2)), m.i32.mul(m.i32.shr_s(g(1), c(1)), c(4)))))),
-    m.return(m.call("__getprop", [g(0), m.call("__keyid", [g(1)], I32)], I32)),
+    // object: computed read fires a getter if one exists (accessor-aware), else a plain field read
+    m.return(acc ? m.call("__getpropa", [g(0), m.call("__keyid", [g(1)], I32), c(acc.accKey), c(acc.getKey)], I32) : m.call("__getprop", [g(0), m.call("__keyid", [g(1)], I32)], I32)),
   ], binaryen.none));
 
-  // __setindex(recv, key, value).  array: backing[idx] = value (extend length); object: __setprop.  locals: 3=addr, 4=idx
+  // __setindex(recv, key, value).  array: backing[idx] = value (extend length); object: a setter
+  // fires if one exists (accessor-aware), else a plain store.  locals: 3=addr, 4=idx
   m.addFunction("__setindex", binaryen.createType([I32, I32, I32]), I32, [I32, I32], m.block(null, [
     m.local.set(3, addr(0)),
     m.if(m.i32.eq(ld(0, g(3)), c(ARRTAG)), m.block(null, [
@@ -1905,7 +1907,8 @@ function addIndexRuntime(m, keyIds) {
       m.if(m.i32.ge_s(g(4), ld(4, g(3))), st(4, g(3), m.i32.add(g(4), c(1)))),           // grow length if idx >= length
       m.return(c(0)),
     ], binaryen.none)),
-    m.drop(m.call("__setprop", [g(0), m.call("__keyid", [g(1)], I32), g(2)], I32)),
+    acc ? m.drop(m.call("__setpropa", [g(0), m.call("__keyid", [g(1)], I32), g(2), c(acc.accKey), c(acc.setKey)], I32))
+      : m.drop(m.call("__setprop", [g(0), m.call("__keyid", [g(1)], I32), g(2)], I32)),
     m.return(c(0)),
   ], binaryen.none));
 }
@@ -2160,7 +2163,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const gens = [...new Set(Object.values(program).flatMap((fn) => fn.code.filter((i) => Array.isArray(i) && i[0] === "MAKECLOSURE" && i[3]).map((i) => i[1])))];
   const usesMapSet = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CTORG" && (i[1] === "Map" || i[1] === "Set"))); // Map/Set construction
   const usesGenerators = gens.length > 0 || uses("GENNEXT", "YIELD") || usesMapSet; // gen runtime + {value, done} objects; Map/Set reuse the iterator path
-  const usesAccessors = uses("GETPROPA", "SETPROPA");      // getters/setters need the accessor runtime
+  const usesAccessors = uses("GETPROPA", "SETPROPA") || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "SETHIDDEN" && i[1] === "__accessors__")); // static get/set access OR an accessor *definition* (computed access a[k] still fires it via __index)
   const usesJsonParse = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CALLM" && i[1] === "parse")); // JSON.parse(str): the host rebuilds the value tree via the runtime's own exported constructors
   const usesIndex = uses("INDEX", "SETINDEX") || usesJsonParse;             // computed member access -> the index runtime (+ key interning, which JSON.parse reuses to intern object keys)
   const usesReject = uses("MKREJECT");                      // Promise.reject -> a rejection cell; awaiting it throws
@@ -2265,7 +2268,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
     if (usesJson) addJsonRuntime(m);
   }
   if (usesClasses) addClassRuntime(m);
-  if (usesIndex) addIndexRuntime(m, keyIds);
+  if (usesIndex) addIndexRuntime(m, keyIds, usesAccessors ? { accKey: keyIds.get("__accessors__"), getKey: keyIds.get("get"), setKey: keyIds.get("set") } : null); // computed access fires accessors when the program has any
   if (usesAccessors) addAccessorRuntime(m, keyIds.get("__accessors__"), keyIds.get("get"), keyIds.get("set"), maxargs);
   if (usesGenerators) addGenRuntime(m, keyIds.get("value"), keyIds.get("done"), usesMapSet);
   if (usesClosures || usesGenerators) { // the table holds every function (closures call through it; the gen runtime's call_indirect needs it to exist even with no closures)
