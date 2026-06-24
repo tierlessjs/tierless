@@ -378,6 +378,51 @@ function pushLit(m, slot, v) {
   return [m.local.set(slot, m.i32.const(immediate(v)))];
 }
 
+// The polymorphic result of `a <op> b` (a, b are thunks — a fresh local.get per use,
+// no IR-node sharing). Integer fast path with string-/float-/bigint-aware fallbacks
+// (JS semantics). Shared by compileFn AND the generator-body codegen so the two can't
+// drift on operators (string concat / === / etc. used to be integer-only in generators).
+function binExpr(m, op, a, b, strings, floats, bigs) {
+  const I32 = binaryen.i32;
+  const bool = (cond) => m.select(cond, m.i32.const(TRUE), m.i32.const(FALSE));
+  const isBigE = (x) => m.i32.and(m.i32.eq(m.i32.and(x(), m.i32.const(3)), m.i32.const(1)), m.i32.eq(m.i32.load(0, 4, m.i32.and(x(), m.i32.const(0xfffc))), m.i32.const(BIGTAG)));
+  const arith = () => {
+    const bothInt = () => m.i32.eqz(m.i32.and(m.i32.or(a(), b()), m.i32.const(1)));
+    const intAdd = () => m.i32.add(a(), b()), intSub = () => m.i32.sub(a(), b()), intMul = () => m.i32.mul(m.i32.shr_s(a(), m.i32.const(1)), b());
+    const cmpSym = { "<": (x) => m.i32.lt_s(x, m.i32.const(0)), "<=": (x) => m.i32.le_s(x, m.i32.const(0)), ">": (x) => m.i32.gt_s(x, m.i32.const(0)), ">=": (x) => m.i32.ge_s(x, m.i32.const(0)) };
+    const num = () => {
+      if (op === "/") return m.call("__divf", [a(), b()], I32);
+      if (op === "+") return (floats || strings) ? m.if(bothInt(), intAdd(), m.call("__add", [a(), b()], I32)) : intAdd();
+      if (op === "-") return floats ? m.if(bothInt(), intSub(), m.call("__subf", [a(), b()], I32)) : intSub();
+      if (op === "*") return floats ? m.if(bothInt(), intMul(), m.call("__mulf", [a(), b()], I32)) : intMul();
+      const ci = { "<": m.i32.lt_s, "<=": m.i32.le_s, ">": m.i32.gt_s, ">=": m.i32.ge_s }[op];
+      const cf = { "<": "__ltf", "<=": "__lef", ">": "__gtf", ">=": "__gef" }[op];
+      return floats ? m.if(bothInt(), bool(ci(a(), b())), m.call(cf, [a(), b()], I32)) : bool(ci(a(), b()));
+    };
+    if (bigs) {
+      const bc = { "+": BIGOPS.add, "-": BIGOPS.sub, "*": BIGOPS.mul, "/": BIGOPS.div }[op];
+      const bigE = bc !== undefined ? m.call("__big_bin", [m.i32.const(bc), a(), b()], I32) : cmpSym[op] ? bool(cmpSym[op](m.call("__big_cmp", [a(), b()], I32))) : null;
+      if (bigE) return m.if(isBigE(a), bigE, num());
+    }
+    return num();
+  };
+  const big = (code, intExpr) => bigs ? m.if(isBigE(a), m.call("__big_bin", [m.i32.const(code), a(), b()], I32), intExpr) : intExpr;
+  if (op === "+" || op === "-" || op === "*" || op === "/" || op === "<" || op === "<=" || op === ">" || op === ">=") return arith();
+  if (op === "===") return (strings || floats || bigs) ? bool(m.call("__eq", [a(), b()], I32)) : bool(m.i32.eq(a(), b()));
+  if (op === "!==") return (strings || floats || bigs) ? bool(m.i32.eqz(m.call("__eq", [a(), b()], I32))) : bool(m.i32.ne(a(), b()));
+  if (op === "==") return bigs ? bool(m.call("__big_eq", [a(), b()], I32)) : (strings || floats) ? bool(m.call("__eq", [a(), b()], I32)) : bool(m.i32.eq(a(), b()));
+  if (op === "!=") return bigs ? bool(m.i32.eqz(m.call("__big_eq", [a(), b()], I32))) : (strings || floats) ? bool(m.i32.eqz(m.call("__eq", [a(), b()], I32))) : bool(m.i32.ne(a(), b()));
+  if (op === "**") { const np = m.call("__num_pow", [a(), b()], I32); return bigs ? m.if(isBigE(a), m.call("__big_bin", [m.i32.const(BIGOPS.pow), a(), b()], I32), np) : np; }
+  if (op === "&") return big(BIGOPS.and, m.i32.and(a(), b()));
+  if (op === "|") return big(BIGOPS.or, m.i32.or(a(), b()));
+  if (op === "^") return big(BIGOPS.xor, m.i32.xor(a(), b()));
+  if (op === "%") return big(BIGOPS.mod, m.i32.rem_s(a(), b()));
+  if (op === "<<") return big(BIGOPS.shl, m.i32.shl(a(), m.i32.shr_s(b(), m.i32.const(1))));
+  if (op === ">>") return big(BIGOPS.shr, m.i32.shl(m.i32.shr_s(m.i32.shr_s(a(), m.i32.const(1)), m.i32.shr_s(b(), m.i32.const(1))), m.i32.const(1)));
+  if (op === ">>>") return m.i32.shl(m.i32.shr_u(m.i32.shr_s(a(), m.i32.const(1)), m.i32.shr_s(b(), m.i32.const(1))), m.i32.const(1));
+  throw new Error("aot: unsupported BIN " + op);
+}
+
 const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1, INDEX: -1, SETINDEX: -3, ISARRAY: 0, GLOBAL: 1, CALLMS: -1, APPENDALL: -1, ARGUMENTS: 1, GATHERREST: 0, TOARRAY: 0, ASSIGNALL: -1, DELPROP: 0, KEYS: 0, JSONSTR: -2, AWAITALL: 0, MKREJECT: 0 };
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" || ins[0] === "CALLM" ? -ins[2] : ins[0] === "CALLG" || ins[0] === "CTORG" ? 1 - (ins[2] || 0) : DELTA[ins[0]] ?? 0;
 // Ops that run user code and can therefore propagate an exception — so a block ends
@@ -499,29 +544,9 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
   // (bigint / regex / float / const-array literals are built by the shared module-level
   // pushLit; buildStrInto stays because ISA, join's default separator, and the RegExp
   // constructor also build bare strings.)
-  // Arithmetic / comparison with the integer fast path kept and a float (or string,
-  // for +) fallback when a non-fixnum operand is present. a, b are thunks (a fresh
-  // local.get each use). + and === concatenate / compare strings via __add / __eq.
-  const arith = (op, a, b) => {
-    const bothInt = () => m.i32.eqz(m.i32.and(m.i32.or(a(), b()), m.i32.const(1)));
-    const intAdd = () => m.i32.add(a(), b()), intSub = () => m.i32.sub(a(), b()), intMul = () => m.i32.mul(m.i32.shr_s(a(), m.i32.const(1)), b());
-    const cmpSym = { "<": (x) => m.i32.lt_s(x, m.i32.const(0)), "<=": (x) => m.i32.le_s(x, m.i32.const(0)), ">": (x) => m.i32.gt_s(x, m.i32.const(0)), ">=": (x) => m.i32.ge_s(x, m.i32.const(0)) };
-    const num = () => {                                                                         // the int/float/string path
-      if (op === "/") return m.call("__divf", [a(), b()], I32);
-      if (op === "+") return (floats || strings) ? m.if(bothInt(), intAdd(), m.call("__add", [a(), b()], I32)) : intAdd();
-      if (op === "-") return floats ? m.if(bothInt(), intSub(), m.call("__subf", [a(), b()], I32)) : intSub();
-      if (op === "*") return floats ? m.if(bothInt(), intMul(), m.call("__mulf", [a(), b()], I32)) : intMul();
-      const ci = { "<": m.i32.lt_s, "<=": m.i32.le_s, ">": m.i32.gt_s, ">=": m.i32.ge_s }[op];
-      const cf = { "<": "__ltf", "<=": "__lef", ">": "__gtf", ">=": "__gef" }[op];
-      return floats ? m.if(bothInt(), bool(ci(a(), b())), m.call(cf, [a(), b()], I32)) : bool(ci(a(), b()));
-    };
-    if (bigs) {                                                                                // bigint operands (JS forbids mixing with Number, so checking a suffices)
-      const bc = { "+": BIGOPS.add, "-": BIGOPS.sub, "*": BIGOPS.mul, "/": BIGOPS.div }[op];   // delegated to the host's BigInt
-      const bigE = bc !== undefined ? m.call("__big_bin", [m.i32.const(bc), a(), b()], I32) : cmpSym[op] ? bool(cmpSym[op](m.call("__big_cmp", [a(), b()], I32))) : null;
-      if (bigE) return m.if(isBigE(a), bigE, num());
-    }
-    return num();
-  };
+  // Arithmetic / comparison / bitwise (ADD..GE and BIN) share the module-level
+  // binExpr — keeping the integer fast path with float/string/bigint fallbacks in
+  // one place, used by both this body codegen and the generator-body codegen.
   // Exception protocol helpers.
   const excFlag = () => m.i32.load(0, 4, m.i32.const(EXC_FLAG));                                // pending?
   const raise = (valSlot) => [m.i32.store(0, 4, m.i32.const(EXC_VALUE), get(valSlot)), m.i32.store(0, 4, m.i32.const(EXC_FLAG), m.i32.const(1))]; // set EXC_VALUE + flag (propagate)
@@ -553,7 +578,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
         case "ADD": case "SUB": case "MUL": case "LT": case "LE": case "GT": case "GE": {
           h -= 2; const sa = scratch(h), sb = scratch(h + 1);
           const sym = { ADD: "+", SUB: "-", MUL: "*", LT: "<", LE: "<=", GT: ">", GE: ">=" }[ins[0]];
-          stmts.push(m.local.set(scratch(h), arith(sym, () => get(sa), () => get(sb)))); h++; break;
+          stmts.push(m.local.set(scratch(h), binExpr(m, sym, () => get(sa), () => get(sb), strings, floats, bigs))); h++; break;
         }
         case "CALL": case "RES": {
           const ac = ins[2] || 0; h -= ac;
@@ -565,26 +590,9 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
           if (ins[0] === "CALL") stmts.push(...setArgc(m.i32.const(ac)));
           stmts.push(m.local.set(scratch(h), m.call(ins[1], callArgs, I32))); h++; break;
         }
-        case "BIN": {                          // tsc.mjs binary op. With strings present, + and === are polymorphic (JS semantics)
-          h -= 2; const sa = scratch(h), sb = scratch(h + 1), op = ins[1];
-          const a = () => get(sa), b = () => get(sb); let e;                  // thunks: a fresh local.get per use (no IR-node sharing)
-          const big = (code, intExpr) => bigs ? m.if(isBigE(a), m.call("__big_bin", [m.i32.const(code), a(), b()], I32), intExpr) : intExpr; // delegate to the host's BigInt, else the integer op
-          if (op === "+" || op === "-" || op === "*" || op === "/" || op === "<" || op === "<=" || op === ">" || op === ">=") e = arith(op, a, b);
-          else if (op === "===") e = (strings || floats || bigs) ? bool(m.call("__eq", [a(), b()], I32)) : bool(m.i32.eq(a(), b())); // __eq: strings/floats/bigints by value
-          else if (op === "!==") e = (strings || floats || bigs) ? bool(m.i32.eqz(m.call("__eq", [a(), b()], I32))) : bool(m.i32.ne(a(), b()));
-          else if (op === "==") e = bigs ? bool(m.call("__big_eq", [a(), b()], I32)) : (strings || floats) ? bool(m.call("__eq", [a(), b()], I32)) : bool(m.i32.eq(a(), b())); // loose: the host coerces bigint vs number/string
-          else if (op === "!=") e = bigs ? bool(m.i32.eqz(m.call("__big_eq", [a(), b()], I32))) : (strings || floats) ? bool(m.i32.eqz(m.call("__eq", [a(), b()], I32))) : bool(m.i32.ne(a(), b()));
-          else if (op === "**") { const np = m.call("__num_pow", [a(), b()], I32); e = bigs ? m.if(isBigE(a), m.call("__big_bin", [m.i32.const(BIGOPS.pow), a(), b()], I32), np) : np; } // bigint ** bigint stays exact on the host; number ** number is Math.pow (host), boxed
-          // bitwise: tagged ints distribute over & | ^ and (signed) %; shifts untag the amount and re-tag. A bigint operand routes to the host.
-          else if (op === "&") e = big(BIGOPS.and, m.i32.and(a(), b()));
-          else if (op === "|") e = big(BIGOPS.or, m.i32.or(a(), b()));
-          else if (op === "^") e = big(BIGOPS.xor, m.i32.xor(a(), b()));
-          else if (op === "%") e = big(BIGOPS.mod, m.i32.rem_s(a(), b()));
-          else if (op === "<<") e = big(BIGOPS.shl, m.i32.shl(a(), m.i32.shr_s(b(), m.i32.const(1))));
-          else if (op === ">>") e = big(BIGOPS.shr, m.i32.shl(m.i32.shr_s(m.i32.shr_s(a(), m.i32.const(1)), m.i32.shr_s(b(), m.i32.const(1))), m.i32.const(1)));
-          else if (op === ">>>") e = m.i32.shl(m.i32.shr_u(m.i32.shr_s(a(), m.i32.const(1)), m.i32.shr_s(b(), m.i32.const(1))), m.i32.const(1));
-          else throw new Error("aot: unsupported BIN " + op);
-          stmts.push(m.local.set(scratch(h), e)); h++; break;
+        case "BIN": {                          // tsc.mjs binary op (polymorphic int/float/string/bigint) — shared with the generator-body codegen
+          h -= 2; const sa = scratch(h), sb = scratch(h + 1);
+          stmts.push(m.local.set(scratch(h), binExpr(m, ins[1], () => get(sa), () => get(sb), strings, floats, bigs))); h++; break;
         }
         case "MAKECLOSURE": {                  // box a function as a closure [CLOSTAG, fnIndex, ...env]
           // ins[3] = generator flag: ignored here — a generator function compiles to a
@@ -1994,7 +2002,7 @@ function emitGenTrampoline(m, name, fn, bodyIdx, maxargs) {
 // value, done=0) or RET (done=1, return the value). A second, self-contained
 // codegen path: a generator is inherently resumable, so it can't use the
 // straight-line Relooper body. Numeric bodies for now (the common generator).
-function compileGenBody(m, bodyName, fn, keyIds, fnIndex, maxargs) {
+function compileGenBody(m, bodyName, fn, keyIds, fnIndex, maxargs, strings, floats, bigs) {
   const I32 = binaryen.i32;
   const nl = fn.nlocals, code = resolveLabels(fn.code);
   const loc = (i) => i + 1;
@@ -2068,19 +2076,9 @@ function compileGenBody(m, bodyName, fn, keyIds, fnIndex, maxargs) {
         case "BITNOT": stmts.push(m.local.set(scratch(h - 1), m.i32.sub(m.i32.const(-2), get(scratch(h - 1))))); break;
         case "ITER": stmts.push(m.local.set(scratch(h - 1), m.call("__iter", [get(scratch(h - 1))], I32))); break; // an array iterable gets wrapped; a generator passes through
         case "AWAIT": break;                   // await of a plain value is identity
-        case "BIN": {
-          h -= 2; const a = get(scratch(h)), b = get(scratch(h + 1)), op = ins[1]; let e;
-          if (op === "+") e = m.i32.add(a, b);
-          else if (op === "-") e = m.i32.sub(a, b);
-          else if (op === "*") e = m.i32.mul(m.i32.shr_s(a, m.i32.const(1)), b);
-          else if (op === "<") e = bool(m.i32.lt_s(a, b));
-          else if (op === "<=") e = bool(m.i32.le_s(a, b));
-          else if (op === ">") e = bool(m.i32.gt_s(a, b));
-          else if (op === ">=") e = bool(m.i32.ge_s(a, b));
-          else if (op === "===" || op === "==") e = bool(m.i32.eq(a, b));
-          else if (op === "!==" || op === "!=") e = bool(m.i32.ne(a, b));
-          else throw new Error("aot: generator BIN " + op + " not yet supported");
-          stmts.push(m.local.set(scratch(h), e)); h++; break;
+        case "BIN": {                          // polymorphic int/float/string/bigint — shared with compileFn via binExpr
+          h -= 2; const sa = scratch(h), sb = scratch(h + 1);
+          stmts.push(m.local.set(scratch(h), binExpr(m, ins[1], () => get(sa), () => get(sb), strings, floats, bigs))); h++; break;
         }
         case "GETPROP": stmts.push(m.local.set(scratch(h - 1), m.call("__getprop", [get(scratch(h - 1)), m.i32.const(keyIds.get(ins[1]))], I32))); break;
         case "MAKECLOSURE": {                  // no-capture only (yield* targets a top-level generator)
@@ -2334,7 +2332,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   if (uses("CALLVS")) maxargs = Math.max(maxargs, 8);
   const needsArgc = uses("ARGUMENTS", "GATHERREST"); // `arguments` / rest params recover the real arg count from ARGC_ADDR
   for (const [name, fn] of Object.entries(program)) {
-    if (gens.includes(name)) { emitGenTrampoline(m, name, fn, fnIndex[name + "$gen"], maxargs); compileGenBody(m, name + "$gen", fn, keyIds, fnIndex, maxargs); } // generator: trampoline + dispatch body
+    if (gens.includes(name)) { emitGenTrampoline(m, name, fn, fnIndex[name + "$gen"], maxargs); compileGenBody(m, name + "$gen", fn, keyIds, fnIndex, maxargs, usesStrings, usesFloat, usesBig); } // generator: trampoline + dispatch body
     else compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings, clsIds, usesExceptions, maxargs, needsArgc, usesReject, usesMapSet, usesFloat, usesBig);
   }
   if (usesArrays) addArrayRuntime(m);

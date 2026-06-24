@@ -22,6 +22,12 @@ const programs = [
   ["string and float literals in a generator body", `
     function* g() { yield "first"; yield 1.5; yield "last"; }
     function main() { let s = ""; for (const x of g()) { s = s + x + ","; } return s; }`],   // "first,1.5,last," — literals built on the heap inside the gen body
+  ["polymorphic operators run inside a generator body (concat, string ===, float)", `
+    function* g(label, n) { yield label + ":" + n; yield (label === "x"); yield n / 4; }
+    function main() { let s = ""; for (const v of g("x", 10)) { s = s + v + "|"; } return s; }`], // "x:10|true|2.5|" — BIN over strings/floats in the gen body (not just literals), shared with compileFn via binExpr
+  ["a caught value is string-concatenated inside the generator", `
+    function* g() { try { throw 42; } catch (e) { yield "caught:" + e; } yield "after"; }
+    function main() { let s = ""; for (const x of g()) { s = s + x + "/"; } return s; }`], // "caught:42/after/" — string concat of a caught value, the realts gen-return failure class
   ["a generator method reads this", `
     class Counter { constructor(n) { this.n = n; } *upto() { for (let i = 0; i < this.n; i++) { yield i * 10; } } }
     function main() { const c = new Counter(4); let s = 0; for (const x of c.upto()) { s = s + x; } return s; }`], // 0+10+20+30 = 60
