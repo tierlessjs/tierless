@@ -13,12 +13,15 @@
 
 import { createRuntime, initialFrames } from "#stackmix";
 import { compileModuleToWasm } from "#stackmix/wasm/frontend.mjs";
-import { BUMP_ADDR, HEAP_BASE, readValue } from "#stackmix/wasm/aot.mjs";
+import { BUMP_ADDR, HEAP_BASE, readValue, stdlibHost } from "#stackmix/wasm/aot.mjs";
 
 const programs = [
   ["fixed yields, for-of sum", `
     function* g() { yield 10; yield 20; yield 30; }
     function main() { let s = 0; for (const x of g()) { s = s + x; } return s; }`],          // 60
+  ["string and float literals in a generator body", `
+    function* g() { yield "first"; yield 1.5; yield "last"; }
+    function main() { let s = ""; for (const x of g()) { s = s + x + ","; } return s; }`],   // "first,1.5,last," — literals built on the heap inside the gen body
   ["range generator, for-of sum", `
     function* range(a, b) { for (let i = a; i < b; i = i + 1) { yield i; } }
     function main() { let s = 0; for (const x of range(1, 5)) { s = s + x; } return s; }`],    // 1+2+3+4 = 10
@@ -81,7 +84,9 @@ function interp(src) {
   return rt.run({ id: "t" }, initialFrames("main", []), { deref: (x) => x }).value;
 }
 function native(src) {
-  const inst = new WebAssembly.Instance(new WebAssembly.Module(compileModuleToWasm(src, { entry: "main", resources: [] })), { env: {} });
+  const sh = stdlibHost(); // a generator may build float/string literals -> the delegated stdlib (Number->string) is provided by the host
+  const inst = new WebAssembly.Instance(new WebAssembly.Module(compileModuleToWasm(src, { entry: "main", resources: [] })), { env: sh.imports });
+  sh.bind(inst);
   new DataView(inst.exports.memory.buffer).setInt32(BUMP_ADDR, HEAP_BASE, true);
   return readValue(inst.exports.memory, inst.exports.main());
 }

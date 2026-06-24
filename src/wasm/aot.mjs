@@ -305,7 +305,8 @@ export function readDeep(memory, v, keystr) {
   };
   return rec(v);
 }
-// Map an IR PUSH literal to its tagged immediate (floats/strings: a later slice).
+// Map an IR PUSH literal to its tagged immediate (a fixnum / singleton). Aggregates
+// (strings, floats, bigints, regex, const arrays) are built on the heap by pushLit.
 function immediate(x) {
   if (x === undefined) return UNDEF;
   if (x === null) return NULL;
@@ -313,6 +314,56 @@ function immediate(x) {
   if (x === false) return FALSE;
   if (typeof x === "number" && Number.isInteger(x)) return x << 1;
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
+}
+
+// Build a PUSH literal `v` into local `slot` (using slot+1 as a temp for regex/array
+// elements). Shared by compileFn and the generator-body codegen so the two can't
+// drift on literal handling (a string literal in a generator used to throw here).
+function pushLit(m, slot, v) {
+  const I32 = binaryen.i32, get = (i) => m.local.get(i, I32);
+  const buildStr = (sl, s) => {
+    const out = [m.local.set(sl, m.i32.load(0, 4, m.i32.const(BUMP_ADDR))),
+      m.i32.store(0, 4, get(sl), m.i32.const(STRTAG)), m.i32.store(4, 4, get(sl), m.i32.const(s.length))];
+    for (let k = 0; k < s.length; k++) out.push(m.i32.store8(8 + k, 1, get(sl), m.i32.const(s.charCodeAt(k))));
+    out.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(sl), m.i32.const(8 + ((s.length + 3) & ~3)))));
+    out.push(m.local.set(sl, m.i32.or(get(sl), m.i32.const(1))));
+    return out;
+  };
+  if (typeof v === "string") return buildStr(slot, v);
+  if (Array.isArray(v)) {                              // a constant array (e.g. a class's __class__ name list)
+    const out = [m.local.set(slot, m.call("__newarr", [], I32))];
+    for (const el of v) {
+      if (typeof el === "string") out.push(...buildStr(slot + 1, el));
+      else out.push(m.local.set(slot + 1, m.i32.const(immediate(el))));
+      out.push(m.drop(m.call("__arrpush", [get(slot), get(slot + 1)], I32)));
+    }
+    return out;
+  }
+  if (typeof v === "bigint") {                          // [BIGTAG, sign, nlimbs, ...limbs]
+    const neg = v < 0n; let x = neg ? -v : v; const limbs = [];
+    while (x > 0n) { limbs.push(Number(x & 0xffffffffn) | 0); x >>= 32n; }
+    const out = [m.local.set(slot, m.i32.load(0, 4, m.i32.const(BUMP_ADDR))),
+      m.i32.store(0, 4, get(slot), m.i32.const(BIGTAG)), m.i32.store(4, 4, get(slot), m.i32.const(neg ? 1 : 0)), m.i32.store(8, 4, get(slot), m.i32.const(limbs.length))];
+    for (let k = 0; k < limbs.length; k++) out.push(m.i32.store(12 + k * 4, 4, get(slot), m.i32.const(limbs[k])));
+    out.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(slot), m.i32.const(12 + limbs.length * 4))));
+    out.push(m.local.set(slot, m.i32.or(get(slot), m.i32.const(1))));
+    return out;
+  }
+  if (v instanceof RegExp) return [                     // [REGEXTAG, sourceStr, flagsStr]
+    m.local.set(slot, m.i32.load(0, 4, m.i32.const(BUMP_ADDR))),
+    m.i32.store(0, 4, get(slot), m.i32.const(REGEXTAG)),
+    m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(slot), m.i32.const(12))),
+    ...buildStr(slot + 1, v.source), m.i32.store(4, 4, get(slot), get(slot + 1)),
+    ...buildStr(slot + 1, v.flags), m.i32.store(8, 4, get(slot), get(slot + 1)),
+    m.local.set(slot, m.i32.or(get(slot), m.i32.const(1))),
+  ];
+  if (typeof v === "number" && !Number.isInteger(v)) return [   // boxed double [FLOATTAG, f64]
+    m.local.set(slot, m.i32.load(0, 4, m.i32.const(BUMP_ADDR))),
+    m.i32.store(0, 4, get(slot), m.i32.const(FLOATTAG)), m.f64.store(4, 8, get(slot), m.f64.const(v)),
+    m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(slot), m.i32.const(12))),
+    m.local.set(slot, m.i32.or(get(slot), m.i32.const(1))),
+  ];
+  return [m.local.set(slot, m.i32.const(immediate(v)))];
 }
 
 const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1, INDEX: -1, SETINDEX: -3, ISARRAY: 0, GLOBAL: 1, CALLMS: -1, APPENDALL: -1, ARGUMENTS: 1, GATHERREST: 0, TOARRAY: 0, ASSIGNALL: -1, DELPROP: 0, KEYS: 0, JSONSTR: -2, AWAITALL: 0, MKREJECT: 0 };
@@ -433,40 +484,9 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
     out.push(m.local.set(slot, m.i32.or(get(slot), m.i32.const(1))));
     return out;
   };
-  // Build a bigint [BIGTAG, sign, nlimbs, ...limbs] into local `slot` from a JS
-  // BigInt literal (base-2^32 little-endian magnitude; sign 0/1). Every operation
-  // on it is then delegated to the host (stdlibHost) — this only lays out the cell.
-  const buildBigInto = (slot, val) => {
-    const neg = val < 0n; let x = neg ? -val : val; const limbs = [];
-    while (x > 0n) { limbs.push(Number(x & 0xffffffffn) | 0); x >>= 32n; }
-    const out = [m.local.set(slot, m.i32.load(0, 4, m.i32.const(BUMP_ADDR))),
-      m.i32.store(0, 4, get(slot), m.i32.const(BIGTAG)), m.i32.store(4, 4, get(slot), m.i32.const(neg ? 1 : 0)), m.i32.store(8, 4, get(slot), m.i32.const(limbs.length))];
-    for (let k = 0; k < limbs.length; k++) out.push(m.i32.store(12 + k * 4, 4, get(slot), m.i32.const(limbs[k])));
-    out.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(slot), m.i32.const(12 + limbs.length * 4))));
-    out.push(m.local.set(slot, m.i32.or(get(slot), m.i32.const(1))));
-    return out;
-  };
-  // Build a regex [REGEXTAG, sourceStr, flagsStr] into local `slot` from a literal.
-  // The cell is reserved first so the two string builds (sharing one temp slot)
-  // land after it; the host reads source/flags to construct a real RegExp.
-  const buildRegexInto = (slot, re) => {
-    const tmp = slot + 1;
-    return [
-      m.local.set(slot, m.i32.load(0, 4, m.i32.const(BUMP_ADDR))),
-      m.i32.store(0, 4, get(slot), m.i32.const(REGEXTAG)),
-      m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(slot), m.i32.const(12))),   // reserve [tag, src, flags]
-      ...buildStrInto(tmp, re.source), m.i32.store(4, 4, get(slot), get(tmp)),
-      ...buildStrInto(tmp, re.flags), m.i32.store(8, 4, get(slot), get(tmp)),
-      m.local.set(slot, m.i32.or(get(slot), m.i32.const(1))),
-    ];
-  };
-  // Build a boxed double [FLOATTAG, f64] into local `slot` (for a non-integer literal).
-  const buildFloatInto = (slot, x) => [
-    m.local.set(slot, m.i32.load(0, 4, m.i32.const(BUMP_ADDR))),
-    m.i32.store(0, 4, get(slot), m.i32.const(FLOATTAG)), m.f64.store(4, 8, get(slot), m.f64.const(x)),
-    m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(slot), m.i32.const(12))),
-    m.local.set(slot, m.i32.or(get(slot), m.i32.const(1))),
-  ];
+  // (bigint / regex / float / const-array literals are built by the shared module-level
+  // pushLit; buildStrInto stays because ISA, join's default separator, and the RegExp
+  // constructor also build bare strings.)
   // Arithmetic / comparison with the integer fast path kept and a float (or string,
   // for +) fallback when a non-fixnum operand is present. a, b are thunks (a fresh
   // local.get each use). + and === concatenate / compare strings via __add / __eq.
@@ -508,23 +528,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
     let h = entryH[bi], result = null, term = { kind: "fall", next: end };
     for (const ins of code.slice(start, end)) {
       switch (ins[0]) {
-        case "PUSH": {
-          const v = ins[1];
-          if (typeof v === "string") { stmts.push(...buildStrInto(scratch(h), v)); h++; break; } // string literal
-          if (Array.isArray(v)) {              // constant array (e.g. a class's __class__ name list): NEWARR + ARRPUSH each element
-            stmts.push(m.local.set(scratch(h), m.call("__newarr", [], I32)));
-            for (const el of v) {
-              if (typeof el === "string") stmts.push(...buildStrInto(scratch(h + 1), el));
-              else stmts.push(m.local.set(scratch(h + 1), m.i32.const(immediate(el))));
-              stmts.push(m.drop(m.call("__arrpush", [get(scratch(h)), get(scratch(h + 1))], I32)));
-            }
-            h++; break;
-          }
-          if (typeof v === "bigint") { stmts.push(...buildBigInto(scratch(h), v)); h++; break; } // bigint literal
-          if (v instanceof RegExp) { stmts.push(...buildRegexInto(scratch(h), v)); h++; break; } // regex literal
-          if (typeof v === "number" && !Number.isInteger(v)) { stmts.push(...buildFloatInto(scratch(h), v)); h++; break; } // non-integer literal -> boxed double
-          stmts.push(m.local.set(scratch(h), m.i32.const(immediate(v)))); h++; break; // tagged immediate
-        }
+        case "PUSH": stmts.push(...pushLit(m, scratch(h), ins[1])); h++; break; // string / array / bigint / regex / float / immediate (shared with the generator-body codegen)
         case "LOAD": stmts.push(m.local.set(scratch(h), get(loc(ins[1])))); h++; break;
         case "STORE": h--; stmts.push(m.local.set(loc(ins[1]), get(scratch(h)))); break;
         case "LOADENV": stmts.push(m.local.set(scratch(h), m.i32.load(8 + ins[1] * 4, 4, m.i32.and(get(ENV), m.i32.const(~3))))); h++; break; // env[idx] from the closure
@@ -1980,7 +1984,7 @@ function compileGenBody(m, bodyName, fn, keyIds, fnIndex, maxargs) {
     }
     for (const ins of code.slice(start, end)) {
       switch (ins[0]) {
-        case "PUSH": stmts.push(m.local.set(scratch(h), m.i32.const(immediate(ins[1])))); h++; break;
+        case "PUSH": stmts.push(...pushLit(m, scratch(h), ins[1])); h++; break;
         case "LOAD": stmts.push(m.local.set(scratch(h), get(loc(ins[1])))); h++; break;
         case "STORE": h--; stmts.push(m.local.set(loc(ins[1]), get(scratch(h)))); break;
         case "POP": h--; break;
