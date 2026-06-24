@@ -82,6 +82,10 @@ const REJTAG = -6;
 // idx]. ITER wraps the collection in one; GENNEXT advances it. A generator is
 // already its own iterator, so ITER leaves a generator (and any iterator) as-is.
 const ITERTAG = -7;
+// Map and Set. Both are [tag, count, backing]; a Map backing is [cap, k0,v0,k1,v1,
+// ...] (entries, like an object but keys are values compared by __eq, not interned
+// ids), a Set backing is [cap, v0,v1,...] (so it iterates exactly like an array).
+const MAPTAG = -8, SETTAG = -9;
 
 // Host-side array helpers: build/read a growable array in an instance's linear
 // memory (so resources can pass number[] across the boundary). Layout matches
@@ -149,7 +153,7 @@ function immediate(x) {
 }
 
 const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1, INDEX: -1, SETINDEX: -3, ISARRAY: 0, GLOBAL: 1, CALLMS: -1, APPENDALL: -1, ARGUMENTS: 1, GATHERREST: 0, TOARRAY: 0, ASSIGNALL: -1, DELPROP: 0, KEYS: 0, JSONSTR: -2, AWAITALL: 0, MKREJECT: 0 };
-const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" || ins[0] === "CALLM" ? -ins[2] : ins[0] === "CALLG" ? 1 - ins[2] : DELTA[ins[0]] ?? 0;
+const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" || ins[0] === "CALLM" ? -ins[2] : ins[0] === "CALLG" || ins[0] === "CTORG" ? 1 - (ins[2] || 0) : DELTA[ins[0]] ?? 0;
 // Ops that run user code and can therefore propagate an exception — so a block ends
 // after one, and the next checks the pending-exception flag.
 const CALL_OPS = new Set(["CALL", "CALLV", "CALLMETHOD", "CALLDYN", "CALLVS", "GETPROPA", "SETPROPA", "GENNEXT", "GENTHROW", "AWAIT", "AWAITALL"]);
@@ -220,7 +224,7 @@ function blockHeights(code, leaders) {
   return { entryH: entry, maxAbs, blockHandler, entryHandler };
 }
 
-function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, exceptions, maxargs, needsArgc, reject) {
+function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, exceptions, maxargs, needsArgc, reject, mapSet) {
   const I32 = binaryen.i32;
   const argc = fn.argc || 0, nl = fn.nlocals;
   const code = resolveLabels(fn.code);
@@ -425,6 +429,14 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
         case "INDEX": { h -= 2; stmts.push(m.local.set(scratch(h), m.call("__index", [get(scratch(h)), get(scratch(h + 1))], I32))); h++; break; } // recv[key]
         case "SETINDEX": { h -= 3; stmts.push(m.drop(m.call("__setindex", [get(scratch(h)), get(scratch(h + 1)), get(scratch(h + 2))], I32))); break; } // recv[key] = value
         case "NEWOBJ": stmts.push(m.local.set(scratch(h), m.call("__newobj", [], I32))); h++; break;
+        case "CTORG": {                        // new Map(...) / new Set(...): construct, then populate from an optional init array
+          const cn = ins[1], n = ins[2] || 0; h -= n;
+          const ctor = cn === "Map" ? "__newmap" : cn === "Set" ? "__newset" : null;
+          if (!ctor) throw new Error("aot: unsupported constructor " + cn);
+          stmts.push(m.local.set(scratch(h + n), m.call(ctor, [], I32)));                                  // build above the args
+          if (n >= 1) stmts.push(m.local.set(scratch(h + n), m.call(cn === "Map" ? "__mapinit" : "__setinit", [get(scratch(h + n)), get(scratch(h))], I32)));
+          stmts.push(m.local.set(scratch(h), get(scratch(h + n)))); h++; break;
+        }
         case "GETPROP": {                      // [obj] -> [obj.key]; key interned to an id
           const v = m.call("__getprop", [get(scratch(h - 1)), m.i32.const(keyIds.get(ins[1]))], I32);
           stmts.push(m.local.set(scratch(h - 1), v)); break;
@@ -442,12 +454,37 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
           stmts.push(m.local.set(scratch(h), r)); h++; break;
         }
         case "CALLMETHOD": {                   // recv.name(args): the method closure captured `this`, so call it with env = the method
-          const argc = ins[2]; h -= argc + 1;  // stack: [recv, arg0..arg_{argc-1}]
-          stmts.push(m.local.set(scratch(h), m.call("__getprop", [get(scratch(h)), m.i32.const(keyIds.get(ins[1]))], I32))); // recv[name] = method closure
-          const fn = m.i32.load(4, 4, m.i32.and(get(scratch(h)), m.i32.const(~3)));
-          const args = [get(scratch(h))]; for (let k = 0; k < argc; k++) args.push(get(scratch(h + 1 + k)));
-          stmts.push(...setArgc(m.i32.const(argc)));
-          stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, padTo(args), callType(), I32))); h++; break;
+          const mname = ins[1], argc = ins[2]; h -= argc + 1;  // stack: [recv, arg0..arg_{argc-1}]
+          const a = (k) => get(scratch(h + 1 + k));
+          // Closure dispatch (the general path): recv[name] is a method closure.
+          const closureCall = () => {
+            const args = [get(scratch(h))]; for (let k = 0; k < argc; k++) args.push(a(k));
+            return m.block(null, [
+              m.local.set(scratch(h), m.call("__getprop", [get(scratch(h)), m.i32.const(keyIds.get(mname))], I32)),   // recv -> method closure (recv read first)
+              ...setArgc(m.i32.const(argc)),
+              m.local.set(scratch(h), m.call_indirect("0", m.i32.load(4, 4, m.i32.and(get(scratch(h)), m.i32.const(~3))), padTo(args), callType(), I32)),
+            ], binaryen.none);
+          };
+          // Map/Set native methods are tag-dispatched at runtime (a regular object can
+          // share a method name, so the general path stays the fallback).
+          const MAPSET = { set: 1, get: 1, has: 1, add: 1, keys: 1, values: 1, entries: 1 };
+          if (mapSet && MAPSET[mname]) {
+            const tag = () => m.i32.load(0, 4, m.i32.and(get(scratch(h)), m.i32.const(0xfffc)));
+            const isMap = () => m.i32.eq(tag(), m.i32.const(MAPTAG));
+            const r = get(scratch(h));
+            const native = mname === "set" ? m.call("__mapset", [r, a(0), a(1)], I32)
+              : mname === "get" ? m.call("__mapget", [r, a(0)], I32)
+              : mname === "add" ? m.call("__setadd", [r, a(0)], I32)
+              : mname === "entries" ? m.call("__mapiter", [r, m.i32.const(1)], I32)
+              : mname === "has" ? m.call("__collhas", [r, a(0)], I32)
+              : mname === "keys" ? m.select(isMap(), m.call("__mapiter", [get(scratch(h)), m.i32.const(2)], I32), m.call("__iter", [get(scratch(h))], I32))   // Set.keys() = a values iterator
+              : m.select(isMap(), m.call("__mapiter", [get(scratch(h)), m.i32.const(3)], I32), m.call("__iter", [get(scratch(h))], I32)); // values
+            const isColl = m.i32.and(m.i32.eq(m.i32.and(get(scratch(h)), m.i32.const(3)), m.i32.const(1)), m.i32.or(isMap(), m.i32.eq(tag(), m.i32.const(SETTAG))));
+            stmts.push(m.if(isColl, m.local.set(scratch(h), native), closureCall()));
+          } else {
+            stmts.push(closureCall());
+          }
+          h++; break;
         }
         case "ISARRAY": stmts.push(m.local.set(scratch(h - 1), bool(isArr(scratch(h - 1))))); break; // Array.isArray, lowered by the HOF inliner
         case "GLOBAL": stmts.push(m.local.set(scratch(h), m.i32.const(UNDEF))); h++; break;          // stdlib namespace (Math/Number/Array): a placeholder receiver — CALLM/CALLMS dispatch on the static method name
@@ -625,7 +662,7 @@ function addArrayRuntime(m) {
 
 // Runtime helpers for string-keyed objects (added only when a program uses them).
 // An object is a stable header [OBJTAG, count, backing] + backing [cap, (key,val)...].
-function addObjectRuntime(m, lenId) {
+function addObjectRuntime(m, lenId, sizeId) {
   const I32 = binaryen.i32;
   const g = (i) => m.local.get(i, I32);
   const c = (n) => m.i32.const(n);
@@ -645,10 +682,12 @@ function addObjectRuntime(m, lenId) {
   // __getprop(obj, key) -> value or undefined.  params 0=obj,1=key; locals 2=addr,3=backing,4=count,5=i
   m.addFunction("__getprop", binaryen.createType([I32, I32]), I32, [I32, I32, I32, I32], m.block(null, [
     m.local.set(2, m.i32.and(g(0), c(~3))),
-    // Arrays and strings expose .length (header word [tag, length, ...]); any other
-    // key on them reads as undefined. Objects fall through to the key-pair scan.
+    // Arrays and strings expose .length, Maps and Sets expose .size — all the count
+    // word at offset 4. Any other key on them reads undefined. Objects fall through.
     m.if(m.i32.or(m.i32.eq(ld(0, g(2)), c(ARRTAG)), m.i32.eq(ld(0, g(2)), c(STRTAG))),
       m.return(m.select(m.i32.eq(g(1), c(lenId)), m.i32.shl(ld(4, g(2)), c(1)), c(UNDEF)))),
+    m.if(m.i32.or(m.i32.eq(ld(0, g(2)), c(MAPTAG)), m.i32.eq(ld(0, g(2)), c(SETTAG))),
+      m.return(m.select(m.i32.eq(g(1), c(sizeId)), m.i32.shl(ld(4, g(2)), c(1)), c(UNDEF)))),
     m.local.set(3, ld(8, g(2))), m.local.set(4, ld(4, g(2))), m.local.set(5, c(0)),
     m.loop("L", m.block(null, [
       m.if(m.i32.ge_u(g(5), g(4)), m.return(c(UNDEF))),            // i >= count -> undefined (missing key)
@@ -904,7 +943,7 @@ function addBuiltinRuntime(m, { spread, append, toarray, assignall, valueId, don
   if (append) {
     const body = [
       m.local.set(2, m.i32.and(g(1), c(~3))),
-      m.if(m.i32.eq(ld(0, g(2)), c(ARRTAG)), m.block(null, [
+      m.if(m.i32.or(m.i32.eq(ld(0, g(2)), c(ARRTAG)), m.i32.eq(ld(0, g(2)), c(SETTAG))), m.block(null, [ // array or Set: copy the stride-1 backing
         m.local.set(3, ld(8, g(2))), m.local.set(4, ld(4, g(2))), m.local.set(5, c(0)),
         m.loop("L", m.block(null, [
           m.if(m.i32.ge_s(g(5), g(4)), m.return(g(0))),
@@ -913,8 +952,8 @@ function addBuiltinRuntime(m, { spread, append, toarray, assignall, valueId, don
         ])),
       ], binaryen.none)),
     ];
-    if (valueId != null) body.push(                    // generator source: __gennext until done
-      m.if(m.i32.eq(ld(0, g(2)), c(GENTAG)), m.loop("G", m.block(null, [
+    if (valueId != null) body.push(                    // a generator or any iterator: drive __gennext until done
+      m.if(m.i32.or(m.i32.eq(ld(0, g(2)), c(GENTAG)), m.i32.eq(ld(0, g(2)), c(ITERTAG))), m.loop("G", m.block(null, [
         m.local.set(6, m.call("__gennext", [g(1), c(UNDEF)], I32)),
         m.if(m.i32.eq(m.call("__getprop", [g(6), c(doneId)], I32), c(TRUE)), m.return(g(0))),
         m.drop(m.call("__arrpush", [g(0), m.call("__getprop", [g(6), c(valueId)], I32)], I32)),
@@ -1252,6 +1291,140 @@ function addStrMethRuntime(m, genIds) {
   ]);
 }
 
+// Runtime for Map and Set (added when a program constructs one). Keys/values are
+// compared by __eq (value equality, so two equal strings collide as one key).
+// Growth doubles the backing and memory.copies it, like the object runtime.
+function addMapSetRuntime(m) {
+  const I32 = binaryen.i32;
+  const g = (i) => m.local.get(i, I32);
+  const c = (n) => m.i32.const(n);
+  const ld = (off, p) => m.i32.load(off, 4, p);
+  const st = (off, p, v) => m.i32.store(off, 4, p, v);
+  const bump = () => m.i32.load(0, 4, c(BUMP_ADDR));
+  const setBump = (v) => m.i32.store(0, 4, c(BUMP_ADDR), v);
+  const addr = (i) => m.i32.and(g(i), c(~3));
+  const eq = (a, b) => m.call("__eq", [a, b], I32);
+  const fn = (name, np, nl, body) => m.addFunction(name, binaryen.createType(new Array(np).fill(I32)), I32, new Array(nl).fill(I32), m.block(null, body, binaryen.none));
+  const ICAP = 4;
+
+  // __newmap()/__newset() -> tagged pointer. entryWords = 2 (map) or 1 (set).
+  const ctor = (name, tag, entryWords) => fn(name, 0, 2, [
+    m.local.set(0, bump()), st(0, g(0), c(ICAP)), setBump(m.i32.add(g(0), c((1 + ICAP * entryWords) * 4))), // backing = [cap, ...slots]
+    m.local.set(1, bump()), st(0, g(1), c(tag)), st(4, g(1), c(0)), st(8, g(1), g(0)), setBump(m.i32.add(g(1), c(12))),
+    m.return(m.i32.or(g(1), c(1))),
+  ]);
+  ctor("__newmap", MAPTAG, 2);
+  ctor("__newset", SETTAG, 1);
+
+  // grow(addrLocal, backingLocal, countLocal, entryWords): double the backing if full.
+  const grow = (entryWords) => m.block(null, [   // uses locals 4=addr,5=backing,6=count; 7=cap,8=newBacking
+    m.local.set(7, ld(0, g(5))),
+    m.if(m.i32.ge_s(g(6), g(7)), m.block(null, [
+      m.local.set(8, bump()), st(0, g(8), m.i32.mul(g(7), c(2))), setBump(m.i32.add(g(8), m.i32.add(m.i32.mul(m.i32.mul(g(7), c(2)), c(entryWords * 4)), c(4)))),
+      m.memory.copy(m.i32.add(g(8), c(4)), m.i32.add(g(5), c(4)), m.i32.mul(g(6), c(entryWords * 4))),
+      st(8, g(4), g(8)), m.local.set(5, g(8)),
+    ], binaryen.none)),
+  ], binaryen.none);
+
+  // Map: entry i key at backing+4+i*8, val at backing+8+i*8.
+  const mkey = (b, i) => ld(4, m.i32.add(g(b), m.i32.mul(g(i), c(8))));
+  const mval = (b, i) => ld(8, m.i32.add(g(b), m.i32.mul(g(i), c(8))));
+  // __mapset(m,k,v) -> m. locals 3=i,4=addr,5=backing,6=count,7=cap,8=newBacking
+  fn("__mapset", 3, 6, [
+    m.local.set(4, addr(0)), m.local.set(5, ld(8, g(4))), m.local.set(6, ld(4, g(4))), m.local.set(3, c(0)),
+    m.loop("L", m.block(null, [
+      m.if(m.i32.lt_s(g(3), g(6)), m.block(null, [
+        m.if(eq(mkey(5, 3), g(1)), m.block(null, [st(8, m.i32.add(g(5), m.i32.mul(g(3), c(8))), g(2)), m.return(g(0))])), // overwrite
+        m.local.set(3, m.i32.add(g(3), c(1))), m.br("L"),
+      ])),
+    ])),
+    grow(2),
+    st(4, m.i32.add(g(5), m.i32.mul(g(6), c(8))), g(1)), st(8, m.i32.add(g(5), m.i32.mul(g(6), c(8))), g(2)), // append
+    st(4, g(4), m.i32.add(g(6), c(1))), m.return(g(0)),
+  ]);
+  // __mapget(m,k)/__maphas(m,k)/__mapdel(m,k). locals 2=i,3=addr,4=backing,5=count
+  const mscan = (name, hit, miss) => fn(name, 2, 4, [
+    m.local.set(3, addr(0)), m.local.set(4, ld(8, g(3))), m.local.set(5, ld(4, g(3))), m.local.set(2, c(0)),
+    m.loop("L", m.block(null, [
+      m.if(m.i32.ge_s(g(2), g(5)), m.return(miss)),
+      m.if(eq(mkey(4, 2), g(1)), hit),
+      m.local.set(2, m.i32.add(g(2), c(1))), m.br("L"),
+    ])),
+    m.unreachable(),
+  ]);
+  mscan("__mapget", m.return(mval(4, 2)), c(UNDEF));
+  // __mapdel(m,k) -> bool: shift entries down. locals 2=i,3=addr,4=backing,5=count
+  fn("__mapdel", 2, 4, [
+    m.local.set(3, addr(0)), m.local.set(4, ld(8, g(3))), m.local.set(5, ld(4, g(3))), m.local.set(2, c(0)),
+    m.loop("L", m.block(null, [
+      m.if(m.i32.ge_s(g(2), g(5)), m.return(c(FALSE))),
+      m.if(eq(mkey(4, 2), g(1)), m.block(null, [
+        m.memory.copy(m.i32.add(m.i32.add(g(4), c(4)), m.i32.mul(g(2), c(8))), m.i32.add(m.i32.add(g(4), c(12)), m.i32.mul(g(2), c(8))), m.i32.mul(m.i32.sub(m.i32.sub(g(5), g(2)), c(1)), c(8))),
+        st(4, g(3), m.i32.sub(g(5), c(1))), m.return(c(TRUE)),
+      ])),
+      m.local.set(2, m.i32.add(g(2), c(1))), m.br("L"),
+    ])),
+    m.unreachable(),
+  ]);
+
+  // Set: value i at backing+4+i*4 (stride 1, like an array).
+  const sval = (b, i) => ld(4, m.i32.add(g(b), m.i32.mul(g(i), c(4))));
+  // __setadd(s,v) -> s. locals 3=i,4=addr,5=backing,6=count,7=cap,8=newBacking
+  fn("__setadd", 2, 7, [
+    m.local.set(4, addr(0)), m.local.set(5, ld(8, g(4))), m.local.set(6, ld(4, g(4))), m.local.set(3, c(0)),
+    m.loop("L", m.block(null, [
+      m.if(m.i32.lt_s(g(3), g(6)), m.block(null, [
+        m.if(eq(sval(5, 3), g(1)), m.return(g(0))),            // already present
+        m.local.set(3, m.i32.add(g(3), c(1))), m.br("L"),
+      ])),
+    ])),
+    grow(1),
+    st(4, m.i32.add(g(5), m.i32.mul(g(6), c(4))), g(1)),       // append
+    st(4, g(4), m.i32.add(g(6), c(1))), m.return(g(0)),
+  ]);
+  // __collhas(coll, key) -> bool, for a Map or a Set. Tag-aware (entry stride is 8
+  // bytes for a Map, 4 for a Set), so it is safe to call on either — unlike a
+  // select over __maphas/__sethas, which would also run the wrong scan and could
+  // deref garbage past the backing. params 0=coll,1=key; locals 2=addr,3=backing,
+  // 4=count,5=i,6=stride
+  fn("__collhas", 2, 5, [
+    m.local.set(2, addr(0)), m.local.set(6, m.select(m.i32.eq(ld(0, g(2)), c(MAPTAG)), c(8), c(4))),
+    m.local.set(3, ld(8, g(2))), m.local.set(4, ld(4, g(2))), m.local.set(5, c(0)),
+    m.loop("L", m.block(null, [
+      m.if(m.i32.ge_s(g(5), g(4)), m.return(c(FALSE))),
+      m.if(eq(ld(4, m.i32.add(g(3), m.i32.mul(g(5), g(6)))), g(1)), m.return(c(TRUE))),
+      m.local.set(5, m.i32.add(g(5), c(1))), m.br("L"),
+    ])),
+    m.unreachable(),
+  ]);
+  // __mapinit(m, arr) -> m: arr of [k,v] pair arrays. locals 2=backing,3=len,4=i,5=pair
+  fn("__mapinit", 2, 4, [
+    m.local.set(2, ld(8, addr(1))), m.local.set(3, ld(4, addr(1))), m.local.set(4, c(0)),
+    m.loop("L", m.block(null, [
+      m.if(m.i32.ge_s(g(4), g(3)), m.return(g(0))),
+      m.local.set(5, m.i32.and(ld(4, m.i32.add(g(2), m.i32.mul(g(4), c(4)))), c(~3))),   // pair = arr[i] (an array [k,v])
+      m.drop(m.call("__mapset", [g(0), ld(4, ld(8, g(5))), ld(8, ld(8, g(5)))], I32)),   // pair backing: [cap,k,v] -> k=ld(4,backing), v=ld(8,backing)
+      m.local.set(4, m.i32.add(g(4), c(1))), m.br("L"),
+    ])),
+    m.unreachable(),
+  ]);
+  // __setinit(s, arr) -> s. locals 2=backing,3=len,4=i
+  fn("__setinit", 2, 3, [
+    m.local.set(2, ld(8, addr(1))), m.local.set(3, ld(4, addr(1))), m.local.set(4, c(0)),
+    m.loop("L", m.block(null, [
+      m.if(m.i32.ge_s(g(4), g(3)), m.return(g(0))),
+      m.drop(m.call("__setadd", [g(0), ld(4, m.i32.add(g(2), m.i32.mul(g(4), c(4))))], I32)),
+      m.local.set(4, m.i32.add(g(4), c(1))), m.br("L"),
+    ])),
+    m.unreachable(),
+  ]);
+  // __mapiter(map, kind) -> [ITERTAG, map, 0, kind]: kind 1=entries, 2=keys, 3=values.
+  fn("__mapiter", 2, 1, [
+    m.local.set(2, bump()), st(0, g(2), c(ITERTAG)), st(4, g(2), g(0)), st(8, g(2), c(0)), st(12, g(2), g(1)),
+    setBump(m.i32.add(g(2), c(16))), m.return(m.i32.or(g(2), c(1))),
+  ]);
+}
+
 // Runtime helper for instanceof (added when a program uses ISA). A user class
 // tags each instance with a hidden __class__ array of its class-name chain.
 function addClassRuntime(m) {
@@ -1525,7 +1698,7 @@ function compileGenBody(m, bodyName, fn, keyIds, fnIndex, maxargs) {
 }
 
 // Runtime: drive a generator one step (added when a program uses generators).
-function addGenRuntime(m, valueKey, doneKey) {
+function addGenRuntime(m, valueKey, doneKey, mapSet) {
   const I32 = binaryen.i32;
   const g = (i) => m.local.get(i, I32);
   const c = (n) => m.i32.const(n);
@@ -1546,26 +1719,45 @@ function addGenRuntime(m, valueKey, doneKey) {
     m.if(m.i32.load(0, 4, c(EXC_FLAG)), m.return(c(0))),                               // body threw uncaught -> propagate
     mkResult(g(2), m.select(m.i32.load(12, 4, genAddr()), c(TRUE), c(FALSE))),          // value + done (the body set done)
   ], binaryen.none);
-  // __iter(v) -> an iterator. An array is wrapped in [ITERTAG, coll, idx=0]; a
-  // generator (or anything already an iterator) is returned as-is. locals: 1=p
-  m.addFunction("__iter", binaryen.createType([I32]), I32, [I32], m.block(null, [
-    m.if(m.i32.and(m.i32.eq(m.i32.and(g(0), c(3)), c(1)), m.i32.eq(m.i32.load(0, 4, m.i32.and(g(0), c(0xfffc))), c(ARRTAG))), m.block(null, [
-      m.local.set(1, m.i32.load(0, 4, c(BUMP_ADDR))),
-      m.i32.store(0, 4, g(1), c(ITERTAG)), m.i32.store(4, 4, g(1), g(0)), m.i32.store(8, 4, g(1), c(0)),
-      m.i32.store(0, 4, c(BUMP_ADDR), m.i32.add(g(1), c(12))),
-      m.return(m.i32.or(g(1), c(1))),
-    ], binaryen.none)),
-    m.return(g(0)),
+  // __iter(v) -> an iterator [ITERTAG, coll, idx=0, kind]: an array or Set is
+  // kind 0 (stride-1 values), a Map is kind 1 (entries); a generator (or anything
+  // already an iterator) is returned as-is. locals: 1=p,2=tag,3=kind
+  const mkIter = (kind) => m.block(null, [
+    m.local.set(1, m.i32.load(0, 4, c(BUMP_ADDR))),
+    m.i32.store(0, 4, g(1), c(ITERTAG)), m.i32.store(4, 4, g(1), g(0)), m.i32.store(8, 4, g(1), c(0)), m.i32.store(12, 4, g(1), kind),
+    m.i32.store(0, 4, c(BUMP_ADDR), m.i32.add(g(1), c(16))),
+    m.return(m.i32.or(g(1), c(1))),
+  ], binaryen.none);
+  m.addFunction("__iter", binaryen.createType([I32]), I32, [I32, I32, I32], m.block(null, [
+    m.if(m.i32.ne(m.i32.and(g(0), c(3)), c(1)), m.return(g(0))),                              // not a pointer -> as-is
+    m.local.set(2, m.i32.load(0, 4, m.i32.and(g(0), c(0xfffc)))),
+    m.if(m.i32.eq(g(2), c(ARRTAG)), mkIter(c(0))),
+    ...(mapSet ? [m.if(m.i32.eq(g(2), c(SETTAG)), mkIter(c(0))), m.if(m.i32.eq(g(2), c(MAPTAG)), mkIter(c(1)))] : []),
+    m.return(g(0)),                                                                           // generator / existing iterator
   ], binaryen.none));
   // __gennext(gen, sent) -> {value, done}.  An ITERTAG iterator advances over its
-  // collection's backing; otherwise drive the generator body. locals: 2=ret,3=obj,
-  // 4=iterAddr,5=collAddr,6=idx
-  m.addFunction("__gennext", binaryen.createType([I32, I32]), I32, [I32, I32, I32, I32, I32], m.block(null, [
+  // collection's backing (kind 0 = stride-1 values, 1 = map [k,v] entries, 2 = map
+  // keys, 3 = map values); otherwise drive the generator body. locals: 2=ret,3=obj,
+  // 4=iterAddr,5=collBacking,6=idx,7=kind/pairArr
+  const elem1 = () => m.i32.load(4, 4, m.i32.add(g(5), m.i32.mul(g(6), c(4))));               // stride-1 value
+  const mapK = () => m.i32.load(4, 4, m.i32.add(g(5), m.i32.mul(g(6), c(8))));                // map entry key
+  const mapV = () => m.i32.load(8, 4, m.i32.add(g(5), m.i32.mul(g(6), c(8))));                // map entry value
+  m.addFunction("__gennext", binaryen.createType([I32, I32]), I32, [I32, I32, I32, I32, I32, I32], m.block(null, [
     m.if(m.i32.and(m.i32.eq(m.i32.and(g(0), c(3)), c(1)), m.i32.eq(m.i32.load(0, 4, m.i32.and(g(0), c(0xfffc))), c(ITERTAG))), m.block(null, [
-      m.local.set(4, m.i32.and(g(0), c(~3))), m.local.set(5, m.i32.and(m.i32.load(4, 4, g(4)), c(~3))), m.local.set(6, m.i32.load(8, 4, g(4))),
-      m.if(m.i32.ge_s(g(6), m.i32.load(4, 4, g(5))), mkResult(c(UNDEF), c(TRUE))),           // idx >= count -> done
-      m.i32.store(8, 4, g(4), m.i32.add(g(6), c(1))),                                         // advance idx
-      mkResult(m.i32.load(4, 4, m.i32.add(m.i32.load(8, 4, g(5)), m.i32.mul(g(6), c(4)))), c(FALSE)), // value = backing[idx]
+      m.local.set(4, m.i32.and(g(0), c(~3))), m.local.set(7, m.i32.load(12, 4, g(4))), m.local.set(6, m.i32.load(8, 4, g(4))),
+      m.if(m.i32.ge_s(g(6), m.i32.load(4, 4, m.i32.and(m.i32.load(4, 4, g(4)), c(~3)))), mkResult(c(UNDEF), c(TRUE))), // idx >= count -> done
+      m.local.set(5, m.i32.load(8, 4, m.i32.and(m.i32.load(4, 4, g(4)), c(~3)))),             // backing
+      m.i32.store(8, 4, g(4), m.i32.add(g(6), c(1))),                                          // advance idx
+      ...(mapSet ? [
+        m.if(m.i32.eq(g(7), c(2)), mkResult(mapK(), c(FALSE))),                                // map keys
+        m.if(m.i32.eq(g(7), c(3)), mkResult(mapV(), c(FALSE))),                                // map values
+        m.if(m.i32.eq(g(7), c(1)), m.block(null, [                                             // map entries -> [k, v]
+          m.local.set(7, m.call("__newarr", [], I32)),
+          m.drop(m.call("__arrpush", [g(7), mapK()], I32)), m.drop(m.call("__arrpush", [g(7), mapV()], I32)),
+          mkResult(g(7), c(FALSE)),
+        ], binaryen.none)),
+      ] : []),
+      mkResult(elem1(), c(FALSE)),                                                             // kind 0: stride-1 value
     ], binaryen.none)),
     drive(0),
   ], binaryen.none));
@@ -1594,7 +1786,8 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   // just one that yields, so `function*(){}` with no yield still counts. Each is
   // compiled as a trampoline + dispatch body.
   const gens = [...new Set(Object.values(program).flatMap((fn) => fn.code.filter((i) => Array.isArray(i) && i[0] === "MAKECLOSURE" && i[3]).map((i) => i[1])))];
-  const usesGenerators = gens.length > 0 || uses("GENNEXT", "YIELD"); // gen runtime + {value, done} objects
+  const usesMapSet = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CTORG" && (i[1] === "Map" || i[1] === "Set"))); // Map/Set construction
+  const usesGenerators = gens.length > 0 || uses("GENNEXT", "YIELD") || usesMapSet; // gen runtime + {value, done} objects; Map/Set reuse the iterator path
   const usesAccessors = uses("GETPROPA", "SETPROPA");      // getters/setters need the accessor runtime
   const usesIndex = uses("INDEX", "SETINDEX");             // computed member access -> the index runtime (+ key interning)
   const usesReject = uses("MKREJECT");                      // Promise.reject -> a rejection cell; awaiting it throws
@@ -1604,9 +1797,9 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const usesStrMeth = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CALLM" && STRMETHS.has(i[1])));
   const usesKeys = uses("KEYS");                            // Object.keys / for-in -> the keys runtime (reverse id->string + an array)
   const usesJson = uses("JSONSTR");                         // JSON.stringify -> the json runtime (shares __keystr)
-  const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL", "ARGUMENTS", "GATHERREST", "TOARRAY", "KEYS") || usesConstArray || usesStrMeth; // __class__ name lists build arrays; APPENDALL/ARGUMENTS/GATHERREST/split/from/TOARRAY/KEYS push
+  const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL", "ARGUMENTS", "GATHERREST", "TOARRAY", "KEYS") || usesConstArray || usesStrMeth || usesMapSet; // __class__ name lists build arrays; APPENDALL/ARGUMENTS/GATHERREST/split/from/TOARRAY/KEYS push; Map entries + init use arrays
   const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA", "ASSIGNALL", "KEYS") || usesClasses || usesGenerators || usesIndex; // instances, method dispatch, {value,done}, computed access, object spread
-  const usesStrings = usesClasses || usesIndex || usesStrMeth || usesKeys || usesJson || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq); string methods + keys + json build strings
+  const usesStrings = usesClasses || usesIndex || usesStrMeth || usesKeys || usesJson || usesMapSet || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq); string methods + keys + json build strings; Map/Set compare keys via __eq
   if (usesArrays || usesObjects || usesStrings) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow/concat paths
   // Property and method keys are interned to small ints at compile time, so
   // GETPROP/SETPROP/SETHIDDEN/CALLMETHOD are id matches in the object runtime.
@@ -1615,6 +1808,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   if (usesGenerators) for (const k of ["value", "done"]) if (!keyIds.has(k)) keyIds.set(k, keyIds.size + 1); // GENNEXT builds {value, done}
   if (usesAccessors) for (const k of ["__accessors__", "get", "set"]) if (!keyIds.has(k)) keyIds.set(k, keyIds.size + 1); // accessor lookups
   if (usesObjects && !keyIds.has("length")) keyIds.set("length", keyIds.size + 1);                          // __getprop dispatches array/string .length on this id
+  if (usesMapSet && !keyIds.has("size")) keyIds.set("size", keyIds.size + 1);                               // ...and Map/Set .size
   // Class names get a registry slot each (for the memoized class object used by statics).
   const clsIds = new Map();
   for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && (i[0] === "CLSGET" || i[0] === "CLSPUT") && !clsIds.has(i[1])) clsIds.set(i[1], clsIds.size);
@@ -1648,10 +1842,11 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const needsArgc = uses("ARGUMENTS", "GATHERREST"); // `arguments` / rest params recover the real arg count from ARGC_ADDR
   for (const [name, fn] of Object.entries(program)) {
     if (gens.includes(name)) { emitGenTrampoline(m, name, fn, fnIndex[name + "$gen"], maxargs); compileGenBody(m, name + "$gen", fn, keyIds, fnIndex, maxargs); } // generator: trampoline + dispatch body
-    else compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings, clsIds, usesExceptions, maxargs, needsArgc, usesReject);
+    else compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings, clsIds, usesExceptions, maxargs, needsArgc, usesReject, usesMapSet);
   }
   if (usesArrays) addArrayRuntime(m);
-  if (usesObjects) addObjectRuntime(m, keyIds.get("length"));
+  if (usesObjects) addObjectRuntime(m, keyIds.get("length"), keyIds.get("size"));
+  if (usesMapSet) addMapSetRuntime(m);
   if (uses("CALLMS", "APPENDALL", "TOARRAY", "ASSIGNALL")) addBuiltinRuntime(m, { spread: uses("CALLMS"), append: uses("APPENDALL"), toarray: uses("TOARRAY"), assignall: uses("ASSIGNALL"), valueId: usesGenerators ? keyIds.get("value") : null, doneId: usesGenerators ? keyIds.get("done") : null });
   if (usesStrings) addStringRuntime(m);
   if (usesReject) addPromiseRuntime(m);
@@ -1666,7 +1861,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   if (usesClasses) addClassRuntime(m);
   if (usesIndex) addIndexRuntime(m, keyIds);
   if (usesAccessors) addAccessorRuntime(m, keyIds.get("__accessors__"), keyIds.get("get"), keyIds.get("set"), maxargs);
-  if (usesGenerators) addGenRuntime(m, keyIds.get("value"), keyIds.get("done"));
+  if (usesGenerators) addGenRuntime(m, keyIds.get("value"), keyIds.get("done"), usesMapSet);
   if (usesClosures || usesGenerators) { // the table holds every function (closures call through it; the gen runtime's call_indirect needs it to exist even with no closures)
     m.addTable("0", fnNames.length, fnNames.length, binaryen.funcref);
     m.addActiveElementSegment("0", "fns", fnNames, m.i32.const(0));
