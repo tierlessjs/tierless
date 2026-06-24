@@ -94,6 +94,72 @@ const FLOATTAG = -10;
 // little-endian, normalized (zero is nlimbs=0). Sign is omitted (the realts surface
 // is non-negative). Arbitrary precision; limb arithmetic runs in i64.
 const BIGTAG = -11;
+// A compiled regex: [REGEXTAG, flags(g=1,i=2), nInstr, ...instrs(op,x,y each), ...class
+// data]. The pattern is known at compile time, so it is compiled to a tiny bytecode
+// here and matched by a backtracking VM at runtime. CLASS.x is a byte offset (from
+// the object) to [neg, nranges, lo,hi,...].
+const REGEXTAG = -12;
+// Compile a regex source+flags to the i32 blob above. Supports literals, ., char
+// classes [..] (ranges, negation, \d\w\s\D\W\S), * + ?, |, (groups), ^ $, and the
+// g/i flags. Backrefs, lookaround, and {n,m} are out of scope.
+function compileRegexBlob(source, flags) {
+  let i = 0; const src = source;
+  const peek = () => src[i], nx = () => src[i++], eof = () => i >= src.length;
+  const classFor = (e) => ({ d: { neg: 0, r: [[48, 57]] }, w: { neg: 0, r: [[48, 57], [65, 90], [97, 122], [95, 95]] }, s: { neg: 0, r: [[9, 13], [32, 32]] },
+    D: { neg: 1, r: [[48, 57]] }, W: { neg: 1, r: [[48, 57], [65, 90], [97, 122], [95, 95]] }, S: { neg: 1, r: [[9, 13], [32, 32]] } }[e] || null);
+  const escMap = { n: 10, t: 9, r: 13, f: 12, v: 11, "0": 0 };
+  function parseAlt() { let n = parseConcat(); while (peek() === "|") { nx(); n = { t: "alt", a: n, b: parseConcat() }; } return n; }
+  function parseConcat() { const it = []; while (!eof() && peek() !== "|" && peek() !== ")") it.push(parseRepeat()); return it.length === 1 ? it[0] : { t: "seq", it }; }
+  function parseRepeat() { let n = parseAtom(); while (!eof() && (peek() === "*" || peek() === "+" || peek() === "?")) { const q = nx(); n = { t: q === "*" ? "star" : q === "+" ? "plus" : "opt", n }; } return n; }
+  function parseAtom() {
+    const ch = peek();
+    if (ch === "(") { nx(); if (src[i] === "?" && src[i + 1] === ":") i += 2; const n = parseAlt(); if (peek() === ")") nx(); return { t: "group", n }; }
+    if (ch === "[") return parseClass();
+    if (ch === ".") { nx(); return { t: "any" }; }
+    if (ch === "^") { nx(); return { t: "bol" }; }
+    if (ch === "$") { nx(); return { t: "eol" }; }
+    if (ch === "\\") { nx(); const e = nx(); const cl = classFor(e); if (cl) return { t: "class", neg: cl.neg, r: cl.r }; return { t: "char", c: e in escMap ? escMap[e] : e.charCodeAt(0) }; }
+    nx(); return { t: "char", c: ch.charCodeAt(0) };
+  }
+  function parseClass() {
+    nx(); let neg = 0; if (peek() === "^") { neg = 1; nx(); } const r = [];
+    while (!eof() && peek() !== "]") {
+      let lo;
+      if (peek() === "\\") { nx(); const e = nx(); const cl = classFor(e); if (cl) { r.push(...cl.r); continue; } lo = e in escMap ? escMap[e] : e.charCodeAt(0); }
+      else lo = nx().charCodeAt(0);
+      if (peek() === "-" && src[i + 1] !== "]") { nx(); const hi = peek() === "\\" ? (nx(), nx().charCodeAt(0)) : nx().charCodeAt(0); r.push([lo, hi]); }
+      else r.push([lo, lo]);
+    }
+    if (peek() === "]") nx();
+    return { t: "class", neg, r };
+  }
+  const ig = flags.includes("i");
+  const prog = []; const emit = (op, x = 0, y = 0, cls = null) => (prog.push({ op, x, y, cls }), prog.length - 1);
+  function comp(n) {
+    if (n.t === "char") emit(1, ig ? lowByte(n.c) : n.c);
+    else if (n.t === "any") emit(2);
+    else if (n.t === "class") emit(3, 0, 0, n);
+    else if (n.t === "bol") emit(7);
+    else if (n.t === "eol") emit(8);
+    else if (n.t === "group") comp(n.n);
+    else if (n.t === "seq") n.it.forEach(comp);
+    else if (n.t === "alt") { const sp = emit(4); const la = prog.length; comp(n.a); const jm = emit(5); const lb = prog.length; comp(n.b); prog[sp].x = la; prog[sp].y = lb; prog[jm].x = prog.length; }
+    else if (n.t === "star") { const l1 = emit(4); const l2 = prog.length; comp(n.n); emit(5, l1); prog[l1].x = l2; prog[l1].y = prog.length; }
+    else if (n.t === "plus") { const l1 = prog.length; comp(n.n); const sp = emit(4); prog[sp].x = l1; prog[sp].y = prog.length; }
+    else if (n.t === "opt") { const sp = emit(4); const l1 = prog.length; comp(n.n); prog[sp].x = l1; prog[sp].y = prog.length; }
+  }
+  comp(parseAlt()); emit(6);
+  const flagBits = (flags.includes("g") ? 1 : 0) | (ig ? 2 : 0);
+  const nInstr = prog.length, classBase = 12 + nInstr * 12; const instrW = [], classW = [];
+  for (const p of prog) {
+    let x = p.x;
+    if (p.op === 3) { x = classBase + classW.length * 4; classW.push(p.cls.neg, p.cls.r.length); for (const [lo, hi] of p.cls.r) classW.push(ig ? lowByte(lo) : lo, ig ? lowByte(hi) : hi); }
+    instrW.push(p.op, x, p.y);
+  }
+  return [REGEXTAG, flagBits, nInstr, ...instrW, ...classW];
+}
+function lowByte(c) { return c >= 65 && c <= 90 ? c + 32 : c; }
+
 
 // Host-side array helpers: build/read a growable array in an instance's linear
 // memory (so resources can pass number[] across the boundary). Layout matches
@@ -295,6 +361,15 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
     out.push(m.local.set(slot, m.i32.or(get(slot), m.i32.const(1))));
     return out;
   };
+  // Build a compiled regex blob into local `slot` from a RegExp literal.
+  const buildRegexInto = (slot, re) => {
+    const words = compileRegexBlob(re.source, re.flags);
+    const out = [m.local.set(slot, m.i32.load(0, 4, m.i32.const(BUMP_ADDR)))];
+    for (let k = 0; k < words.length; k++) out.push(m.i32.store(k * 4, 4, get(slot), m.i32.const(words[k])));
+    out.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(slot), m.i32.const(words.length * 4))));
+    out.push(m.local.set(slot, m.i32.or(get(slot), m.i32.const(1))));
+    return out;
+  };
   // Build a boxed double [FLOATTAG, f64] into local `slot` (for a non-integer literal).
   const buildFloatInto = (slot, x) => [
     m.local.set(slot, m.i32.load(0, 4, m.i32.const(BUMP_ADDR))),
@@ -356,6 +431,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
             h++; break;
           }
           if (typeof v === "bigint") { stmts.push(...buildBigInto(scratch(h), v)); h++; break; } // bigint literal
+          if (v instanceof RegExp) { stmts.push(...buildRegexInto(scratch(h), v)); h++; break; } // regex literal
           if (typeof v === "number" && !Number.isInteger(v)) { stmts.push(...buildFloatInto(scratch(h), v)); h++; break; } // non-integer literal -> boxed double
           stmts.push(m.local.set(scratch(h), m.i32.const(immediate(v)))); h++; break; // tagged immediate
         }
@@ -571,6 +647,9 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
             case "from": res = m.call("__arrayfrom", [a(0)], I32); break;                               // Array.from(arg0)
             case "flat": res = m.call("__arrflat", [get(scratch(h))], I32); break;                      // one-level flatten
             case "toString": res = bigs ? m.if(isBigE(() => get(scratch(h))), m.call("__bigstr", [get(scratch(h))], I32), m.call("__tostr", [get(scratch(h))], I32)) : m.call("__tostr", [get(scratch(h))], I32); break; // bigint -> base-10, else number -> string
+            case "test": res = m.call("__retest", [get(scratch(h)), a(0)], I32); break;                 // /re/.test(s): receiver is the regex, arg the string
+            case "match": res = m.call("__rematchall", [a(0), get(scratch(h))], I32); break;            // s.match(/re/): receiver the string, arg the regex
+            case "replace": res = m.call("__rereplace", [a(0), get(scratch(h)), a(1), m.i32.and(m.i32.eq(m.i32.and(a(1), m.i32.const(3)), m.i32.const(1)), m.i32.eq(m.i32.load(0, 4, m.i32.and(a(1), m.i32.const(0xfffc))), m.i32.const(CLOSTAG)))], I32); break; // s.replace(/re/, str|fn)
             case "join": {
               let sep; if (n >= 1) sep = a(0); else { stmts.push(...buildStrInto(scratch(h + 1), ",")); sep = get(scratch(h + 1)); } // default separator ","
               res = m.call("__arrjoin", [get(scratch(h)), sep], I32); break;
@@ -1056,6 +1135,110 @@ function addBuiltinRuntime(m, { spread, append, toarray, assignall, valueId, don
     ])),
     m.unreachable(),
   ], binaryen.none));
+}
+
+// Runtime for regex (added when a program has a regex literal). A backtracking VM
+// over the compiled bytecode (see compileRegexBlob) plus test / match / replace
+// wrappers. `maxargs` sizes the call to a replace-function. Reuses __substr (string
+// methods), __concat (strings), and the array runtime.
+function addRegexRuntime(m, maxargs) {
+  const I32 = binaryen.i32;
+  const g = (i) => m.local.get(i, I32);
+  const c = (n) => m.i32.const(n);
+  const ld = (off, p) => m.i32.load(off, 4, p);
+  const ld8 = (off, p) => m.i32.load8_u(off, 1, p);
+  const fn = (name, np, nl, body) => m.addFunction(name, binaryen.createType(new Array(np).fill(I32)), I32, nl, m.block(null, body, binaryen.none));
+  const raw = (i) => m.i32.and(g(i), c(~3));
+
+  // __rematch(re, str, pc, sp, len) -> end sp of a match anchored at sp, or -1.
+  // recursive backtracking. params 0=re,1=str,2=pc,3=sp,4=len; locals 5=ia,6=op,
+  // 7=ch,8=r,9=ca,10=k,11=nr,12=matched
+  fn("__rematch", 5, [I32, I32, I32, I32, I32, I32, I32, I32], [
+    m.local.set(5, m.i32.add(m.i32.add(g(0), c(12)), m.i32.mul(g(2), c(12)))),     // instr addr = re + 12 + pc*12
+    m.local.set(6, ld(0, g(5))),
+    m.if(m.i32.eq(g(6), c(6)), m.return(g(3))),                                     // MATCH
+    m.if(m.i32.eq(g(6), c(5)), m.return(m.call("__rematch", [g(0), g(1), ld(4, g(5)), g(3), g(4)], I32))), // JMP x
+    m.if(m.i32.eq(g(6), c(4)), m.block(null, [                                      // SPLIT x,y (try x first -> greedy)
+      m.local.set(8, m.call("__rematch", [g(0), g(1), ld(4, g(5)), g(3), g(4)], I32)),
+      m.if(m.i32.ge_s(g(8), c(0)), m.return(g(8))),
+      m.return(m.call("__rematch", [g(0), g(1), ld(8, g(5)), g(3), g(4)], I32)),
+    ], binaryen.none)),
+    m.if(m.i32.eq(g(6), c(7)), m.return(m.select(m.i32.eqz(g(3)), m.call("__rematch", [g(0), g(1), m.i32.add(g(2), c(1)), g(3), g(4)], I32), c(-1)))), // BOL
+    m.if(m.i32.eq(g(6), c(8)), m.return(m.select(m.i32.eq(g(3), g(4)), m.call("__rematch", [g(0), g(1), m.i32.add(g(2), c(1)), g(3), g(4)], I32), c(-1)))), // EOL
+    m.if(m.i32.ge_s(g(3), g(4)), m.return(c(-1))),                                  // consuming ops need a char
+    m.local.set(7, ld8(8, m.i32.add(g(1), g(3)))),
+    m.if(m.i32.and(ld(4, g(0)), c(2)), m.if(m.i32.and(m.i32.ge_s(g(7), c(65)), m.i32.le_s(g(7), c(90))), m.local.set(7, m.i32.add(g(7), c(32))))), // i-flag: lowercase input
+    m.if(m.i32.eq(g(6), c(1)), m.return(m.select(m.i32.eq(g(7), ld(4, g(5))), m.call("__rematch", [g(0), g(1), m.i32.add(g(2), c(1)), m.i32.add(g(3), c(1)), g(4)], I32), c(-1)))), // CHAR
+    m.if(m.i32.eq(g(6), c(2)), m.return(m.call("__rematch", [g(0), g(1), m.i32.add(g(2), c(1)), m.i32.add(g(3), c(1)), g(4)], I32))),                  // ANY
+    // CLASS
+    m.local.set(9, m.i32.add(g(0), ld(4, g(5)))),                                   // class addr = re + x
+    m.local.set(11, ld(4, g(9))), m.local.set(12, c(0)), m.local.set(10, c(0)),
+    m.loop("L", m.block(null, [m.if(m.i32.lt_s(g(10), g(11)), m.block(null, [
+      m.if(m.i32.and(m.i32.ge_s(g(7), ld(8, m.i32.add(g(9), m.i32.mul(g(10), c(8))))), m.i32.le_s(g(7), ld(12, m.i32.add(g(9), m.i32.mul(g(10), c(8)))))), m.local.set(12, c(1))),
+      m.local.set(10, m.i32.add(g(10), c(1))), m.br("L"),
+    ]))])),
+    m.if(m.i32.ne(g(12), ld(0, g(9))), m.return(m.call("__rematch", [g(0), g(1), m.i32.add(g(2), c(1)), m.i32.add(g(3), c(1)), g(4)], I32))), // matched XOR neg
+    m.return(c(-1)),
+  ]);
+
+  // __retest(re, str) -> tagged bool. params 0=re,1=str; locals 2=ra,3=sa,4=len,5=sp
+  fn("__retest", 2, [I32, I32, I32, I32], [
+    m.local.set(2, raw(0)), m.local.set(3, raw(1)), m.local.set(4, ld(4, g(3))), m.local.set(5, c(0)),
+    m.loop("L", m.block(null, [m.if(m.i32.le_s(g(5), g(4)), m.block(null, [
+      m.if(m.i32.ge_s(m.call("__rematch", [g(2), g(3), c(0), g(5), g(4)], I32), c(0)), m.return(c(TRUE))),
+      m.local.set(5, m.i32.add(g(5), c(1))), m.br("L"),
+    ]))])),
+    m.return(c(FALSE)),
+  ]);
+
+  // __rematchall(re, str) -> array of match substrings (g) / first match (else) / a
+  // 0-length array stands in for null at the wrapper. params 0=re,1=str; locals
+  // 2=ra,3=sa,4=len,5=g,6=out,7=pos,8=sp,9=end,10=mstart
+  fn("__rematchall", 2, [I32, I32, I32, I32, I32, I32, I32, I32, I32], [
+    m.local.set(2, raw(0)), m.local.set(3, raw(1)), m.local.set(4, ld(4, g(3))), m.local.set(5, m.i32.and(ld(4, g(2)), c(1))),
+    m.local.set(6, m.call("__newarr", [], I32)), m.local.set(7, c(0)),
+    m.loop("O", m.block(null, [
+      m.local.set(10, c(-1)), m.local.set(8, g(7)),
+      m.loop("S", m.block(null, [m.if(m.i32.and(m.i32.lt_s(g(10), c(0)), m.i32.le_s(g(8), g(4))), m.block(null, [
+        m.local.set(9, m.call("__rematch", [g(2), g(3), c(0), g(8), g(4)], I32)),
+        m.if(m.i32.ge_s(g(9), c(0)), m.local.set(10, g(8)), m.local.set(8, m.i32.add(g(8), c(1)))),
+        m.br("S"),
+      ]))])),
+      m.if(m.i32.lt_s(g(10), c(0)), m.return(m.select(m.i32.eqz(ld(4, m.i32.and(g(6), c(~3)))), c(NULL), g(6)))), // no (more) matches -> null when empty
+      m.drop(m.call("__arrpush", [g(6), m.call("__substr", [g(1), g(10), m.i32.sub(g(9), g(10))], I32)], I32)),
+      m.if(m.i32.eqz(g(5)), m.return(g(6))),                                        // not global: first only
+      m.local.set(7, m.select(m.i32.gt_s(g(9), g(10)), g(9), m.i32.add(g(10), c(1)))), // advance (avoid empty-match loop)
+      m.br("O"),
+    ])),
+  ]);
+
+  // __rereplace(re, str, repl, isFn) -> string. params 0=re,1=str,2=repl,3=isFn;
+  // locals 4=ra,5=sa,6=len,7=gf,8=out,9=last,10=pos,11=sp,12=end,13=mstart,14=fnidx
+  fn("__rereplace", 4, [I32, I32, I32, I32, I32, I32, I32, I32, I32, I32, I32], [
+    m.local.set(4, raw(0)), m.local.set(5, raw(1)), m.local.set(6, ld(4, g(5))), m.local.set(7, m.i32.and(ld(4, g(4)), c(1))),
+    m.local.set(8, m.call("__substr", [g(1), c(0), c(0)], I32)), m.local.set(9, c(0)), m.local.set(10, c(0)),
+    m.loop("O", m.block(null, [
+      m.local.set(13, c(-1)), m.local.set(11, g(10)),
+      m.loop("S", m.block(null, [m.if(m.i32.and(m.i32.lt_s(g(13), c(0)), m.i32.le_s(g(11), g(6))), m.block(null, [
+        m.local.set(12, m.call("__rematch", [g(4), g(5), c(0), g(11), g(6)], I32)),
+        m.if(m.i32.ge_s(g(12), c(0)), m.local.set(13, g(11)), m.local.set(11, m.i32.add(g(11), c(1)))),
+        m.br("S"),
+      ]))])),
+      m.if(m.i32.lt_s(g(13), c(0)), m.block(null, [                                 // no more matches: copy tail, done
+        m.local.set(8, m.call("__concat", [g(8), m.call("__substr", [g(1), g(9), m.i32.sub(g(6), g(9))], I32)], I32)),
+        m.return(g(8)),
+      ], binaryen.none)),
+      m.local.set(8, m.call("__concat", [g(8), m.call("__substr", [g(1), g(9), m.i32.sub(g(13), g(9))], I32)], I32)), // copy [last, mstart)
+      m.if(g(3),                                                                    // replacement: fn(match) or the literal string
+        m.local.set(8, m.call("__concat", [g(8), m.call_indirect("0", ld(4, m.i32.and(g(2), c(~3))), padR(g(2), m.call("__substr", [g(1), g(13), m.i32.sub(g(12), g(13))], I32)), binaryen.createType(new Array(1 + maxargs).fill(I32)), I32)], I32)),
+        m.local.set(8, m.call("__concat", [g(8), g(2)], I32))),
+      m.local.set(9, g(12)),
+      m.if(m.i32.eqz(g(7)), m.block(null, [m.local.set(8, m.call("__concat", [g(8), m.call("__substr", [g(1), g(9), m.i32.sub(g(6), g(9))], I32)], I32)), m.return(g(8))])), // not global
+      m.local.set(10, m.select(m.i32.gt_s(g(12), g(13)), g(12), m.i32.add(g(13), c(1)))),
+      m.br("O"),
+    ])),
+  ]);
+  function padR(env, arg) { const a = [env, arg]; while (a.length < 1 + maxargs) a.push(c(UNDEF)); return a; }
 }
 
 // Runtime for BigInt (added when a program has a bigint literal or BigInt()). A
@@ -2193,8 +2376,9 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const usesReject = uses("MKREJECT");                      // Promise.reject -> a rejection cell; awaiting it throws
   const usesExceptions = uses("THROW", "PUSHTRY") || usesReject; // try/catch/throw: sentinel-return unwinding (a rejected await needs it too)
   const usesConstArray = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "PUSH" && Array.isArray(i[1])));
+  const usesRegex = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "PUSH" && i[1] instanceof RegExp)); // a regex literal -> the regex VM (+ __substr / __concat / arrays)
   const STRMETHS = new Set(["toUpperCase", "toLowerCase", "trim", "split", "slice", "join", "from", "charCodeAt", "charAt", "flat"]); // CALLM names handled by the string/array-method runtime
-  const usesStrMeth = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CALLM" && STRMETHS.has(i[1])));
+  const usesStrMeth = usesRegex || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CALLM" && STRMETHS.has(i[1]))); // regex match/replace use __substr
   const usesKeys = uses("KEYS");                            // Object.keys / for-in -> the keys runtime (reverse id->string + an array)
   const usesJson = uses("JSONSTR");                         // JSON.stringify -> the json runtime (shares __keystr)
   // Floating point: a non-integer literal, a division (always float-shaped), or a
@@ -2244,7 +2428,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
       else if (i[0] === "CALLMETHOD" || i[0] === "CALL") maxargs = Math.max(maxargs, i[0] === "CALL" ? (i[2] || 0) : i[2]);
     }
   }
-  if (usesAccessors) maxargs = Math.max(maxargs, 1); // a setter call passes (env, value): the uniform signature must hold both even if no setter exists (SETPROPA falls back to a plain store)
+  if (usesAccessors || usesRegex) maxargs = Math.max(maxargs, 1); // a setter call passes (env, value), a replace-function call (env, match): the uniform signature must hold both even when the dead path isn't exercised
   // A spread call f(...xs) can pass more args than any static arity, and a rest
   // param must collect them all from the fixed param slots — so reserve headroom.
   // Spreads beyond this bound (rare) would truncate into a rest param.
@@ -2263,6 +2447,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   if (usesStrings) addStringRuntime(m, usesFloat, usesBig);
   if (usesReject) addPromiseRuntime(m);
   if (usesStrMeth) addStrMethRuntime(m, usesGenerators ? { value: keyIds.get("value"), done: keyIds.get("done") } : null);
+  if (usesRegex) addRegexRuntime(m, maxargs);
   if (usesKeys || usesJson) { // __keystr: enumerable keys are those never set via SETHIDDEN (so __class__, instance methods, and __accessors__ are skipped)
     const hidden = new Set();
     for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && i[0] === "SETHIDDEN") hidden.add(i[1]);
@@ -2274,7 +2459,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   if (usesIndex) addIndexRuntime(m, keyIds);
   if (usesAccessors) addAccessorRuntime(m, keyIds.get("__accessors__"), keyIds.get("get"), keyIds.get("set"), maxargs);
   if (usesGenerators) addGenRuntime(m, keyIds.get("value"), keyIds.get("done"), usesMapSet);
-  if (usesClosures || usesGenerators) { // the table holds every function (closures call through it; the gen runtime's call_indirect needs it to exist even with no closures)
+  if (usesClosures || usesGenerators || usesRegex) { // the table holds every function (closures call through it; the gen and regex runtimes' call_indirect need it to exist even with no closures)
     m.addTable("0", fnNames.length, fnNames.length, binaryen.funcref);
     m.addActiveElementSegment("0", "fns", fnNames, m.i32.const(0));
   }
