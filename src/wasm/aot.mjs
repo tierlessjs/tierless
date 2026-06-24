@@ -139,7 +139,7 @@ function immediate(x) {
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
 }
 
-const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1, INDEX: -1, SETINDEX: -3, ISARRAY: 0, GLOBAL: 1, CALLMS: -1, APPENDALL: -1, ARGUMENTS: 1, GATHERREST: 0, TOARRAY: 0, ASSIGNALL: -1, DELPROP: 0, KEYS: 0 };
+const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1, INDEX: -1, SETINDEX: -3, ISARRAY: 0, GLOBAL: 1, CALLMS: -1, APPENDALL: -1, ARGUMENTS: 1, GATHERREST: 0, TOARRAY: 0, ASSIGNALL: -1, DELPROP: 0, KEYS: 0, JSONSTR: -2 };
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" || ins[0] === "CALLM" ? -ins[2] : ins[0] === "CALLG" ? 1 - ins[2] : DELTA[ins[0]] ?? 0;
 // Ops that run user code and can therefore propagate an exception — so a block ends
 // after one, and the next checks the pending-exception flag.
@@ -522,6 +522,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
         case "APPENDALL": { h -= 1; stmts.push(m.drop(m.call("__appendall", [get(scratch(h - 1)), get(scratch(h))], I32))); break; } // [...src]: spread src into the array below it
         case "DELPROP": stmts.push(m.local.set(scratch(h - 1), m.call("__delprop", [get(scratch(h - 1)), m.i32.const(keyIds.get(ins[1]))], I32))); break; // delete obj.key -> true
         case "KEYS": stmts.push(m.local.set(scratch(h - 1), m.call("__keys", [get(scratch(h - 1))], I32))); break; // Object.keys / for-in: array of own enumerable string keys
+        case "JSONSTR": { h -= 3; stmts.push(m.local.set(scratch(h), m.call("__jsonstr", [get(scratch(h))], I32))); h++; break; } // [val, replacer, space] -> JSON string (replacer/space ignored)
         case "TOARRAY": stmts.push(m.local.set(scratch(h - 1), m.call("__toarray", [get(scratch(h - 1))], I32))); break; // array destructuring: materialize the iterable (identity for arrays)
         case "ASSIGNALL": { stmts.push(m.drop(m.call("__assignall", [get(scratch(h - 2)), get(scratch(h - 1))], I32))); h -= 1; break; } // {...src}: copy src's pairs into the target below it
         case "ARRGET": { h -= 2; const backing = m.i32.load(8, 4, m.i32.and(get(scratch(h)), m.i32.const(~3))); const idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1));
@@ -691,14 +692,14 @@ function addObjectRuntime(m, lenId) {
 // __accessors__ are non-enumerable), so a hidden key resolves to 0 and is skipped.
 // `enumerable` is [[string, id], ...]; dynamically-interned keys aren't in it (a
 // computed-key object wouldn't enumerate those — the static-key case is covered).
-function addKeysRuntime(m, enumerable) {
+// __keystr(id) -> the key's interned string, or 0 for a non-enumerable/unknown id.
+// Shared by KEYS and JSON.stringify (both enumerate only the same data keys).
+function addKeyStr(m, enumerable) {
   const I32 = binaryen.i32;
   const g = (i) => m.local.get(i, I32);
   const c = (n) => m.i32.const(n);
-  const ld = (off, p) => m.i32.load(off, 4, p);
   const st = (off, p, v) => m.i32.store(off, 4, p, v);
   const bump = () => m.i32.load(0, 4, c(BUMP_ADDR));
-  // __keystr(id) -> the key's string, or 0 for a non-enumerable/unknown id.
   const retStr = (s) => {                                                  // build [STRTAG, len, ...bytes], return it tagged
     const out = [m.local.set(1, bump()), st(0, g(1), c(STRTAG)), st(4, g(1), c(s.length))];
     for (let k = 0; k < s.length; k++) out.push(m.i32.store8(8 + k, 1, g(1), c(s.charCodeAt(k))));
@@ -709,6 +710,13 @@ function addKeysRuntime(m, enumerable) {
     ...enumerable.map(([s, id]) => m.if(m.i32.eq(g(0), c(id)), retStr(s))),
     m.return(c(0)),
   ], binaryen.none));
+}
+
+function addKeysRuntime(m) {
+  const I32 = binaryen.i32;
+  const g = (i) => m.local.get(i, I32);
+  const c = (n) => m.i32.const(n);
+  const ld = (off, p) => m.i32.load(off, 4, p);
   // __keys(o) -> array of o's own enumerable string keys, in insertion order.
   // params 0=o; locals 1=out,2=backing,3=count,4=i,5=s
   m.addFunction("__keys", binaryen.createType([I32]), I32, [I32, I32, I32, I32, I32], m.block(null, [
@@ -720,6 +728,85 @@ function addKeysRuntime(m, enumerable) {
       m.local.set(4, m.i32.add(g(4), c(1))), m.br("L"),
     ])),
     m.unreachable(),
+  ], binaryen.none));
+}
+
+// Runtime for JSON.stringify (added when a program uses JSONSTR). Recursively
+// serializes the tagged value model: numbers, quoted/escaped strings, booleans,
+// null, arrays, and objects (enumerable keys only, via __keystr — functions and
+// hidden keys are dropped, matching JS). Replacer/space are ignored.
+function addJsonRuntime(m) {
+  const I32 = binaryen.i32;
+  const g = (i) => m.local.get(i, I32);
+  const c = (n) => m.i32.const(n);
+  const ld = (off, p) => m.i32.load(off, 4, p);
+  const ld8 = (off, p) => m.i32.load8_u(off, 1, p);
+  const addr = (i) => m.i32.and(g(i), c(~3));
+  const bump = () => m.i32.load(0, 4, c(BUMP_ADDR));
+  const setBump = (v) => m.i32.store(0, 4, c(BUMP_ADDR), v);
+  const cc = (a, b) => m.call("__concat", [a, b], I32);
+  // Build a fixed string literal inline (bump-only, no locals): store [STRTAG, len,
+  // ...bytes], advance bump, return the old pointer tagged.
+  const lit = (s) => {
+    const size = 8 + ((s.length + 3) & ~3);
+    const out = [m.i32.store(0, 4, bump(), c(STRTAG)), m.i32.store(4, 4, bump(), c(s.length))];
+    for (let k = 0; k < s.length; k++) out.push(m.i32.store8(8 + k, 1, bump(), c(s.charCodeAt(k))));
+    out.push(setBump(m.i32.add(bump(), c(size))), m.i32.or(m.i32.sub(bump(), c(size)), c(1)));
+    return m.block(null, out, I32);
+  };
+  // __jsonquote(s) -> '"' + s with " and \ backslash-escaped + '"'. params 0=s;
+  // locals 1=in,2=len,3=extra,4=i,5=b,6=out,7=j
+  m.addFunction("__jsonquote", binaryen.createType([I32]), I32, [I32, I32, I32, I32, I32, I32, I32], m.block(null, [
+    m.local.set(1, addr(0)), m.local.set(2, ld(4, g(1))), m.local.set(3, c(0)), m.local.set(4, c(0)),
+    m.loop("C", m.block(null, [m.if(m.i32.lt_u(g(4), g(2)), m.block(null, [   // count chars needing an escape
+      m.local.set(5, ld8(8, m.i32.add(g(1), g(4)))),
+      m.if(m.i32.or(m.i32.eq(g(5), c(34)), m.i32.eq(g(5), c(92))), m.local.set(3, m.i32.add(g(3), c(1)))),
+      m.local.set(4, m.i32.add(g(4), c(1))), m.br("C"),
+    ]))])),
+    m.local.set(6, bump()), m.i32.store(0, 4, g(6), c(STRTAG)), m.i32.store(4, 4, g(6), m.i32.add(m.i32.add(g(2), g(3)), c(2))),
+    setBump(m.i32.add(g(6), m.i32.add(c(8), m.i32.and(m.i32.add(m.i32.add(m.i32.add(g(2), g(3)), c(2)), c(3)), c(~3))))),
+    m.i32.store8(8, 1, g(6), c(34)), m.local.set(7, c(1)), m.local.set(4, c(0)),  // opening quote, j=1
+    m.loop("F", m.block(null, [m.if(m.i32.lt_u(g(4), g(2)), m.block(null, [
+      m.local.set(5, ld8(8, m.i32.add(g(1), g(4)))),
+      m.if(m.i32.or(m.i32.eq(g(5), c(34)), m.i32.eq(g(5), c(92))), m.block(null, [m.i32.store8(8, 1, m.i32.add(g(6), g(7)), c(92)), m.local.set(7, m.i32.add(g(7), c(1)))])), // escaping backslash
+      m.i32.store8(8, 1, m.i32.add(g(6), g(7)), g(5)), m.local.set(7, m.i32.add(g(7), c(1))),
+      m.local.set(4, m.i32.add(g(4), c(1))), m.br("F"),
+    ]))])),
+    m.i32.store8(8, 1, m.i32.add(g(6), g(7)), c(34)),                          // closing quote
+    m.return(m.i32.or(g(6), c(1))),
+  ], binaryen.none));
+  // __jsonstr(v) -> JSON string. params 0=v; locals 1=addr,2=out,3=backing,4=count,5=i,6=ks,7=wrote
+  m.addFunction("__jsonstr", binaryen.createType([I32]), I32, [I32, I32, I32, I32, I32, I32, I32], m.block(null, [
+    m.if(m.i32.eq(g(0), c(UNDEF)), m.return(c(UNDEF))),                        // JSON.stringify(undefined) === undefined
+    m.if(m.i32.eq(g(0), c(NULL)), m.return(lit("null"))),
+    m.if(m.i32.eq(g(0), c(TRUE)), m.return(lit("true"))),
+    m.if(m.i32.eq(g(0), c(FALSE)), m.return(lit("false"))),
+    m.if(m.i32.eqz(m.i32.and(g(0), c(1))), m.return(m.call("__numstr", [g(0)], I32))), // fixnum
+    m.local.set(1, addr(0)),
+    m.if(m.i32.eq(ld(0, g(1)), c(STRTAG)), m.return(m.call("__jsonquote", [g(0)], I32))),
+    m.if(m.i32.eq(ld(0, g(1)), c(ARRTAG)), m.block(null, [                     // [e0,e1,...]
+      m.local.set(2, lit("[")), m.local.set(3, ld(8, g(1))), m.local.set(4, ld(4, g(1))), m.local.set(5, c(0)),
+      m.loop("A", m.block(null, [
+        m.if(m.i32.ge_s(g(5), g(4)), m.return(cc(g(2), lit("]")))),
+        m.if(m.i32.gt_s(g(5), c(0)), m.local.set(2, cc(g(2), lit(",")))),
+        m.local.set(2, cc(g(2), m.call("__jsonstr", [ld(4, m.i32.add(g(3), m.i32.mul(g(5), c(4))))], I32))),
+        m.local.set(5, m.i32.add(g(5), c(1))), m.br("A"),
+      ])),
+    ], binaryen.none)),
+    m.if(m.i32.eq(ld(0, g(1)), c(OBJTAG)), m.block(null, [                     // {"k":v,...}, enumerable keys only
+      m.local.set(2, lit("{")), m.local.set(3, ld(8, g(1))), m.local.set(4, ld(4, g(1))), m.local.set(5, c(0)), m.local.set(7, c(0)),
+      m.loop("O", m.block(null, [
+        m.if(m.i32.ge_s(g(5), g(4)), m.return(cc(g(2), lit("}")))),
+        m.local.set(6, m.call("__keystr", [ld(4, m.i32.add(g(3), m.i32.mul(g(5), c(8))))], I32)), // pair i key id -> string or 0
+        m.if(m.i32.ne(g(6), c(0)), m.block(null, [
+          m.if(g(7), m.local.set(2, cc(g(2), lit(",")))),
+          m.local.set(2, cc(cc(cc(g(2), m.call("__jsonquote", [g(6)], I32)), lit(":")), m.call("__jsonstr", [ld(8, m.i32.add(g(3), m.i32.mul(g(5), c(8))))], I32))),
+          m.local.set(7, c(1)),
+        ])),
+        m.local.set(5, m.i32.add(g(5), c(1))), m.br("O"),
+      ])),
+    ], binaryen.none)),
+    m.return(lit("null")),                                                    // closures / class objects -> null (JS drops functions)
   ], binaryen.none));
 }
 
@@ -1442,9 +1529,10 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const STRMETHS = new Set(["toUpperCase", "toLowerCase", "trim", "split", "slice", "join", "from", "charCodeAt", "charAt", "flat"]); // CALLM names handled by the string/array-method runtime
   const usesStrMeth = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CALLM" && STRMETHS.has(i[1])));
   const usesKeys = uses("KEYS");                            // Object.keys / for-in -> the keys runtime (reverse id->string + an array)
+  const usesJson = uses("JSONSTR");                         // JSON.stringify -> the json runtime (shares __keystr)
   const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL", "ARGUMENTS", "GATHERREST", "TOARRAY", "KEYS") || usesConstArray || usesStrMeth; // __class__ name lists build arrays; APPENDALL/ARGUMENTS/GATHERREST/split/from/TOARRAY/KEYS push
   const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA", "ASSIGNALL", "KEYS") || usesClasses || usesGenerators || usesIndex; // instances, method dispatch, {value,done}, computed access, object spread
-  const usesStrings = usesClasses || usesIndex || usesStrMeth || usesKeys || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq); string methods + keys build strings
+  const usesStrings = usesClasses || usesIndex || usesStrMeth || usesKeys || usesJson || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq); string methods + keys + json build strings
   if (usesArrays || usesObjects || usesStrings) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow/concat paths
   // Property and method keys are interned to small ints at compile time, so
   // GETPROP/SETPROP/SETHIDDEN/CALLMETHOD are id matches in the object runtime.
@@ -1493,10 +1581,12 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   if (uses("CALLMS", "APPENDALL", "TOARRAY", "ASSIGNALL")) addBuiltinRuntime(m, { spread: uses("CALLMS"), append: uses("APPENDALL"), toarray: uses("TOARRAY"), assignall: uses("ASSIGNALL"), valueId: usesGenerators ? keyIds.get("value") : null, doneId: usesGenerators ? keyIds.get("done") : null });
   if (usesStrings) addStringRuntime(m);
   if (usesStrMeth) addStrMethRuntime(m, usesGenerators ? { value: keyIds.get("value"), done: keyIds.get("done") } : null);
-  if (usesKeys) { // enumerable keys: those never set via SETHIDDEN (so __class__, instance methods, and __accessors__ are skipped)
+  if (usesKeys || usesJson) { // __keystr: enumerable keys are those never set via SETHIDDEN (so __class__, instance methods, and __accessors__ are skipped)
     const hidden = new Set();
     for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && i[0] === "SETHIDDEN") hidden.add(i[1]);
-    addKeysRuntime(m, [...keyIds].filter(([k]) => !hidden.has(k)).map(([k, id]) => [k, id]));
+    addKeyStr(m, [...keyIds].filter(([k]) => !hidden.has(k)));
+    if (usesKeys) addKeysRuntime(m);
+    if (usesJson) addJsonRuntime(m);
   }
   if (usesClasses) addClassRuntime(m);
   if (usesIndex) addIndexRuntime(m, keyIds);
