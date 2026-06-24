@@ -92,8 +92,8 @@ sound enough for v1; precise maps are the upgrade if false positives ever matter
    `realts`/`conformance`/`difftest` corpora through `aot.mjs` vs Node → the true parity
    number and the complete gap list. This walk is the host-side prototype of `__serialize`.
 2. **Close the gaps** the parity run surfaces. Started at **38 pass / 2 mismatch /
-   10 error / 8 skipped** over the 58-case `realts` corpus (skips are non-integer entry
-   args the harness can't marshal). Closed, each its own green commit:
+   10 error / 8 skipped** over the 58-case sync `realts` corpus. Closed, each its own
+   green commit:
    - `**` on numbers → host `Math.pow`, boxed.
    - string/float/etc. literals in a generator body → shared `pushLit` (was codegen drift).
    - `this`/env capture in a generator body → env carried in the generator object.
@@ -104,20 +104,22 @@ sound enough for v1; precise maps are the upgrade if false positives ever matter
    - arrow functions capture lexical `this` (closure capture kind "T").
    - for-of over a string → an ITERTAG iterator that yields one-char strings.
    - the callable globals: `Number`/`String`/`Boolean`/`parseInt`/`parseFloat`/`isNaN`/`isFinite`.
+   - generator `.return()` runs `finally` on abandon → a `RETSIG` sentinel raised at the
+     resume point unwinds through the body's catch/finally machinery; `__genret` resolves it.
+   - per-**object** key hiddenness (a `HIDDEN_FLAG` bit on the stored key id), replacing the
+     per-*keyId* global flag — so a name can be a hidden method on one object and an
+     enumerable data key on another (also closed the `#private`-fields snippet).
+   - `String.raw` → compile-time raw concatenation in the frontend (was a native OOB fault).
+   - polymorphic operators (`+`/`===`/`/`/bitwise/`**`…) inside a generator body → the
+     gen-body codegen was integer-only; hoisted the operator logic into one module-level
+     `binExpr` shared by both the straight-line and generator-body codegens (was codegen drift).
 
-   Now at **46 pass / 3 mismatch / 1 error / 8 skipped**. The remaining four are the
-   exotic/edge tail (documented, not yet fixed):
-   - generator `.return()` does not run `finally` on abandon (deferred by design in `__genret`).
-   - private fields/methods (`#x`) — the arrow-`this` snippet's `#private` half.
-   - tagged templates / `String.raw` (a runtime fault — `memory access out of bounds`).
-   - a key used as BOTH a hidden method name AND an enumerable data key is wrongly
-     skipped: hiddenness is tracked per-*keyId* (compile-time global), not per-object.
-     The clean fix is a per-pair hidden bit, but it touches `__getprop`/`__setprop`/
-     `__delprop`/enumeration (the hot paths), so it's deferred as higher-risk-than-reward.
-
-   These four are edge JS features unlikely in the product programs (the render demo,
-   hn-thread); they're tracked here rather than chased, so the effort can move to the
-   larger milestone (integration + the in-WASM codec) that actually retires the interpreters.
+   **Now at 58 pass / 0 fail / 0 error / 0 skipped** — the whole sync corpus matches Node.
+   (The measurement harness inlines each entry's args as literals, so it also runs the
+   object/array-arg cases the earlier integer-only marshaler had to skip.) Every known
+   correctness gap is closed; the next step is to *prove* conformance with a standard
+   suite (Test262) rather than chase ad-hoc snippets. Async snippets (`checkAsync`) are
+   validated separately by the `wasm-async` probe against the interpreter oracle.
 3. **In-module reachability walk + relocatable encode/decode** for a settled (non-suspended)
    heap value. Prove `__serialize` → fresh instance → `__deserialize` round-trips against
    the deep-decoder.
