@@ -33,6 +33,7 @@ const programs = [
   ["unequal strings", `function main() { return "ab" === "ac"; }`],
   ["different lengths are not equal", `function main() { return "ab" === "abc"; }`],
   ["!== on strings", `function main() { return "a" !== "b"; }`],
+  ["String.raw lowers to compile-time raw concatenation", `function main() { return String.raw\`a\\nb\` + "|" + String.raw\`x\${2 + 3}y\`; }`], // "a\\nb|x5y" — raw escapes preserved verbatim, the substitution coerced and concatenated (no runtime .raw)
   ["string through a function", `
     function greet(name) { return "hi " + name; }
     function main() { return greet("ann"); }`],

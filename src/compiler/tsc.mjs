@@ -577,7 +577,12 @@ function compileInto(sf, checker, { resources = [], entry = null, prefix = "", o
         if (ts.isNoSubstitutionTemplateLiteral(tpl)) { cooked = [tpl.text]; raws = [rawOf(tpl)]; exprs = []; }
         else { cooked = [tpl.head.text, ...tpl.templateSpans.map((s) => s.literal.text)]; raws = [rawOf(tpl.head), ...tpl.templateSpans.map((s) => rawOf(s.literal))]; exprs = tpl.templateSpans.map((s) => s.expression); }
         const strArr = cooked.slice(); strArr.raw = raws; const argc = 1 + exprs.length; // a constant array (template-string identity is cached, matching JS)
-        if (ts.isPropertyAccessExpression(node.tag)) { expr(node.tag.expression); emit("PUSH", strArr); exprs.forEach((e) => expr(e)); emit("CALLMETHOD", node.tag.name.text, argc); } // e.g. String.raw`...`
+        if (ts.isPropertyAccessExpression(node.tag) && ts.isIdentifier(node.tag.expression) && node.tag.expression.text === "String" && node.tag.name.text === "raw" && bindingOf.get(node.tag.expression) == null) {
+          emit("PUSH", raws[0]);                                                                  // String.raw`...`: the raw parts are known at compile time, so concatenate them with the (string-coerced) substitutions directly — no runtime .raw needed
+          exprs.forEach((e, k) => { expr(e); emit("BIN", "+"); emit("PUSH", raws[k + 1]); emit("BIN", "+"); });
+          return true;
+        }
+        if (ts.isPropertyAccessExpression(node.tag)) { expr(node.tag.expression); emit("PUSH", strArr); exprs.forEach((e) => expr(e)); emit("CALLMETHOD", node.tag.name.text, argc); } // e.g. obj.tag`...`
         else { expr(node.tag); emit("PUSH", strArr); exprs.forEach((e) => expr(e)); emit("CALLV", argc); }
         return true;
       }
