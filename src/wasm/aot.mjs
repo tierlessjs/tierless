@@ -132,7 +132,7 @@ function immediate(x) {
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
 }
 
-const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1 };
+const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1, INDEX: -1, SETINDEX: -3 };
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" ? -ins[2] : DELTA[ins[0]] ?? 0;
 // Ops that run user code and can therefore propagate an exception — so a block ends
 // after one, and the next checks the pending-exception flag.
@@ -387,6 +387,8 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
         case "GENTHROW": {                     // [gen, value] -> [{value, done}]; throw into the generator at its paused yield
           h -= 2; stmts.push(m.local.set(scratch(h), m.call("__genthrow", [get(scratch(h)), get(scratch(h + 1))], I32))); h++; break;
         }
+        case "INDEX": { h -= 2; stmts.push(m.local.set(scratch(h), m.call("__index", [get(scratch(h)), get(scratch(h + 1))], I32))); h++; break; } // recv[key]
+        case "SETINDEX": { h -= 3; stmts.push(m.drop(m.call("__setindex", [get(scratch(h)), get(scratch(h + 1)), get(scratch(h + 2))], I32))); break; } // recv[key] = value
         case "NEWOBJ": stmts.push(m.local.set(scratch(h), m.call("__newobj", [], I32))); h++; break;
         case "GETPROP": {                      // [obj] -> [obj.key]; key interned to an id
           const v = m.call("__getprop", [get(scratch(h - 1)), m.i32.const(keyIds.get(ins[1]))], I32);
@@ -737,6 +739,65 @@ function addAccessorRuntime(m, accKey, getKey, setKey) {
   ], binaryen.none));
 }
 
+// Runtime for computed member access (obj[expr] / arr[i]). A receiver is an array
+// (numeric index) or an object (string key). Object keys are interned ints, so a
+// string key is mapped to its id by __keyid, which lazily seeds a table with the
+// program's static keys and then interns any new key by value — so a key never
+// seen statically still gets a unique id (no collisions), and a key shared with
+// static access (GETPROP "x") resolves to the same id.
+function addIndexRuntime(m, keyIds) {
+  const I32 = binaryen.i32, MAXKEYS = 64;
+  const g = (i) => m.local.get(i, I32), c = (n) => m.i32.const(n);
+  const ld = (off, p) => m.i32.load(off, 4, p), st = (off, p, v) => m.i32.store(off, 4, p, v);
+  const addr = (i) => m.i32.and(g(i), c(~3));
+  const pool = () => m.global.get("__keypool", I32), count = () => m.global.get("__keycount", I32);
+  m.addGlobal("__keypool", I32, true, c(0));
+  m.addGlobal("__keycount", I32, true, c(0));
+
+  const seed = [m.local.set(2, m.i32.load(0, 4, c(BUMP_ADDR))), m.i32.store(0, 4, c(BUMP_ADDR), m.i32.add(g(2), c(MAXKEYS * 8)))]; // base + reserve
+  for (const [name, id] of keyIds.entries()) {                                          // build each static key string into the table
+    seed.push(m.local.set(1, m.i32.load(0, 4, c(BUMP_ADDR))), st(0, g(1), c(STRTAG)), st(4, g(1), c(name.length)));
+    for (let k = 0; k < name.length; k++) seed.push(m.i32.store8(8 + k, 1, g(1), c(name.charCodeAt(k))));
+    seed.push(m.i32.store(0, 4, c(BUMP_ADDR), m.i32.add(g(1), c(8 + ((name.length + 3) & ~3)))));
+    seed.push(st((id - 1) * 8, g(2), m.i32.or(g(1), c(1))), st((id - 1) * 8 + 4, g(2), c(id)));
+  }
+  seed.push(m.global.set("__keypool", g(2)), m.global.set("__keycount", c(keyIds.size)));
+
+  // __keyid(str) -> interned id.  locals: 1=tmp, 2=base, 3=i/newid
+  m.addFunction("__keyid", binaryen.createType([I32]), I32, [I32, I32, I32], m.block(null, [
+    m.if(m.i32.eqz(pool()), m.block(null, seed, binaryen.none)),                         // lazy seed
+    m.local.set(3, c(0)),
+    m.block("found", [m.loop("K", m.block(null, [
+      m.br_if("found", m.i32.ge_u(g(3), count())),                                       // exhausted -> append
+      m.if(m.call("__eq", [g(0), ld(0, m.i32.add(pool(), m.i32.mul(g(3), c(8))))], I32), m.return(ld(4, m.i32.add(pool(), m.i32.mul(g(3), c(8)))))),
+      m.local.set(3, m.i32.add(g(3), c(1))), m.br("K"),
+    ]))]),
+    m.local.set(3, m.i32.add(count(), c(1))),                                            // new key: id = count + 1
+    st(0, m.i32.add(pool(), m.i32.mul(count(), c(8))), g(0)), st(4, m.i32.add(pool(), m.i32.mul(count(), c(8))), g(3)),
+    m.global.set("__keycount", g(3)), m.return(g(3)),
+  ], binaryen.none));
+
+  // __index(recv, key) -> value.  array: backing[untag(key)]; object: by string key.  locals: 2=addr
+  m.addFunction("__index", binaryen.createType([I32, I32]), I32, [I32], m.block(null, [
+    m.local.set(2, addr(0)),
+    m.if(m.i32.eq(ld(0, g(2)), c(ARRTAG)), m.return(ld(4, m.i32.add(ld(8, g(2)), m.i32.mul(m.i32.shr_s(g(1), c(1)), c(4)))))),
+    m.return(m.call("__getprop", [g(0), m.call("__keyid", [g(1)], I32)], I32)),
+  ], binaryen.none));
+
+  // __setindex(recv, key, value).  array: backing[idx] = value (extend length); object: __setprop.  locals: 3=addr, 4=idx
+  m.addFunction("__setindex", binaryen.createType([I32, I32, I32]), I32, [I32, I32], m.block(null, [
+    m.local.set(3, addr(0)),
+    m.if(m.i32.eq(ld(0, g(3)), c(ARRTAG)), m.block(null, [
+      m.local.set(4, m.i32.shr_s(g(1), c(1))),
+      m.i32.store(4, 4, m.i32.add(ld(8, g(3)), m.i32.mul(g(4), c(4))), g(2)),            // backing[idx] = value
+      m.if(m.i32.ge_s(g(4), ld(4, g(3))), st(4, g(3), m.i32.add(g(4), c(1)))),           // grow length if idx >= length
+      m.return(c(0)),
+    ], binaryen.none)),
+    m.drop(m.call("__setprop", [g(0), m.call("__keyid", [g(1)], I32), g(2)], I32)),
+    m.return(c(0)),
+  ], binaryen.none));
+}
+
 // A generator function compiles to two wasm functions. The TRAMPOLINE keeps the
 // original name and is what CALLV calls: it allocates a generator object holding
 // the body's table index and the initial args, and returns it (so no CALLV
@@ -933,11 +994,12 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const gens = [...new Set(Object.values(program).flatMap((fn) => fn.code.filter((i) => Array.isArray(i) && i[0] === "MAKECLOSURE" && i[3]).map((i) => i[1])))];
   const usesGenerators = gens.length > 0 || uses("GENNEXT", "YIELD"); // gen runtime + {value, done} objects
   const usesAccessors = uses("GETPROPA", "SETPROPA");      // getters/setters need the accessor runtime
+  const usesIndex = uses("INDEX", "SETINDEX");             // computed member access -> the index runtime (+ key interning)
   const usesExceptions = uses("THROW", "PUSHTRY");         // try/catch/throw: sentinel-return unwinding
   const usesConstArray = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "PUSH" && Array.isArray(i[1])));
   const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN") || usesConstArray; // __class__ name lists build arrays
-  const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA") || usesClasses || usesGenerators; // instances, method dispatch, {value,done} results
-  const usesStrings = usesClasses || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA compares class-name strings (__eq)
+  const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA") || usesClasses || usesGenerators || usesIndex; // instances, method dispatch, {value,done}, computed access
+  const usesStrings = usesClasses || usesIndex || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq)
   if (usesArrays || usesObjects || usesStrings) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow/concat paths
   // Property and method keys are interned to small ints at compile time, so
   // GETPROP/SETPROP/SETHIDDEN/CALLMETHOD are id matches in the object runtime.
@@ -967,6 +1029,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   if (usesObjects) addObjectRuntime(m);
   if (usesStrings) addStringRuntime(m);
   if (usesClasses) addClassRuntime(m);
+  if (usesIndex) addIndexRuntime(m, keyIds);
   if (usesAccessors) addAccessorRuntime(m, keyIds.get("__accessors__"), keyIds.get("get"), keyIds.get("set"));
   if (usesGenerators) addGenRuntime(m, keyIds.get("value"), keyIds.get("done"));
   if (usesClosures) {
