@@ -139,7 +139,7 @@ function immediate(x) {
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
 }
 
-const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1, INDEX: -1, SETINDEX: -3, ISARRAY: 0, GLOBAL: 1, CALLMS: -1, APPENDALL: -1, ARGUMENTS: 1, GATHERREST: 0 };
+const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1, INDEX: -1, SETINDEX: -3, ISARRAY: 0, GLOBAL: 1, CALLMS: -1, APPENDALL: -1, ARGUMENTS: 1, GATHERREST: 0, TOARRAY: 0, ASSIGNALL: -1 };
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" || ins[0] === "CALLM" ? -ins[2] : ins[0] === "CALLG" ? 1 - ins[2] : DELTA[ins[0]] ?? 0;
 // Ops that run user code and can therefore propagate an exception — so a block ends
 // after one, and the next checks the pending-exception flag.
@@ -519,6 +519,8 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
         case "NEWARR": stmts.push(m.local.set(scratch(h), m.call("__newarr", [], I32))); h++; break;
         case "ARRPUSH": { h -= 2; stmts.push(m.drop(m.call("__arrpush", [get(scratch(h)), get(scratch(h + 1))], I32))); break; } // arr.push(v)
         case "APPENDALL": { h -= 1; stmts.push(m.drop(m.call("__appendall", [get(scratch(h - 1)), get(scratch(h))], I32))); break; } // [...src]: spread src into the array below it
+        case "TOARRAY": stmts.push(m.local.set(scratch(h - 1), m.call("__toarray", [get(scratch(h - 1))], I32))); break; // array destructuring: materialize the iterable (identity for arrays)
+        case "ASSIGNALL": { stmts.push(m.drop(m.call("__assignall", [get(scratch(h - 2)), get(scratch(h - 1))], I32))); h -= 1; break; } // {...src}: copy src's pairs into the target below it
         case "ARRGET": { h -= 2; const backing = m.i32.load(8, 4, m.i32.and(get(scratch(h)), m.i32.const(~3))); const idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1));
           stmts.push(m.local.set(scratch(h), m.i32.load(4, 4, m.i32.add(backing, m.i32.mul(idx, m.i32.const(4)))))); h++; break; } // arr[idx] = backing[idx]
         case "ARRLEN": stmts.push(m.local.set(scratch(h - 1), m.i32.shl(m.i32.load(4, 4, m.i32.and(get(scratch(h - 1)), m.i32.const(~3))), m.i32.const(1)))); break; // tagInt(length)
@@ -665,11 +667,21 @@ function addObjectRuntime(m, lenId) {
 
 // Host-builtin runtime: the Math.max(...a)/min spread folds and the spread
 // primitive APPENDALL. Each is emitted only when the program needs it.
-function addBuiltinRuntime(m, { spread, append, valueId, doneId }) {
+function addBuiltinRuntime(m, { spread, append, toarray, assignall, valueId, doneId }) {
   const I32 = binaryen.i32;
   const g = (i) => m.local.get(i, I32);
   const c = (n) => m.i32.const(n);
   const ld = (off, p) => m.i32.load(off, 4, p);
+  const ld8 = (off, p) => m.i32.load8_u(off, 1, p);
+  // Build a one-char string [STRTAG, 1, byte] from byte `i` of string `s` (avoids a
+  // dependency on the string-method runtime, which may not be present).
+  const charStr = (s, i) => m.block(null, [
+    m.i32.store(0, 4, m.i32.load(0, 4, c(BUMP_ADDR)), c(STRTAG)),
+    m.i32.store(4, 4, m.i32.load(0, 4, c(BUMP_ADDR)), c(1)),
+    m.i32.store8(8, 1, m.i32.load(0, 4, c(BUMP_ADDR)), ld8(8, m.i32.add(m.i32.and(s, c(~3)), i))),
+    m.i32.store(0, 4, c(BUMP_ADDR), m.i32.add(m.i32.load(0, 4, c(BUMP_ADDR)), c(12))),
+    m.i32.or(m.i32.sub(m.i32.load(0, 4, c(BUMP_ADDR)), c(12)), c(1)),
+  ], I32);
   // Spread folds for Math.max(...a)/Math.min(...a): reduce a backing store to its
   // extreme. An empty spread has no representable result (no ±Infinity) -> undefined.
   if (spread) {
@@ -715,6 +727,44 @@ function addBuiltinRuntime(m, { spread, append, valueId, doneId }) {
     body.push(m.return(g(0)));
     m.addFunction("__appendall", binaryen.createType([I32, I32]), I32, [I32, I32, I32, I32, I32], m.block(null, body, binaryen.none));
   }
+  // __toarray(x) -> array: identity for an array (destructuring reads by index),
+  // else materialize a string's chars or a generator's values. params 0=x; locals
+  // 1=out,2=addr,3=len,4=i,5=res
+  if (toarray) {
+    const tbody = [
+      m.local.set(2, m.i32.and(g(0), c(~3))),
+      m.if(m.i32.eq(ld(0, g(2)), c(ARRTAG)), m.return(g(0))),                 // already an array
+      m.local.set(1, m.call("__newarr", [], I32)),
+      m.if(m.i32.eq(ld(0, g(2)), c(STRTAG)), m.block(null, [                  // string: one char per element
+        m.local.set(3, ld(4, g(2))), m.local.set(4, c(0)),
+        m.loop("S", m.block(null, [
+          m.if(m.i32.ge_s(g(4), g(3)), m.return(g(1))),
+          m.drop(m.call("__arrpush", [g(1), charStr(g(0), g(4))], I32)),
+          m.local.set(4, m.i32.add(g(4), c(1))), m.br("S"),
+        ])),
+      ], binaryen.none)),
+    ];
+    if (valueId != null) tbody.push(
+      m.if(m.i32.eq(ld(0, g(2)), c(GENTAG)), m.loop("G", m.block(null, [
+        m.local.set(5, m.call("__gennext", [g(0), c(UNDEF)], I32)),
+        m.if(m.i32.eq(m.call("__getprop", [g(5), c(doneId)], I32), c(TRUE)), m.return(g(1))),
+        m.drop(m.call("__arrpush", [g(1), m.call("__getprop", [g(5), c(valueId)], I32)], I32)),
+        m.br("G"),
+      ]))));
+    tbody.push(m.return(g(1)));
+    m.addFunction("__toarray", binaryen.createType([I32]), I32, [I32, I32, I32, I32, I32], m.block(null, tbody, binaryen.none));
+  }
+  // __assignall(tgt, src) -> tgt: copy src's own (key, val) pairs into tgt (object
+  // spread / Object.assign). params 0=tgt,1=src; locals 2=backing,3=count,4=i
+  if (assignall) m.addFunction("__assignall", binaryen.createType([I32, I32]), I32, [I32, I32, I32], m.block(null, [
+    m.local.set(2, ld(8, m.i32.and(g(1), c(~3)))), m.local.set(3, ld(4, m.i32.and(g(1), c(~3)))), m.local.set(4, c(0)),
+    m.loop("L", m.block(null, [
+      m.if(m.i32.ge_s(g(4), g(3)), m.return(g(0))),
+      m.drop(m.call("__setprop", [g(0), ld(4, m.i32.add(g(2), m.i32.mul(g(4), c(8)))), ld(8, m.i32.add(g(2), m.i32.mul(g(4), c(8))))], I32)), // tgt[key_i] = val_i
+      m.local.set(4, m.i32.add(g(4), c(1))), m.br("L"),
+    ])),
+    m.unreachable(),
+  ], binaryen.none));
 }
 
 // Runtime helpers for strings (added only when a program has a string literal).
@@ -1311,8 +1361,8 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const usesConstArray = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "PUSH" && Array.isArray(i[1])));
   const STRMETHS = new Set(["toUpperCase", "toLowerCase", "trim", "split", "slice", "join", "from", "charCodeAt", "charAt"]); // CALLM names handled by the string/array-method runtime
   const usesStrMeth = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CALLM" && STRMETHS.has(i[1])));
-  const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL", "ARGUMENTS", "GATHERREST") || usesConstArray || usesStrMeth; // __class__ name lists build arrays; APPENDALL/ARGUMENTS/GATHERREST/split/from push
-  const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA") || usesClasses || usesGenerators || usesIndex; // instances, method dispatch, {value,done}, computed access
+  const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL", "ARGUMENTS", "GATHERREST", "TOARRAY") || usesConstArray || usesStrMeth; // __class__ name lists build arrays; APPENDALL/ARGUMENTS/GATHERREST/split/from/TOARRAY push
+  const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA", "ASSIGNALL") || usesClasses || usesGenerators || usesIndex; // instances, method dispatch, {value,done}, computed access, object spread
   const usesStrings = usesClasses || usesIndex || usesStrMeth || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq); string methods build/concat strings
   if (usesArrays || usesObjects || usesStrings) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow/concat paths
   // Property and method keys are interned to small ints at compile time, so
@@ -1359,7 +1409,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   }
   if (usesArrays) addArrayRuntime(m);
   if (usesObjects) addObjectRuntime(m, keyIds.get("length"));
-  if (uses("CALLMS", "APPENDALL")) addBuiltinRuntime(m, { spread: uses("CALLMS"), append: uses("APPENDALL"), valueId: usesGenerators ? keyIds.get("value") : null, doneId: usesGenerators ? keyIds.get("done") : null });
+  if (uses("CALLMS", "APPENDALL", "TOARRAY", "ASSIGNALL")) addBuiltinRuntime(m, { spread: uses("CALLMS"), append: uses("APPENDALL"), toarray: uses("TOARRAY"), assignall: uses("ASSIGNALL"), valueId: usesGenerators ? keyIds.get("value") : null, doneId: usesGenerators ? keyIds.get("done") : null });
   if (usesStrings) addStringRuntime(m);
   if (usesStrMeth) addStrMethRuntime(m, usesGenerators ? { value: keyIds.get("value"), done: keyIds.get("done") } : null);
   if (usesClasses) addClassRuntime(m);
