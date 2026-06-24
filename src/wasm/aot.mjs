@@ -235,6 +235,12 @@ export const makeHandle = (addr) => (addr | 3);
 // addr >= HEAP_BASE), so a singleton never aliases a real object. This keeps
 // undefined/null/false distinct from the fixnum 0 (JS: 0 !== false, null !== undefined).
 export const UNDEF = 0x1, NULL = 0x5, FALSE = 0x9, TRUE = 0xD;
+// A reserved sentinel raised through the exception protocol by a generator's .return()
+// (mode 2): it flows through finally handlers (which re-raise it) exactly like a thrown
+// value, but __genret recognizes it and completes with the return value instead of
+// throwing — so a *real* throw inside a finally (a different EXC value) still propagates.
+// Odd and below HEAP_BASE, so it's never a user value (like UNDEF/NULL/...).
+const RETSIG = 0x11;
 export const tagBool = (b) => (b ? TRUE : FALSE);
 // Decode a tagged value back to a JS value (a pointer stays opaque — walk the heap).
 export function decodeValue(v) {
@@ -376,7 +382,7 @@ const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, PO
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" || ins[0] === "CALLM" ? -ins[2] : ins[0] === "CALLG" || ins[0] === "CTORG" ? 1 - (ins[2] || 0) : DELTA[ins[0]] ?? 0;
 // Ops that run user code and can therefore propagate an exception — so a block ends
 // after one, and the next checks the pending-exception flag.
-const CALL_OPS = new Set(["CALL", "CALLV", "CALLMETHOD", "CALLDYN", "CALLVS", "GETPROPA", "SETPROPA", "GENNEXT", "GENTHROW", "AWAIT", "AWAITALL"]);
+const CALL_OPS = new Set(["CALL", "CALLV", "CALLMETHOD", "CALLDYN", "CALLVS", "GETPROPA", "SETPROPA", "GENNEXT", "GENTHROW", "GENRET", "AWAIT", "AWAITALL"]);
 
 // Labeled asm -> instruction list with JMP/JMPF targets resolved to indices.
 function resolveLabels(rawCode) {
@@ -643,7 +649,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
         case "GENNEXT": {                      // [gen, sentValue] -> [{value, done}]; drive the generator one step
           h -= 2; stmts.push(m.local.set(scratch(h), m.call("__gennext", [get(scratch(h)), get(scratch(h + 1))], I32))); h++; break;
         }
-        case "GENRET": {                       // [gen, value] -> [{value, done:true}]; abandon the generator (no finally yet)
+        case "GENRET": {                       // [gen, value] -> [{value, done:true}]; runs enclosing finally(s); a throw escaping one propagates (CALL_OPS)
           h -= 2; stmts.push(m.local.set(scratch(h), m.call("__genret", [get(scratch(h)), get(scratch(h + 1))], I32))); h++; break;
         }
         case "GENTHROW": {                     // [gen, value] -> [{value, done}]; throw into the generator at its paused yield
@@ -2025,11 +2031,16 @@ function compileGenBody(m, bodyName, fn, keyIds, fnIndex, maxargs) {
     const start = leaders[bi], end = bi + 1 < leaders.length ? leaders[bi + 1] : code.length;
     const resume = start > 0 && code[start - 1][0] === "YIELD"; // entered on resume: the sent value sits on top of the operand stack
     const stmts = []; let h = entryH[bi], term = [];
-    if (resume) {                          // resumed via next(v) [mode 0] or .throw(e) [mode 1]
+    if (resume) {                          // resumed via next(v) [mode 0], .throw(e) [mode 1], or .return(v) [mode 2]
       const hand = entryHandler[bi];       // the yield's enclosing try, if any
       const throwArm = hand
         ? m.block(null, [...raise(m.i32.load(16, 4, genAddr())), ...toCatch(hand)], binaryen.none) // caught: route into the gen-body catch
         : m.block(null, [...raise(m.i32.load(16, 4, genAddr())), ...propagate()], binaryen.none);  // uncaught: propagate out of the generator
+      // .return(v): raise RETSIG so any enclosing finally runs (and re-raises it); __genret turns it into {value:v, done:true}.
+      const returnArm = hand
+        ? m.block(null, [...raise(m.i32.const(RETSIG)), ...toCatch(hand)], binaryen.none)          // run the finally, then re-raise -> propagates RETSIG
+        : m.block(null, [...raise(m.i32.const(RETSIG)), ...propagate()], binaryen.none);           // no finally -> just propagate RETSIG out
+      stmts.push(m.if(m.i32.eq(m.i32.load(20, 4, genAddr()), m.i32.const(2)), returnArm));
       stmts.push(m.if(m.i32.eq(m.i32.load(20, 4, genAddr()), m.i32.const(1)), throwArm));
       stmts.push(m.local.set(scratch(h - 1), m.i32.load(16, 4, genAddr()))); // mode 0: v becomes the yield expression's value
     }
@@ -2195,10 +2206,21 @@ function addGenRuntime(m, valueKey, doneKey, mapSet) {
   ], binaryen.none));
   // __genthrow(gen, value) -> {value, done}.  it.throw(e): resume the body in throw mode.
   m.addFunction("__genthrow", binaryen.createType([I32, I32]), I32, [I32, I32], drive(1));
-  // __genret(gen, value) -> {value, done:true}.  it.return(v): abandon the generator (finally blocks are a later slice).
+  // __genret(gen, value) -> {value, done:true}.  it.return(v): resume the body in mode 2,
+  // which raises RETSIG at the suspended yield so any enclosing finally runs; the body
+  // re-raises RETSIG and propagates. We consume it and complete with v. A real throw that
+  // escapes a finally has a different EXC value, so it propagates instead.
   m.addFunction("__genret", binaryen.createType([I32, I32]), I32, [I32, I32], m.block(null, [
-    m.i32.store(12, 4, genAddr(), c(1)),                                               // mark done
-    mkResult(g(1), c(TRUE)),
+    m.if(m.i32.load(12, 4, genAddr()), mkResult(g(1), c(TRUE))),                       // already done -> {value:v, done:true}
+    m.i32.store(16, 4, genAddr(), g(1)), m.i32.store(20, 4, genAddr(), c(2)),          // sent = v, mode = 2 (return)
+    m.local.set(2, m.call_indirect("0", m.i32.load(4, 4, genAddr()), [g(0)], binaryen.createType([I32]), I32)), // run finally(s)
+    m.i32.store(12, 4, genAddr(), c(1)),                                               // the generator is now finished
+    m.if(m.i32.load(0, 4, c(EXC_FLAG)), m.block(null, [
+      m.if(m.i32.eq(m.i32.load(0, 4, c(EXC_VALUE)), c(RETSIG)),                         // the return sentinel -> consume it, complete with v
+        m.block(null, [m.i32.store(0, 4, c(EXC_FLAG), c(0)), mkResult(g(1), c(TRUE))], binaryen.none)),
+      m.return(c(0)),                                                                  // a real throw escaped a finally -> propagate (EXC flag stays set)
+    ], binaryen.none)),
+    mkResult(g(1), c(TRUE)),                                                           // no try around the yield -> just {value:v, done:true}
   ], binaryen.none));
 }
 

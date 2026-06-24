@@ -31,6 +31,15 @@ const programs = [
   ["a generator builds and consumes an array internally", `
     function* squares(n) { const a = []; for (let i = 1; i <= n; i++) { a.push(i); } for (const x of a) { yield x * x; } }
     function main() { let s = 0; for (const v of squares(4)) { s = s + v; } return s; }`],     // 1+4+9+16 = 30
+  ["it.return() runs finally and completes", `
+    function* g(log) { try { yield 1; yield 2; } finally { log.push("C"); } }
+    function main() { const log = []; const it = g(log); const a = it.next().value; const r = it.return("STOP"); return a + "/" + r.value + "/" + r.done + "/" + log.join("") + "/" + it.next().done; }`], // "1/STOP/true/C/true"
+  ["it.return() runs nested finallys inner-to-outer", `
+    function* g(log) { try { try { yield 1; } finally { log.push("in"); } } finally { log.push("out"); } }
+    function main() { const log = []; const it = g(log); it.next(); it.return(0); return log.join(","); }`], // "in,out"
+  ["a throw inside a finally during return propagates", `
+    function* g() { try { yield 1; } finally { throw "BOOM"; } }
+    function main() { const it = g(); it.next(); try { it.return(1); return "no"; } catch (e) { return "caught:" + e; } }`], // "caught:BOOM"
   ["range generator, for-of sum", `
     function* range(a, b) { for (let i = a; i < b; i = i + 1) { yield i; } }
     function main() { let s = 0; for (const x of range(1, 5)) { s = s + x; } return s; }`],    // 1+2+3+4 = 10
