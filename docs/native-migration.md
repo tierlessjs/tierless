@@ -91,25 +91,33 @@ sound enough for v1; precise maps are the upgrade if false positives ever matter
    nesting) to JS values; a `decode` compile flag that exports `__keystr`. Run the real
    `realts`/`conformance`/`difftest` corpora through `aot.mjs` vs Node → the true parity
    number and the complete gap list. This walk is the host-side prototype of `__serialize`.
-2. **Close the gaps** the parity run surfaces. Measured `readDeep`-vs-Node over the
-   58-case `realts` corpus: **38 pass, 2 mismatch, 10 error, 8 skipped** (skips are
-   non-integer entry args the measurement harness can't marshal, not compiler gaps).
-   The complete gap list, one per commit where possible:
-   - `aot: ** on numbers not yet supported` — exponent on plain numbers (f64 pow / host).
-   - `aot: opcode LOADTHIS not supported in a generator body yet` (×2) — `this` inside a
-     generator method; thread the receiver through the saved gen locals.
-   - `aot: closure capture kind T not yet supported` — arrow lexical `this` + private fields.
-   - `aot: unsupported host method values` — `.values()` (Map/Set/Object).
-   - `aot: unsupported literal "first"/"cleanup"` (×3) — a string literal reaching
-     `immediate()` in some position (likely a const array / switch-case / default slot).
-   - `memory access out of bounds` — runtime fault (for-of over a string is a suspect).
-   - `table index is out of bounds` — runtime fault (a generator/tagged-template indirect call).
-   - mismatch: getters leak into enumeration — a `get` accessor appears in JSON/keys
-     (native shows `summary`; Node omits it; accessor keys must be non-enumerable).
-   - mismatch: local class declaration drops methods-as-data — native loses `add`/`speak`
-     fields that Node keeps (some local-class lowering interaction).
-   The ERR cases cluster on generators, object-literals-with-methods/getters, tagged
-   templates/`String.raw`, arrow-`this`+private-fields, and stdlib (`Object.values`).
+2. **Close the gaps** the parity run surfaces. Started at **38 pass / 2 mismatch /
+   10 error / 8 skipped** over the 58-case `realts` corpus (skips are non-integer entry
+   args the harness can't marshal). Closed, each its own green commit:
+   - `**` on numbers → host `Math.pow`, boxed.
+   - string/float/etc. literals in a generator body → shared `pushLit` (was codegen drift).
+   - `this`/env capture in a generator body → env carried in the generator object.
+   - array ops (NEWARR/ARRPUSH/ARRGET/ARRLEN/APPENDALL/TOARRAY) in a generator body.
+   - computed access fires accessors → `__index`/`__setindex` are accessor-aware (also
+     the detection: an accessor *definition* now triggers `usesAccessors`).
+   - `Object.values`; `Object.assign`.
+   - arrow functions capture lexical `this` (closure capture kind "T").
+   - for-of over a string → an ITERTAG iterator that yields one-char strings.
+   - the callable globals: `Number`/`String`/`Boolean`/`parseInt`/`parseFloat`/`isNaN`/`isFinite`.
+
+   Now at **46 pass / 3 mismatch / 1 error / 8 skipped**. The remaining four are the
+   exotic/edge tail (documented, not yet fixed):
+   - generator `.return()` does not run `finally` on abandon (deferred by design in `__genret`).
+   - private fields/methods (`#x`) — the arrow-`this` snippet's `#private` half.
+   - tagged templates / `String.raw` (a runtime fault — `memory access out of bounds`).
+   - a key used as BOTH a hidden method name AND an enumerable data key is wrongly
+     skipped: hiddenness is tracked per-*keyId* (compile-time global), not per-object.
+     The clean fix is a per-pair hidden bit, but it touches `__getprop`/`__setprop`/
+     `__delprop`/enumeration (the hot paths), so it's deferred as higher-risk-than-reward.
+
+   These four are edge JS features unlikely in the product programs (the render demo,
+   hn-thread); they're tracked here rather than chased, so the effort can move to the
+   larger milestone (integration + the in-WASM codec) that actually retires the interpreters.
 3. **In-module reachability walk + relocatable encode/decode** for a settled (non-suspended)
    heap value. Prove `__serialize` → fresh instance → `__deserialize` round-trips against
    the deep-decoder.
