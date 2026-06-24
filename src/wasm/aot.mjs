@@ -47,6 +47,13 @@ const CLSREG_BASE = 24;
 // sets these and returns; each call site checks the flag and unwinds. Cleared
 // when a handler catches, so it is 0 at any suspend point (no mid-throw migrate).
 const EXC_FLAG = 0, EXC_VALUE = 4;
+// The count of arguments actually passed to the current call, at ctrl word 12 (the
+// gap between EXC_VALUE/BUMP_ADDR and the asyncify struct at 16). The uniform call
+// signature pads missing args with undefined, so this is how `arguments` and a
+// rest param recover the real count. A caller writes it immediately before the
+// call; the callee reads it at entry (ARGUMENTS/GATHERREST run before any nested
+// call can overwrite it). Only emitted when a program needs it.
+const ARGC_ADDR = 12;
 
 // Growable arrays: a stable 3-word header [ARRTAG, length, backing] plus a
 // separate backing store [capacity, ...slots], so push() can grow the backing
@@ -132,7 +139,7 @@ function immediate(x) {
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
 }
 
-const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1, INDEX: -1, SETINDEX: -3, ISARRAY: 0, GLOBAL: 1, CALLMS: -1, APPENDALL: -1 };
+const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1, INDEX: -1, SETINDEX: -3, ISARRAY: 0, GLOBAL: 1, CALLMS: -1, APPENDALL: -1, ARGUMENTS: 1, GATHERREST: 0 };
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" || ins[0] === "CALLM" ? -ins[2] : ins[0] === "CALLG" ? 1 - ins[2] : DELTA[ins[0]] ?? 0;
 // Ops that run user code and can therefore propagate an exception — so a block ends
 // after one, and the next checks the pending-exception flag.
@@ -204,7 +211,7 @@ function blockHeights(code, leaders) {
   return { entryH: entry, maxAbs, blockHandler, entryHandler };
 }
 
-function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, exceptions, maxargs) {
+function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, exceptions, maxargs, needsArgc) {
   const I32 = binaryen.i32;
   const argc = fn.argc || 0, nl = fn.nlocals;
   const code = resolveLabels(fn.code);
@@ -224,6 +231,10 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
   const labelHelper = P + (nl - argc) + maxH; // the Relooper's scratch local
   const callType = () => binaryen.createType(new Array(P).fill(I32)); // the uniform table signature
   const padTo = (args) => { while (args.length < P) args.push(m.i32.const(UNDEF)); return args; };
+  // Publish the actual argument count for the callee's ARGUMENTS/GATHERREST (no-op
+  // unless the program uses them). `expr` is an i32 expression (binaryen handles
+  // are themselves numbers, so a static count must be wrapped in i32.const first).
+  const setArgc = (expr) => needsArgc ? [m.i32.store(0, 4, m.i32.const(ARGC_ADDR), expr)] : [];
   const get = (i) => m.local.get(i, I32);
   const bool = (cond) => m.select(cond, m.i32.const(TRUE), m.i32.const(FALSE));   // i32 0/1 -> tagged boolean
   // JS truthiness of the value in local `i`: falsy is 0, undefined, null, false.
@@ -305,6 +316,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
           // and are padded to the uniform arity; resources are host imports, called
           // with their natural arity.
           const callArgs = ins[0] === "CALL" ? padTo([m.i32.const(0), ...args]) : args;
+          if (ins[0] === "CALL") stmts.push(...setArgc(m.i32.const(ac)));
           stmts.push(m.local.set(scratch(h), m.call(ins[1], callArgs, I32))); h++; break;
         }
         case "BIN": {                          // tsc.mjs binary op. With strings present, + and === are polymorphic (JS semantics)
@@ -354,6 +366,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
           const argc = ins[1]; h -= argc + 1;
           const fn = m.i32.load(4, 4, m.i32.and(get(scratch(h)), m.i32.const(~3)));                              // closure[1] = fn table index
           const args = [get(scratch(h))]; for (let k = 0; k < argc; k++) args.push(get(scratch(h + 1 + k)));    // env (the closure itself) is param 0
+          stmts.push(...setArgc(m.i32.const(argc)));
           stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, padTo(args), callType(), I32))); h++; break;
         }
         case "CALLDYN": {                      // recv[key](args): dynamic dispatch. Supported receiver is an array
@@ -364,6 +377,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
           stmts.push(m.local.set(recv, callee));                                                                 // stash the closure in the receiver slot
           const fn = m.i32.load(4, 4, m.i32.and(get(recv), m.i32.const(~3)));
           const args = [get(recv)]; for (let k = 0; k < argc; k++) args.push(get(scratch(h + 2 + k)));           // env (the closure) is param 0; `this` (recv) is dropped (no method use yet)
+          stmts.push(...setArgc(m.i32.const(argc)));
           stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, padTo(args), callType(), I32))); h++; break;
         }
         case "TYPEOF": stmts.push(m.local.set(scratch(h - 1), m.call("__typeof", [get(scratch(h - 1))], I32))); break; // value -> type string
@@ -385,6 +399,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
           // undefined past the spread's length. (No function binds beyond maxargs.)
           const args = [get(closeSlot)];
           for (let j = 0; j < maxargs; j++) args.push(m.select(m.i32.gt_s(len(), m.i32.const(j)), elem(j), m.i32.const(UNDEF)));
+          stmts.push(...setArgc(len()));                                              // actual count = the spread array's length
           stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, args, callType(), I32))); h++; break;
         }
         case "GENNEXT": {                      // [gen, sentValue] -> [{value, done}]; drive the generator one step
@@ -420,6 +435,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
           stmts.push(m.local.set(scratch(h), m.call("__getprop", [get(scratch(h)), m.i32.const(keyIds.get(ins[1]))], I32))); // recv[name] = method closure
           const fn = m.i32.load(4, 4, m.i32.and(get(scratch(h)), m.i32.const(~3)));
           const args = [get(scratch(h))]; for (let k = 0; k < argc; k++) args.push(get(scratch(h + 1 + k)));
+          stmts.push(...setArgc(m.i32.const(argc)));
           stmts.push(m.local.set(scratch(h), m.call_indirect("0", fn, padTo(args), callType(), I32))); h++; break;
         }
         case "ISARRAY": stmts.push(m.local.set(scratch(h - 1), bool(isArr(scratch(h - 1))))); break; // Array.isArray, lowered by the HOF inliner
@@ -476,6 +492,17 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
         }
         case "ASET": { h -= 3; const addr = m.i32.and(get(scratch(h)), m.i32.const(~3)), idx = m.i32.shr_s(get(scratch(h + 1)), m.i32.const(1)), v = get(scratch(h + 2));
           stmts.push(m.i32.store(4, 4, m.i32.add(addr, m.i32.mul(idx, m.i32.const(4))), v)); break; } // mem[addr + 4 + idx*4] = val
+        case "ARGUMENTS": {                    // `arguments`: an array of the actually-passed args (params 1..argc-1), count from ARGC_ADDR
+          stmts.push(m.local.set(scratch(h), m.call("__newarr", [], I32)));
+          for (let k = 0; k < maxargs; k++) stmts.push(m.if(m.i32.gt_s(m.i32.load(0, 4, m.i32.const(ARGC_ADDR)), m.i32.const(k)), m.drop(m.call("__arrpush", [get(scratch(h)), get(1 + k)], I32))));
+          h++; break;
+        }
+        case "GATHERREST": {                   // rest param at arg index r: locals[r] = [arg_r, arg_{r+1}, ...] (the actual extra args)
+          const r = ins[1];
+          stmts.push(m.local.set(scratch(h), m.call("__newarr", [], I32)));
+          for (let k = r; k < maxargs; k++) stmts.push(m.if(m.i32.gt_s(m.i32.load(0, 4, m.i32.const(ARGC_ADDR)), m.i32.const(k)), m.drop(m.call("__arrpush", [get(scratch(h)), get(1 + k)], I32))));
+          stmts.push(m.local.set(loc(r), get(scratch(h)))); break; // install the rest array as the rest local
+        }
         case "NEWARR": stmts.push(m.local.set(scratch(h), m.call("__newarr", [], I32))); h++; break;
         case "ARRPUSH": { h -= 2; stmts.push(m.drop(m.call("__arrpush", [get(scratch(h)), get(scratch(h + 1))], I32))); break; } // arr.push(v)
         case "APPENDALL": { h -= 1; stmts.push(m.drop(m.call("__appendall", [get(scratch(h - 1)), get(scratch(h))], I32))); break; } // [...src]: spread src into the array below it
@@ -1098,7 +1125,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const usesIndex = uses("INDEX", "SETINDEX");             // computed member access -> the index runtime (+ key interning)
   const usesExceptions = uses("THROW", "PUSHTRY");         // try/catch/throw: sentinel-return unwinding
   const usesConstArray = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "PUSH" && Array.isArray(i[1])));
-  const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL") || usesConstArray; // __class__ name lists build arrays; APPENDALL pushes
+  const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL", "ARGUMENTS", "GATHERREST") || usesConstArray; // __class__ name lists build arrays; APPENDALL/ARGUMENTS/GATHERREST push
   const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA") || usesClasses || usesGenerators || usesIndex; // instances, method dispatch, {value,done}, computed access
   const usesStrings = usesClasses || usesIndex || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq)
   if (usesArrays || usesObjects || usesStrings) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow/concat paths
@@ -1135,9 +1162,14 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
     }
   }
   if (usesAccessors) maxargs = Math.max(maxargs, 1); // a setter call passes (env, value): the uniform signature must hold both even if no setter exists (SETPROPA falls back to a plain store)
+  // A spread call f(...xs) can pass more args than any static arity, and a rest
+  // param must collect them all from the fixed param slots — so reserve headroom.
+  // Spreads beyond this bound (rare) would truncate into a rest param.
+  if (uses("CALLVS")) maxargs = Math.max(maxargs, 8);
+  const needsArgc = uses("ARGUMENTS", "GATHERREST"); // `arguments` / rest params recover the real arg count from ARGC_ADDR
   for (const [name, fn] of Object.entries(program)) {
     if (gens.includes(name)) { emitGenTrampoline(m, name, fn, fnIndex[name + "$gen"], maxargs); compileGenBody(m, name + "$gen", fn, keyIds, fnIndex, maxargs); } // generator: trampoline + dispatch body
-    else compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings, clsIds, usesExceptions, maxargs);
+    else compileFn(m, name, fn, handles, fnIndex, keyIds, usesStrings, clsIds, usesExceptions, maxargs, needsArgc);
   }
   if (usesArrays) addArrayRuntime(m);
   if (usesObjects) addObjectRuntime(m, keyIds.get("length"));

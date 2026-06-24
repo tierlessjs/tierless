@@ -2,9 +2,11 @@
 // matches the interpreter. Math (abs/floor/ceil/round/sign/max/min), Number
 // (isInteger/isFinite/isNaN), Array.isArray, the array higher-order methods
 // (map/filter/reduce/find/some/every — inlined by the frontend, gated on an
-// ISARRAY check), array/string `.length`, and spread ([...a], f(...a),
-// Math.max(...a)). The HOFs exercise the uniform indirect-call arity: a callback
-// declared `x => ...` is invoked with (value, index), the extra arg ignored.
+// ISARRAY check), array/string `.length`, spread ([...a], f(...a),
+// Math.max(...a)), and the `arguments` object + rest parameters. The HOFs and
+// `arguments` both ride the uniform indirect-call arity: a callback declared
+// `x => ...` is invoked with (value, index), extras ignored; `arguments` and a
+// rest param recover the real passed-arg count published at each call site.
 // Each program runs interpreted and compiled to native wasm; the decoded native
 // value must equal the interpreter's.
 
@@ -31,6 +33,12 @@ const programs = [
   ["Math.max with spread", `function main() { const a = [3, 1, 4, 1, 5, 9, 2, 6]; return Math.max(...a) * 10 + Math.min(...a); }`],          // 9*10 + 1 = 91
   ["spread a computed array into a call", `function main() { function add3(a, b, c) { return a + b + c; } const xs = [10, 20, 30]; return add3(...xs); }`], // 60
   ["chained HOFs", `function main() { const a = [1, 2, 3, 4, 5, 6, 7, 8]; return a.filter((x) => x % 2 === 0).map((x) => x * x).reduce((s, x) => s + x, 0); }`], // 4+16+36+64 = 120
+  ["arguments: length and index", `function variadic() { let s = 0; for (let i = 0; i < arguments.length; i++) { s += arguments[i]; } return s; } function main() { return variadic(1, 2, 3, 4); }`], // 10
+  ["arguments captured by a nested arrow", `function viaArrow() { return (() => arguments[0] + arguments[1])(); } function main() { return viaArrow(10, 20); }`], // 30
+  ["arguments forwarded through an implicit constructor", `class A { constructor(n) { this.n = n; } } class B extends A {} class C extends B { c = this.n + 1; } function main() { return new C(3).n * 100 + new C(3).c; }`], // 304
+  ["rest parameter collects the tail", `function sum(first, ...rest) { let s = first; for (let i = 0; i < rest.length; i++) { s += rest[i]; } return s; } function main() { return sum(1, 2, 3, 4) * 10 + sum(7); }`], // 10*10 + 7 = 107
+  ["rest gathers a spread call", `function f(a, b, ...rest) { return a + b + rest.length; } function main() { const more = [4, 5]; return f(1, 2, ...more, 6); }`], // 1+2+3 = 6
+  ["only a rest parameter", `function tail(...xs) { return xs.length; } function main() { return tail() * 100 + tail(1, 2, 3); }`], // 0*100 + 3 = 3
 ];
 
 function interp(src) {
