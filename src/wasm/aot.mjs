@@ -585,8 +585,8 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
           caps.forEach(([kind, ci], j) => {                                                                       // env[j] = each captured value
             let v;
             if (kind === "L") v = get(loc(ci));                                                                  // capture a local
-            else if (kind === "E") v = m.i32.load(8 + ci * 4, 4, m.i32.and(get(ENV), m.i32.const(~3)));          // re-capture an outer env slot
-            else throw new Error("aot: closure capture kind " + kind + " not yet supported");                    // "T" (this): arrives with classes
+            else if (kind === "E" || (kind === "T" && ci >= 0)) v = m.i32.load(8 + ci * 4, 4, m.i32.and(get(ENV), m.i32.const(~3))); // re-capture an outer env slot; "T" = an arrow snapshotting the owner's lexical `this` (already in env)
+            else throw new Error("aot: closure capture kind " + kind + (kind === "T" ? " (dynamic this — no lexical receiver)" : "") + " not yet supported");
             stmts.push(m.i32.store(8 + j * 4, 4, get(tmp), v));
           });
           stmts.push(m.i32.store(0, 4, m.i32.const(BUMP_ADDR), m.i32.add(get(tmp), m.i32.const(8 + caps.length * 4))));

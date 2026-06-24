@@ -14,6 +14,12 @@ import { compileModuleToWasm } from "#stackmix/wasm/frontend.mjs";
 import { BUMP_ADDR, HEAP_BASE, decodeValue } from "#stackmix/wasm/aot.mjs";
 
 const programs = [
+  ["an arrow captures lexical this", `
+    class Counter { constructor() { this.n = 0; } makeInc() { return () => { this.n = this.n + 1; return this.n; }; } }
+    function main() { const c = new Counter(); const inc = c.makeInc(); return inc() + inc() + inc(); }`],   // 1+2+3 = 6
+  ["a nested arrow forwards lexical this", `
+    class Box { constructor() { this.v = 10; } make() { return () => () => this.v; } }
+    function main() { return new Box().make()()(); }`],                                                      // 10
   ["makeAdder captures a param", `
     function makeAdder(n) { return (x) => x + n; }
     function main() { const a5 = makeAdder(5); const a10 = makeAdder(10); return a5(1) + a10(1); }`], // 6 + 11 = 17
