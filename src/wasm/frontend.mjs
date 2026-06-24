@@ -53,11 +53,11 @@ export function compileTsToWasm(source, { entry = "main", resources, handles = f
 // (`%moduleinit`) only binds module-level names, which this subset never reads
 // (resources are RES, not bindings), so it's dropped. `resources` must list the
 // resource calls so tsc.mjs lowers them to RES rather than ordinary calls.
-export function compileModuleToWasm(source, { entry = "main", resources = [], handles = false } = {}) {
+export function compileModuleToWasm(source, { entry = "main", resources = [], handles = false, decode = false } = {}) {
   const frag = compileModule(source, { entry, resources });
   const program = {};
   for (const [name, fn] of Object.entries(frag)) if (name !== "%moduleinit") program[name] = fn;
-  return compileToWasm(program, { entry, resources: usedResources(program), handles });
+  return compileToWasm(program, { entry, resources: usedResources(program), handles, decode });
 }
 
 const usedResources = (program) =>

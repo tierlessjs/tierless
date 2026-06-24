@@ -255,6 +255,55 @@ export function readValue(memory, v) {
   }
   return { ptr: addr };
 }
+// Like readValue but fully materializes aggregates (arrays, objects, Map, Set) into
+// JS values, recursing through the heap; identity/cycles preserved via a seen-map.
+// Object keys resolve through `keystr` (an id -> string fn — e.g. inst.exports.__keystr
+// read back through readValue); a key that resolves to null (hidden / non-enumerable)
+// is skipped, matching JS's enumerable-only view. Closures/generators come back as
+// markers. This host-side walk is the prototype of the in-module __serialize (same
+// tag-directed traversal — see docs/native-migration.md).
+export function readDeep(memory, v, keystr) {
+  const dv = new DataView(memory.buffer);
+  const str = (t) => { const a = t & ~3, n = dv.getInt32(a + 4, true); let s = ""; for (let i = 0; i < n; i++) s += String.fromCharCode(dv.getUint8(a + 8 + i)); return s; };
+  const seen = new Map();
+  const rec = (v) => {
+    if (!isPointer(v) || v === UNDEF || v === NULL || v === TRUE || v === FALSE) return decodeValue(v);
+    const addr = pointerAddr(v), tag = dv.getInt32(addr, true);
+    if (tag === STRTAG) return str(v);
+    if (tag === FLOATTAG) return dv.getFloat64(addr + 4, true);
+    if (tag === BIGTAG) { const sign = dv.getInt32(addr + 4, true), n = dv.getInt32(addr + 8, true); let x = 0n; for (let i = n - 1; i >= 0; i--) x = (x << 32n) | BigInt(dv.getUint32(addr + 12 + i * 4, true)); return sign ? -x : x; }
+    if (tag === REGEXTAG) return new RegExp(str(dv.getInt32(addr + 4, true)), str(dv.getInt32(addr + 8, true)));
+    if (seen.has(addr)) return seen.get(addr);
+    if (tag === ARRTAG) {
+      const out = []; seen.set(addr, out);
+      const len = dv.getInt32(addr + 4, true), backing = dv.getInt32(addr + 8, true);
+      for (let i = 0; i < len; i++) out.push(rec(dv.getInt32(backing + 4 + i * 4, true)));
+      return out;
+    }
+    if (tag === OBJTAG) {
+      const out = {}; seen.set(addr, out);
+      const count = dv.getInt32(addr + 4, true), backing = dv.getInt32(addr + 8, true);
+      for (let i = 0; i < count; i++) { const key = keystr ? keystr(dv.getInt32(backing + 4 + 8 * i, true)) : null; if (key == null) continue; out[key] = rec(dv.getInt32(backing + 8 + 8 * i, true)); }
+      return out;
+    }
+    if (tag === MAPTAG) {
+      const out = new Map(); seen.set(addr, out);
+      const count = dv.getInt32(addr + 4, true), backing = dv.getInt32(addr + 8, true);
+      for (let i = 0; i < count; i++) out.set(rec(dv.getInt32(backing + 4 + 8 * i, true)), rec(dv.getInt32(backing + 8 + 8 * i, true)));
+      return out;
+    }
+    if (tag === SETTAG) {
+      const out = new Set(); seen.set(addr, out);
+      const count = dv.getInt32(addr + 4, true), backing = dv.getInt32(addr + 8, true);
+      for (let i = 0; i < count; i++) out.add(rec(dv.getInt32(backing + 4 + i * 4, true)));
+      return out;
+    }
+    if (tag === CLOSTAG) return "[function]";
+    if (tag === GENTAG) return "[generator]";
+    return { ptr: addr };
+  };
+  return rec(v);
+}
 // Map an IR PUSH literal to its tagged immediate (floats/strings: a later slice).
 function immediate(x) {
   if (x === undefined) return UNDEF;
@@ -2083,7 +2132,7 @@ function addGenRuntime(m, valueKey, doneKey, mapSet) {
 // leading param, so the exported entry's signature is (env, ...args). A host
 // invoking it passes a dummy env (0) first — e.g. render(0, threshold). An
 // entry with no args needs nothing extra (the missing env coerces to 0).
-export function compileToWasm(program, { entry = "main", resources = [], asyncify = true, handles = false } = {}) {
+export function compileToWasm(program, { entry = "main", resources = [], asyncify = true, handles = false, decode = false } = {}) {
   const m = new binaryen.Module();
   m.setMemory(1, 1, "memory");
   const uses = (...ops) => Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ops.includes(i[0])));
@@ -2187,7 +2236,8 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   if (usesStrings) addStringRuntime(m, usesFloat, usesBig);
   if (usesReject) addPromiseRuntime(m);
   if (usesStrMeth) addStrMethRuntime(m, usesGenerators ? { value: keyIds.get("value"), done: keyIds.get("done") } : null);
-  if (usesKeys || usesJson) { // __keystr: enumerable keys are those never set via SETHIDDEN (so __class__, instance methods, and __accessors__ are skipped)
+  const buildKeystr = usesKeys || usesJson || (decode && usesObjects); // `decode` forces the id->string table so readDeep can name object keys
+  if (buildKeystr) { // __keystr: enumerable keys are those never set via SETHIDDEN (so __class__, instance methods, and __accessors__ are skipped)
     const hidden = new Set();
     for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && i[0] === "SETHIDDEN") hidden.add(i[1]);
     addKeyStr(m, [...keyIds].filter(([k]) => !hidden.has(k)), keyIds.size, usesIndex); // usesIndex => the __keyid pool exists, so dynamic keys can be recovered
@@ -2209,6 +2259,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   // knowledge of the heap layout (unlike a stringify-on-host, which would have to
   // decode every tag). Forced on above: usesArrays + usesObjects + usesIndex.
   if (usesJsonParse) for (const f of ["__newobj", "__setprop", "__keyid", "__newarr", "__arrpush"]) m.addFunctionExport(f, f);
+  if (decode && buildKeystr) m.addFunctionExport("__keystr", "__keystr"); // readDeep resolves object key ids -> strings through this
   if (!m.validate()) { const txt = m.emitText(); throw new Error("aot: module did not validate\n" + txt); }
   if (asyncify) m.runPasses(["asyncify"]); // unwind/rewind frames to/from linear memory
   return m.emitBinary().slice();

@@ -41,6 +41,7 @@ const cases = [
   { file: "test/probes/wasm-keys.mjs",            needs: ["the AOT compiler runs for-in and Object.keys"] },
   { file: "test/probes/wasm-json.mjs",            needs: ["the AOT compiler runs JSON.stringify"] },
   { file: "test/probes/wasm-json-parse.mjs",      needs: ["the AOT compiler runs JSON.parse"] },
+  { file: "test/probes/wasm-decode.mjs",          needs: ["readDeep materializes the native heap"] },
   { file: "test/probes/wasm-promise.mjs",         needs: ["the AOT compiler runs Promise.resolve/all/reject"] },
   { file: "test/probes/wasm-mapset.mjs",          needs: ["the AOT compiler runs Map and Set"] },
   { file: "test/probes/wasm-floats.mjs",          needs: ["the AOT compiler runs floating-point"] },
