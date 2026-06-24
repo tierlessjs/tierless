@@ -756,6 +756,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
               res = m.call("__arrjoin", [get(scratch(h)), sep], I32); break;
             }
             case "parse": { if (n !== 1) throw new Error("aot: JSON.parse with a reviver not supported"); res = m.call("__json_parse", [a(0)], I32); break; } // JSON.parse(str): the host parses and rebuilds the value tree via the runtime's own constructors (interpreter handles a reviver)
+            case "values": res = m.call("__values", [a(0)], I32); break;                       // Object.values(obj) -> array of own enumerable values
             default: throw new Error("aot: unsupported host method " + mname);
           }
           stmts.push(m.local.set(scratch(h), res)); h++; break;
@@ -1020,6 +1021,23 @@ function addKeysRuntime(m) {
       m.if(m.i32.ge_u(g(4), g(3)), m.return(g(1))),
       m.local.set(5, m.call("__keystr", [ld(4, m.i32.add(g(2), m.i32.mul(g(4), c(8))))], I32)), // key id -> string (pair i key at backing + 8i + 4)
       m.if(m.i32.ne(g(5), c(0)), m.drop(m.call("__arrpush", [g(1), g(5)], I32))),
+      m.local.set(4, m.i32.add(g(4), c(1))), m.br("L"),
+    ])),
+    m.unreachable(),
+  ], binaryen.none));
+}
+
+// __values(o) -> array of o's own enumerable values (Object.values), in insertion order.
+// Like __keys but pushes the value (pair i value at backing + 8i + 8) for each key the
+// enumerable table accepts. params 0=o; locals 1=out,2=backing,3=count,4=i.
+function addValuesRuntime(m) {
+  const I32 = binaryen.i32, g = (i) => m.local.get(i, I32), c = (n) => m.i32.const(n), ld = (off, p) => m.i32.load(off, 4, p);
+  m.addFunction("__values", binaryen.createType([I32]), I32, [I32, I32, I32, I32], m.block(null, [
+    m.local.set(1, m.call("__newarr", [], I32)), m.local.set(2, ld(8, m.i32.and(g(0), c(~3)))), m.local.set(3, ld(4, m.i32.and(g(0), c(~3)))), m.local.set(4, c(0)),
+    m.loop("L", m.block(null, [
+      m.if(m.i32.ge_u(g(4), g(3)), m.return(g(1))),
+      m.if(m.i32.ne(m.call("__keystr", [ld(4, m.i32.add(g(2), m.i32.mul(g(4), c(8))))], I32), c(0)), // enumerable? (key id resolves)
+        m.drop(m.call("__arrpush", [g(1), ld(8, m.i32.add(g(2), m.i32.mul(g(4), c(8))))], I32))),    // push the value
       m.local.set(4, m.i32.add(g(4), c(1))), m.br("L"),
     ])),
     m.unreachable(),
@@ -2165,6 +2183,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const usesGenerators = gens.length > 0 || uses("GENNEXT", "YIELD") || usesMapSet; // gen runtime + {value, done} objects; Map/Set reuse the iterator path
   const usesAccessors = uses("GETPROPA", "SETPROPA") || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "SETHIDDEN" && i[1] === "__accessors__")); // static get/set access OR an accessor *definition* (computed access a[k] still fires it via __index)
   const usesJsonParse = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CALLM" && i[1] === "parse")); // JSON.parse(str): the host rebuilds the value tree via the runtime's own exported constructors
+  const usesValues = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CALLM" && i[1] === "values" && i[2] >= 1)); // Object.values(obj) -> __values (needs __keystr + arrays)
   const usesIndex = uses("INDEX", "SETINDEX") || usesJsonParse;             // computed member access -> the index runtime (+ key interning, which JSON.parse reuses to intern object keys)
   const usesReject = uses("MKREJECT");                      // Promise.reject -> a rejection cell; awaiting it throws
   const usesExceptions = uses("THROW", "PUSHTRY") || usesReject; // try/catch/throw: sentinel-return unwinding (a rejected await needs it too)
@@ -2187,8 +2206,8 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
     || (hasNum((i) => i[0] === "PUSH" && typeof i[1] === "string") && hasNum((i) => numOp.has(i[0]) || (i[0] === "BIN" && ["*", "-", "<", "<=", ">", ">="].includes(i[1]))))
     || usesJsonParse // a parsed JSON number can be a non-integer / out-of-fixnum-range double, so the float runtime (and float->string) must be present (also pulls in usesStrings below)
     || usesNumPow;
-  const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL", "ARGUMENTS", "GATHERREST", "TOARRAY", "KEYS") || usesConstArray || usesStrMeth || usesMapSet || usesJsonParse; // __class__ name lists build arrays; APPENDALL/ARGUMENTS/GATHERREST/split/from/TOARRAY/KEYS push; Map entries + init use arrays; JSON.parse builds arrays
-  const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA", "ASSIGNALL", "KEYS") || usesClasses || usesGenerators || usesIndex; // instances, method dispatch, {value,done}, computed access, object spread
+  const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL", "ARGUMENTS", "GATHERREST", "TOARRAY", "KEYS") || usesConstArray || usesStrMeth || usesMapSet || usesJsonParse || usesValues; // __class__ name lists build arrays; APPENDALL/ARGUMENTS/GATHERREST/split/from/TOARRAY/KEYS push; Map entries + init use arrays; JSON.parse + Object.values build arrays
+  const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA", "ASSIGNALL", "KEYS") || usesClasses || usesGenerators || usesIndex || usesValues; // instances, method dispatch, {value,done}, computed access, object spread, Object.values
   const usesStrings = usesClasses || usesIndex || usesStrMeth || usesKeys || usesJson || usesMapSet || usesFloat || usesBig || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq); string methods + keys + json build strings; Map/Set compare keys via __eq; floats reuse __add/__concat; bigint toString/typeof
   if (usesArrays || usesObjects || usesStrings) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow/concat paths
   // Property and method keys are interned to small ints at compile time, so
@@ -2259,12 +2278,13 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   if (usesStrings) addStringRuntime(m, usesFloat, usesBig);
   if (usesReject) addPromiseRuntime(m);
   if (usesStrMeth) addStrMethRuntime(m, usesGenerators ? { value: keyIds.get("value"), done: keyIds.get("done") } : null);
-  const buildKeystr = usesKeys || usesJson || (decode && usesObjects); // `decode` forces the id->string table so readDeep can name object keys
+  const buildKeystr = usesKeys || usesJson || usesValues || (decode && usesObjects); // `decode` forces the id->string table so readDeep can name object keys; Object.values needs it to pick enumerable pairs
   if (buildKeystr) { // __keystr: enumerable keys are those never set via SETHIDDEN (so __class__, instance methods, and __accessors__ are skipped)
     const hidden = new Set();
     for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && i[0] === "SETHIDDEN") hidden.add(i[1]);
     addKeyStr(m, [...keyIds].filter(([k]) => !hidden.has(k)), keyIds.size, usesIndex); // usesIndex => the __keyid pool exists, so dynamic keys can be recovered
     if (usesKeys) addKeysRuntime(m);
+    if (usesValues) addValuesRuntime(m);
     if (usesJson) addJsonRuntime(m);
   }
   if (usesClasses) addClassRuntime(m);

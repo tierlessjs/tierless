@@ -15,6 +15,8 @@ const programs = [
   ["for-in concatenates keys in insertion order", `function main() { const o = { x: 1, y: 2, z: 3 }; let s = ""; for (const k in o) { s += k; } return s; }`], // "xyz"
   ["for-in sums values by computed access", `function main() { const o = { a: 10, b: 20, c: 30 }; let s = 0; for (const k in o) { s += o[k]; } return s; }`], // 60
   ["Object.keys length", `function main() { const o = { a: 1, b: 2, c: 3, d: 4 }; return Object.keys(o).length; }`], // 4
+  ["Object.values returns the values array", `function main() { return Object.values({ a: 1, b: 2, c: 3 }).join(","); }`], // "1,2,3"
+  ["Object.keys and Object.values agree", `function main() { const o = { p: 10, q: 20 }; return Object.keys(o).join("") + "=" + (Object.values(o)[0] + Object.values(o)[1]); }`], // "pq=30"
   ["Object.keys joined", `function main() { const o = { first: 1, second: 2, third: 3 }; return Object.keys(o).join(","); }`], // "first,second,third"
   ["keys after grow past capacity", `function main() { const o = {}; o.a = 1; o.b = 2; o.c = 3; o.d = 4; o.e = 5; return Object.keys(o).join(""); }`], // "abcde"
   ["keys after a delete", `function main() { const o = { a: 1, b: 2, c: 3 }; delete o.b; return Object.keys(o).join(","); }`], // "a,c"
