@@ -32,6 +32,7 @@ const cases = [
   { file: "test/probes/wasm-diff.mjs",            needs: ["the AOT compiler matches the interpreter (differential oracle)"] },
   { file: "test/probes/wasm-closures.mjs",        needs: ["the AOT compiler runs the real frontend's closures"] },
   { file: "test/probes/wasm-values.mjs",          needs: ["the AOT value model (undefined/null/booleans"] },
+  { file: "test/probes/wasm-operators.mjs",       needs: ["the AOT compiler runs the unary and bitwise operators"] },
   { file: "test/probes/wasm-objects.mjs",         needs: ["the AOT compiler runs string-keyed objects"] },
   { file: "test/probes/wasm-captures.mjs",        needs: ["the AOT compiler runs capturing closures"] },
   { file: "test/probes/wasm-strings.mjs",         needs: ["the AOT compiler runs strings"] },

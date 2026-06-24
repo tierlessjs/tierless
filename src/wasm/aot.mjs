@@ -132,7 +132,7 @@ function immediate(x) {
   throw new Error("aot: unsupported literal " + JSON.stringify(x));
 }
 
-const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1 };
+const DELTA = { PUSH: 1, LOAD: 1, LOADENV: 1, LOADTHIS: 1, DUP: 1, STORE: -1, POP: -1, ADD: -1, SUB: -1, MUL: -1, NEG: 0, INC: 0, DEC: 0, NOT: 0, BITNOT: 0, LT: -1, LE: -1, GT: -1, GE: -1, RET: -1, JMPF: -1, JMP: 0, ALLOC: 0, AGET: -1, ASET: -3, NEWARR: 1, ARRPUSH: -2, ARRGET: -1, ARRLEN: 0, BIN: -1, MAKECLOSURE: 1, NEWOBJ: 1, GETPROP: 0, SETPROP: -1, SETHIDDEN: -1, GETPROPA: 0, SETPROPA: -1, ISA: 0, TYPEOF: 0, YIELD: 0, ITER: 0, AWAIT: 0, GENNEXT: -1, GENRET: -1, CLSGET: 1, CLSPUT: 0, ISNULLISH: 0, CALLVS: -1, PUSHTRY: 0, POPTRY: 0, THROW: -1, GENTHROW: -1 };
 const delta = (ins) => ins[0] === "CALL" || ins[0] === "RES" ? 1 - (ins[2] || 0) : ins[0] === "CALLV" ? -ins[1] : ins[0] === "CALLDYN" ? -(ins[1] + 1) : ins[0] === "CALLMETHOD" ? -ins[2] : DELTA[ins[0]] ?? 0;
 // Ops that run user code and can therefore propagate an exception — so a block ends
 // after one, and the next checks the pending-exception flag.
@@ -311,6 +311,14 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
           else if (op === ">=") e = bool(m.i32.ge_s(a(), b()));
           else if (op === "===" || op === "==") e = strings ? bool(m.call("__eq", [a(), b()], I32)) : bool(m.i32.eq(a(), b())); // __eq: strings by value
           else if (op === "!==" || op === "!=") e = strings ? bool(m.i32.eqz(m.call("__eq", [a(), b()], I32))) : bool(m.i32.ne(a(), b()));
+          // bitwise: tagged ints distribute over & | ^ and (signed) %; shifts untag the amount and re-tag.
+          else if (op === "&") e = m.i32.and(a(), b());
+          else if (op === "|") e = m.i32.or(a(), b());
+          else if (op === "^") e = m.i32.xor(a(), b());
+          else if (op === "%") e = m.i32.rem_s(a(), b());
+          else if (op === "<<") e = m.i32.shl(a(), m.i32.shr_s(b(), m.i32.const(1)));
+          else if (op === ">>") e = m.i32.shl(m.i32.shr_s(m.i32.shr_s(a(), m.i32.const(1)), m.i32.shr_s(b(), m.i32.const(1))), m.i32.const(1));
+          else if (op === ">>>") e = m.i32.shl(m.i32.shr_u(m.i32.shr_s(a(), m.i32.const(1)), m.i32.shr_s(b(), m.i32.const(1))), m.i32.const(1));
           else throw new Error("aot: unsupported BIN " + op);
           stmts.push(m.local.set(scratch(h), e)); h++; break;
         }
@@ -435,6 +443,10 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
           stmts.push(m.local.set(scratch(h), m.i32.load(4, 4, m.i32.add(backing, m.i32.mul(idx, m.i32.const(4)))))); h++; break; } // arr[idx] = backing[idx]
         case "ARRLEN": stmts.push(m.local.set(scratch(h - 1), m.i32.shl(m.i32.load(4, 4, m.i32.and(get(scratch(h - 1)), m.i32.const(~3))), m.i32.const(1)))); break; // tagInt(length)
         case "NEG": stmts.push(m.local.set(scratch(h - 1), m.i32.sub(m.i32.const(0), get(scratch(h - 1))))); break; // -(n<<1) = (-n)<<1
+        case "INC": stmts.push(m.local.set(scratch(h - 1), m.i32.add(get(scratch(h - 1)), m.i32.const(2)))); break; // ++ : tagged +1
+        case "DEC": stmts.push(m.local.set(scratch(h - 1), m.i32.sub(get(scratch(h - 1)), m.i32.const(2)))); break; // -- : tagged -1
+        case "NOT": stmts.push(m.local.set(scratch(h - 1), bool(falsy(scratch(h - 1))))); break; // !x : true iff x is falsy
+        case "BITNOT": stmts.push(m.local.set(scratch(h - 1), m.i32.sub(m.i32.const(-2), get(scratch(h - 1))))); break; // ~(2n) = 2(~n) = -2 - 2n
         case "PUSHTRY": case "POPTRY": break;  // handler scope is resolved at compile time (blockHeights); no runtime code
         case "THROW": h--; term = { kind: "throw", handler: blockHandler[bi], value: scratch(h) }; break;
         case "JMP": term = { kind: "jmp", target: ins[1] }; break;
@@ -805,6 +817,10 @@ function compileGenBody(m, bodyName, fn, keyIds, fnIndex) {
         case "POP": h--; break;
         case "DUP": stmts.push(m.local.set(scratch(h), get(scratch(h - 1)))); h++; break;
         case "NEG": stmts.push(m.local.set(scratch(h - 1), m.i32.sub(m.i32.const(0), get(scratch(h - 1))))); break;
+        case "INC": stmts.push(m.local.set(scratch(h - 1), m.i32.add(get(scratch(h - 1)), m.i32.const(2)))); break;
+        case "DEC": stmts.push(m.local.set(scratch(h - 1), m.i32.sub(get(scratch(h - 1)), m.i32.const(2)))); break;
+        case "NOT": stmts.push(m.local.set(scratch(h - 1), bool(falsy(scratch(h - 1))))); break;
+        case "BITNOT": stmts.push(m.local.set(scratch(h - 1), m.i32.sub(m.i32.const(-2), get(scratch(h - 1))))); break;
         case "ITER": case "AWAIT": break;     // no-ops (a generator is its own iterator; await of a plain value is identity)
         case "BIN": {
           h -= 2; const a = get(scratch(h)), b = get(scratch(h + 1)), op = ins[1]; let e;
