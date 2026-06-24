@@ -137,12 +137,27 @@ export function hostArrayValues(memory, taggedPtr) {
 // run during instantiation, so the late binding is safe). This is the model for any
 // pure, synchronous, complex stdlib: delegate to the host, marshal at the edge.
 export function stdlibHost() {
-  let mem, table;
+  let mem, table, exp;
   const dv = () => new DataView(mem.buffer);
   const readStr = (d, t) => { const a = t & ~3, n = d.getInt32(a + 4, true); let s = ""; for (let i = 0; i < n; i++) s += String.fromCharCode(d.getUint8(a + 8 + i)); return s; };
   const allocStr = (d, s) => { const b = d.getInt32(BUMP_ADDR, true); d.setInt32(b, STRTAG, true); d.setInt32(b + 4, s.length, true); for (let i = 0; i < s.length; i++) d.setUint8(b + 8 + i, s.charCodeAt(i) & 0xff); d.setInt32(BUMP_ADDR, b + 8 + ((s.length + 3) & ~3), true); return b | 1; };
   const allocArr = (d, items) => { const cap = Math.max(items.length, 1), bk = d.getInt32(BUMP_ADDR, true); d.setInt32(bk, cap, true); for (let i = 0; i < items.length; i++) d.setInt32(bk + 4 + i * 4, items[i], true); const h = bk + (cap + 1) * 4; d.setInt32(h, ARRTAG, true); d.setInt32(h + 4, items.length, true); d.setInt32(h + 8, bk, true); d.setInt32(BUMP_ADDR, h + 12, true); return h | 1; };
+  const allocFloat = (d, x) => { const b = d.getInt32(BUMP_ADDR, true); d.setInt32(b, FLOATTAG, true); d.setFloat64(b + 4, x, true); d.setInt32(BUMP_ADDR, b + 12, true); return b | 1; }; // a non-integer / out-of-fixnum-range JSON number
   const readRe = (d, p) => { const a = p & ~3; return new RegExp(readStr(d, d.getInt32(a + 4, true)), readStr(d, d.getInt32(a + 8, true))); };
+  // JSON.parse: parse on the host, then rebuild the value tree IN the heap by calling
+  // the runtime's own exported constructors — so this needs no heap-layout knowledge.
+  // Numbers normalize exactly like __boxf (whole & |v| < 2^30 -> fixnum, else boxed).
+  const encode = (v) => {
+    if (v === null) return NULL;
+    if (v === true) return TRUE;
+    if (v === false) return FALSE;
+    if (typeof v === "number") return Number.isInteger(v) && Math.abs(v) < 0x40000000 ? v << 1 : allocFloat(dv(), v);
+    if (typeof v === "string") return allocStr(dv(), v);
+    if (Array.isArray(v)) { const a = exp.__newarr(); for (const x of v) exp.__arrpush(a, encode(x)); return a; }
+    const o = exp.__newobj();
+    for (const k of Object.keys(v)) { const id = exp.__keyid(allocStr(dv(), k)); exp.__setprop(o, id, encode(v[k])); } // intern the key (same id as a static .k access), then store
+    return o;
+  };
   // BigInt marshaling: [BIGTAG, sign, nlimbs, ...limbs] <-> a JS BigInt.
   const isBig = (d, t) => (t & 1) === 1 && (t & ~3) >= HEAP_BASE && d.getInt32(t & ~3, true) === BIGTAG;
   const isStr = (d, t) => (t & 1) === 1 && (t & ~3) >= HEAP_BASE && d.getInt32(t & ~3, true) === STRTAG;
@@ -190,8 +205,9 @@ export function stdlibHost() {
       return isStr(d, a) && isStr(d, b) && readStr(d, a) === readStr(d, b) ? 1 : 0;
     },
     __num_str: (v) => { const d = dv(); return allocStr(dv(), String(d.getFloat64((v & ~3) + 4, true))); }, // a boxed double -> its JS string (shortest round-trip, exponent rules — the platform's own)
+    __json_parse: (strPtr) => encode(JSON.parse(readStr(dv(), strPtr))), // the host's own JSON.parse, rebuilt in the heap via the exported constructors
   };
-  return { imports, bind: (inst) => { mem = inst.exports.memory; table = inst.exports.__table; } };
+  return { imports, bind: (inst) => { mem = inst.exports.memory; table = inst.exports.__table; exp = inst.exports; } };
 }
 
 // Tagged-value helpers (also used to read/write values across the host boundary).
@@ -685,6 +701,7 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
               let sep; if (n >= 1) sep = a(0); else { stmts.push(...buildStrInto(scratch(h + 1), ",")); sep = get(scratch(h + 1)); } // default separator ","
               res = m.call("__arrjoin", [get(scratch(h)), sep], I32); break;
             }
+            case "parse": { if (n !== 1) throw new Error("aot: JSON.parse with a reviver not supported"); res = m.call("__json_parse", [a(0)], I32); break; } // JSON.parse(str): the host parses and rebuilds the value tree via the runtime's own constructors (interpreter handles a reviver)
             default: throw new Error("aot: unsupported host method " + mname);
           }
           stmts.push(m.local.set(scratch(h), res)); h++; break;
@@ -907,14 +924,16 @@ function addObjectRuntime(m, lenId, sizeId) {
 }
 
 // Runtime for Object.keys / for-in (added when a program uses KEYS). Object keys
-// are interned ids, so __keystr maps an id back to its string; the map covers only
+// are interned ids, so __keystr maps an id back to its string; the static map covers
 // enumerable keys (those never set via SETHIDDEN — __class__, instance methods,
 // __accessors__ are non-enumerable), so a hidden key resolves to 0 and is skipped.
-// `enumerable` is [[string, id], ...]; dynamically-interned keys aren't in it (a
-// computed-key object wouldn't enumerate those — the static-key case is covered).
+// `enumerable` is [[string, id], ...]. A dynamically-interned key (a computed
+// obj[k]=v, or a JSON.parse key) gets an id above the static range and is always an
+// enumerable data key; when the interner's pool exists (hasPool), recover its string
+// directly from the pool slot (id-1), so for-in / Object.keys / re-stringify see it.
 // __keystr(id) -> the key's interned string, or 0 for a non-enumerable/unknown id.
 // Shared by KEYS and JSON.stringify (both enumerate only the same data keys).
-function addKeyStr(m, enumerable) {
+function addKeyStr(m, enumerable, staticMax, hasPool) {
   const I32 = binaryen.i32;
   const g = (i) => m.local.get(i, I32);
   const c = (n) => m.i32.const(n);
@@ -928,6 +947,8 @@ function addKeyStr(m, enumerable) {
   };
   m.addFunction("__keystr", binaryen.createType([I32]), I32, [I32], m.block(null, [
     ...enumerable.map(([s, id]) => m.if(m.i32.eq(g(0), c(id)), retStr(s))),
+    ...(hasPool ? [m.if(m.i32.gt_s(g(0), c(staticMax)),                    // a dynamic key: pool slot (id-1) holds [stringPtr, id]
+      m.return(m.i32.load(0, 4, m.i32.add(m.global.get("__keypool", I32), m.i32.mul(m.i32.sub(g(0), c(1)), c(8))))))] : []),
     m.return(c(0)),
   ], binaryen.none));
 }
@@ -1310,10 +1331,20 @@ function addStringRuntime(m, floats, bigs) {
     m.return(m.i32.or(g(5), c(1))),
   ], binaryen.none));
 
-  // __tostr(v) -> string.  string: itself; fixnum: __numstr; boxed double: host __num_str; else: "" (bool/null coercion is a later slice)
+  // litStr(s) -> statements that build the constant string s into local 1 and return it tagged.
+  const litStr = (s) => {
+    const out = [m.local.set(1, bump()), st(0, g(1), c(STRTAG)), st(4, g(1), c(s.length))];
+    for (let k = 0; k < s.length; k++) out.push(st8(8 + k, g(1), c(s.charCodeAt(k))));
+    out.push(setBump(m.i32.add(g(1), c(8 + ((s.length + 3) & ~3)))), m.return(m.i32.or(g(1), c(1))));
+    return m.block(null, out, binaryen.none);
+  };
+  // __tostr(v) -> string.  string: itself; fixnum: __numstr; boxed double: host __num_str;
+  // boolean/null/undefined: their JS text; objects/arrays: "" (a later slice).
   m.addFunction("__tostr", binaryen.createType([I32]), I32, [I32], m.block(null, [
     m.if(isStr(0), m.return(g(0))),
     m.if(m.i32.eqz(m.i32.and(g(0), c(1))), m.return(m.call("__numstr", [g(0)], I32))),
+    m.if(m.i32.eq(g(0), c(TRUE)), litStr("true")), m.if(m.i32.eq(g(0), c(FALSE)), litStr("false")),
+    m.if(m.i32.eq(g(0), c(NULL)), litStr("null")), m.if(m.i32.eq(g(0), c(UNDEF)), litStr("undefined")),
     ...(floats ? [m.if(m.i32.and(m.i32.eq(m.i32.and(g(0), c(3)), c(1)), m.i32.eq(ld(0, addr(0)), c(FLOATTAG))), m.return(m.call("__num_str", [g(0)], I32)))] : []), // boxed double -> the host's Number->string
     m.local.set(1, bump()), st(0, g(1), c(STRTAG)), st(4, g(1), c(0)), setBump(m.i32.add(g(1), c(8))),
     m.return(m.i32.or(g(1), c(1))),
@@ -2064,7 +2095,8 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const usesMapSet = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CTORG" && (i[1] === "Map" || i[1] === "Set"))); // Map/Set construction
   const usesGenerators = gens.length > 0 || uses("GENNEXT", "YIELD") || usesMapSet; // gen runtime + {value, done} objects; Map/Set reuse the iterator path
   const usesAccessors = uses("GETPROPA", "SETPROPA");      // getters/setters need the accessor runtime
-  const usesIndex = uses("INDEX", "SETINDEX");             // computed member access -> the index runtime (+ key interning)
+  const usesJsonParse = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CALLM" && i[1] === "parse")); // JSON.parse(str): the host rebuilds the value tree via the runtime's own exported constructors
+  const usesIndex = uses("INDEX", "SETINDEX") || usesJsonParse;             // computed member access -> the index runtime (+ key interning, which JSON.parse reuses to intern object keys)
   const usesReject = uses("MKREJECT");                      // Promise.reject -> a rejection cell; awaiting it throws
   const usesExceptions = uses("THROW", "PUSHTRY") || usesReject; // try/catch/throw: sentinel-return unwinding (a rejected await needs it too)
   const usesConstArray = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "PUSH" && Array.isArray(i[1])));
@@ -2082,8 +2114,9 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const numOp = new Set(["MUL", "SUB", "NEG", "LT", "LE", "GT", "GE"]);
   const usesFloat = hasNum((i) => i[0] === "PUSH" && typeof i[1] === "number" && !Number.isInteger(i[1]))
     || hasNum((i) => i[0] === "BIN" && i[1] === "/")
-    || (hasNum((i) => i[0] === "PUSH" && typeof i[1] === "string") && hasNum((i) => numOp.has(i[0]) || (i[0] === "BIN" && ["*", "-", "<", "<=", ">", ">="].includes(i[1]))));
-  const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL", "ARGUMENTS", "GATHERREST", "TOARRAY", "KEYS") || usesConstArray || usesStrMeth || usesMapSet; // __class__ name lists build arrays; APPENDALL/ARGUMENTS/GATHERREST/split/from/TOARRAY/KEYS push; Map entries + init use arrays
+    || (hasNum((i) => i[0] === "PUSH" && typeof i[1] === "string") && hasNum((i) => numOp.has(i[0]) || (i[0] === "BIN" && ["*", "-", "<", "<=", ">", ">="].includes(i[1]))))
+    || usesJsonParse; // a parsed JSON number can be a non-integer / out-of-fixnum-range double, so the float runtime (and float->string) must be present (also pulls in usesStrings below)
+  const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL", "ARGUMENTS", "GATHERREST", "TOARRAY", "KEYS") || usesConstArray || usesStrMeth || usesMapSet || usesJsonParse; // __class__ name lists build arrays; APPENDALL/ARGUMENTS/GATHERREST/split/from/TOARRAY/KEYS push; Map entries + init use arrays; JSON.parse builds arrays
   const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA", "ASSIGNALL", "KEYS") || usesClasses || usesGenerators || usesIndex; // instances, method dispatch, {value,done}, computed access, object spread
   const usesStrings = usesClasses || usesIndex || usesStrMeth || usesKeys || usesJson || usesMapSet || usesFloat || usesBig || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq); string methods + keys + json build strings; Map/Set compare keys via __eq; floats reuse __add/__concat; bigint toString/typeof
   if (usesArrays || usesObjects || usesStrings) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow/concat paths
@@ -2118,6 +2151,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
     m.addFunctionImport("__big_from", "env", "__big_from", i1, binaryen.i32); // BigInt(fixnum) -> bigint
   }
   if (usesFloat && usesStrings) m.addFunctionImport("__num_str", "env", "__num_str", binaryen.createType([binaryen.i32]), binaryen.i32); // boxed double -> string (the host's Number->string); referenced only by __tostr, which exists only with strings
+  if (usesJsonParse) m.addFunctionImport("__json_parse", "env", "__json_parse", binaryen.createType([binaryen.i32]), binaryen.i32); // JSON.parse(str) -> value tree (the host's own JSON.parse, rebuilt through the exported constructors below)
   // Closures call through a function table: every user function sits at its
   // program-order index, and a closure carries that index (MAKECLOSURE / CALLV).
   // A generator function adds a second entry — its dispatch body `name$gen`.
@@ -2156,7 +2190,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   if (usesKeys || usesJson) { // __keystr: enumerable keys are those never set via SETHIDDEN (so __class__, instance methods, and __accessors__ are skipped)
     const hidden = new Set();
     for (const fn of Object.values(program)) for (const i of fn.code) if (Array.isArray(i) && i[0] === "SETHIDDEN") hidden.add(i[1]);
-    addKeyStr(m, [...keyIds].filter(([k]) => !hidden.has(k)));
+    addKeyStr(m, [...keyIds].filter(([k]) => !hidden.has(k)), keyIds.size, usesIndex); // usesIndex => the __keyid pool exists, so dynamic keys can be recovered
     if (usesKeys) addKeysRuntime(m);
     if (usesJson) addJsonRuntime(m);
   }
@@ -2170,6 +2204,11 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
     m.addTableExport("0", "__table"); // the regex host calls back into a replace-function through this
   }
   m.addFunctionExport(entry, entry);
+  // JSON.parse is built on the host, which constructs the value tree by calling the
+  // runtime's OWN constructors back through these exports — so the host needs no
+  // knowledge of the heap layout (unlike a stringify-on-host, which would have to
+  // decode every tag). Forced on above: usesArrays + usesObjects + usesIndex.
+  if (usesJsonParse) for (const f of ["__newobj", "__setprop", "__keyid", "__newarr", "__arrpush"]) m.addFunctionExport(f, f);
   if (!m.validate()) { const txt = m.emitText(); throw new Error("aot: module did not validate\n" + txt); }
   if (asyncify) m.runPasses(["asyncify"]); // unwind/rewind frames to/from linear memory
   return m.emitBinary().slice();

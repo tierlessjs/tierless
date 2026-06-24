@@ -23,6 +23,10 @@ const programs = [
   ["coerce a negative number", `function main() { return "t=" + (0 - 42); }`],
   ["coerce zero", `function main() { return "z" + 0; }`],
   ["coerce a multi-digit number", `function main() { return "#" + 12345; }`],
+  ["coerce true", `function main() { return "v=" + (1 < 2); }`],                          // "v=true"
+  ["coerce false", `function main() { return "v=" + (2 < 1); }`],                          // "v=false"
+  ["coerce null", `function main() { return "v=" + null; }`],                              // "v=null"
+  ["coerce undefined", `function main() { let x; return "v=" + x; }`],                     // "v=undefined"
   ["equal strings are === by value", `function main() { const a = "x" + "y"; const b = "xy"; return a === b; }`],
   ["unequal strings", `function main() { return "ab" === "ac"; }`],
   ["different lengths are not equal", `function main() { return "ab" === "abc"; }`],
