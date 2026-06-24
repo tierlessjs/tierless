@@ -189,6 +189,7 @@ export function stdlibHost() {
       }
       return isStr(d, a) && isStr(d, b) && readStr(d, a) === readStr(d, b) ? 1 : 0;
     },
+    __num_str: (v) => { const d = dv(); return allocStr(dv(), String(d.getFloat64((v & ~3) + 4, true))); }, // a boxed double -> its JS string (shortest round-trip, exponent rules — the platform's own)
   };
   return { imports, bind: (inst) => { mem = inst.exports.memory; table = inst.exports.__table; } };
 }
@@ -1309,10 +1310,11 @@ function addStringRuntime(m, floats, bigs) {
     m.return(m.i32.or(g(5), c(1))),
   ], binaryen.none));
 
-  // __tostr(v) -> string.  string: itself; fixnum: __numstr; else: "" (coercion of bool/null is a later slice)
+  // __tostr(v) -> string.  string: itself; fixnum: __numstr; boxed double: host __num_str; else: "" (bool/null coercion is a later slice)
   m.addFunction("__tostr", binaryen.createType([I32]), I32, [I32], m.block(null, [
     m.if(isStr(0), m.return(g(0))),
     m.if(m.i32.eqz(m.i32.and(g(0), c(1))), m.return(m.call("__numstr", [g(0)], I32))),
+    ...(floats ? [m.if(m.i32.and(m.i32.eq(m.i32.and(g(0), c(3)), c(1)), m.i32.eq(ld(0, addr(0)), c(FLOATTAG))), m.return(m.call("__num_str", [g(0)], I32)))] : []), // boxed double -> the host's Number->string
     m.local.set(1, bump()), st(0, g(1), c(STRTAG)), st(4, g(1), c(0)), setBump(m.i32.add(g(1), c(8))),
     m.return(m.i32.or(g(1), c(1))),
   ], binaryen.none));
@@ -2115,6 +2117,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
     m.addFunctionImport("__big_str", "env", "__big_str", i1, binaryen.i32);   // -> base-10 string
     m.addFunctionImport("__big_from", "env", "__big_from", i1, binaryen.i32); // BigInt(fixnum) -> bigint
   }
+  if (usesFloat && usesStrings) m.addFunctionImport("__num_str", "env", "__num_str", binaryen.createType([binaryen.i32]), binaryen.i32); // boxed double -> string (the host's Number->string); referenced only by __tostr, which exists only with strings
   // Closures call through a function table: every user function sits at its
   // program-order index, and a closure carries that index (MAKECLOSURE / CALLV).
   // A generator function adds a second entry — its dispatch body `name$gen`.

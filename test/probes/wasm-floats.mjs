@@ -5,12 +5,14 @@
 // === and downstream integer/bitwise ops keep working, otherwise it is boxed
 // [FLOATTAG, f64]. Covers literals, +-*/ , comparisons, unary +/- coercion
 // (`+"3.14"` / `-"-2"`), Math.floor/ceil/round/trunc/abs, Number.isInteger, and
-// mixed int/float. Each program runs interpreted and compiled to native wasm; the
-// decoded native value must equal the interpreter's.
+// mixed int/float. Turning a boxed double back into text (concat / toString / join)
+// is delegated to the host's own Number->string (shortest-round-trip and exponent
+// rules — an engine, not hand-rolled). Each program runs interpreted and compiled to
+// native wasm; the decoded native value must equal the interpreter's.
 
 import { createRuntime, initialFrames } from "#stackmix";
 import { compileModuleToWasm } from "#stackmix/wasm/frontend.mjs";
-import { BUMP_ADDR, HEAP_BASE, readValue } from "#stackmix/wasm/aot.mjs";
+import { BUMP_ADDR, HEAP_BASE, readValue, stdlibHost } from "#stackmix/wasm/aot.mjs";
 
 const programs = [
   ["a float literal round-trips", `function main() { return 3.14; }`],                                   // 3.14
@@ -35,6 +37,13 @@ const programs = [
   ["a float accumulator in a loop", `function main() { let x = 0.0; for (let i = 0; i < 5; i++) { x = x + 0.5; } return x; }`], // 2.5
   ["averaging produces a float", `function main() { const a = [1, 2, 4]; let s = 0; for (const x of a) { s += x; } return s / a.length; }`], // 7/3 = 2.333…
   ["mixed: int math then a float step", `function main() { let n = 10; n = n * 3; return n / 4; }`],       // 30/4 = 7.5
+  // A boxed double turned into text is delegated to the host's Number->string (the
+  // shortest-round-trip / exponent rules are an engine of their own — not hand-rolled).
+  ["a float concatenates into a string", `function main() { return "pi=" + 3.14; }`],                      // "pi=3.14"
+  ["toString of a float", `function main() { return (7 / 2).toString(); }`],                               // "3.5"
+  ["a float joins inside an array", `function main() { return [1.5, 2.25, 3].join(","); }`],               // "1.5,2.25,3"
+  ["rounding error shows the real digits", `function main() { return "" + (0.1 + 0.2); }`],                 // "0.30000000000000004"
+  ["a tiny float uses exponent notation", `function main() { return "" + (1 / 8 / 1000000); }`],            // "1.25e-7"
 ];
 
 function interp(src) {
@@ -43,7 +52,9 @@ function interp(src) {
   return rt.run({ id: "t" }, initialFrames("main", []), { deref: (x) => x }).value;
 }
 function native(src) {
-  const inst = new WebAssembly.Instance(new WebAssembly.Module(compileModuleToWasm(src, { entry: "main", resources: [] })), { env: {} });
+  const sh = stdlibHost(); // Number->string is delegated to the host; bind it to the instance after instantiation
+  const inst = new WebAssembly.Instance(new WebAssembly.Module(compileModuleToWasm(src, { entry: "main", resources: [] })), { env: sh.imports });
+  sh.bind(inst);
   new DataView(inst.exports.memory.buffer).setInt32(BUMP_ADDR, HEAP_BASE, true);
   return readValue(inst.exports.memory, inst.exports.main());
 }

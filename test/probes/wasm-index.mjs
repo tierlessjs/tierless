@@ -8,7 +8,7 @@
 
 import { createRuntime, initialFrames } from "#stackmix";
 import { compileModuleToWasm } from "#stackmix/wasm/frontend.mjs";
-import { BUMP_ADDR, HEAP_BASE, readValue } from "#stackmix/wasm/aot.mjs";
+import { BUMP_ADDR, HEAP_BASE, readValue, stdlibHost } from "#stackmix/wasm/aot.mjs";
 
 const programs = [
   ["constant array index", `function main() { const a = [1, 2, 3]; return a[0] + a[2]; }`],        // 1 + 3 = 4
@@ -36,7 +36,9 @@ function interp(src) {
   return rt.run({ id: "t" }, initialFrames("main", []), { deref: (x) => x }).value;
 }
 function native(src) {
-  const inst = new WebAssembly.Instance(new WebAssembly.Module(compileModuleToWasm(src, { entry: "main", resources: [] })), { env: {} });
+  const sh = stdlibHost(); // the delegated stdlib (Number->string, regex, BigInt) is provided by the host
+  const inst = new WebAssembly.Instance(new WebAssembly.Module(compileModuleToWasm(src, { entry: "main", resources: [] })), { env: sh.imports });
+  sh.bind(inst);
   new DataView(inst.exports.memory.buffer).setInt32(BUMP_ADDR, HEAP_BASE, true);
   return readValue(inst.exports.memory, inst.exports.main());
 }

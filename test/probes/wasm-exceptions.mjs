@@ -12,7 +12,7 @@
 
 import { createRuntime, initialFrames } from "#stackmix";
 import { compileModuleToWasm } from "#stackmix/wasm/frontend.mjs";
-import { BUMP_ADDR, HEAP_BASE, readValue } from "#stackmix/wasm/aot.mjs";
+import { BUMP_ADDR, HEAP_BASE, readValue, stdlibHost } from "#stackmix/wasm/aot.mjs";
 
 const programs = [
   ["catch a thrown value in the same function", `
@@ -79,7 +79,9 @@ function interp(src) {
   return rt.run({ id: "t" }, initialFrames("main", []), { deref: (x) => x }).value;
 }
 function native(src) {
-  const inst = new WebAssembly.Instance(new WebAssembly.Module(compileModuleToWasm(src, { entry: "main", resources: [] })), { env: {} });
+  const sh = stdlibHost(); // the delegated stdlib (Number->string, regex, BigInt) is provided by the host
+  const inst = new WebAssembly.Instance(new WebAssembly.Module(compileModuleToWasm(src, { entry: "main", resources: [] })), { env: sh.imports });
+  sh.bind(inst);
   const dv = new DataView(inst.exports.memory.buffer);
   dv.setInt32(BUMP_ADDR, HEAP_BASE, true);
   const r = inst.exports.main();
