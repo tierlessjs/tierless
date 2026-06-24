@@ -457,6 +457,19 @@ function compileFn(m, name, fn, handles, fnIndex, keyIds, strings, clsIds, excep
             case "isInteger": case "isFinite": res = bool(m.i32.eqz(m.i32.and(a(0), m.i32.const(1)))); break; // a tagged int has low bit 0
             case "isNaN": res = m.i32.const(FALSE); break;                                              // no NaN in this model
             case "isArray": res = bool(isArr(scratch(h + 1))); break;
+            // ---- string / array instance methods (receiver = scratch(h)) ----
+            case "toUpperCase": res = m.call("__strupper", [get(scratch(h))], I32); break;
+            case "toLowerCase": res = m.call("__strlower", [get(scratch(h))], I32); break;
+            case "trim": res = m.call("__strtrim", [get(scratch(h))], I32); break;
+            case "split": res = m.call("__strsplit", [get(scratch(h)), a(0)], I32); break;
+            case "charCodeAt": res = m.call("__strcharcodeat", [get(scratch(h)), n >= 1 ? a(0) : m.i32.const(0)], I32); break;
+            case "charAt": res = m.call("__strcharat", [get(scratch(h)), n >= 1 ? a(0) : m.i32.const(0)], I32); break;
+            case "slice": res = m.call("__slice", [get(scratch(h)), a(0), n >= 2 ? a(1) : m.i32.shl(m.i32.load(4, 4, m.i32.and(get(scratch(h)), m.i32.const(~3))), m.i32.const(1))], I32); break; // default end = length
+            case "from": res = m.call("__arrayfrom", [a(0)], I32); break;                               // Array.from(arg0)
+            case "join": {
+              let sep; if (n >= 1) sep = a(0); else { stmts.push(...buildStrInto(scratch(h + 1), ",")); sep = get(scratch(h + 1)); } // default separator ","
+              res = m.call("__arrjoin", [get(scratch(h)), sep], I32); break;
+            }
             default: throw new Error("aot: unsupported host method " + mname);
           }
           stmts.push(m.local.set(scratch(h), res)); h++; break;
@@ -800,6 +813,177 @@ function addStringRuntime(m) {
   ], binaryen.none));
 }
 
+// Runtime for string and array instance methods (added when a program calls one
+// via CALLM). Strings are [STRTAG, byteLen, ...bytes] (ASCII); the helpers slice,
+// case-fold, split, search, and join over that byte layout. Array helpers reuse
+// __newarr / __arrpush. `genIds` carries {value, done} so Array.from can drain a
+// generator (null when generators aren't in use).
+function addStrMethRuntime(m, genIds) {
+  const I32 = binaryen.i32;
+  const g = (i) => m.local.get(i, I32);
+  const c = (n) => m.i32.const(n);
+  const ld = (off, p) => m.i32.load(off, 4, p);
+  const st = (off, p, v) => m.i32.store(off, 4, p, v);
+  const ld8 = (off, p) => m.i32.load8_u(off, 1, p);
+  const st8 = (off, p, v) => m.i32.store8(off, 1, p, v);
+  const bump = () => m.i32.load(0, 4, c(BUMP_ADDR));
+  const setBump = (v) => m.i32.store(0, 4, c(BUMP_ADDR), v);
+  const addr = (i) => m.i32.and(g(i), c(~3));
+  const pad = (e) => m.i32.and(m.i32.add(e, c(3)), c(~3));
+  const tag = (e) => m.i32.or(e, c(1));
+  const fn = (name, np, nl, body) => m.addFunction(name, binaryen.createType(new Array(np).fill(I32)), I32, new Array(nl).fill(I32), m.block(null, body, binaryen.none));
+
+  // __substr(s, start, len) -> a fresh string of `len` bytes from byte `start`.
+  fn("__substr", 3, 1, [
+    m.local.set(3, bump()), st(0, g(3), c(STRTAG)), st(4, g(3), g(2)), setBump(m.i32.add(g(3), m.i32.add(c(8), pad(g(2))))),
+    m.memory.copy(m.i32.add(g(3), c(8)), m.i32.add(m.i32.add(addr(0), c(8)), g(1)), g(2)),
+    m.return(tag(g(3))),
+  ]);
+
+  // Case fold: copy s, mapping ASCII a-z<->A-Z. params 0=s; locals 1=len,2=str,3=i,4=b
+  const fold = (name, lo, hi, delta) => fn(name, 1, 4, [
+    m.local.set(1, ld(4, addr(0))), m.local.set(2, bump()), st(0, g(2), c(STRTAG)), st(4, g(2), g(1)), setBump(m.i32.add(g(2), m.i32.add(c(8), pad(g(1))))),
+    m.local.set(3, c(0)),
+    m.loop("L", m.block(null, [
+      m.if(m.i32.ge_u(g(3), g(1)), m.return(tag(g(2)))),
+      m.local.set(4, ld8(8, m.i32.add(addr(0), g(3)))),
+      m.if(m.i32.and(m.i32.ge_u(g(4), c(lo)), m.i32.le_u(g(4), c(hi))), m.local.set(4, m.i32.add(g(4), c(delta)))),
+      st8(8, m.i32.add(g(2), g(3)), g(4)),
+      m.local.set(3, m.i32.add(g(3), c(1))), m.br("L"),
+    ])),
+    m.unreachable(),
+  ]);
+  fold("__strupper", 97, 122, -32);
+  fold("__strlower", 65, 90, 32);
+
+  // is byte b ASCII whitespace?
+  const isWs = (b) => m.i32.or(m.i32.or(m.i32.eq(b, c(32)), m.i32.eq(b, c(9))), m.i32.or(m.i32.eq(b, c(10)), m.i32.eq(b, c(13))));
+  // __strtrim(s): drop leading/trailing whitespace. params 0=s; locals 1=len,2=i,3=j
+  fn("__strtrim", 1, 3, [
+    m.local.set(1, ld(4, addr(0))), m.local.set(2, c(0)), m.local.set(3, g(1)),
+    m.loop("A", m.block(null, [m.if(m.i32.and(m.i32.lt_u(g(2), g(3)), isWs(ld8(8, m.i32.add(addr(0), g(2))))), m.block(null, [m.local.set(2, m.i32.add(g(2), c(1))), m.br("A")]))])),
+    m.loop("B", m.block(null, [m.if(m.i32.and(m.i32.gt_u(g(3), g(2)), isWs(ld8(8, m.i32.add(addr(0), m.i32.sub(g(3), c(1)))))), m.block(null, [m.local.set(3, m.i32.sub(g(3), c(1))), m.br("B")]))])),
+    m.return(m.call("__substr", [g(0), g(2), m.i32.sub(g(3), g(2))], I32)),
+  ]);
+
+  // __strfind(s, sub, from) -> first byte index of sub in s at/after `from`, or -1.
+  // params 0=s,1=sub,2=from; locals 3=sl,4=nl,5=i,6=j
+  fn("__strfind", 3, 4, [
+    m.local.set(3, ld(4, addr(0))), m.local.set(4, ld(4, addr(1))), m.local.set(5, g(2)),
+    m.if(m.i32.eqz(g(4)), m.return(g(2))),                                  // empty needle matches at `from`
+    m.loop("L", m.block(null, [
+      m.if(m.i32.gt_s(m.i32.add(g(5), g(4)), g(3)), m.return(c(-1))),       // past the last possible start
+      m.local.set(6, c(0)),
+      m.block("ne", [m.loop("M", m.block(null, [
+        m.br_if("ne", m.i32.ge_u(g(6), g(4))),                              // full needle matched
+        m.if(m.i32.ne(ld8(8, m.i32.add(addr(0), m.i32.add(g(5), g(6)))), ld8(8, m.i32.add(addr(1), g(6)))), m.br("ne")),
+        m.local.set(6, m.i32.add(g(6), c(1))), m.br("M"),
+      ]))]),
+      m.if(m.i32.ge_u(g(6), g(4)), m.return(g(5))),                         // matched
+      m.local.set(5, m.i32.add(g(5), c(1))), m.br("L"),
+    ])),
+    m.unreachable(),
+  ]);
+  // __strindexof(s, sub) -> tagged index or -1
+  fn("__strindexof", 2, 0, [m.return(m.i32.shl(m.call("__strfind", [g(0), g(1), c(0)], I32), c(1)))]);
+  // __strincludes(s, sub) -> tagged boolean
+  fn("__strincludes", 2, 0, [m.return(m.select(m.i32.ge_s(m.call("__strfind", [g(0), g(1), c(0)], I32), c(0)), c(TRUE), c(FALSE)))]);
+  // __strcharcodeat(s, i) -> tagged code unit, or undefined out of range. i is tagged.
+  fn("__strcharcodeat", 2, 1, [m.local.set(2, m.i32.shr_s(g(1), c(1))), m.if(m.i32.or(m.i32.lt_s(g(2), c(0)), m.i32.ge_s(g(2), ld(4, addr(0)))), m.return(c(UNDEF))), m.return(m.i32.shl(ld8(8, m.i32.add(addr(0), g(2))), c(1)))]);
+  // __strcharat(s, i) -> a one-char string ("" out of range). i is tagged.
+  fn("__strcharat", 2, 1, [m.local.set(2, m.i32.shr_s(g(1), c(1))), m.if(m.i32.or(m.i32.lt_s(g(2), c(0)), m.i32.ge_s(g(2), ld(4, addr(0)))), m.return(m.call("__substr", [g(0), c(0), c(0)], I32))), m.return(m.call("__substr", [g(0), g(2), c(1)], I32))]);
+
+  // __strsplit(s, sep) -> array of substrings. Empty sep -> array of single chars.
+  // params 0=s,1=sep; locals 2=arr,3=sl,4=nl,5=i,6=hit
+  fn("__strsplit", 2, 5, [
+    m.local.set(2, m.call("__newarr", [], I32)), m.local.set(3, ld(4, addr(0))), m.local.set(4, ld(4, addr(1))),
+    m.if(m.i32.eqz(g(4)), m.block(null, [                                   // "" separator: one char per element
+      m.local.set(5, c(0)),
+      m.loop("C", m.block(null, [
+        m.if(m.i32.ge_u(g(5), g(3)), m.return(g(2))),
+        m.drop(m.call("__arrpush", [g(2), m.call("__substr", [g(0), g(5), c(1)], I32)], I32)),
+        m.local.set(5, m.i32.add(g(5), c(1))), m.br("C"),
+      ])),
+    ], binaryen.none)),
+    m.local.set(5, c(0)),                                                   // i = segment start
+    m.loop("L", m.block(null, [
+      m.local.set(6, m.call("__strfind", [g(0), g(1), g(5)], I32)),         // next separator at/after i
+      m.if(m.i32.lt_s(g(6), c(0)), m.block(null, [                          // none: push the tail, done
+        m.drop(m.call("__arrpush", [g(2), m.call("__substr", [g(0), g(5), m.i32.sub(g(3), g(5))], I32)], I32)),
+        m.return(g(2)),
+      ], binaryen.none)),
+      m.drop(m.call("__arrpush", [g(2), m.call("__substr", [g(0), g(5), m.i32.sub(g(6), g(5))], I32)], I32)),
+      m.local.set(5, m.i32.add(g(6), g(4))), m.br("L"),
+    ])),
+    m.unreachable(),
+  ]);
+
+  // __slice(recv, start, end) -> substring (string) or subarray (array). start/end
+  // are tagged ints; negative counts from the end; clamped. params 0=recv,1=start,
+  // 2=end; locals 3=len,4=s,5=e,6=out,7=i
+  fn("__slice", 3, 5, [
+    m.local.set(3, ld(4, addr(0))),                                        // length (header word, both string and array)
+    m.local.set(4, m.i32.shr_s(g(1), c(1))), m.local.set(5, m.i32.shr_s(g(2), c(1))),
+    m.if(m.i32.lt_s(g(4), c(0)), m.local.set(4, m.i32.add(g(4), g(3)))), m.if(m.i32.lt_s(g(4), c(0)), m.local.set(4, c(0))),
+    m.if(m.i32.lt_s(g(5), c(0)), m.local.set(5, m.i32.add(g(5), g(3)))), m.if(m.i32.gt_s(g(5), g(3)), m.local.set(5, g(3))),
+    m.if(m.i32.lt_s(g(5), g(4)), m.local.set(5, g(4))),                     // empty if end < start
+    m.if(m.i32.eq(ld(0, addr(0)), c(STRTAG)), m.return(m.call("__substr", [g(0), g(4), m.i32.sub(g(5), g(4))], I32))),
+    m.local.set(6, m.call("__newarr", [], I32)), m.local.set(7, g(4)),      // array: copy elements [s, e)
+    m.loop("L", m.block(null, [
+      m.if(m.i32.ge_s(g(7), g(5)), m.return(g(6))),
+      m.drop(m.call("__arrpush", [g(6), ld(4, m.i32.add(ld(8, addr(0)), m.i32.mul(g(7), c(4))))], I32)),
+      m.local.set(7, m.i32.add(g(7), c(1))), m.br("L"),
+    ])),
+    m.unreachable(),
+  ]);
+
+  // __arrjoin(arr, sep) -> string of the elements (each stringified) joined by sep.
+  // params 0=arr,1=sep; locals 2=backing,3=len,4=out,5=i
+  fn("__arrjoin", 2, 4, [
+    m.local.set(2, ld(8, addr(0))), m.local.set(3, ld(4, addr(0))),
+    m.local.set(4, m.call("__substr", [g(1), c(0), c(0)], I32)),            // out = "" (empty slice of sep)
+    m.local.set(5, c(0)),
+    m.loop("L", m.block(null, [
+      m.if(m.i32.ge_s(g(5), g(3)), m.return(g(4))),
+      m.if(m.i32.gt_s(g(5), c(0)), m.local.set(4, m.call("__concat", [g(4), g(1)], I32))), // separator before each but the first
+      m.local.set(4, m.call("__concat", [g(4), m.call("__tostr", [ld(4, m.i32.add(g(2), m.i32.mul(g(5), c(4))))], I32)], I32)),
+      m.local.set(5, m.i32.add(g(5), c(1))), m.br("L"),
+    ])),
+    m.unreachable(),
+  ]);
+
+  // __arrayfrom(x) -> a new array: copy an array, the chars of a string, or the
+  // values of a generator. params 0=x; locals 1=out,2=addr,3=backing,4=len,5=i,6=res
+  const body = [
+    m.local.set(1, m.call("__newarr", [], I32)), m.local.set(2, addr(0)),
+    m.if(m.i32.eq(ld(0, g(2)), c(ARRTAG)), m.block(null, [
+      m.local.set(3, ld(8, g(2))), m.local.set(4, ld(4, g(2))), m.local.set(5, c(0)),
+      m.loop("L", m.block(null, [
+        m.if(m.i32.ge_s(g(5), g(4)), m.return(g(1))),
+        m.drop(m.call("__arrpush", [g(1), ld(4, m.i32.add(g(3), m.i32.mul(g(5), c(4))))], I32)),
+        m.local.set(5, m.i32.add(g(5), c(1))), m.br("L"),
+      ])),
+    ], binaryen.none)),
+    m.if(m.i32.eq(ld(0, g(2)), c(STRTAG)), m.block(null, [                  // string: one char per element
+      m.local.set(4, ld(4, g(2))), m.local.set(5, c(0)),
+      m.loop("S", m.block(null, [
+        m.if(m.i32.ge_s(g(5), g(4)), m.return(g(1))),
+        m.drop(m.call("__arrpush", [g(1), m.call("__substr", [g(0), g(5), c(1)], I32)], I32)),
+        m.local.set(5, m.i32.add(g(5), c(1))), m.br("S"),
+      ])),
+    ], binaryen.none)),
+  ];
+  if (genIds) body.push(
+    m.if(m.i32.eq(ld(0, g(2)), c(GENTAG)), m.loop("G", m.block(null, [
+      m.local.set(6, m.call("__gennext", [g(0), c(UNDEF)], I32)),
+      m.if(m.i32.eq(m.call("__getprop", [g(6), c(genIds.done)], I32), c(TRUE)), m.return(g(1))),
+      m.drop(m.call("__arrpush", [g(1), m.call("__getprop", [g(6), c(genIds.value)], I32)], I32)),
+      m.br("G"),
+    ]))));
+  body.push(m.return(g(1)));
+  fn("__arrayfrom", 1, 6, body);
+}
+
 // Runtime helper for instanceof (added when a program uses ISA). A user class
 // tags each instance with a hidden __class__ array of its class-name chain.
 function addClassRuntime(m) {
@@ -1125,9 +1309,11 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   const usesIndex = uses("INDEX", "SETINDEX");             // computed member access -> the index runtime (+ key interning)
   const usesExceptions = uses("THROW", "PUSHTRY");         // try/catch/throw: sentinel-return unwinding
   const usesConstArray = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "PUSH" && Array.isArray(i[1])));
-  const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL", "ARGUMENTS", "GATHERREST") || usesConstArray; // __class__ name lists build arrays; APPENDALL/ARGUMENTS/GATHERREST push
+  const STRMETHS = new Set(["toUpperCase", "toLowerCase", "trim", "split", "slice", "join", "from", "charCodeAt", "charAt"]); // CALLM names handled by the string/array-method runtime
+  const usesStrMeth = Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && i[0] === "CALLM" && STRMETHS.has(i[1])));
+  const usesArrays = uses("NEWARR", "ARRPUSH", "ARRGET", "ARRLEN", "APPENDALL", "ARGUMENTS", "GATHERREST") || usesConstArray || usesStrMeth; // __class__ name lists build arrays; APPENDALL/ARGUMENTS/GATHERREST/split/from push
   const usesObjects = uses("NEWOBJ", "GETPROP", "SETPROP", "SETHIDDEN", "CALLMETHOD", "GETPROPA", "SETPROPA") || usesClasses || usesGenerators || usesIndex; // instances, method dispatch, {value,done}, computed access
-  const usesStrings = usesClasses || usesIndex || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq)
+  const usesStrings = usesClasses || usesIndex || usesStrMeth || Object.values(program).some((fn) => fn.code.some((i) => Array.isArray(i) && ((i[0] === "PUSH" && typeof i[1] === "string") || i[0] === "TYPEOF"))); // ISA / __keyid compare strings (__eq); string methods build/concat strings
   if (usesArrays || usesObjects || usesStrings) m.setFeatures(binaryen.Features.All); // enable memory.copy (bulk memory) for the grow/concat paths
   // Property and method keys are interned to small ints at compile time, so
   // GETPROP/SETPROP/SETHIDDEN/CALLMETHOD are id matches in the object runtime.
@@ -1175,6 +1361,7 @@ export function compileToWasm(program, { entry = "main", resources = [], asyncif
   if (usesObjects) addObjectRuntime(m, keyIds.get("length"));
   if (uses("CALLMS", "APPENDALL")) addBuiltinRuntime(m, { spread: uses("CALLMS"), append: uses("APPENDALL"), valueId: usesGenerators ? keyIds.get("value") : null, doneId: usesGenerators ? keyIds.get("done") : null });
   if (usesStrings) addStringRuntime(m);
+  if (usesStrMeth) addStrMethRuntime(m, usesGenerators ? { value: keyIds.get("value"), done: keyIds.get("done") } : null);
   if (usesClasses) addClassRuntime(m);
   if (usesIndex) addIndexRuntime(m, keyIds);
   if (usesAccessors) addAccessorRuntime(m, keyIds.get("__accessors__"), keyIds.get("get"), keyIds.get("set"), maxargs);
