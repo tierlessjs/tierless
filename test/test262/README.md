@@ -62,6 +62,18 @@ are coverage gaps, not wrong answers.
 
 - **`NaN === NaN` returned `true`** (the identical-bits fast path fired before the
   float-by-value compare). Fixed: strict equality compares boxed floats by value.
+- **arithmetic on `boolean`/`null`/`undefined` produced garbage** in a program with
+  no floats/strings (the raw-integer fast path ran on an odd-tagged singleton, so
+  `true + 1` → a value reinterpreted as a pointer). Fixed: emit the coercion slow
+  path whenever a non-fixnum operand could reach an arithmetic/relational operator
+  (matching the interpreter), kept host-free for lean programs.
+
+The Test262 headline barely moves from these because the operator chapters bundle
+each value-coercion case with features still out of scope (`new Boolean(...)` and
+other wrapper objects, `eval`, `Symbol`/`BigInt` mixing, object `ToPrimitive`), so
+a fixed case often just progresses to the next unsupported one. The fixes' real
+proof is the interpreter-parity probes and realts staying 58/58 — native must
+match the interpreter oracle, which Test262 cross-checks against the spec.
 
 ## Snapshot
 
