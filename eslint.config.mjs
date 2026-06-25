@@ -14,6 +14,8 @@ export default [
       "**/*.wasm",
       "**/*.csv",
       "test/test262/vendor/**", // fetched Test262 corpus (not ours to lint)
+      "experiments/qjs-migrate/qjsmig.mjs", // emscripten-generated glue
+      "experiments/qjs-migrate/raw_lib.js", // emscripten --js-library (addToLibrary/Module globals)
     ],
   },
   js.configs.recommended,
