@@ -61,6 +61,7 @@ const cases = [
   { file: "test/difftest.mjs",                    needs: ["NO DIVERGENCES"] },
   { file: "test/decorators.mjs",                  needs: ["Result: ALL PASS"] },
   { file: "test/multimodule.mjs",                 needs: ["Result: ALL PASS"] },
+  { file: "experiments/react-tiers/verify.mjs",   needs: ["PASS — auto-compiled tier-split continuation produced the correct session"] },
 ];
 
 // Build the wasm once up front.
