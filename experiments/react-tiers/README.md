@@ -111,6 +111,17 @@ hooks. `api.*` and `commit()` look like ordinary calls.
      and click. `verify-live.mjs` drives this live page headlessly with real Chromium
      clicks.
 
+5. **§5 distributed handle heap** (`heap.mjs`). Small locals travel with the continuation;
+   a **big** local stays on its owning tier as an opaque handle (`{owner, id}`) and is
+   fetched only if the other tier actually derefs it — the *stack-smaller-than-heap* win
+   (design.md §5). `encodeWire` flattens each frame's locals into individual roots so a big
+   one excises into the tier's versioned heap while the frame skeleton stays tiny; the
+   project's `Heap`/`Channel`/`makeHost` (`src/runtime/fetch.mjs`) provide fetch-on-deref
+   with **single-writer** coherence (owner is master, bumps a version on mutate, readers
+   hold a version-invalidated snapshot cache). `heap-probe.mjs` shows a 1.1 MB dataset ride
+   as a 463-byte handle (≈2400× smaller wire), fetched coherently only when derefed. (Not
+   yet wired into the live `pump` — it's the codec/coherence layer, proven standalone.)
+
 ## Files
 
 | file | what |
@@ -129,6 +140,8 @@ hooks. `api.*` and `commit()` look like ordinary calls.
 | `verify.mjs` | headless regression (no browser/socket); asserts the compiled session — in `npm test` |
 | `cf-fixtures.src.js` → `cf-fixtures.gen.mjs` | control-flow test functions and their compiled bundle |
 | `control-flow.mjs` | headless regression for loops/continue/try-catch-finally across migration — in `npm test` |
+| `heap.mjs` | §5 distributed handle heap: frame-flattening tier-aware wire + `Heap`/`Channel`/`makeHost` reuse |
+| `heap-probe.mjs` | headless proof: big locals stay home as handles, fetched on deref, single-writer coherent — in `npm test` |
 | `verify-live.mjs` | headless check of the live page via real Chromium clicks (run on demand) |
 
 ## Running
@@ -166,6 +179,13 @@ node experiments/react-tiers/transform.cjs experiments/react-tiers/cf-fixtures.s
   implicitly, so it's intentionally unsupported rather than a missing feature.
 - Render runs wholesale on the server and the browser only commits. Splitting render
   itself across tiers (per-component continuation identity) is the larger follow-on.
-- Cross-tier **shared mutable state** is left where the design notes put it: single JS
-  event thread per session here, so there's one writer; coherence for concurrent sessions
-  is the genuine deferred problem.
+- The §5 handle heap (`heap.mjs`) is proven at the codec/coherence layer but **not yet
+  wired into the live `pump`** — the next step is to excise big locals on a real migration
+  and serve `fetch{id}` over the `ws` socket (the protocol `src/runtime/wss.mjs` already
+  defines). Transparent deref in CPS (touch a foreign handle and it auto-fetches) needs a
+  compiler hook, since the state machine accesses `F.x` directly; today a deref is explicit
+  (via `makeHost`).
+- Cross-tier **shared mutable state** now has the design's answer at the data layer:
+  single-writer + version-invalidated cache (read-mostly shared data works). **Write-back**
+  — a reader's mutation propagating to the owner — is the still-deferred hard problem, as
+  the design doc marks it out of scope for v1.

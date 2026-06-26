@@ -63,6 +63,7 @@ const cases = [
   { file: "test/multimodule.mjs",                 needs: ["Result: ALL PASS"] },
   { file: "experiments/react-tiers/verify.mjs",   needs: ["PASS — auto-compiled tier-split continuation produced the correct session"] },
   { file: "experiments/react-tiers/control-flow.mjs", needs: ["extended control flow survives migration"] },
+  { file: "experiments/react-tiers/heap-probe.mjs",    needs: ["big locals stay home, fetched on deref, single-writer coherent"] },
 ];
 
 // Build the wasm once up front.
