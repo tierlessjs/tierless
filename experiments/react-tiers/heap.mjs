@@ -53,3 +53,41 @@ export function decodeWire(wire) {
 
 // How many §5 handles the wire carries (a local that stayed home), for reporting/tests.
 export const wireHandles = (wire) => JSON.parse(wire).graph.objs.filter((o) => o.k === "H").map((o) => o.h);
+
+// --- §5 write-back: optimistic, version-checked coherence ------------------------------
+//
+// v1 was single-writer: the owner mutates the master, readers hold version-invalidated
+// snapshots and never write. Write-back lifts that to single-MASTER with optimistic
+// concurrency: any tier may be the writer, but it must propose its mutated snapshot back
+// under the version it read (a compare-and-set). The master stays the sole serialization
+// point — it accepts only if no one bumped the version since the reader fetched, so a
+// stale write is rejected as a conflict and the reader refetches + retries. No lost
+// updates; the same guarantee a CAS register gives, applied to a fetched §5 snapshot.
+
+// The owner-side CAS. Accept `value` as the new master iff the heap is still at
+// `baseVersion` (what the writer last saw). Returns {ok, version}: on success the version
+// is bumped; on conflict ok=false and `version` is the owner's current (newer) version so
+// the writer knows what to refetch.
+export function writeBack(heap, id, baseVersion, value) {
+  const cur = heap.version(id);
+  if (cur !== baseVersion) return { ok: false, version: cur };  // someone wrote first — reject
+  heap.objs.set(id, value);                                     // accept the reader's snapshot as the new master
+  heap.ver.set(id, cur + 1);                                    // bump: invalidates every other reader's cache
+  return { ok: true, version: cur + 1 };
+}
+
+// The reader-side optimistic loop: fetch the current snapshot, apply `mutator` to it,
+// propose it back under the fetched version. On conflict, refetch (now seeing the winner's
+// change) and re-apply — at most `tries` times. Because each attempt re-reads first, a
+// retry merges on top of the latest master instead of clobbering it. Returns
+// {ok, version, tries, copy}; `tries` reveals how much contention it hit.
+export function commitWrite(channel, handle, mutator, { tries = 5 } = {}) {
+  const ownerHeap = channel.tiers[handle.owner].heap;
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    const { copy, version } = channel.fetch(handle);  // read-current (counts a fetch on the channel)
+    mutator(copy);                                     // apply the intended mutation to the fresh snapshot
+    const res = writeBack(ownerHeap, handle.id, version, copy);
+    if (res.ok) return { ok: true, version: res.version, tries: attempt, copy };
+  }
+  return { ok: false, tries };
+}

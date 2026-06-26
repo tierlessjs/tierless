@@ -66,6 +66,7 @@ const cases = [
   { file: "experiments/react-tiers/heap-probe.mjs",    needs: ["big locals stay home, fetched on deref, single-writer coherent"] },
   { file: "experiments/react-tiers/heap-live.mjs",     needs: ["the dataset stayed on the server, crossing only when the browser derefed it"] },
   { file: "experiments/react-tiers/heap-auto.mjs",     needs: ["transparent deref: ordinary member access on a handle auto-fetches"] },
+  { file: "experiments/react-tiers/heap-writeback.mjs", needs: ["optimistic CAS, conflicts detected and retried, no lost updates"] },
 ];
 
 // Build the wasm once up front.

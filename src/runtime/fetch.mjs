@@ -10,11 +10,13 @@
 //                        safe), cache it, and keep using the cached snapshot
 //   pinned resource?  -> (handled elsewhere: a RES call migrates the continuation)
 //
-// Coherence: single-writer. The owning tier is the master; it bumps a version
+// Coherence: single-master. The owning tier is the master; it bumps a version
 // on mutation. A reader caches fetched snapshots keyed by version; a deref
 // consults the owner's current version (an "invalidating cache"), so a stale
-// snapshot is refetched after the master changes. Readers mutate only their own
-// snapshot copy; write-back/shared-write is explicitly out of scope for v1.
+// snapshot is refetched after the master changes. This module is the read path
+// (readers mutate only their own snapshot copy); the optimistic, version-checked
+// WRITE path — a reader proposing its mutated snapshot back to the master under a
+// compare-and-set — is layered on top in experiments/react-tiers/heap.mjs.
 
 import { encodeGraph, decodeGraph, isHandle } from "./heap.mjs";
 

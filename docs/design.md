@@ -101,6 +101,11 @@ The hard part. A migrated continuation references locals; some of those are poin
 - **Large objects become references, not copies.** Above the threshold, replace with an opaque handle (`obj#1234` = "object 1234, lives on tier X"). Dereferencing a handle you don't have locally triggers a fetch from the owning tier. The author doesn't see this; it just works, sometimes slowly.
 - **Explicit shared state for genuinely cross-tier data.** A distinguished namespace (e.g. `shared.userData`) that authors hang shared domains off of. These get the full distributed-object treatment — tagged, tracked, fetched/synced lazily. This is the one place the author opts into "this is shared," and it keeps the expensive machinery scoped to where it's actually wanted rather than wrapping every closure variable.
 
+### Coherence
+The owning tier is the **master** — the single point where writes serialize. Readers on other tiers hold snapshots stamped with the master's version; a deref consults the master's current version (an invalidating cache), so a snapshot goes stale the moment the master changes and is refetched on next touch. That covers reads.
+
+Writes are **optimistic, not locked.** A reader that mutates a fetched snapshot may propose it back to the master under the version it read — a compare-and-set. The master accepts only if no one bumped the version in between; otherwise the write is rejected as a conflict and the writer refetches (now seeing the winner's change), re-applies, and retries. This keeps the master as the sole serialization point (no distributed locks, no two-phase commit) while letting *any* tier be the writer, and it degrades to the simple single-writer case when there's no contention. The cost of a lost race is a refetch + retry, made measurable, never a silent lost update.
+
 ### Why not mirror the whole heap
 Keeping both linear memories in full sync was considered and rejected: global/singleton/cache mutations would thrash constantly across the wire (megabytes, every mutation, every GC cycle). People *do* write code with lots of global state, so full sync is a performance disaster. Reference-on-demand + explicit shared state localizes the cost.
 
