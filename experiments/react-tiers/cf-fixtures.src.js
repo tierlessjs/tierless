@@ -131,3 +131,84 @@ function nestedArgs() {
 function callInExpr() {
   return fetchDouble(4) + 1;          // a suspendable call's result used in an expression -> hoisted
 }
+
+// --- suspensions in conditional / switch / labeled / do-while / loop-header positions ---
+function ternaryPick() {
+  let hi = 1;
+  let x = hi ? api.get(7) : api.get(9);    // ?: — only the taken branch suspends (lowered to if/else)
+  return x;                                // 7
+}
+function shortCircuit() {
+  let off = 0;
+  let a = off || api.get(5);               // || right side suspends
+  let b = off && api.fail(1);              // && short-circuits: api.fail never runs
+  return a + b;                            // 5 + 0 = 5
+}
+function switchPick() {
+  let k = 2;
+  let out = "none";
+  switch (k) {
+    case 1: out = api.get(10); break;
+    case 2: out = api.get(20); break;
+    default: out = api.get(0);
+  }
+  return out;                              // 20
+}
+function switchFall() {
+  let k = 1;
+  let acc = 0;
+  switch (k) {
+    case 1: acc = acc + api.get(1);        // falls through to case 2
+    case 2: acc = acc + api.get(2); break;
+    case 3: acc = acc + api.get(3);
+  }
+  return acc;                              // 1 + 2 = 3
+}
+function labeledBreak() {
+  let found = 0;
+  outer: for (let i = 1; i <= 3; i = i + 1) {
+    for (let j = 1; j <= 3; j = j + 1) {
+      const v = api.get(i * j);            // suspends in the inner loop
+      if (v === 4) { found = v; break outer; }
+    }
+  }
+  return found;                            // 4 (2*2)
+}
+function doWhileSusp() {
+  let i = 0;
+  let sum = 0;
+  do {
+    const v = api.get(i);                  // suspends in a do-while body
+    sum = sum + v;
+    i = i + 1;
+  } while (i < 3);
+  return sum;                              // 0 + 1 + 2 = 3
+}
+function forHeaderSusp() {
+  let sum = 0;
+  for (let i = api.get(1); i <= 3; i = i + 1) {  // suspending for-init -> hoisted before the loop
+    sum = sum + i;
+  }
+  return sum;                              // 1 + 2 + 3 = 6
+}
+function returnInTry() {
+  try {
+    const v = api.get(5);
+    return v;                              // early return out of a try/catch (pops the handler on the way out)
+  } catch (e) {
+    return -1;
+  }
+}
+function breakOutOfTry() {
+  let sum = 0;
+  for (let i = 1; i <= 5; i = i + 1) {
+    try {
+      const v = api.get(i);
+      if (v === 3) { break; }              // break crosses the try (pops its handler)
+      sum = sum + v;
+    } catch (e) {
+      sum = -1;
+    }
+  }
+  return sum;                              // 1 + 2 = 3
+}

@@ -40,6 +40,15 @@ const cases = [
   ["resource in a while-test (desugared)", "whileTestSusp", 6],
   ["two resources in a call's args, order preserved", "nestedArgs", 5],
   ["suspendable-call result used in an expression", "callInExpr", 9],
+  ["?: where only the taken branch suspends", "ternaryPick", 7],
+  ["&& / || short-circuit with a suspending operand", "shortCircuit", 5],
+  ["switch with a break", "switchPick", 20],
+  ["switch fall-through", "switchFall", 3],
+  ["labeled break out of nested loops", "labeledBreak", 4],
+  ["do-while with a suspending body", "doWhileSusp", 3],
+  ["suspending for-init", "forHeaderSusp", 6],
+  ["early return out of a try/catch", "returnInTry", 5],
+  ["break out of a try inside a loop", "breakOutOfTry", 3],
 ];
 
 let pass = 0;
@@ -51,6 +60,6 @@ for (const [label, fn, expected] of cases) {
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : `  (got ${err ? "ERR:" + err.message : JSON.stringify(got)}, expected ${JSON.stringify(expected)})`}`);
 }
 console.log(pass === cases.length
-  ? `\nPASS — extended control flow survives migration: loops, continue, try/catch/finally, nested calls, and suspensions in expression positions (${pass}/${cases.length})`
+  ? `\nPASS — extended control flow survives migration: loops, continue, try/catch/finally, nested calls, expression positions, &&/||/?:, switch, labeled break/continue, do-while, and loop headers (${pass}/${cases.length})`
   : `\nFAIL (${pass}/${cases.length})`);
 process.exit(pass === cases.length ? 0 : 1);

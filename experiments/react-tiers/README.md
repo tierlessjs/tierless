@@ -67,14 +67,17 @@ hooks. `api.*` and `commit()` look like ordinary calls.
    explicit frame object `F`. Output: `app/bundle.gen.mjs` (committed, so the demo runs
    without the Babel toolchain). This is the V8-native analog of asyncify: the
    continuation is plain data, no native stack. Control flow covered: sequence, `if/else`,
-   `while`/`for`, `break`/`continue`, `return`, `throw`, `try/catch/finally`, and **calls
-   between functions** — **including a resource that fails on another tier being caught by
-   a `catch` up the call stack in the migrated code**, because the handler stack (`F.__h`)
-   rides along in the serialized continuation. A suspension may appear in any ordinary
-   **expression position** (`return f(x)`, `out = api.get()`, `a + f(x)`, `g(api.h())`,
-   `if (api.check())`, `while (api.more())`): an ANF pass hoists it into a temp on the
-   frame, in evaluation order, before lowering. (`control-flow.mjs` proves each of these
-   survives a wire round-trip at every suspend.)
+   `while`/`for`/`do-while`, `break`/`continue` (incl. **labeled**), `return`, `throw`,
+   `switch`, `&&`/`||`/`??`/`?:`, `try/catch/finally`, an early `return`/`break`/`continue`
+   **out of** a `try/catch`, and **calls between functions** — **including a resource that
+   fails on another tier being caught by a `catch` up the call stack in the migrated
+   code**, because the handler stack (`F.__h`) rides along in the serialized continuation.
+   A suspension may appear in essentially any **expression position** (`return f(x)`,
+   `out = api.get()`, `a + f(x)`, `g(api.h())`, `if (api.check())`, `while (api.more())`,
+   `cond ? api.a() : api.b()`): an ANF pass hoists it into a frame temp (lowering `?:`/`&&`/
+   `||` to if-statements so only the taken branch runs), in evaluation order, before
+   lowering. (`control-flow.mjs` proves each of these — 23 cases — survives a wire
+   round-trip at every suspend.)
 
    **Suspendability is inferred.** A function is compiled into a state machine only if it
    (transitively) touches a tier-pinned resource; pure single-tier helpers (here `render`,
@@ -152,15 +155,16 @@ node experiments/react-tiers/transform.cjs experiments/react-tiers/cf-fixtures.s
 
 ## Caveats / not-yet
 
-- `transform.cjs` now covers sequence, `if/else`, `while`/`for`, `break`/`continue`,
-  `return`, `throw`, `try/catch/finally`, **calls between suspendable functions**
-  (sub-frames; the continuation spans the call stack), and **suspensions in expression
-  positions** (hoisted to frame temps), all across suspends. Remaining gaps (the compiler
-  throws a clear error rather than miscompile): a suspension in a **short-circuit /
-  conditional** position (`&&`, `||`, `??`, `?:`, `?.` — lift it to a statement) or a
-  **loop header** other than a plain `while`, a `break`/`continue`/`return` that **exits**
-  a `try`, `switch`, and labeled loops. `@babel/plugin-transform-regenerator` is the
-  reference for the rest, onto this same explicit-frame model.
+- `transform.cjs` covers essentially all ordinary control flow (see the list above):
+  loops, `switch`, labeled break/continue, `&&`/`||`/`??`/`?:`, `try/catch/finally`,
+  calls between suspendable functions (sub-frames), and suspensions in any expression
+  position — all across suspends and serializable. Remaining gaps (the compiler throws a
+  clear error rather than miscompile): a `return`/`break`/`continue` that exits a `try`
+  **with a `finally`** (needs completion records — the one hard CPS case; `@babel/plugin-
+  transform-regenerator` is the reference, onto this same explicit-frame model), a
+  suspension in a `for`-update / `do-while`-test / under optional chaining (`?.`), and the
+  source being a generator/`async` function (we transform plain functions). None of these
+  are load-bearing for React-style components.
 - Render runs wholesale on the server and the browser only commits. Splitting render
   itself across tiers (per-component continuation identity) is the larger follow-on.
 - Cross-tier **shared mutable state** is left where the design notes put it: single JS

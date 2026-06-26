@@ -68,8 +68,9 @@ function allowlist(ast) {
 }
 
 // ---- PASS 2: state machine. Compile a suspendable function's body into basic blocks.
-// ctx threads { next, brk, cont, tryDepth, loopDepth } so break/continue know their
-// target and we can reject a jump that would skip a try's handler bookkeeping.
+// ctx threads the targets break/continue/return jump to (brk/cont per loop, labels for
+// labeled loops) plus tryStack — the enclosing trys — so an abrupt exit pops the right
+// handlers and refuses to silently skip a finally.
 let blocks, suspSet;
 const nb = () => (blocks.push({ lines: [], term: null }), blocks.length - 1);
 const isSusp = (s) =>
@@ -121,21 +122,38 @@ function hasSuspInside(node, exclSelf) {
 const isHeadNormal = (path) => {                                   // already in a position compileStmt handles
   const p = path.parentPath;
   if (p.isExpressionStatement()) return true;
-  if (p.isVariableDeclarator() && p.node.init === path.node) { const d = p.parentPath; return d.node.declarations.length === 1 && (d.parentPath.isBlockStatement() || d.parentPath.isProgram()); }
+  if (p.isVariableDeclarator() && p.node.init === path.node) { const d = p.parentPath; return d.node.declarations.length === 1 && (d.parentPath.isBlockStatement() || d.parentPath.isProgram() || d.parentPath.isSwitchCase()); }
   return false;
 };
-function assertSafeContext(path, stmt) {                           // refuse to hoist out of short-circuit / conditional positions
+function assertSafeContext(path, stmt) {                           // safety net: nothing should reach here in a conditional position after desugaring
   let cur = path;
   while (cur && cur !== stmt) {
     const par = cur.parentPath;
-    if (par.isLogicalExpression() && par.node.right === cur.node) throw new Error("suspension in the right side of && / || / ?? is not supported (lift it to a statement above)");
-    if (par.isConditionalExpression() && (par.node.consequent === cur.node || par.node.alternate === cur.node)) throw new Error("suspension in a branch of ?: is not supported (use an if statement)");
+    if (par.isLogicalExpression() && par.node.right === cur.node) throw new Error("suspension in the right side of && / || / ?? is not supported");
+    if (par.isConditionalExpression() && (par.node.consequent === cur.node || par.node.alternate === cur.node)) throw new Error("suspension in a branch of ?: is not supported");
     if (par.isOptionalMemberExpression() || par.isOptionalCallExpression()) throw new Error("suspension under optional chaining (?.) is not supported");
     cur = par;
   }
 }
+// && || ?? ?: that CONTAIN a suspension -> lift into a temp via if-statements, so only the
+// taken branch's suspension evaluates. The branches/test then normalize like any statement.
+function desugarCondLog(path, name) {
+  const n = path.node, id = () => t.identifier(name), assign = (v) => t.expressionStatement(t.assignmentExpression("=", id(), v));
+  const out = [];
+  if (t.isConditionalExpression(n)) {
+    out.push(t.variableDeclaration("let", [t.variableDeclarator(id())]));
+    out.push(t.ifStatement(n.test, t.blockStatement([assign(n.consequent)]), t.blockStatement([assign(n.alternate)])));
+  } else {                                                          // LogicalExpression
+    out.push(t.variableDeclaration("let", [t.variableDeclarator(id(), n.left)]));
+    const cond = n.operator === "&&" ? id() : n.operator === "||" ? t.unaryExpression("!", id()) : t.binaryExpression("==", id(), t.nullLiteral());
+    out.push(t.ifStatement(cond, t.blockStatement([assign(n.right)])));
+  }
+  path.getStatementParent().insertBefore(out);
+  path.replaceWith(id());
+}
 function normalize(fnPath) {
   let counter = 0;
+  const fresh = () => "__t" + (counter++);
   for (let guard = 0; guard < 100000; guard++) {
     let acted = false;
     fnPath.traverse({ WhileStatement(p) {                         // while(E) where E suspends -> while(true){ if(!(E)) break; body }
@@ -145,14 +163,37 @@ function normalize(fnPath) {
       acted = true; p.stop();
     } });
     if (acted) continue;
-    fnPath.traverse({ enter(p) {                                   // hoist one innermost, non-head-normal suspension
+    fnPath.traverse({ ForStatement(p) {                           // for(init;test;update): move a suspending test into the body; hoist a suspending init
+      if (acted) return;
+      const node = p.node;
+      if (node.update && hasSuspInside(node.update, false)) throw new Error("suspension in a for-update is not supported (do it inside the body)");
+      if (node.test && hasSuspInside(node.test, false)) {
+        const body = t.isBlockStatement(node.body) ? node.body.body : [node.body];
+        p.replaceWith(t.forStatement(node.init, null, node.update, t.blockStatement([t.ifStatement(t.unaryExpression("!", node.test), t.blockStatement([t.breakStatement()])), ...body])));
+        acted = true; p.stop(); return;
+      }
+      if (node.init && hasSuspInside(node.init, false)) {          // init runs once -> a plain statement before the loop
+        p.insertBefore(t.isVariableDeclaration(node.init) ? node.init : t.expressionStatement(node.init));
+        node.init = null; acted = true; p.stop();
+      }
+    } });
+    if (acted) continue;
+    fnPath.traverse({ enter(p) {                                   // desugar an OUTERMOST && / || / ?? / ?: that contains a suspension
+      if (acted) return;
+      const n = p.node;
+      if (!(t.isConditionalExpression(n) || t.isLogicalExpression(n)) || !hasSuspInside(n, false)) return;
+      desugarCondLog(p, fresh());
+      acted = true; p.stop();
+    } });
+    if (acted) continue;
+    fnPath.traverse({ enter(p) {                                   // hoist one innermost, non-head-normal suspension into a temp
       if (acted) return;
       const n = p.node;
       if (!isSuspExpr(n) || hasSuspInside(n, true) || isHeadNormal(p)) return;
       const stmt = p.getStatementParent();
-      if (stmt.isWhileStatement() || stmt.isForStatement() || stmt.isDoWhileStatement() || stmt.isForOfStatement() || stmt.isForInStatement()) throw new Error("suspension in a loop header is not supported (use while(true) + an explicit break, or assign it inside the body)");
+      if (stmt.isForStatement() || stmt.isDoWhileStatement() || stmt.isForOfStatement() || stmt.isForInStatement()) throw new Error("suspension in this loop header is not supported (assign it inside the body)");
       assertSafeContext(p, stmt);
-      const name = "__t" + (counter++);
+      const name = fresh();
       stmt.insertBefore(t.variableDeclaration("const", [t.variableDeclarator(t.identifier(name), n)]));
       p.replaceWith(t.identifier(name));
       acted = true; p.stop();
@@ -164,8 +205,11 @@ const blockStmts = (n) => (t.isBlockStatement(n) ? n.body : [n]);
 const withNext = (ctx, next) => ({ ...ctx, next });
 function compileStmts(stmts, ctx) { let cont = ctx.next; for (let i = stmts.length - 1; i >= 0; i--) cont = compileStmt(stmts[i], withNext(ctx, cont)); return cont; }
 
+// Register a loop/switch label so `break label` / `continue label` can find their targets.
+const regLabel = (ctx, brk, brkDepth, cont, contDepth) => (ctx.label ? { ...ctx.labels, [ctx.label]: { brk, brkDepth, cont, contDepth } } : ctx.labels);
+
 function compileStmt(s, ctx) {
-  const { next, brk, cont, tryDepth, loopDepth } = ctx;
+  const { next, tryDepth } = ctx;
 
   if (isSusp(s)) {                                                 // const x = api.f() -> suspend on a resource
     const { assign, op } = suspInfo(s);
@@ -178,52 +222,72 @@ function compileStmt(s, ctx) {
     const b = nb(); blocks[b].term = { kind: "call", fn: cs.fn, args: cs.args, resume: r }; return b;
   }
   if (t.isBlockStatement(s)) return compileStmts(s.body, ctx);
+  if (t.isEmptyStatement(s)) { const b = nb(); blocks[b].term = { kind: "jump", to: next }; return b; }
+
+  if (t.isLabeledStatement(s)) {                                   // label: loop/switch -> pass the label down for it to register
+    if (t.isWhileStatement(s.body) || t.isForStatement(s.body) || t.isDoWhileStatement(s.body) || t.isSwitchStatement(s.body)) return compileStmt(s.body, { ...ctx, label: s.label.name });
+    return compileStmt(s.body, { ...ctx, labels: { ...ctx.labels, [s.label.name]: { brk: next, brkDepth: tryDepth, cont: null, contDepth: tryDepth } } });
+  }
 
   if (t.isWhileStatement(s)) {
-    if (containsSuspCall(s.test)) throw new Error("suspendable call in a loop test is not supported (assign it first)");
-    const loop = { ...ctx, loopDepth: tryDepth };
-    if (t.isBooleanLiteral(s.test, { value: true })) {            // while(true): plain head, no test
-      const head = nb(); const body = compileStmts(blockStmts(s.body), { ...loop, next: head, brk: next, cont: head });
-      blocks[head].term = { kind: "jump", to: body }; return head;
-    }
     const head = nb();
-    const body = compileStmts(blockStmts(s.body), { ...loop, next: head, brk: next, cont: head });
-    blocks[head].term = { kind: "branch", cond: gen(s.test), then: body, else: next }; return head;
+    const labels = regLabel(ctx, next, tryDepth, head, tryDepth);
+    const body = compileStmts(blockStmts(s.body), { ...ctx, next: head, brk: next, brkDepth: tryDepth, cont: head, contDepth: tryDepth, labels, label: undefined });
+    blocks[head].term = t.isBooleanLiteral(s.test, { value: true }) ? { kind: "jump", to: body } : { kind: "branch", cond: gen(s.test), then: body, else: next };
+    return head;
   }
   if (t.isForStatement(s)) {
-    if ((s.test && containsSuspCall(s.test)) || (s.update && containsSuspCall(s.update)) || (s.init && containsSuspCall(s.init))) throw new Error("suspendable call in a for-header is not supported (assign it first)");
-    const loop = { ...ctx, loopDepth: tryDepth };
     const init = nb();
     if (s.init) { if (t.isVariableDeclaration(s.init)) for (const d of s.init.declarations) { if (d.init) blocks[init].lines.push(`F.${d.id.name} = ${gen(d.init)};`); } else blocks[init].lines.push(`${gen(s.init)};`); }
-    const head = nb();
-    const update = nb(); if (s.update) blocks[update].lines.push(`${gen(s.update)};`);
-    const body = compileStmts(blockStmts(s.body), { ...loop, next: update, brk: next, cont: update }); // continue -> update
+    const head = nb(), update = nb(); if (s.update) blocks[update].lines.push(`${gen(s.update)};`);
+    const labels = regLabel(ctx, next, tryDepth, update, tryDepth);
+    const body = compileStmts(blockStmts(s.body), { ...ctx, next: update, brk: next, brkDepth: tryDepth, cont: update, contDepth: tryDepth, labels, label: undefined }); // continue -> update
     blocks[init].term = { kind: "jump", to: head };
     blocks[head].term = s.test ? { kind: "branch", cond: gen(s.test), then: body, else: next } : { kind: "jump", to: body };
     blocks[update].term = { kind: "jump", to: head };
     return init;
   }
+  if (t.isDoWhileStatement(s)) {
+    if (hasSuspInside(s.test, false)) throw new Error("suspension in a do-while test is not supported");
+    const head = nb(), test = nb();
+    const labels = regLabel(ctx, next, tryDepth, test, tryDepth);
+    const body = compileStmts(blockStmts(s.body), { ...ctx, next: test, brk: next, brkDepth: tryDepth, cont: test, contDepth: tryDepth, labels, label: undefined });
+    blocks[head].term = { kind: "jump", to: body };
+    blocks[test].term = { kind: "branch", cond: gen(s.test), then: head, else: next };  // body runs first, then test loops back
+    return head;
+  }
+  if (t.isSwitchStatement(s)) {
+    if (s.cases.some((c) => c.test && containsSuspCall(c.test))) throw new Error("suspendable call in a case label is not supported");
+    const disc = gen(s.discriminant), after = next;               // discriminant already hoisted by normalize if it suspended
+    const labels = regLabel(ctx, after, tryDepth, ctx.cont, ctx.contDepth);  // break -> end of switch; continue -> the enclosing loop
+    const swCtx = { ...ctx, brk: after, brkDepth: tryDepth, labels, label: undefined };
+    const entries = new Array(s.cases.length);
+    let fall = after;                                             // cases fall through to the next
+    for (let i = s.cases.length - 1; i >= 0; i--) { entries[i] = compileStmts(s.cases[i].consequent, { ...swCtx, next: fall }); fall = entries[i]; }
+    const defIdx = s.cases.findIndex((c) => c.test === null);
+    let dispatch = defIdx >= 0 ? entries[defIdx] : after;         // no match -> default (or past the switch)
+    for (let i = s.cases.length - 1; i >= 0; i--) { if (s.cases[i].test === null) continue; const b = nb(); blocks[b].term = { kind: "branch", cond: `${disc} === ${gen(s.cases[i].test)}`, then: entries[i], else: dispatch }; dispatch = b; }
+    return dispatch;
+  }
   if (t.isIfStatement(s)) {
-    if (containsSuspCall(s.test)) throw new Error("suspendable call in an if-test is not supported (assign it first)");
     const consequent = compileStmts(blockStmts(s.consequent), ctx);
     const alt = s.alternate ? compileStmts(blockStmts(s.alternate), ctx) : next;
     const b = nb(); blocks[b].term = { kind: "branch", cond: gen(s.test), then: consequent, else: alt }; return b;
   }
   if (t.isBreakStatement(s)) {
-    if (tryDepth > loopDepth) throw new Error("break that exits a try is not yet supported");
-    const b = nb(); blocks[b].term = { kind: "jump", to: brk }; return b;
+    const tg = s.label ? ctx.labels[s.label.name] : { brk: ctx.brk, brkDepth: ctx.brkDepth };
+    if (!tg || tg.brk == null) throw new Error("break has no target");
+    return abruptExit(ctx, tg.brkDepth, { kind: "jump", to: tg.brk });   // pop handlers of crossed trys
   }
   if (t.isContinueStatement(s)) {
-    if (tryDepth > loopDepth) throw new Error("continue that exits a try is not yet supported");
-    const b = nb(); blocks[b].term = { kind: "jump", to: cont }; return b;
+    const tg = s.label ? ctx.labels[s.label.name] : { cont: ctx.cont, contDepth: ctx.contDepth };
+    if (!tg || tg.cont == null) throw new Error("continue has no target");
+    return abruptExit(ctx, tg.contDepth, { kind: "jump", to: tg.cont });
   }
   if (t.isReturnStatement(s)) {
-    if (tryDepth > 0) throw new Error("return inside a try is not yet supported");
-    if (s.argument && containsSuspCall(s.argument)) throw new Error("suspendable call in a return value is not supported (assign it first)");
-    const b = nb(); blocks[b].term = { kind: "ret", value: s.argument ? gen(s.argument) : "undefined" }; return b;
+    return abruptExit(ctx, 0, { kind: "ret", value: s.argument ? gen(s.argument) : "undefined" });
   }
   if (t.isThrowStatement(s)) { const b = nb(); blocks[b].term = { kind: "throw", value: gen(s.argument) }; return b; }
-
   if (t.isTryStatement(s)) return compileTry(s, ctx);
 
   if (containsSuspCall(s)) throw new Error("a suspendable call must be a statement: `const x = f(...)` or `f(...);`");
@@ -236,9 +300,11 @@ function compileStmt(s, ctx) {
 function compileTry(s, ctx) {
   const { next, tryDepth } = ctx;
   if (s.handler && s.finalizer) return compileTry(t.tryStatement(t.blockStatement([t.tryStatement(s.block, s.handler, null)]), null, s.finalizer), ctx);
-  const inner = { ...ctx, tryDepth: tryDepth + 1 };
+  // tryStack records, per enclosing try, whether it has a finally — so an abrupt exit
+  // (return/break/continue) knows which handlers to pop and won't silently skip a finally.
 
   if (s.handler) {                                                 // pure try/catch
+    const inner = { ...ctx, tryDepth: tryDepth + 1, tryStack: [...ctx.tryStack, { hasFinally: false }] };
     const entry = nb(), catchB = nb();
     const bodyEnd = nb(); blocks[bodyEnd].lines.push("F.__h.pop();"); blocks[bodyEnd].term = { kind: "jump", to: next };
     const body = compileStmts(blockStmts(s.block), { ...inner, next: bodyEnd });
@@ -246,11 +312,12 @@ function compileTry(s, ctx) {
     const param = s.handler.param ? s.handler.param.name : null;
     if (param) blocks[catchB].lines.push(`F.${param} = F.__err;`);
     const catchEnd = nb(); blocks[catchEnd].lines.push("F.__h.pop();"); blocks[catchEnd].term = { kind: "jump", to: next };
-    blocks[catchB].term = { kind: "jump", to: compileStmts(blockStmts(s.handler.body), { ...ctx, next: catchEnd }) };
+    blocks[catchB].term = { kind: "jump", to: compileStmts(blockStmts(s.handler.body), { ...inner, next: catchEnd }) }; // handler still live during catch
     return entry;
   }
 
   // pure try/finally
+  const inner = { ...ctx, tryDepth: tryDepth + 1, tryStack: [...ctx.tryStack, { hasFinally: true }] };
   const entry = nb(), finB = nb();
   const bodyEnd = nb();
   blocks[bodyEnd].lines.push("F.__h[F.__h.length - 1].state = 2;", "F.__c = null;");
@@ -258,16 +325,27 @@ function compileTry(s, ctx) {
   const body = compileStmts(blockStmts(s.block), { ...inner, next: bodyEnd });
   blocks[entry].term = { kind: "pushTry", catch: null, fin: finB, to: body };
   const finEnd = nb();
-  blocks[finB].term = { kind: "jump", to: compileStmts(blockStmts(s.finalizer), { ...ctx, next: finEnd }) };
+  blocks[finB].term = { kind: "jump", to: compileStmts(blockStmts(s.finalizer), { ...ctx, next: finEnd, tryStack: [...ctx.tryStack, { hasFinally: false }] }) };
   blocks[finEnd].term = { kind: "finish", after: next };
   return entry;
+}
+
+// An abrupt exit (return/break/continue) that crosses enclosing trys must pop each one's
+// handler. Crossing a try that has a finally is the deferred hard case (completion records).
+function abruptExit(ctx, targetDepth, term) {
+  const crossed = ctx.tryStack.slice(targetDepth);
+  if (crossed.some((x) => x.hasFinally)) throw new Error("return/break/continue across a finally is not yet supported");
+  const b = nb();
+  for (let i = 0; i < crossed.length; i++) blocks[b].lines.push("F.__h.pop();");
+  blocks[b].term = term;
+  return b;
 }
 
 function compileFn(node) {
   const fnName = node.id.name;
   blocks = [];
   const END = nb(); blocks[END].term = { kind: "ret", value: '"(end)"' };
-  const entry = compileStmts(node.body.body, { next: END, brk: END, cont: END, tryDepth: 0, loopDepth: 0 });
+  const entry = compileStmts(node.body.body, { next: END, brk: END, brkDepth: 0, cont: END, contDepth: 0, tryDepth: 0, tryStack: [], labels: {}, label: undefined });
   const boot = nb(); blocks[boot].term = { kind: "jump", to: entry };  // pc 0 -> entry
   const ids = [boot, ...Array.from(blocks.keys()).filter((i) => i !== boot)];
   const remap = new Map(ids.map((id, i) => [id, i]));
