@@ -12,7 +12,7 @@
 // exactly as serializeContinuation flattens locals/stack/env. Coherence is the prior
 // single-writer model (fetch.mjs): the owner is master, bumps a version on mutation, and
 // readers hold a version-invalidated snapshot cache.
-import { encodeGraph, decodeGraph } from "../../src/runtime/heap.mjs";
+import { encodeGraph, decodeGraph, isHandle } from "../../src/runtime/heap.mjs";
 import { Heap } from "../../src/runtime/fetch.mjs";
 
 export { Channel, makeHost } from "../../src/runtime/fetch.mjs";
@@ -90,4 +90,46 @@ export function commitWrite(channel, handle, mutator, { tries = 5 } = {}) {
     if (res.ok) return { ok: true, version: res.version, tries: attempt, copy };
   }
   return { ok: false, tries };
+}
+
+// A coherence host supporting BOTH reads and writes — the symmetric partner of fetch.mjs's
+// read-only makeHost, used by the compiler's --auto-deref/--auto-writeback machine. deref()
+// returns a version-invalidated snapshot (the master in place on the owner; a cached/fetched
+// copy elsewhere); the fetched copy is tagged NON-enumerably (a Symbol, so it never travels
+// or serializes) with the handle it came from and the version it was read at. writeBack()
+// reads that tag and proposes the mutated snapshot back to the owner under that version (an
+// optimistic CAS). On the owning tier the master is edited in place and writeBack just bumps
+// the version so other tiers' caches invalidate.
+const PROV = Symbol("stackmix.provenance");
+export function makeCoherentHost(localTier, channel) {
+  const cache = new Map();   // id -> { version, copy }
+  const stats = { fetches: 0, hits: 0, localUses: 0, writeBacks: 0, conflicts: 0 };
+  const tag = (obj, owner, id, version) => {
+    if (obj && typeof obj === "object") Object.defineProperty(obj, PROV, { value: { owner, id, version }, enumerable: false, writable: true, configurable: true });
+    return obj;
+  };
+  return {
+    stats,
+    deref(h) {
+      if (!isHandle(h)) return h;
+      if (h.owner === localTier.id) { stats.localUses++; return tag(localTier.heap.get(h.id), h.owner, h.id, localTier.heap.version(h.id)); } // master in place
+      const current = channel.currentVersion(h);
+      const c = cache.get(h.id);
+      if (c && c.version === current) { stats.hits++; return c.copy; }              // coherent cache hit
+      const { copy, version } = channel.fetch(h);
+      tag(copy, h.owner, h.id, version);
+      cache.set(h.id, { version, copy });
+      stats.fetches++;
+      return copy;
+    },
+    writeBack(obj) {
+      const prov = obj && obj[PROV];
+      if (!prov) return obj;                                                        // untracked value — nothing to propagate
+      const ownerHeap = channel.tiers[prov.owner].heap;
+      const res = writeBack(ownerHeap, prov.id, prov.version, obj);                 // optimistic CAS under the version we read
+      if (res.ok) { prov.version = res.version; cache.set(prov.id, { version: res.version, copy: obj }); stats.writeBacks++; }
+      else { stats.conflicts++; }                                                   // a real reader would refetch+retry (commitWrite); no contention here
+      return obj;
+    },
+  };
 }

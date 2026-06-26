@@ -73,7 +73,7 @@ function allowlist(ast) {
 // ctx threads the targets break/continue/return jump to (brk/cont per loop, labels for
 // labeled loops) plus tryStack — the enclosing trys — so an abrupt exit pops the right
 // handlers and refuses to silently skip a finally.
-let blocks, suspSet, AUTO_DEREF = false;
+let blocks, suspSet, AUTO_DEREF = false, AUTO_WRITEBACK = false;
 const nb = () => (blocks.push({ lines: [], term: null }), blocks.length - 1);
 const isSusp = (s) =>
   (t.isVariableDeclaration(s) && s.declarations.length === 1 && t.isYieldExpression(s.declarations[0].init)) ||
@@ -404,13 +404,20 @@ function compileFn(node) {
 // may arrive on another tier as a §5 handle. Before every READ of such a local, guard it
 // with `if (isHandle(L)) L = deref(L)` so the first touch fetches it (and materializes it
 // in place, so later touches are cheap checks). The developer writes ordinary L.x / L[i].
-function insertDerefGuards(p) {
+// Locals bound from a data resource (const L = api.f()) — these may arrive on another tier
+// as a §5 handle, so reads of them get a deref guard and writes through them get a write-back.
+function remotableLocals(p) {
   const remotable = new Set();
   p.traverse({ VariableDeclarator(v) {                            // const L = yield R(tier, "api.*")
     const init = v.node.init;
     if (t.isYieldExpression(init) && t.isCallExpression(init.argument) && t.isIdentifier(init.argument.callee, { name: "R" })
       && t.isStringLiteral(init.argument.arguments[1]) && init.argument.arguments[1].value.startsWith("api.") && t.isIdentifier(v.node.id)) remotable.add(v.node.id.name);
   } });
+  return remotable;
+}
+
+function insertDerefGuards(p) {
+  const remotable = remotableLocals(p);
   if (!remotable.size) return;
   const guards = new Map();                                       // statement node -> Set of locals to guard before it
   p.traverse({ Identifier(ip) {
@@ -429,8 +436,45 @@ function insertDerefGuards(p) {
   }
 }
 
+// --auto-writeback: transparent write-back, the symmetric partner of --auto-deref. A member
+// MUTATION through a remotable local (`L.x = …`, `L[i].y = …`, `L[i]++`) edits the snapshot
+// fetched on this tier; that edit must propagate to the owning master. After each such
+// statement emit `yield R("@writeback","writeback", L)`, which the runtime resolves with an
+// optimistic version-checked CAS (heap.mjs writeBack). Whole-identifier rebinds (`L = …`,
+// incl. the deref guard's own `L = deref(L)`) are NOT writes through the object, so they're
+// left alone. The developer writes ordinary `L[i].x = v`.
+function rootOfMember(node) {                                     // the base identifier a member chain hangs off
+  let o = node;
+  while (t.isMemberExpression(o)) o = o.object;
+  return t.isIdentifier(o) ? o.name : null;
+}
+function insertWriteBacks(p) {
+  const remotable = remotableLocals(p);
+  if (!remotable.size) return;
+  const backs = new Map();                                        // statement node -> { path, locals } to write back after it
+  const note = (target, ip) => {                                  // target is the assignment/update LHS
+    if (!t.isMemberExpression(target)) return;                    // only member mutations propagate (a rebind doesn't touch the object)
+    const root = rootOfMember(target);
+    if (!root || !remotable.has(root)) return;
+    const stmt = ip.getStatementParent();
+    if (!stmt) return;
+    if (!backs.has(stmt.node)) backs.set(stmt.node, { path: stmt, locals: new Set() });
+    backs.get(stmt.node).locals.add(root);
+  };
+  p.traverse({
+    AssignmentExpression(ap) { note(ap.node.left, ap); },         // L[i].x = v   (any operator: =, +=, …)
+    UpdateExpression(up) { note(up.node.argument, up); },         // L[i].x++ / --L.x
+  });
+  for (const { path, locals } of backs.values()) {
+    const wb = [...locals].map((L) => t.expressionStatement(
+      t.yieldExpression(t.callExpression(t.identifier("R"), [t.stringLiteral("@writeback"), t.stringLiteral("writeback"), t.identifier(L)]))));
+    path.insertAfter(wb);
+  }
+}
+
 function lower(p) {
   if (AUTO_DEREF) insertDerefGuards(p);                           // before normalize: the guard's `L = deref(L)` is a suspension to hoist
+  if (AUTO_WRITEBACK) insertWriteBacks(p);                        // after the guards (so the write-back yield isn't itself deref-guarded)
   normalize(p);                                                   // hoist suspensions out of expression positions first
   const node = p.node;
   const params = node.params.map((x) => x.name);
@@ -536,8 +580,9 @@ export const start = (fn, args = []) => run([{ fn, pc: 0, args }]);
 const args = process.argv.slice(2);
 const flags = args.filter((a) => a.startsWith("--"));
 const [inPath, outPath] = args.filter((a) => !a.startsWith("--"));
-if (!inPath || !outPath) { console.error("usage: node transform.cjs <in.js> <out.gen.mjs> [--bare] [--auto-deref]"); process.exit(2); }
-AUTO_DEREF = flags.includes("--auto-deref");
+if (!inPath || !outPath) { console.error("usage: node transform.cjs <in.js> <out.gen.mjs> [--bare] [--auto-deref] [--auto-writeback]"); process.exit(2); }
+AUTO_WRITEBACK = flags.includes("--auto-writeback");
+AUTO_DEREF = flags.includes("--auto-deref") || AUTO_WRITEBACK;   // a write through a handle must first materialize it (deref)
 const preamble = flags.includes("--bare") ? "" : 'import { h } from "./h.mjs";\nimport { Dashboard } from "./components.mjs";\nimport { render } from "./render.mjs";';
 fs.writeFileSync(outPath, "// GENERATED by transform.cjs from " + inPath + " — do not edit by hand.\n" + compile(fs.readFileSync(inPath, "utf8"), preamble));
 console.log("wrote " + outPath);

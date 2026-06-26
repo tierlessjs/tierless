@@ -67,6 +67,7 @@ const cases = [
   { file: "experiments/react-tiers/heap-live.mjs",     needs: ["the dataset stayed on the server, crossing only when the browser derefed it"] },
   { file: "experiments/react-tiers/heap-auto.mjs",     needs: ["transparent deref: ordinary member access on a handle auto-fetches"] },
   { file: "experiments/react-tiers/heap-writeback.mjs", needs: ["optimistic CAS, conflicts detected and retried, no lost updates"] },
+  { file: "experiments/react-tiers/heap-write.mjs",    needs: ["transparent write-back: an ordinary member assignment propagated to the owning master"] },
   { file: "experiments/react-tiers/policy-live.mjs",    needs: ["informed FETCH", "priced migrate vs fetch from real bytes and steered the socket"] },
 ];
 
