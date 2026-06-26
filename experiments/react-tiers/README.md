@@ -66,18 +66,20 @@ hooks. `api.*` and `commit()` look like ordinary calls.
    **serializable state machine** — a `while(true) switch(F.pc)` whose locals live on an
    explicit frame object `F`. Output: `app/bundle.gen.mjs` (committed, so the demo runs
    without the Babel toolchain). This is the V8-native analog of asyncify: the
-   continuation is plain data, no native stack. Control flow covered: sequence, `if/else`,
-   `while`/`for`/`do-while`, `break`/`continue` (incl. **labeled**), `return`, `throw`,
-   `switch`, `&&`/`||`/`??`/`?:`, `try/catch/finally`, an early `return`/`break`/`continue`
-   **out of** a `try/catch`, and **calls between functions** — **including a resource that
-   fails on another tier being caught by a `catch` up the call stack in the migrated
-   code**, because the handler stack (`F.__h`) rides along in the serialized continuation.
-   A suspension may appear in essentially any **expression position** (`return f(x)`,
-   `out = api.get()`, `a + f(x)`, `g(api.h())`, `if (api.check())`, `while (api.more())`,
-   `cond ? api.a() : api.b()`): an ANF pass hoists it into a frame temp (lowering `?:`/`&&`/
-   `||` to if-statements so only the taken branch runs), in evaluation order, before
-   lowering. (`control-flow.mjs` proves each of these — 23 cases — survives a wire
-   round-trip at every suspend.)
+   continuation is plain data, no native stack. **All ordinary control flow is covered**:
+   sequence, `if/else`, `while`/`for`/`do-while`, `break`/`continue` (incl. **labeled**),
+   `return`, `throw`, `switch`, `&&`/`||`/`??`/`?:`, `try/catch/finally`, an early
+   `return`/`break`/`continue` **out of a `try` — running every crossed `finally` in order
+   on the way** (completion records: `F.__c` + `__unwindStep`), and **calls between
+   functions** — **including a resource that fails on another tier being caught by a
+   `catch` up the call stack in the migrated code**, because the handler stack (`F.__h`)
+   rides along in the serialized continuation. A suspension may appear in **any** position:
+   expression (`return f(x)`, `out = api.get()`, `a + f(x)`, `g(api.h())`), `if`/`while`/
+   `switch` tests, `for`-init/test/update and `do-while` tests (loop headers desugar so the
+   suspension moves into the body), and conditional positions (`cond ? api.a() : api.b()`,
+   `x || api.y()` — lowered to if-statements so only the taken branch runs). An ANF pass
+   hoists each into a frame temp in evaluation order before lowering. (`control-flow.mjs`
+   proves each — 26 cases — survives a wire round-trip at every suspend.)
 
    **Suspendability is inferred.** A function is compiled into a state machine only if it
    (transitively) touches a tier-pinned resource; pure single-tier helpers (here `render`,
@@ -155,16 +157,13 @@ node experiments/react-tiers/transform.cjs experiments/react-tiers/cf-fixtures.s
 
 ## Caveats / not-yet
 
-- `transform.cjs` covers essentially all ordinary control flow (see the list above):
-  loops, `switch`, labeled break/continue, `&&`/`||`/`??`/`?:`, `try/catch/finally`,
-  calls between suspendable functions (sub-frames), and suspensions in any expression
-  position — all across suspends and serializable. Remaining gaps (the compiler throws a
-  clear error rather than miscompile): a `return`/`break`/`continue` that exits a `try`
-  **with a `finally`** (needs completion records — the one hard CPS case; `@babel/plugin-
-  transform-regenerator` is the reference, onto this same explicit-frame model), a
-  suspension in a `for`-update / `do-while`-test / under optional chaining (`?.`), and the
-  source being a generator/`async` function (we transform plain functions). None of these
-  are load-bearing for React-style components.
+- `transform.cjs` covers all ordinary control flow with suspensions in any position (see
+  the list above), all serializable and migrating across tiers. The two remaining limits
+  are deliberate, not control-flow gaps: (1) a suspension in the *conditional* part of an
+  optional chain (`obj?.m(api.x())` / `a?.[api.x()]`) throws a clear error — lift it to a
+  statement (the suspendable *base*, `api.get()?.x`, is fine); (2) the source is a plain
+  function — `async`/generator source is unnecessary here because tier calls suspend
+  implicitly, so it's intentionally unsupported rather than a missing feature.
 - Render runs wholesale on the server and the browser only commits. Splitting render
   itself across tiers (per-component continuation identity) is the larger follow-on.
 - Cross-tier **shared mutable state** is left where the design notes put it: single JS

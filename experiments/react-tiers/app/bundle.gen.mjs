@@ -88,6 +88,15 @@ export function __dispatch(F, err) {
   }
   return null;
 }
+// Drive a pending return/break/continue (F.__c) through the finallys it must still run:
+// pop the handlers of crossed try/catch regions, then return the next finally pc (or null
+// when none remain and the completion should execute).
+export function __unwindStep(F) {
+  const c = F.__c; if (!c || !c.steps) return null;
+  while (c.steps.length && c.steps[0].pop !== undefined) { for (let i = 0; i < c.steps[0].pop; i++) F.__h.pop(); c.steps.shift(); }
+  if (c.steps.length) return c.steps.shift().fin;
+  return null;
+}
 // Unwind an error across FRAMES: try the top frame's handlers, else pop it and try the
 // caller. A resource that fails in a callee is thus caught by a try/catch in a caller.
 export function __unwind(stack, err) {

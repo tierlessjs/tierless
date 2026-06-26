@@ -212,3 +212,28 @@ function breakOutOfTry() {
   }
   return sum;                              // 1 + 2 = 3
 }
+function returnThroughFinally() {
+  let log = 0;
+  try {
+    const v = api.get(7);
+    return v;                              // the return runs the finally first, then returns v
+  } finally {
+    log = api.get(1);                      // finally runs (and may itself suspend) — does not change the return
+  }
+}
+function forUpdateSusp() {
+  let sum = 0;
+  for (let i = 1; i <= 3; i = api.inc(i)) {  // suspending for-update (runs each pass, continue still hits it)
+    sum = sum + i;
+  }
+  return sum;                              // 1 + 2 + 3 = 6
+}
+function doWhileTestSusp() {
+  let i = 0;
+  let sum = 0;
+  do {
+    sum = sum + i;
+    i = i + 1;
+  } while (api.lt3(i));                     // suspending do-while test (re-evaluated each pass)
+  return sum;                              // 0 + 1 + 2 = 3
+}

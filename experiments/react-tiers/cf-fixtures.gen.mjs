@@ -136,7 +136,7 @@ F.log = F.log + F.v;
         F.log = F.log + "a";
         F.pc = 8; break;
       case 10:
-        { const __c = F.__c; F.__c = null; F.__h.pop(); if (__c && __c.type === "throw") { const __t = __dispatch(F, __c.arg); if (__t == null) return { op: "throw", value: __c.arg }; F.pc = __t; break; } F.pc = 2; break; }
+        { F.__h.pop(); const __c = F.__c; if (!__c) { F.pc = 2; break; } if (__c.type === "throw") { F.__c = null; const __t = __dispatch(F, __c.arg); if (__t == null) return { op: "throw", value: __c.arg }; F.pc = __t; break; } const __p = __unwindStep(F); if (__p != null) { F.pc = __p; break; } F.__c = null; if (__c.type === "return") return { op: "return", value: __c.value }; F.pc = __c.target; break; }
       case 11:
         F.log = F.log + "F"; // runs on the normal path
         F.pc = 10; break;
@@ -188,7 +188,7 @@ F.log = F.log + F.v;
         F.log = F.log + "C"; // catch runs
         F.pc = 13; break;
       case 15:
-        { const __c = F.__c; F.__c = null; F.__h.pop(); if (__c && __c.type === "throw") { const __t = __dispatch(F, __c.arg); if (__t == null) return { op: "throw", value: __c.arg }; F.pc = __t; break; } F.pc = 2; break; }
+        { F.__h.pop(); const __c = F.__c; if (!__c) { F.pc = 2; break; } if (__c.type === "throw") { F.__c = null; const __t = __dispatch(F, __c.arg); if (__t == null) return { op: "throw", value: __c.arg }; F.pc = __t; break; } const __p = __unwindStep(F); if (__p != null) { F.pc = __p; break; } F.__c = null; if (__c.type === "return") return { op: "return", value: __c.value }; F.pc = __c.target; break; }
       case 16:
         F.log = F.log + "F"; // then finally runs
         F.pc = 15; break;
@@ -807,6 +807,131 @@ F.sum = F.sum + F.v;
         F.sum = 0;
         F.pc = 3; break;
     }
+  },
+  returnThroughFinally(F) {
+    while (true) switch (F.pc) {
+      case 0:
+        F.pc = 12; break;
+      case 1:
+        return { op: "return", value: "(end)" };
+      case 2:
+        (F.__h || (F.__h = [])).push({ catch: null, fin: 3, state: 0 }); F.pc = 7; break;
+      case 3:
+        F.pc = 11; break;
+      case 4:
+        F.__h[F.__h.length - 1].state = 2;
+        F.__c = null;
+        F.pc = 3; break;
+      case 5:
+        F.__c = { type: "return", value: F.v, steps: [{ fin: 3 }] }; { const __p = __unwindStep(F); if (__p != null) { F.pc = __p; break; } const __c = F.__c; F.__c = null; return { op: "return", value: __c.value }; }
+      case 6:
+        F.v = F.ret;
+        F.pc = 5; break;
+      case 7:
+        F.pc = 6; return { op: "resource", tier: "server", name: "api.get", args: [7] };
+      case 8:
+        { F.__h.pop(); const __c = F.__c; if (!__c) { F.pc = 1; break; } if (__c.type === "throw") { F.__c = null; const __t = __dispatch(F, __c.arg); if (__t == null) return { op: "throw", value: __c.arg }; F.pc = __t; break; } const __p = __unwindStep(F); if (__p != null) { F.pc = __p; break; } F.__c = null; if (__c.type === "return") return { op: "return", value: __c.value }; F.pc = __c.target; break; }
+      case 9:
+        F.log = F.__t0; // finally runs (and may itself suspend) — does not change the return
+        F.pc = 8; break;
+      case 10:
+        F.__t0 = F.ret;
+        F.pc = 9; break;
+      case 11:
+        F.pc = 10; return { op: "resource", tier: "server", name: "api.get", args: [1] };
+      case 12:
+        F.log = 0;
+        F.pc = 2; break;
+    }
+  },
+  forUpdateSusp(F) {
+    while (true) switch (F.pc) {
+      case 0:
+        F.pc = 14; break;
+      case 1:
+        return { op: "return", value: "(end)" };
+      case 2:
+        return { op: "return", value: F.sum };
+      case 3:
+        F.pc = 11; break;
+      case 4:
+        // suspending for-update (runs each pass, continue still hits it)
+F.sum = F.sum + F.i;
+        F.pc = 3; break;
+      case 5:
+        F.pc = 2; break;
+      case 6:
+        if (!(F.i <= 3)) { F.pc = 5; } else { F.pc = 4; } break;
+      case 7:
+        F.__t0 = false;
+        F.pc = 6; break;
+      case 8:
+        F.i = F.__t1;
+        F.pc = 6; break;
+      case 9:
+        if (F.__t0) { F.pc = 7; } else { F.pc = 8; } break;
+      case 10:
+        F.__t1 = F.ret;
+        F.pc = 9; break;
+      case 11:
+        F.pc = 10; return { op: "resource", tier: "server", name: "api.inc", args: [F.i] };
+      case 12:
+        F.__t0 = true;
+        F.pc = 3; break;
+      case 13:
+        F.i = 1;
+        F.pc = 12; break;
+      case 14:
+        F.sum = 0;
+        F.pc = 13; break;
+    }
+  },
+  doWhileTestSusp(F) {
+    while (true) switch (F.pc) {
+      case 0:
+        F.pc = 16; break;
+      case 1:
+        return { op: "return", value: "(end)" };
+      case 2:
+        return { op: "return", value: F.sum };
+      case 3:
+        F.pc = 13; break;
+      case 4:
+        F.i = F.i + 1;
+        F.pc = 3; break;
+      case 5:
+        F.sum = F.sum + F.i;
+        F.pc = 4; break;
+      case 6:
+        F.__t0 = false;
+        F.pc = 5; break;
+      case 7:
+        F.pc = 2; break;
+      case 8:
+        if (!F.__t1) { F.pc = 7; } else { F.pc = 6; } break;
+      case 9:
+        F.__t1 = F.__t2;
+        F.pc = 8; break;
+      case 10:
+        F.__t2 = F.ret;
+        F.pc = 9; break;
+      case 11:
+        F.pc = 10; return { op: "resource", tier: "server", name: "api.lt3", args: [F.i] };
+      case 12:
+        if (!F.__t1) { F.pc = 11; } else { F.pc = 8; } break;
+      case 13:
+        F.__t1 = F.__t0;
+        F.pc = 12; break;
+      case 14:
+        F.__t0 = true;
+        F.pc = 3; break;
+      case 15:
+        F.sum = 0;
+        F.pc = 14; break;
+      case 16:
+        F.i = 0;
+        F.pc = 15; break;
+    }
   }
 };
 
@@ -821,6 +946,15 @@ export function __dispatch(F, err) {
     if (h.fin != null && h.state < 2) { h.state = 2; F.__c = { type: "throw", arg: err }; return h.fin; }
     hs.pop();
   }
+  return null;
+}
+// Drive a pending return/break/continue (F.__c) through the finallys it must still run:
+// pop the handlers of crossed try/catch regions, then return the next finally pc (or null
+// when none remain and the completion should execute).
+export function __unwindStep(F) {
+  const c = F.__c; if (!c || !c.steps) return null;
+  while (c.steps.length && c.steps[0].pop !== undefined) { for (let i = 0; i < c.steps[0].pop; i++) F.__h.pop(); c.steps.shift(); }
+  if (c.steps.length) return c.steps.shift().fin;
   return null;
 }
 // Unwind an error across FRAMES: try the top frame's handlers, else pop it and try the

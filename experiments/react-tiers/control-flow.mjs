@@ -8,7 +8,12 @@ import { PROGRAMS, __unwind } from "./cf-fixtures.gen.mjs";
 import { encodeGraph, decodeGraph } from "../../src/runtime/heap.mjs";
 
 const wire = (stack) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([stack]))))[0];
-const exec = (req) => { if (req.name === "api.fail") throw new Error("resource failed"); return req.args[0]; }; // dbl/get echo arg; fail throws
+const exec = (req) => {                       // dbl/get echo arg; inc adds 1; lt3 is i<3; fail throws
+  if (req.name === "api.fail") throw new Error("resource failed");
+  if (req.name === "api.inc") return req.args[0] + 1;
+  if (req.name === "api.lt3") return req.args[0] < 3 ? 1 : 0;
+  return req.args[0];
+};
 
 function runMigrating(fn) {
   let stack = [{ fn, pc: 0, args: [] }];
@@ -49,6 +54,9 @@ const cases = [
   ["suspending for-init", "forHeaderSusp", 6],
   ["early return out of a try/catch", "returnInTry", 5],
   ["break out of a try inside a loop", "breakOutOfTry", 3],
+  ["return through a finally (which itself suspends)", "returnThroughFinally", 7],
+  ["suspending for-update", "forUpdateSusp", 6],
+  ["suspending do-while test", "doWhileTestSusp", 3],
 ];
 
 let pass = 0;

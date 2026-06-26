@@ -131,7 +131,10 @@ function assertSafeContext(path, stmt) {                           // safety net
     const par = cur.parentPath;
     if (par.isLogicalExpression() && par.node.right === cur.node) throw new Error("suspension in the right side of && / || / ?? is not supported");
     if (par.isConditionalExpression() && (par.node.consequent === cur.node || par.node.alternate === cur.node)) throw new Error("suspension in a branch of ?: is not supported");
-    if (par.isOptionalMemberExpression() || par.isOptionalCallExpression()) throw new Error("suspension under optional chaining (?.) is not supported");
+    // optional chaining: the base (object/callee) is unconditional and may be hoisted; only the
+    // conditional part — a computed access ?.[susp] or optional-call args ?.(susp) — is rejected.
+    if (par.isOptionalMemberExpression() && par.node.property === cur.node) throw new Error("suspension in an optional computed access (?.[ ]) is not supported (lift it to a statement)");
+    if (par.isOptionalCallExpression() && par.node.arguments.indexOf(cur.node) >= 0) throw new Error("suspension in optional-call arguments (?.()) is not supported (lift it to a statement)");
     cur = par;
   }
 }
@@ -163,19 +166,37 @@ function normalize(fnPath) {
       acted = true; p.stop();
     } });
     if (acted) continue;
-    fnPath.traverse({ ForStatement(p) {                           // for(init;test;update): move a suspending test into the body; hoist a suspending init
+    fnPath.traverse({ ForStatement(p) {                           // for with a suspending test/update -> while with the update at the top of each pass
       if (acted) return;
       const node = p.node;
-      if (node.update && hasSuspInside(node.update, false)) throw new Error("suspension in a for-update is not supported (do it inside the body)");
-      if (node.test && hasSuspInside(node.test, false)) {
+      if ((node.test && hasSuspInside(node.test, false)) || (node.update && hasSuspInside(node.update, false))) {
+        // for(init;test;update) BODY -> { init; let __f=true; while(true){ if(__f)__f=false; else update; if(!test)break; BODY } }
+        const fv = fresh();
         const body = t.isBlockStatement(node.body) ? node.body.body : [node.body];
-        p.replaceWith(t.forStatement(node.init, null, node.update, t.blockStatement([t.ifStatement(t.unaryExpression("!", node.test), t.blockStatement([t.breakStatement()])), ...body])));
-        acted = true; p.stop(); return;
+        const wbody = [t.ifStatement(t.identifier(fv), t.expressionStatement(t.assignmentExpression("=", t.identifier(fv), t.booleanLiteral(false))), node.update ? t.expressionStatement(node.update) : null)];
+        if (node.test) wbody.push(t.ifStatement(t.unaryExpression("!", node.test), t.blockStatement([t.breakStatement()])));
+        wbody.push(...body);
+        const outer = [];
+        if (node.init) outer.push(t.isVariableDeclaration(node.init) ? node.init : t.expressionStatement(node.init));
+        outer.push(t.variableDeclaration("let", [t.variableDeclarator(t.identifier(fv), t.booleanLiteral(true))]));
+        outer.push(t.whileStatement(t.booleanLiteral(true), t.blockStatement(wbody)));
+        p.replaceWith(t.blockStatement(outer)); acted = true; p.stop(); return;
       }
       if (node.init && hasSuspInside(node.init, false)) {          // init runs once -> a plain statement before the loop
         p.insertBefore(t.isVariableDeclaration(node.init) ? node.init : t.expressionStatement(node.init));
         node.init = null; acted = true; p.stop();
       }
+    } });
+    if (acted) continue;
+    fnPath.traverse({ DoWhileStatement(p) {                        // do BODY while(test-suspends) -> { let __o=true; while(__o||test){ __o=false; BODY } }
+      if (acted || !hasSuspInside(p.node.test, false)) return;
+      const ov = fresh();
+      const body = t.isBlockStatement(p.node.body) ? p.node.body.body : [p.node.body];
+      p.replaceWith(t.blockStatement([
+        t.variableDeclaration("let", [t.variableDeclarator(t.identifier(ov), t.booleanLiteral(true))]),
+        t.whileStatement(t.logicalExpression("||", t.identifier(ov), p.node.test), t.blockStatement([t.expressionStatement(t.assignmentExpression("=", t.identifier(ov), t.booleanLiteral(false))), ...body])),
+      ]));
+      acted = true; p.stop();
     } });
     if (acted) continue;
     fnPath.traverse({ enter(p) {                                   // desugar an OUTERMOST && / || / ?? / ?: that contains a suspension
@@ -277,15 +298,15 @@ function compileStmt(s, ctx) {
   if (t.isBreakStatement(s)) {
     const tg = s.label ? ctx.labels[s.label.name] : { brk: ctx.brk, brkDepth: ctx.brkDepth };
     if (!tg || tg.brk == null) throw new Error("break has no target");
-    return abruptExit(ctx, tg.brkDepth, { kind: "jump", to: tg.brk });   // pop handlers of crossed trys
+    return abruptExit(ctx, tg.brkDepth, { ctype: "break", targetRaw: tg.brk });   // pop crossed handlers / run crossed finallys
   }
   if (t.isContinueStatement(s)) {
     const tg = s.label ? ctx.labels[s.label.name] : { cont: ctx.cont, contDepth: ctx.contDepth };
     if (!tg || tg.cont == null) throw new Error("continue has no target");
-    return abruptExit(ctx, tg.contDepth, { kind: "jump", to: tg.cont });
+    return abruptExit(ctx, tg.contDepth, { ctype: "continue", targetRaw: tg.cont });
   }
   if (t.isReturnStatement(s)) {
-    return abruptExit(ctx, 0, { kind: "ret", value: s.argument ? gen(s.argument) : "undefined" });
+    return abruptExit(ctx, 0, { ctype: "return", value: s.argument ? gen(s.argument) : "undefined" });
   }
   if (t.isThrowStatement(s)) { const b = nb(); blocks[b].term = { kind: "throw", value: gen(s.argument) }; return b; }
   if (t.isTryStatement(s)) return compileTry(s, ctx);
@@ -317,8 +338,8 @@ function compileTry(s, ctx) {
   }
 
   // pure try/finally
-  const inner = { ...ctx, tryDepth: tryDepth + 1, tryStack: [...ctx.tryStack, { hasFinally: true }] };
   const entry = nb(), finB = nb();
+  const inner = { ...ctx, tryDepth: tryDepth + 1, tryStack: [...ctx.tryStack, { hasFinally: true, finB }] };
   const bodyEnd = nb();
   blocks[bodyEnd].lines.push("F.__h[F.__h.length - 1].state = 2;", "F.__c = null;");
   blocks[bodyEnd].term = { kind: "jump", to: finB };
@@ -330,14 +351,18 @@ function compileTry(s, ctx) {
   return entry;
 }
 
-// An abrupt exit (return/break/continue) that crosses enclosing trys must pop each one's
-// handler. Crossing a try that has a finally is the deferred hard case (completion records).
-function abruptExit(ctx, targetDepth, term) {
-  const crossed = ctx.tryStack.slice(targetDepth);
-  if (crossed.some((x) => x.hasFinally)) throw new Error("return/break/continue across a finally is not yet supported");
+// An abrupt exit (return/break/continue) crossing enclosing trys must pop each try/catch's
+// handler and RUN each crossed finally (in order) before reaching its target. The completion
+// (F.__c) and the finally chain are recorded; __unwindStep + the finally `finish` drive it.
+function abruptExit(ctx, targetDepth, completion) {
+  const crossed = ctx.tryStack.slice(targetDepth).reverse();      // innermost -> outermost
   const b = nb();
-  for (let i = 0; i < crossed.length; i++) blocks[b].lines.push("F.__h.pop();");
-  blocks[b].term = term;
+  if (!crossed.some((x) => x.hasFinally)) {                        // no finally crossed: just pop handlers and go
+    for (let i = 0; i < crossed.length; i++) blocks[b].lines.push("F.__h.pop();");
+    blocks[b].term = completion.ctype === "return" ? { kind: "ret", value: completion.value } : { kind: "jump", to: completion.targetRaw };
+    return b;
+  }
+  blocks[b].term = { kind: "abrupt", ctype: completion.ctype, value: completion.value, targetRaw: completion.targetRaw, steps: crossed.map((x) => x.hasFinally ? { finRaw: x.finB } : { pop: 1 }) };
   return b;
 }
 
@@ -359,7 +384,13 @@ function compileFn(node) {
     if (tm.kind === "ret") return `return { op: "return", value: ${tm.value} };`;
     if (tm.kind === "throw") return `{ const __t = __dispatch(F, ${tm.value}); if (__t == null) return { op: "throw", value: ${tm.value} }; F.pc = __t; break; }`;
     if (tm.kind === "pushTry") return `(F.__h || (F.__h = [])).push({ catch: ${P(tm.catch)}, fin: ${P(tm.fin)}, state: 0 }); F.pc = ${R(tm.to)}; break;`;
-    if (tm.kind === "finish") return `{ const __c = F.__c; F.__c = null; F.__h.pop(); if (__c && __c.type === "throw") { const __t = __dispatch(F, __c.arg); if (__t == null) return { op: "throw", value: __c.arg }; F.pc = __t; break; } F.pc = ${R(tm.after)}; break; }`;
+    if (tm.kind === "finish") return `{ F.__h.pop(); const __c = F.__c; if (!__c) { F.pc = ${R(tm.after)}; break; } if (__c.type === "throw") { F.__c = null; const __t = __dispatch(F, __c.arg); if (__t == null) return { op: "throw", value: __c.arg }; F.pc = __t; break; } const __p = __unwindStep(F); if (__p != null) { F.pc = __p; break; } F.__c = null; if (__c.type === "return") return { op: "return", value: __c.value }; F.pc = __c.target; break; }`;
+    if (tm.kind === "abrupt") {                                       // return/break/continue crossing a finally: record completion + drive its finally chain
+      const steps = "[" + tm.steps.map((s) => s.pop !== undefined ? `{ pop: ${s.pop} }` : `{ fin: ${R(s.finRaw)} }`).join(", ") + "]";
+      const rec = tm.ctype === "return" ? `{ type: "return", value: ${tm.value}, steps: ${steps} }` : `{ type: ${JSON.stringify(tm.ctype)}, target: ${R(tm.targetRaw)}, steps: ${steps} }`;
+      const exec = tm.ctype === "return" ? "return { op: \"return\", value: __c.value };" : "F.pc = __c.target; break;";
+      return `F.__c = ${rec}; { const __p = __unwindStep(F); if (__p != null) { F.pc = __p; break; } const __c = F.__c; F.__c = null; ${exec} }`;
+    }
     throw new Error("bad terminator " + tm.kind);
   };
   const cases = ids.map((id) => { const blk = blocks[id]; const lines = blk.lines.slice(); lines.push(emitTerm(blk.term)); return `      case ${R(id)}:\n        ${lines.join("\n        ")}`; }).join("\n");
@@ -434,6 +465,15 @@ export function __dispatch(F, err) {
     if (h.fin != null && h.state < 2) { h.state = 2; F.__c = { type: "throw", arg: err }; return h.fin; }
     hs.pop();
   }
+  return null;
+}
+// Drive a pending return/break/continue (F.__c) through the finallys it must still run:
+// pop the handlers of crossed try/catch regions, then return the next finally pc (or null
+// when none remain and the completion should execute).
+export function __unwindStep(F) {
+  const c = F.__c; if (!c || !c.steps) return null;
+  while (c.steps.length && c.steps[0].pop !== undefined) { for (let i = 0; i < c.steps[0].pop; i++) F.__h.pop(); c.steps.shift(); }
+  if (c.steps.length) return c.steps.shift().fin;
   return null;
 }
 // Unwind an error across FRAMES: try the top frame's handlers, else pop it and try the
