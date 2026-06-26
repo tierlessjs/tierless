@@ -63,14 +63,28 @@ export const PROGRAMS = {
   }
 };
 
-// Single-tier driver: step the machine, stopping at every resource request. The
-// two-tier runtime (../runtime.mjs) drives PROGRAMS directly and only stops at
-// resources THIS tier doesn't own; this local driver keeps the bundle runnable alone.
+// Exception dispatch over the serializable handler stack F.__h. Returns the pc of the
+// catch/finally to enter, or null if the throw escapes this frame. Called from the
+// machine (for `throw`) and from the runtime (when a migrated resource throws).
+export function __dispatch(F, err) {
+  const hs = F.__h;
+  while (hs && hs.length) {
+    const h = hs[hs.length - 1];
+    if (h.catch != null && h.state === 0) { h.state = 1; F.__err = err; return h.catch; }  // enter catch (handler stays for a wrapping finally)
+    if (h.fin != null && h.state < 2) { h.state = 2; F.__c = { type: "throw", arg: err }; return h.fin; }
+    hs.pop();
+  }
+  return null;
+}
+// Single-tier driver: step the machine, stopping at every resource request. The two-tier
+// runtime (../runtime.mjs) drives PROGRAMS directly and only stops at resources THIS tier
+// doesn't own; this local driver keeps the bundle runnable alone.
 export function run(stack) {
   for (;;) {
     const top = stack[stack.length - 1];
     const r = PROGRAMS[top.fn](top);
     if (r.op === "return") { stack.pop(); if (!stack.length) return { done: true, value: r.value }; stack[stack.length - 1].ret = r.value; }
+    else if (r.op === "throw") throw r.value;
     else if (r.op === "resource") return { done: false, request: r, stack };
   }
 }

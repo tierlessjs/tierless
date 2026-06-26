@@ -66,7 +66,12 @@ hooks. `api.*` and `commit()` look like ordinary calls.
    **serializable state machine** — a `while(true) switch(F.pc)` whose locals live on an
    explicit frame object `F`. Output: `app/bundle.gen.mjs` (committed, so the demo runs
    without the Babel toolchain). This is the V8-native analog of asyncify: the
-   continuation is plain data, no native stack.
+   continuation is plain data, no native stack. Control flow covered: sequence, `if/else`,
+   `while`/`for`, `break`/`continue`, `return`, `throw`, and `try/catch/finally` —
+   **including a resource that fails on another tier being caught by a `catch` in the
+   migrated code**, because the handler stack (`F.__h`) rides along in the serialized
+   continuation. (`control-flow.mjs` proves each of these survives a wire round-trip at
+   every suspend.)
 
 2. **One pump, two tiers** (`runtime.mjs`). `pump(stack, ownsHere, execHere)` steps the
    machine, runs every resource the local tier owns inline, and **stops at the first
@@ -79,10 +84,16 @@ hooks. `api.*` and `commit()` look like ordinary calls.
    `wsPort`/`makePeer`. The boundary is a true serialize/deserialize — no shared memory —
    so a separate process or machine would resume it identically.
 
-4. **Real DOM + real clicks** (`dom.mjs` + `demo.mjs`). The browser tier paints the vdom
-   into Chromium with `setContent`, with onClick **event tokens** (plain objects, never
-   closures) carried as `data-ev` attributes. A real click is read back through a page
-   binding and becomes the continuation's resume value.
+4. **Real DOM + real clicks.** Two browser tiers are included:
+   - `demo.mjs` — a scripted, deterministic run: a Node+Playwright tier paints the vdom
+     into Chromium with `setContent` (onClick **event tokens** — plain objects, never
+     closures — carried as `data-ev` attributes) and drives clicks, so the demo asserts an
+     exact session end to end.
+   - `server-live.mjs` + `public/client.mjs` — a **live, human-clickable page**: the same
+     `pump` runs IN the browser tab, builds the DOM with `document.createElement` and real
+     `el.onclick` handlers, and parks the continuation on a real human click. Open the URL
+     and click. `verify-live.mjs` drives this live page headlessly with real Chromium
+     clicks.
 
 ## Files
 
@@ -93,41 +104,51 @@ hooks. `api.*` and `commit()` look like ordinary calls.
 | `app/api.mjs` | the "server module": a file-backed task DB (`getTasks`/`getStats`/`addTask`/…) |
 | `transform.cjs` | the allow-list + state-machine compiler (App.src.js → bundle.gen.mjs) |
 | `app/bundle.gen.mjs` | **generated** continuation bundle (committed; demo runs without Babel) |
-| `runtime.mjs` | `pump` — the one tier-agnostic continuation driver + the wire codec |
-| `dom.mjs` | vdom → real HTML with `data-ev` event tokens |
-| `demo.mjs` | the two-tier run: `ws` server tier ↔ real Chromium browser tier |
+| `runtime.mjs` | `pump` — the one tier-agnostic continuation driver + the wire codec + resource-error routing into `catch` |
+| `dom.mjs` | vdom → real HTML with `data-ev` event tokens (used by `demo.mjs`) |
+| `demo.mjs` | scripted two-tier run: `ws` server tier ↔ Node+Playwright Chromium tier |
+| `server-live.mjs` | the live page server: http static + `ws`, drives the continuation |
+| `public/client.mjs` | the live **browser** tier — runs in the tab, real DOM + real `onclick` |
+| `public/transport.mjs` | browser-safe transport (the 4 transport fns from `wss.mjs`, no `core.mjs`) |
 | `verify.mjs` | headless regression (no browser/socket); asserts the compiled session — in `npm test` |
+| `cf-fixtures.src.js` → `cf-fixtures.gen.mjs` | control-flow test functions and their compiled bundle |
+| `control-flow.mjs` | headless regression for loops/continue/try-catch-finally across migration — in `npm test` |
+| `verify-live.mjs` | headless check of the live page via real Chromium clicks (run on demand) |
 
 ## Running
 
 ```sh
-node experiments/react-tiers/verify.mjs   # headless: drives the compiled bundle, asserts the session
-node experiments/react-tiers/demo.mjs     # full: real websocket + real Chromium (needs Playwright)
+node experiments/react-tiers/verify.mjs        # headless: drives the compiled bundle, asserts the session
+node experiments/react-tiers/control-flow.mjs  # headless: loops/continue/try-catch-finally survive migration
+node experiments/react-tiers/demo.mjs          # scripted two-tier run: real websocket + real Chromium
+node experiments/react-tiers/server-live.mjs   # LIVE page — open the printed URL and click the dashboard
+node experiments/react-tiers/verify-live.mjs   # headless drive of the live page with real Chromium clicks
 ```
 
-`verify.mjs` runs as part of `npm test`. `demo.mjs` needs Playwright's Chromium; this repo
+`verify.mjs` and `control-flow.mjs` run as part of `npm test` (no browser needed). The
+Chromium runs (`demo.mjs`, `server-live.mjs`, `verify-live.mjs`) need Playwright; this repo
 env ships it pre-installed (`PLAYWRIGHT_BROWSERS_PATH`), resolved from the global install —
 override the resolver root with `PLAYWRIGHT_REQUIRE` if needed.
 
-Regenerating the bundle needs the Babel toolchain (not a repo dependency, like emscripten
+Regenerating the bundles needs the Babel toolchain (not a repo dependency, like emscripten
 for `qjs-migrate`):
 
 ```sh
 npm i -D @babel/parser@8 @babel/traverse@8 @babel/generator@8 @babel/types@8
 node experiments/react-tiers/transform.cjs experiments/react-tiers/app/App.src.js experiments/react-tiers/app/bundle.gen.mjs
+node experiments/react-tiers/transform.cjs experiments/react-tiers/cf-fixtures.src.js experiments/react-tiers/cf-fixtures.gen.mjs --bare
 ```
 
 ## Caveats / not-yet
 
-- `transform.cjs` covers the control flow this app uses (sequence, `while(true)`,
-  `if/else`, `break`, `return`, and `const x = api.f()` suspensions). Loops with
-  `continue`, `try/catch/finally` across a suspend, and nested function suspensions are
-  the known gaps — `@babel/plugin-transform-regenerator` is the reference for lowering all
-  of them, and the frame model here is the same one it targets.
+- `transform.cjs` now covers sequence, `if/else`, `while`/`for`, `break`/`continue`,
+  `return`, `throw`, and `try/catch/finally` (including across suspends). Remaining gaps:
+  a `break`/`continue`/`return` that **exits** a `try` (the compiler throws a clear error
+  rather than miscompile), `switch`, labeled loops, and **suspensions inside nested
+  function calls** (there is one frame, no sub-frame yet). `@babel/plugin-transform-
+  regenerator` is the reference for the rest, onto this same explicit-frame model.
 - Render runs wholesale on the server and the browser only commits. Splitting render
   itself across tiers (per-component continuation identity) is the larger follow-on.
 - Cross-tier **shared mutable state** is left where the design notes put it: single JS
   event thread per session here, so there's one writer; coherence for concurrent sessions
   is the genuine deferred problem.
-- The browser tier drives scripted clicks (a deterministic "user") so the demo asserts an
-  exact session; wiring it to a live page is just removing the script.
