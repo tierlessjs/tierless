@@ -130,6 +130,29 @@ hooks. `api.*` and `commit()` look like ordinary calls.
    place (later touches are cheap checks). On the owning tier the guards are no-ops. This
    is the interpreter's deref-on-touch, recovered for the compiled continuation.
 
+7. **Write-back coherence** (`heap-writeback.mjs`). The §5 heap was single-writer (readers
+   held snapshots and never wrote). This lifts it to single-**master** with optimistic
+   concurrency: a reader that mutated a fetched snapshot proposes it back under the version
+   it read (a compare-and-set). The master accepts only if no one bumped the version in
+   between, so a stale write is rejected as a conflict and the writer refetches (now seeing
+   the winner's change), re-applies, and retries — no distributed locks, no lost updates.
+   `writeBack` is the owner-side CAS; `commitWrite` is the reader-side retry loop. The probe
+   shows two writers racing (one rejected, refetched, retried; both edits survive) and the
+   helper resolving an injected race in two tries.
+
+8. **§6 migrate-vs-fetch, live** (`policy-app.src.js` → `policy-app.gen.mjs`, `policy-live.mjs`).
+   At a pure-**data** foreign resource the driver has a real choice: ship THIS continuation
+   to the resource's tier (migrate — the working set travels), or pull the resource's data
+   back over the socket and finish where it is (fetch — only the result travels). It prices
+   both options with **real measured bytes** and picks the cheaper one (design.md §6), then
+   actually performs the chosen path over the **real `ws` socket**, so the bytes that cross
+   are the bytes it priced. Two regimes show the flip: a tiny continuation + a big page →
+   migrate (337 B continuation beats a 107 KB fetch); a big working set + one small fact →
+   the **flip**, where the cold "always migrate" rule would ship 96.9 KB but the informed
+   rule fetches **23 B** and stays put (a 4312× saving). Result identical either way; the
+   informed sizes come from a one-time profiling sample that's locked in (§6 "sampling, not
+   always-on").
+
 ## Files
 
 | file | what |
@@ -154,6 +177,9 @@ hooks. `api.*` and `commit()` look like ordinary calls.
 | `heap-live.mjs` | the §5 heap over a **real `ws` socket**: dataset stays server-side, fetched on deref — in `npm test` |
 | `heap-auto.src.js` → `heap-auto.gen.mjs` | the same Report with **no `deref()`** (compiled `--auto-deref`) |
 | `heap-auto.mjs` | proof of **transparent deref**: ordinary `rows[i]` auto-fetches a handle on touch — in `npm test` |
+| `heap-writeback.mjs` | proof of **write-back coherence**: optimistic CAS, conflict → refetch + retry, no lost updates — in `npm test` |
+| `policy-app.src.js` → `policy-app.gen.mjs` | a Survey that builds a working set then needs a server data resource (the §6 boundary) |
+| `policy-live.mjs` | **§6 migrate-vs-fetch over a real socket**: prices both from real bytes and steers what crosses — in `npm test` |
 | `verify-live.mjs` | headless check of the live page via real Chromium clicks (run on demand) |
 
 ## Running
@@ -166,7 +192,9 @@ node experiments/react-tiers/server-live.mjs   # LIVE page — open the printed 
 node experiments/react-tiers/verify-live.mjs   # headless drive of the live page with real Chromium clicks
 ```
 
-`verify.mjs` and `control-flow.mjs` run as part of `npm test` (no browser needed). The
+The headless regressions — `verify.mjs`, `control-flow.mjs`, and the heap/policy probes
+(`heap-probe.mjs`, `heap-live.mjs`, `heap-auto.mjs`, `heap-writeback.mjs`, `policy-live.mjs`)
+— run as part of `npm test` (no browser needed). The
 Chromium runs (`demo.mjs`, `server-live.mjs`, `verify-live.mjs`) need Playwright; this repo
 env ships it pre-installed (`PLAYWRIGHT_BROWSERS_PATH`), resolved from the global install —
 override the resolver root with `PLAYWRIGHT_REQUIRE` if needed.
@@ -178,6 +206,7 @@ for `qjs-migrate`):
 npm i -D @babel/parser@8 @babel/traverse@8 @babel/generator@8 @babel/types@8
 node experiments/react-tiers/transform.cjs experiments/react-tiers/app/App.src.js experiments/react-tiers/app/bundle.gen.mjs
 node experiments/react-tiers/transform.cjs experiments/react-tiers/cf-fixtures.src.js experiments/react-tiers/cf-fixtures.gen.mjs --bare
+node experiments/react-tiers/transform.cjs experiments/react-tiers/policy-app.src.js experiments/react-tiers/policy-app.gen.mjs --bare
 ```
 
 ## Caveats / not-yet
@@ -191,13 +220,16 @@ node experiments/react-tiers/transform.cjs experiments/react-tiers/cf-fixtures.s
   implicitly, so it's intentionally unsupported rather than a missing feature.
 - Render runs wholesale on the server and the browser only commits. Splitting render
   itself across tiers (per-component continuation identity) is the larger follow-on.
-- The §5 handle heap runs over the live `ws` socket (`heap-live.mjs`) and touch-to-fetch is
-  transparent with `--auto-deref` (`heap-auto.mjs`). Remaining heap refinements: the §6
-  migrate-vs-fetch *policy* (when to ship the continuation vs fetch the data) is modeled in
-  `examples/policy` but not yet consulted by the live `pump`; `--auto-deref` guards every
-  read of a data-resource local (pessimistic — a liveness pass could prune the no-op guards
-  on the owning tier).
-- Cross-tier **shared mutable state** now has the design's answer at the data layer:
-  single-writer + version-invalidated cache (read-mostly shared data works). **Write-back**
-  — a reader's mutation propagating to the owner — is the still-deferred hard problem, as
-  the design doc marks it out of scope for v1.
+- The §5 handle heap runs over the live `ws` socket (`heap-live.mjs`), touch-to-fetch is
+  transparent with `--auto-deref` (`heap-auto.mjs`), and the §6 migrate-vs-fetch *policy*
+  (ship the continuation vs fetch the data) is now consulted by the live driver
+  (`policy-live.mjs`): it prices both from real bytes and steers what crosses the socket.
+  Remaining heap refinement: `--auto-deref` guards every read of a data-resource local
+  (pessimistic — a liveness pass could prune the no-op guards on the owning tier), and the
+  §6 fetch-size profile is sampled once and locked in (no online re-profiling).
+- Cross-tier **shared mutable state**: read-mostly works via single-master +
+  version-invalidated cache, and **write-back** — a reader's mutation propagating to the
+  owner — now works too, via optimistic version-checked CAS (`heap-writeback.mjs`):
+  conflicts are detected and resolved by refetch + retry, no lost updates. What remains is
+  ergonomics, not mechanism: the CAS is a `writeBack`/`commitWrite` primitive, not yet hidden
+  behind transparent compiled member-writes the way reads are behind `--auto-deref`.
