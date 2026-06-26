@@ -59,6 +59,8 @@ function allowlist(ast) {
       tier = TIER_OF[c.object.name]; name = c.object.name + "." + c.property.name;     // api.getTasks(...)
     } else if (t.isIdentifier(c) && TIER_OF[c.name]) {
       tier = TIER_OF[c.name]; name = "dom." + c.name;                                   // commit(...)
+    } else if (t.isIdentifier(c) && c.name === "deref") {
+      tier = "@deref"; name = "deref";                                                  // deref(handle): fetch from the handle's owner
     }
     if (!tier) return;
     p.replaceWith(t.yieldExpression(t.callExpression(t.identifier("R"),
