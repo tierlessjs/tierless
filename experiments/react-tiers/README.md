@@ -67,16 +67,24 @@ hooks. `api.*` and `commit()` look like ordinary calls.
    explicit frame object `F`. Output: `app/bundle.gen.mjs` (committed, so the demo runs
    without the Babel toolchain). This is the V8-native analog of asyncify: the
    continuation is plain data, no native stack. Control flow covered: sequence, `if/else`,
-   `while`/`for`, `break`/`continue`, `return`, `throw`, and `try/catch/finally` —
-   **including a resource that fails on another tier being caught by a `catch` in the
-   migrated code**, because the handler stack (`F.__h`) rides along in the serialized
-   continuation. (`control-flow.mjs` proves each of these survives a wire round-trip at
-   every suspend.)
+   `while`/`for`, `break`/`continue`, `return`, `throw`, `try/catch/finally`, and **calls
+   between functions** — **including a resource that fails on another tier being caught by
+   a `catch` up the call stack in the migrated code**, because the handler stack (`F.__h`)
+   rides along in the serialized continuation. (`control-flow.mjs` proves each of these
+   survives a wire round-trip at every suspend.)
+
+   **Suspendability is inferred.** A function is compiled into a state machine only if it
+   (transitively) touches a tier-pinned resource; pure single-tier helpers (here `render`,
+   `h`, the components) are left untouched and called synchronously. A call from one
+   suspendable function into another becomes a **CALL op that pushes a sub-frame** — so the
+   continuation is a *stack* of frames that spans call boundaries. In this app, `App` calls
+   the suspendable `loadView`, so a real run carries an `[App, loadView]` stack.
 
 2. **One pump, two tiers** (`runtime.mjs`). `pump(stack, ownsHere, execHere)` steps the
-   machine, runs every resource the local tier owns inline, and **stops at the first
-   resource it doesn't** — returning the frame stack to ship. The same pump runs on both
-   sides; only "what do I own" differs.
+   machine, pushes a sub-frame on a CALL, runs every resource the local tier owns inline,
+   and **stops at the first resource it doesn't** — returning the whole (possibly
+   multi-frame) frame stack to ship. The same pump runs on both sides; only "what do I own"
+   differs. Errors unwind across frames, so a callee's failure reaches a caller's `catch`.
 
 3. **Real transport** (`src/runtime/wss.mjs`, the project's own). The continuation
    serializes through the project's identity/cycle-preserving graph codec
@@ -99,7 +107,7 @@ hooks. `api.*` and `commit()` look like ordinary calls.
 
 | file | what |
 | --- | --- |
-| `app/App.src.js` | the developer's code: one plain function, no tier split |
+| `app/App.src.js` | the developer's code: plain functions (`App` calls the suspendable `loadView`), no tier split |
 | `app/components.mjs`, `app/h.mjs`, `app/render.mjs` | presentational components → serializable vdom (no React dep) |
 | `app/api.mjs` | the "server module": a file-backed task DB (`getTasks`/`getStats`/`addTask`/…) |
 | `transform.cjs` | the allow-list + state-machine compiler (App.src.js → bundle.gen.mjs) |
@@ -142,11 +150,12 @@ node experiments/react-tiers/transform.cjs experiments/react-tiers/cf-fixtures.s
 ## Caveats / not-yet
 
 - `transform.cjs` now covers sequence, `if/else`, `while`/`for`, `break`/`continue`,
-  `return`, `throw`, and `try/catch/finally` (including across suspends). Remaining gaps:
-  a `break`/`continue`/`return` that **exits** a `try` (the compiler throws a clear error
-  rather than miscompile), `switch`, labeled loops, and **suspensions inside nested
-  function calls** (there is one frame, no sub-frame yet). `@babel/plugin-transform-
-  regenerator` is the reference for the rest, onto this same explicit-frame model.
+  `return`, `throw`, `try/catch/finally`, and **calls between suspendable functions**
+  (sub-frames; the continuation spans the call stack), all across suspends. Remaining gaps
+  (the compiler throws a clear error rather than miscompile): a `break`/`continue`/`return`
+  that **exits** a `try`, a suspendable call used as a **sub-expression** (assign it to a
+  local first), `switch`, and labeled loops. `@babel/plugin-transform-regenerator` is the
+  reference for the rest, onto this same explicit-frame model.
 - Render runs wholesale on the server and the browser only commits. Splitting render
   itself across tiers (per-component continuation identity) is the larger follow-on.
 - Cross-tier **shared mutable state** is left where the design notes put it: single JS

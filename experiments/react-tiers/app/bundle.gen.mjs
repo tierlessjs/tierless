@@ -3,16 +3,36 @@ import { h } from "./h.mjs";
 import { Dashboard } from "./components.mjs";
 import { render } from "./render.mjs";
 export const PROGRAMS = {
+  loadView(F) {
+    while (true) switch (F.pc) {
+      case 0:
+        F.pc = 6; break;
+      case 1:
+        return { op: "return", value: "(end)" };
+      case 2:
+        return { op: "return", value: render(h(Dashboard, { tasks: F.tasks, stats: F.stats, filter: F.args[0] })) };
+      case 3:
+        F.stats = F.ret;
+        F.pc = 2; break;
+      case 4:
+        F.pc = 3; return { op: "resource", tier: "server", name: "api.getStats", args: [] };
+      case 5:
+        F.tasks = F.ret;
+        F.pc = 4; break;
+      case 6:
+        F.pc = 5; return { op: "resource", tier: "server", name: "api.getTasks", args: [{ status: F.args[0] }] };
+    }
+  },
   App(F) {
     while (true) switch (F.pc) {
       case 0:
-        F.pc = 23; break;
+        F.pc = 20; break;
       case 1:
         return { op: "return", value: "(end)" };
       case 2:
         return { op: "return", value: "session ended" };
       case 3:
-        F.pc = 22; break;
+        F.pc = 19; break;
       case 4:
         F.filter = F.ev.value;
         F.pc = 3; break;
@@ -44,19 +64,11 @@ export const PROGRAMS = {
       case 17:
         F.pc = 16; return { op: "resource", tier: "browser", name: "dom.commit", args: [F.vdom] };
       case 18:
-        F.vdom = render(h(Dashboard, { tasks: F.tasks, stats: F.stats, filter: F.filter }));
+        F.vdom = F.ret;
         F.pc = 17; break;
       case 19:
-        F.stats = F.ret;
-        F.pc = 18; break;
+        F.pc = 18; return { op: "call", fn: "loadView", args: [F.filter] };
       case 20:
-        F.pc = 19; return { op: "resource", tier: "server", name: "api.getStats", args: [] };
-      case 21:
-        F.tasks = F.ret;
-        F.pc = 20; break;
-      case 22:
-        F.pc = 21; return { op: "resource", tier: "server", name: "api.getTasks", args: [{ status: F.filter }] };
-      case 23:
         F.filter = "all";
         F.pc = 3; break;
     }
@@ -76,15 +88,22 @@ export function __dispatch(F, err) {
   }
   return null;
 }
-// Single-tier driver: step the machine, stopping at every resource request. The two-tier
-// runtime (../runtime.mjs) drives PROGRAMS directly and only stops at resources THIS tier
-// doesn't own; this local driver keeps the bundle runnable alone.
+// Unwind an error across FRAMES: try the top frame's handlers, else pop it and try the
+// caller. A resource that fails in a callee is thus caught by a try/catch in a caller.
+export function __unwind(stack, err) {
+  while (stack.length) { const tpc = __dispatch(stack[stack.length - 1], err); if (tpc != null) { stack[stack.length - 1].pc = tpc; return true; } stack.pop(); }
+  return false;
+}
+// Single-tier driver: step the machine, push sub-frames for calls, stop at every resource
+// request. The two-tier runtime (../runtime.mjs) drives PROGRAMS directly and only stops
+// at resources THIS tier doesn't own; this local driver keeps the bundle runnable alone.
 export function run(stack) {
   for (;;) {
     const top = stack[stack.length - 1];
     const r = PROGRAMS[top.fn](top);
     if (r.op === "return") { stack.pop(); if (!stack.length) return { done: true, value: r.value }; stack[stack.length - 1].ret = r.value; }
-    else if (r.op === "throw") throw r.value;
+    else if (r.op === "call") { stack.push({ fn: r.fn, pc: 0, args: r.args }); }
+    else if (r.op === "throw") { stack.pop(); if (!__unwind(stack, r.value)) throw r.value; }
     else if (r.op === "resource") return { done: false, request: r, stack };
   }
 }

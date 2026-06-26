@@ -194,6 +194,136 @@ F.log = F.log + F.v;
         F.log = "";
         F.pc = 3; break;
     }
+  },
+  fetchDouble(F) {
+    while (true) switch (F.pc) {
+      case 0:
+        F.pc = 4; break;
+      case 1:
+        return { op: "return", value: "(end)" };
+      case 2:
+        return { op: "return", value: F.row + F.row };
+      case 3:
+        F.row = F.ret;
+        F.pc = 2; break;
+      case 4:
+        F.pc = 3; return { op: "resource", tier: "server", name: "api.get", args: [F.args[0]] };
+    }
+  },
+  sumViaHelper(F) {
+    while (true) switch (F.pc) {
+      case 0:
+        F.pc = 9; break;
+      case 1:
+        return { op: "return", value: "(end)" };
+      case 2:
+        return { op: "return", value: F.total };
+      case 3:
+        F.i = 1;
+        F.pc = 4; break;
+      case 4:
+        if (F.i <= 3) { F.pc = 8; } else { F.pc = 2; } break;
+      case 5:
+        F.i = F.i + 1;
+        F.pc = 4; break;
+      case 6:
+        // CALL: push a sub-frame for fetchDouble, resume on return
+F.total = F.total + F.r;
+        F.pc = 5; break;
+      case 7:
+        F.r = F.ret;
+        F.pc = 6; break;
+      case 8:
+        F.pc = 7; return { op: "call", fn: "fetchDouble", args: [F.i] };
+      case 9:
+        F.total = 0;
+        F.pc = 3; break;
+    }
+  },
+  failingFetch(F) {
+    while (true) switch (F.pc) {
+      case 0:
+        F.pc = 4; break;
+      case 1:
+        return { op: "return", value: "(end)" };
+      case 2:
+        return { op: "return", value: F.v };
+      case 3:
+        F.v = F.ret;
+        F.pc = 2; break;
+      case 4:
+        F.pc = 3; return { op: "resource", tier: "server", name: "api.fail", args: [1] };
+    }
+  },
+  callerCatches(F) {
+    while (true) switch (F.pc) {
+      case 0:
+        F.pc = 11; break;
+      case 1:
+        return { op: "return", value: "(end)" };
+      case 2:
+        return { op: "return", value: F.r };
+      case 3:
+        (F.__h || (F.__h = [])).push({ catch: 4, fin: null, state: 0 }); F.pc = 8; break;
+      case 4:
+        F.e = F.__err;
+        F.pc = 10; break;
+      case 5:
+        F.__h.pop();
+        F.pc = 2; break;
+      case 6:
+        // the callee's resource error...
+F.r = "ok:" + F.v;
+        F.pc = 5; break;
+      case 7:
+        F.v = F.ret;
+        F.pc = 6; break;
+      case 8:
+        F.pc = 7; return { op: "call", fn: "failingFetch", args: [] };
+      case 9:
+        F.__h.pop();
+        F.pc = 2; break;
+      case 10:
+        F.r = "caught:" + F.e.message; // ...is caught here, one frame up
+        F.pc = 9; break;
+      case 11:
+        F.r = "start";
+        F.pc = 3; break;
+    }
+  },
+  throwInMachine(F) {
+    while (true) switch (F.pc) {
+      case 0:
+        F.pc = 11; break;
+      case 1:
+        return { op: "return", value: "(end)" };
+      case 2:
+        return { op: "return", value: F.out };
+      case 3:
+        (F.__h || (F.__h = [])).push({ catch: 4, fin: null, state: 0 }); F.pc = 7; break;
+      case 4:
+        F.e = F.__err;
+        F.pc = 9; break;
+      case 5:
+        F.__h.pop();
+        F.pc = 2; break;
+      case 6:
+        { const __t = __dispatch(F, "boom"); if (__t == null) return { op: "throw", value: "boom" }; F.pc = __t; break; }
+      case 7:
+        F.out = "in";
+        F.pc = 6; break;
+      case 8:
+        F.__h.pop();
+        F.pc = 2; break;
+      case 9:
+        F.out = "caught:" + F.e;
+        F.pc = 8; break;
+      case 10:
+        F.out = F.ret;
+        F.pc = 3; break;
+      case 11:
+        F.pc = 10; return { op: "resource", tier: "server", name: "api.get", args: [1] };
+    }
   }
 };
 
@@ -210,15 +340,22 @@ export function __dispatch(F, err) {
   }
   return null;
 }
-// Single-tier driver: step the machine, stopping at every resource request. The two-tier
-// runtime (../runtime.mjs) drives PROGRAMS directly and only stops at resources THIS tier
-// doesn't own; this local driver keeps the bundle runnable alone.
+// Unwind an error across FRAMES: try the top frame's handlers, else pop it and try the
+// caller. A resource that fails in a callee is thus caught by a try/catch in a caller.
+export function __unwind(stack, err) {
+  while (stack.length) { const tpc = __dispatch(stack[stack.length - 1], err); if (tpc != null) { stack[stack.length - 1].pc = tpc; return true; } stack.pop(); }
+  return false;
+}
+// Single-tier driver: step the machine, push sub-frames for calls, stop at every resource
+// request. The two-tier runtime (../runtime.mjs) drives PROGRAMS directly and only stops
+// at resources THIS tier doesn't own; this local driver keeps the bundle runnable alone.
 export function run(stack) {
   for (;;) {
     const top = stack[stack.length - 1];
     const r = PROGRAMS[top.fn](top);
     if (r.op === "return") { stack.pop(); if (!stack.length) return { done: true, value: r.value }; stack[stack.length - 1].ret = r.value; }
-    else if (r.op === "throw") throw r.value;
+    else if (r.op === "call") { stack.push({ fn: r.fn, pc: 0, args: r.args }); }
+    else if (r.op === "throw") { stack.pop(); if (!__unwind(stack, r.value)) throw r.value; }
     else if (r.op === "resource") return { done: false, request: r, stack };
   }
 }

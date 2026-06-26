@@ -59,3 +59,43 @@ function catchFinally() {
   }
   return log;                         // "aCF"
 }
+
+// --- nested function suspension: the continuation spans call boundaries ---
+// fetchDouble/failingFetch are CALLEES that themselves suspend; their callers push a
+// sub-frame, so the migrated continuation is a STACK of frames that travels as a unit.
+function fetchDouble(id) {
+  const row = api.get(id);            // suspends inside the callee
+  return row + row;
+}
+function sumViaHelper() {
+  let total = 0;
+  for (let i = 1; i <= 3; i = i + 1) {
+    const r = fetchDouble(i);         // CALL: push a sub-frame for fetchDouble, resume on return
+    total = total + r;
+  }
+  return total;                       // (1+1)+(2+2)+(3+3) = 12
+}
+function failingFetch() {
+  const v = api.fail(1);              // the resource fails in the callee
+  return v;
+}
+function callerCatches() {
+  let r = "start";
+  try {
+    const v = failingFetch();         // the callee's resource error...
+    r = "ok:" + v;
+  } catch (e) {
+    r = "caught:" + e.message;        // ...is caught here, one frame up
+  }
+  return r;                           // "caught:resource failed"
+}
+function throwInMachine() {
+  let out = api.get(1);               // a resource makes this function suspendable (compiled)
+  try {
+    out = "in";
+    throw "boom";                     // a sync throw inside the state machine
+  } catch (e) {
+    out = "caught:" + e;
+  }
+  return out;                         // "caught:boom"
+}

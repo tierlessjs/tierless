@@ -1,35 +1,46 @@
 // Stackmix tier-splitting compiler (proof of concept).
 //
-// Input:  a plain function (e.g. app/App.src.js) written as if everything ran in one
-//         place — straight-line calls to api.* and commit(), ordinary control flow.
-// Output: a SERIALIZABLE state machine whose every suspension point is a tier-pinned
-//         resource request. Nothing in the app is hand-written as a state machine;
-//         this file generates it.
+// Input:  plain functions (e.g. app/App.src.js) written as if everything ran in one
+//         place — straight-line calls to api.* and commit(), ordinary control flow,
+//         and ordinary calls between functions.
+// Output: SERIALIZABLE state machines whose every suspension point is a tier-pinned
+//         resource request OR a call into another suspendable function. Nothing in the
+//         app is hand-written as a state machine; this file generates it.
 //
-// Two passes:
+// Passes:
 //   PASS 1  allow-list rewrite. Calls into tier-pinned namespaces become yields that
 //           name the owning tier. `api.*` -> server, `commit()` -> browser (TIER_OF).
-//   PASS 2  CPS / state-machine lowering. The body is split at each yield into basic
-//           blocks emitted as `case N:` of a `while(true) switch(F.pc)`. Locals and
-//           params are hoisted onto the explicit frame object F (F.filter, F.ev, …) so
-//           the whole continuation is plain serializable data — no closure, no native
-//           stack — and can migrate between tiers mid-function.
+//   ANALYSIS  suspendability. A function is suspendable if it directly touches a
+//           tier-pinned resource OR (transitively) calls another suspendable function.
+//           Only suspendable functions are compiled into state machines; the rest are
+//           emitted verbatim and called synchronously (single-tier code runs wholesale).
+//   PASS 2  CPS / state-machine lowering. Each suspendable function's body is split at
+//           every suspension into basic blocks emitted as `case N:` of a
+//           `while(true) switch(F.pc)`. Locals/params are hoisted onto the explicit
+//           frame object F, so the whole continuation is plain serializable data — no
+//           closure, no native stack — and migrates between tiers mid-function.
 //
-// Control flow covered: sequence, if/else, while(true), while(cond), for(;;),
-// break/continue, return, throw, and try/catch / try/finally / try/catch/finally —
-// INCLUDING a resource error thrown across a suspend being caught by an enclosing
-// catch, with the handler stack (F.__h) riding along in the serialized continuation.
-// Lowered the way @babel/plugin-transform-regenerator lowers generators, but onto an
-// explicit serializable frame instead of closure variables (which is what makes
-// snapshot/restore possible). Known gaps: break/continue/return that EXIT a try (the
-// compiler throws a clear error rather than miscompile), and suspensions inside nested
-// function calls (no sub-frame yet).
+// A call into another suspendable function becomes a CALL op that pushes a sub-frame:
+// the continuation is a STACK of frames, so it spans function-call boundaries and the
+// whole stack migrates as a unit (a callee can suspend on the server while its caller
+// waits, all serialized together). Exceptions unwind across frames (__unwind), so a
+// resource that fails in a callee is caught by a try/catch in a caller — even across a
+// tier migration.
+//
+// Control flow covered: sequence, if/else, while/for, break/continue, return, throw,
+// try/catch/finally, and cross-function calls/returns. Lowered the way
+// @babel/plugin-transform-regenerator lowers generators, but onto an explicit
+// serializable frame instead of closure variables (which is what makes snapshot/restore
+// possible). Known gaps (the compiler throws a clear error rather than miscompile):
+// break/continue/return that EXITS a try, a suspendable call used as a sub-expression
+// (assign it to a local first), switch, and labeled loops.
 //
 // Needs the Babel toolchain to RUN (not a repo dependency, like emscripten for
-// qjs-migrate). The committed app/bundle.gen.mjs is its output, so the demo runs
-// without it. To regenerate:
+// qjs-migrate). The committed *.gen.mjs files are its output, so the demos run without
+// it. To regenerate:
 //   npm i -D @babel/parser@8 @babel/traverse@8 @babel/generator@8 @babel/types@8
 //   node transform.cjs app/App.src.js app/bundle.gen.mjs
+//   node transform.cjs cf-fixtures.src.js cf-fixtures.gen.mjs --bare
 const parser = require("@babel/parser");
 const traverse = require("@babel/traverse").default || require("@babel/traverse");
 const generate = require("@babel/generator").default || require("@babel/generator");
@@ -56,10 +67,10 @@ function allowlist(ast) {
   } });
 }
 
-// ---- PASS 2: state machine. Compile the body into basic blocks. ----
+// ---- PASS 2: state machine. Compile a suspendable function's body into basic blocks.
 // ctx threads { next, brk, cont, tryDepth, loopDepth } so break/continue know their
 // target and we can reject a jump that would skip a try's handler bookkeeping.
-let blocks;
+let blocks, suspSet;
 const nb = () => (blocks.push({ lines: [], term: null }), blocks.length - 1);
 const isSusp = (s) =>
   (t.isVariableDeclaration(s) && s.declarations.length === 1 && t.isYieldExpression(s.declarations[0].init)) ||
@@ -70,28 +81,47 @@ function suspInfo(s) {
   const a = y.argument.arguments;                                  // R(tier, name, ...args)
   return { assign, op: `{ op: "resource", tier: ${gen(a[0])}, name: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` };
 }
+// a statement that calls another suspendable (compiled) function -> push a sub-frame
+function callSusp(s) {
+  let call = null, assign = null;
+  if (t.isVariableDeclaration(s) && s.declarations.length === 1 && t.isCallExpression(s.declarations[0].init)) { call = s.declarations[0].init; assign = s.declarations[0].id.name; }
+  else if (t.isExpressionStatement(s) && t.isCallExpression(s.expression)) call = s.expression;
+  if (call && t.isIdentifier(call.callee) && suspSet.has(call.callee.name)) return { assign, fn: call.callee.name, args: call.arguments.map(gen).join(", ") };
+  return null;
+}
+function containsSuspCall(node) {                                  // a suspendable call buried in a sub-expression (rejected)
+  let found = false;
+  (function walk(n) {
+    if (found || !n || typeof n !== "object") return;
+    if (Array.isArray(n)) return n.forEach(walk);
+    if (n.type === "CallExpression" && n.callee && n.callee.type === "Identifier" && suspSet.has(n.callee.name)) { found = true; return; }
+    for (const k in n) { if (k === "loc" || k === "start" || k === "end" || k === "leadingComments" || k === "trailingComments") continue; walk(n[k]); }
+  })(node);
+  return found;
+}
 const blockStmts = (n) => (t.isBlockStatement(n) ? n.body : [n]);
 const withNext = (ctx, next) => ({ ...ctx, next });
-
-function compileStmts(stmts, ctx) {
-  let cont = ctx.next;
-  for (let i = stmts.length - 1; i >= 0; i--) cont = compileStmt(stmts[i], withNext(ctx, cont));
-  return cont;
-}
+function compileStmts(stmts, ctx) { let cont = ctx.next; for (let i = stmts.length - 1; i >= 0; i--) cont = compileStmt(stmts[i], withNext(ctx, cont)); return cont; }
 
 function compileStmt(s, ctx) {
   const { next, brk, cont, tryDepth, loopDepth } = ctx;
 
-  if (isSusp(s)) {
+  if (isSusp(s)) {                                                 // const x = api.f() -> suspend on a resource
     const { assign, op } = suspInfo(s);
     const r = nb(); if (assign) blocks[r].lines.push(`F.${assign} = F.ret;`); blocks[r].term = { kind: "jump", to: next };
-    const b = nb(); blocks[b].term = { kind: "susp", op, resume: r }; return b;     // resume binds F.<assign> = F.ret on success
+    const b = nb(); blocks[b].term = { kind: "susp", op, resume: r }; return b;
+  }
+  const cs = callSusp(s);
+  if (cs) {                                                        // const x = helper() -> push a sub-frame for helper
+    const r = nb(); if (cs.assign) blocks[r].lines.push(`F.${cs.assign} = F.ret;`); blocks[r].term = { kind: "jump", to: next };
+    const b = nb(); blocks[b].term = { kind: "call", fn: cs.fn, args: cs.args, resume: r }; return b;
   }
   if (t.isBlockStatement(s)) return compileStmts(s.body, ctx);
 
   if (t.isWhileStatement(s)) {
+    if (containsSuspCall(s.test)) throw new Error("suspendable call in a loop test is not supported (assign it first)");
     const loop = { ...ctx, loopDepth: tryDepth };
-    if (t.isBooleanLiteral(s.test, { value: true })) {                              // while(true): plain head, no test
+    if (t.isBooleanLiteral(s.test, { value: true })) {            // while(true): plain head, no test
       const head = nb(); const body = compileStmts(blockStmts(s.body), { ...loop, next: head, brk: next, cont: head });
       blocks[head].term = { kind: "jump", to: body }; return head;
     }
@@ -99,14 +129,11 @@ function compileStmt(s, ctx) {
     const body = compileStmts(blockStmts(s.body), { ...loop, next: head, brk: next, cont: head });
     blocks[head].term = { kind: "branch", cond: gen(s.test), then: body, else: next }; return head;
   }
-
   if (t.isForStatement(s)) {
+    if ((s.test && containsSuspCall(s.test)) || (s.update && containsSuspCall(s.update)) || (s.init && containsSuspCall(s.init))) throw new Error("suspendable call in a for-header is not supported (assign it first)");
     const loop = { ...ctx, loopDepth: tryDepth };
     const init = nb();
-    if (s.init) {
-      if (t.isVariableDeclaration(s.init)) for (const d of s.init.declarations) { if (d.init) blocks[init].lines.push(`F.${d.id.name} = ${gen(d.init)};`); }
-      else blocks[init].lines.push(`${gen(s.init)};`);
-    }
+    if (s.init) { if (t.isVariableDeclaration(s.init)) for (const d of s.init.declarations) { if (d.init) blocks[init].lines.push(`F.${d.id.name} = ${gen(d.init)};`); } else blocks[init].lines.push(`${gen(s.init)};`); }
     const head = nb();
     const update = nb(); if (s.update) blocks[update].lines.push(`${gen(s.update)};`);
     const body = compileStmts(blockStmts(s.body), { ...loop, next: update, brk: next, cont: update }); // continue -> update
@@ -115,13 +142,12 @@ function compileStmt(s, ctx) {
     blocks[update].term = { kind: "jump", to: head };
     return init;
   }
-
   if (t.isIfStatement(s)) {
+    if (containsSuspCall(s.test)) throw new Error("suspendable call in an if-test is not supported (assign it first)");
     const consequent = compileStmts(blockStmts(s.consequent), ctx);
     const alt = s.alternate ? compileStmts(blockStmts(s.alternate), ctx) : next;
     const b = nb(); blocks[b].term = { kind: "branch", cond: gen(s.test), then: consequent, else: alt }; return b;
   }
-
   if (t.isBreakStatement(s)) {
     if (tryDepth > loopDepth) throw new Error("break that exits a try is not yet supported");
     const b = nb(); blocks[b].term = { kind: "jump", to: brk }; return b;
@@ -132,12 +158,14 @@ function compileStmt(s, ctx) {
   }
   if (t.isReturnStatement(s)) {
     if (tryDepth > 0) throw new Error("return inside a try is not yet supported");
+    if (s.argument && containsSuspCall(s.argument)) throw new Error("suspendable call in a return value is not supported (assign it first)");
     const b = nb(); blocks[b].term = { kind: "ret", value: s.argument ? gen(s.argument) : "undefined" }; return b;
   }
   if (t.isThrowStatement(s)) { const b = nb(); blocks[b].term = { kind: "throw", value: gen(s.argument) }; return b; }
 
   if (t.isTryStatement(s)) return compileTry(s, ctx);
 
+  if (containsSuspCall(s)) throw new Error("a suspendable call must be a statement: `const x = f(...)` or `f(...);`");
   const b = nb(); blocks[b].lines.push(gen(s)); blocks[b].term = { kind: "jump", to: next }; return b; // gen() of a statement already ends in ;
 }
 
@@ -146,10 +174,7 @@ function compileStmt(s, ctx) {
 // inside a try survives migration with its catch/finally target intact.
 function compileTry(s, ctx) {
   const { next, tryDepth } = ctx;
-  if (s.handler && s.finalizer) {                                  // try B catch C finally F  ≡  try { try B catch C } finally F
-    const inner = t.tryStatement(s.block, s.handler, null);
-    return compileTry(t.tryStatement(t.blockStatement([inner]), null, s.finalizer), ctx);
-  }
+  if (s.handler && s.finalizer) return compileTry(t.tryStatement(t.blockStatement([t.tryStatement(s.block, s.handler, null)]), null, s.finalizer), ctx);
   const inner = { ...ctx, tryDepth: tryDepth + 1 };
 
   if (s.handler) {                                                 // pure try/catch
@@ -190,6 +215,7 @@ function compileFn(node) {
   const emitTerm = (tm) => {
     if (tm.kind === "jump") return `F.pc = ${R(tm.to)}; break;`;
     if (tm.kind === "susp") return `F.pc = ${R(tm.resume)}; return ${tm.op};`;
+    if (tm.kind === "call") return `F.pc = ${R(tm.resume)}; return { op: "call", fn: ${JSON.stringify(tm.fn)}, args: [${tm.args}] };`;
     if (tm.kind === "branch") return `if (${tm.cond}) { F.pc = ${R(tm.then)}; } else { F.pc = ${R(tm.else)}; } break;`;
     if (tm.kind === "ret") return `return { op: "return", value: ${tm.value} };`;
     if (tm.kind === "throw") return `{ const __t = __dispatch(F, ${tm.value}); if (__t == null) return { op: "throw", value: ${tm.value} }; F.pc = __t; break; }`;
@@ -197,48 +223,63 @@ function compileFn(node) {
     if (tm.kind === "finish") return `{ const __c = F.__c; F.__c = null; F.__h.pop(); if (__c && __c.type === "throw") { const __t = __dispatch(F, __c.arg); if (__t == null) return { op: "throw", value: __c.arg }; F.pc = __t; break; } F.pc = ${R(tm.after)}; break; }`;
     throw new Error("bad terminator " + tm.kind);
   };
-  const cases = ids.map((id) => {
-    const blk = blocks[id]; const lines = blk.lines.slice();
-    lines.push(emitTerm(blk.term));
-    return `      case ${R(id)}:\n        ${lines.join("\n        ")}`;
-  }).join("\n");
+  const cases = ids.map((id) => { const blk = blocks[id]; const lines = blk.lines.slice(); lines.push(emitTerm(blk.term)); return `      case ${R(id)}:\n        ${lines.join("\n        ")}`; }).join("\n");
   return `  ${fnName}(F) {\n    while (true) switch (F.pc) {\n${cases}\n    }\n  }`;
+}
+
+// Rewrite a suspendable function's locals/params -> F.x, then compile it to a machine.
+function lower(p) {
+  const node = p.node;
+  const params = node.params.map((x) => x.name);
+  const locals = new Set();
+  p.traverse({ VariableDeclarator(v) { if (t.isIdentifier(v.node.id)) locals.add(v.node.id.name); } });
+  p.traverse({ CatchClause(c) { if (c.node.param && t.isIdentifier(c.node.param)) locals.add(c.node.param.name); } });
+  p.traverse({ CallExpression(cp) {                              // validate suspendable calls are statements
+    const c = cp.node.callee;
+    if (!(t.isIdentifier(c) && suspSet.has(c.name))) return;
+    const par = cp.parent;
+    if (!((t.isVariableDeclarator(par) && par.init === cp.node) || (t.isExpressionStatement(par) && par.expression === cp.node))) throw new Error(`suspendable call ${c.name}(...) must be a statement, not a sub-expression`);
+  } });
+  p.traverse({ Identifier(ip) {
+    const name = ip.node.name;
+    if (name === "F" || !(params.includes(name) || locals.has(name))) return;
+    const par = ip.parent;
+    if (t.isMemberExpression(par) && par.property === ip.node && !par.computed) return;
+    if (t.isObjectProperty(par) && par.key === ip.node && !par.computed) return;
+    if (t.isVariableDeclarator(par) && par.id === ip.node) return;
+    if (t.isCatchClause(par) && par.param === ip.node) return;
+    if (t.isFunction(par)) return;
+    if (params.includes(name)) ip.replaceWith(t.memberExpression(t.memberExpression(t.identifier("F"), t.identifier("args")), t.numericLiteral(params.indexOf(name)), true));
+    else ip.replaceWith(t.memberExpression(t.identifier("F"), t.identifier(name)));
+    ip.skip();
+  } });
+  p.traverse({ VariableDeclaration(v) {
+    if (isSusp(v.node) || callSusp(v.node)) return;               // leave suspensions for compileStmt
+    if (t.isForStatement(v.parent) && v.parent.init === v.node) return;
+    const assigns = v.node.declarations.filter((d) => d.init).map((d) => t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier("F"), t.identifier(d.id.name)), d.init)));
+    if (assigns.length) v.replaceWithMultiple(assigns); else v.remove();
+  } });
+  return compileFn(node);
 }
 
 function compile(src, preamble) {
   const ast = parser.parse(src, { sourceType: "module" });
   allowlist(ast);
-  const progs = [];
-  traverse(ast, { FunctionDeclaration(p) {
-    const node = p.node;
-    const params = node.params.map((x) => x.name);
-    const locals = new Set();
-    p.traverse({ VariableDeclarator(v) { if (t.isIdentifier(v.node.id)) locals.add(v.node.id.name); } });
-    p.traverse({ CatchClause(c) { if (c.node.param && t.isIdentifier(c.node.param)) locals.add(c.node.param.name); } });
-    // rewrite local + param refs -> F.x (reads and writes), skipping keys/decl-ids/catch-params/nested-fn params
-    p.traverse({ Identifier(ip) {
-      const name = ip.node.name;
-      if (name === "F" || !(params.includes(name) || locals.has(name))) return;
-      const par = ip.parent;
-      if (t.isMemberExpression(par) && par.property === ip.node && !par.computed) return;
-      if (t.isObjectProperty(par) && par.key === ip.node && !par.computed) return;
-      if (t.isVariableDeclarator(par) && par.id === ip.node) return;
-      if (t.isCatchClause(par) && par.param === ip.node) return;
-      if (t.isFunction(par)) return;
-      if (params.includes(name)) ip.replaceWith(t.memberExpression(t.memberExpression(t.identifier("F"), t.identifier("args")), t.numericLiteral(params.indexOf(name)), true));
-      else ip.replaceWith(t.memberExpression(t.identifier("F"), t.identifier(name)));
-      ip.skip();
-    } });
-    // var/let/const decls -> F.x = init assignments (the state machine owns the frame)
-    p.traverse({ VariableDeclaration(v) {
-      if (isSusp(v.node)) return;
-      if (t.isForStatement(v.parent) && v.parent.init === v.node) return;   // for-init handled by compileStmt
-      const assigns = v.node.declarations.filter((d) => d.init).map((d) => t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier("F"), t.identifier(d.id.name)), d.init)));
-      if (assigns.length) v.replaceWithMultiple(assigns); else v.remove();
-    } });
-    progs.push(compileFn(node));
-  } });
-  return preamble + "\nexport const PROGRAMS = {\n" + progs.join(",\n") + "\n};\n" + DRIVER;
+  const fnPaths = new Map();
+  traverse(ast, { FunctionDeclaration(p) { if (t.isProgram(p.parent)) fnPaths.set(p.node.id.name, p); } });
+  // suspendability: directly contains a yield (tier resource), or transitively calls one that does
+  const calls = new Map(); const directly = new Set();
+  for (const [name, p] of fnPaths) {
+    let y = false; const cs = new Set();
+    p.traverse({ YieldExpression() { y = true; }, CallExpression(cp) { const c = cp.node.callee; if (t.isIdentifier(c) && fnPaths.has(c.name)) cs.add(c.name); } });
+    if (y) directly.add(name); calls.set(name, cs);
+  }
+  suspSet = new Set(directly);
+  for (let changed = true; changed;) { changed = false; for (const [name, cs] of calls) if (!suspSet.has(name) && [...cs].some((c) => suspSet.has(c))) { suspSet.add(name); changed = true; } }
+
+  const pure = [], progs = [];
+  for (const [name, p] of fnPaths) { if (suspSet.has(name)) progs.push(lower(p)); else pure.push(gen(p.node)); }  // pure single-tier fns run wholesale
+  return preamble + "\n" + (pure.length ? pure.join("\n") + "\n" : "") + "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};\n" + DRIVER;
 }
 
 const DRIVER = `
@@ -255,15 +296,22 @@ export function __dispatch(F, err) {
   }
   return null;
 }
-// Single-tier driver: step the machine, stopping at every resource request. The two-tier
-// runtime (../runtime.mjs) drives PROGRAMS directly and only stops at resources THIS tier
-// doesn't own; this local driver keeps the bundle runnable alone.
+// Unwind an error across FRAMES: try the top frame's handlers, else pop it and try the
+// caller. A resource that fails in a callee is thus caught by a try/catch in a caller.
+export function __unwind(stack, err) {
+  while (stack.length) { const tpc = __dispatch(stack[stack.length - 1], err); if (tpc != null) { stack[stack.length - 1].pc = tpc; return true; } stack.pop(); }
+  return false;
+}
+// Single-tier driver: step the machine, push sub-frames for calls, stop at every resource
+// request. The two-tier runtime (../runtime.mjs) drives PROGRAMS directly and only stops
+// at resources THIS tier doesn't own; this local driver keeps the bundle runnable alone.
 export function run(stack) {
   for (;;) {
     const top = stack[stack.length - 1];
     const r = PROGRAMS[top.fn](top);
     if (r.op === "return") { stack.pop(); if (!stack.length) return { done: true, value: r.value }; stack[stack.length - 1].ret = r.value; }
-    else if (r.op === "throw") throw r.value;
+    else if (r.op === "call") { stack.push({ fn: r.fn, pc: 0, args: r.args }); }
+    else if (r.op === "throw") { stack.pop(); if (!__unwind(stack, r.value)) throw r.value; }
     else if (r.op === "resource") return { done: false, request: r, stack };
   }
 }

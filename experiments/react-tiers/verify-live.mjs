@@ -26,12 +26,16 @@ const waitFor = (pred, ms, label) => new Promise((res, rej) => {
   const t0 = Date.now();
   const iv = setInterval(() => { if (pred()) { clearInterval(iv); res(); } else if (Date.now() - t0 > ms) { clearInterval(iv); rej(new Error("timeout: " + label)); } }, 50);
 });
-const clickButton = (page, text, scope) => page.evaluate(({ text, scope }) => {
-  const root = scope ? [...document.querySelectorAll("li.task")].find((r) => r.innerText.includes(scope)) : document;
-  const b = [...root.querySelectorAll("button")].find((x) => x.textContent.trim() === text);
-  if (!b) throw new Error(`no '${text}' button` + (scope ? ` in row '${scope}'` : ""));
-  b.click();
-}, { text, scope });
+const clickButton = async (page, text, scope) => {
+  await page.waitForFunction(({ text, scope }) => {       // wait for the target to be present (each click re-renders async)
+    const root = scope ? [...document.querySelectorAll("li.task")].find((r) => r.innerText.includes(scope)) : document;
+    return root && [...root.querySelectorAll("button")].some((x) => x.textContent.trim() === text);
+  }, { text, scope }, { timeout: 8000 });
+  await page.evaluate(({ text, scope }) => {
+    const root = scope ? [...document.querySelectorAll("li.task")].find((r) => r.innerText.includes(scope)) : document;
+    [...root.querySelectorAll("button")].find((x) => x.textContent.trim() === text).click();
+  }, { text, scope });
+};
 const rootText = (page) => page.evaluate(() => document.getElementById("root").innerText.replace(/\s+/g, " ").trim());
 
 let browser;
@@ -52,7 +56,7 @@ try {
   assert(true, "real click 'done' filter → only the done task remains");
 
   await clickButton(page, "all");                                        // back to all
-  await page.waitForFunction(() => /5 tasks/.test(document.getElementById("root").innerText), { timeout: 8000 });
+  await page.waitForFunction(() => /Add rate limiting/.test(document.getElementById("root").innerText), { timeout: 8000 }); // a todo row, hidden in the done filter — unambiguous
 
   await clickButton(page, "cycle", "Upgrade Postgres");                  // cycle id 2 todo->doing
   await page.waitForFunction(() => /todo 1 \/ doing 3 \/ done 1/.test(document.getElementById("root").innerText), { timeout: 8000 });

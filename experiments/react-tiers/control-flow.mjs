@@ -4,7 +4,7 @@
 // migration on each resource — so it proves loop counters AND the try-handler stack
 // (F.__h/__c/__err) survive the wire, and that a resource failing "on another tier" is
 // caught by a try/catch in the migrated code. No browser, no socket, no Babel.
-import { PROGRAMS, __dispatch } from "./cf-fixtures.gen.mjs";
+import { PROGRAMS, __unwind } from "./cf-fixtures.gen.mjs";
 import { encodeGraph, decodeGraph } from "../../src/runtime/heap.mjs";
 
 const wire = (stack) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([stack]))))[0];
@@ -13,13 +13,15 @@ const exec = (req) => { if (req.name === "api.fail") throw new Error("resource f
 function runMigrating(fn) {
   let stack = [{ fn, pc: 0, args: [] }];
   for (;;) {
-    const r = PROGRAMS[stack[stack.length - 1].fn](stack[stack.length - 1]);
-    if (r.op === "return") return r.value;           // single-frame fixtures
-    if (r.op === "throw") throw r.value;
-    stack = wire(stack);                             // migrate: serialize the whole continuation, then service the resource
     const top = stack[stack.length - 1];
-    try { top.ret = exec(r); }
-    catch (err) { const tpc = __dispatch(top, err); if (tpc == null) throw err; top.pc = tpc; }
+    const r = PROGRAMS[top.fn](top);
+    if (r.op === "return") { stack.pop(); if (!stack.length) return r.value; stack[stack.length - 1].ret = r.value; continue; }
+    if (r.op === "call") { stack.push({ fn: r.fn, pc: 0, args: r.args }); continue; }   // push a sub-frame
+    if (r.op === "throw") { stack.pop(); if (!__unwind(stack, r.value)) throw r.value; continue; }
+    stack = wire(stack);                             // resource: serialize the WHOLE (possibly multi-frame) continuation, then service
+    const f = stack[stack.length - 1];
+    try { f.ret = exec(r); }
+    catch (err) { if (!__unwind(stack, err)) throw err; }
   }
 }
 
@@ -29,6 +31,9 @@ const cases = [
   ["try/catch a resource error across the migrate", "catchAcrossTier", "rescued:resource failed"],
   ["try/finally runs on the normal path", "finallyRuns", "a5F"],
   ["try/catch/finally (resource throws)", "catchFinally", "aCF"],
+  ["sync throw inside a compiled function", "throwInMachine", "caught:boom"],
+  ["nested suspension: callee suspends, multi-frame stack migrates", "sumViaHelper", 12],
+  ["cross-frame catch: callee's resource fails, caller catches", "callerCatches", "caught:resource failed"],
 ];
 
 let pass = 0;
@@ -40,6 +45,6 @@ for (const [label, fn, expected] of cases) {
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : `  (got ${err ? "ERR:" + err.message : JSON.stringify(got)}, expected ${JSON.stringify(expected)})`}`);
 }
 console.log(pass === cases.length
-  ? `\nPASS — extended control flow survives migration: loops, continue, and try/catch/finally across suspends (${pass}/${cases.length})`
+  ? `\nPASS — extended control flow survives migration: loops, continue, try/catch/finally, and nested function calls across suspends (${pass}/${cases.length})`
   : `\nFAIL (${pass}/${cases.length})`);
 process.exit(pass === cases.length ? 0 : 1);
