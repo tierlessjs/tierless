@@ -99,3 +99,35 @@ function throwInMachine() {
   }
   return out;                         // "caught:boom"
 }
+
+// --- suspensions in EXPRESSION positions (the compiler hoists them to temps) ---
+function addPure(a, b) { return a + b; }   // pure helper: emitted verbatim, called inline
+function returnExpr() {
+  return api.get(7) + 1;              // resource value used in an expression -> hoisted
+}
+function assignRhs() {
+  let out = "a";
+  out = api.get(5);                   // resource on an assignment RHS -> hoisted
+  return out;                         // 5
+}
+function ifTest() {
+  if (api.get(1)) {                   // resource in an if-test -> hoisted before the if
+    return "yes";
+  }
+  return "no";                        // "yes"
+}
+function whileTestSusp() {
+  let i = 3;
+  let sum = 0;
+  while (api.dec(i)) {                // resource in a while-test -> desugared (re-evaluated each pass)
+    sum = sum + i;
+    i = i - 1;
+  }
+  return sum;                         // 3 + 2 + 1 = 6
+}
+function nestedArgs() {
+  return addPure(api.get(2), api.get(3));  // two resources in a pure call's args -> hoisted in order
+}
+function callInExpr() {
+  return fetchDouble(4) + 1;          // a suspendable call's result used in an expression -> hoisted
+}

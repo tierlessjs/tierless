@@ -63,7 +63,7 @@ function allowlist(ast) {
     if (!tier) return;
     p.replaceWith(t.yieldExpression(t.callExpression(t.identifier("R"),
       [t.stringLiteral(tier), t.stringLiteral(name), ...args])));
-    p.skip();
+    // no p.skip(): keep traversing so nested tier calls in the args (e.g. api.f(api.g())) get rewritten too
   } });
 }
 
@@ -98,6 +98,67 @@ function containsSuspCall(node) {                                  // a suspenda
     for (const k in n) { if (k === "loc" || k === "start" || k === "end" || k === "leadingComments" || k === "trailingComments") continue; walk(n[k]); }
   })(node);
   return found;
+}
+
+// ---- ANF normalization: hoist suspensions out of expression positions ----
+// A suspension is a tier resource yield (R(...)) or a call to a suspendable function.
+// After this pass every suspension is `const __tN = <susp>;` or `<susp>;` — a statement,
+// which is all compileStmt knows how to lower. This is what lets ordinary code compile:
+// `return f(x)`, `out = api.get()`, `a + f(x)`, `g(f(x))`, `if (api.check())`, `while (...)`.
+const isResYield = (n) => t.isYieldExpression(n) && t.isCallExpression(n.argument) && t.isIdentifier(n.argument.callee, { name: "R" });
+const isSuspCallNode = (n) => t.isCallExpression(n) && t.isIdentifier(n.callee) && suspSet.has(n.callee.name);
+const isSuspExpr = (n) => isResYield(n) || isSuspCallNode(n);
+function hasSuspInside(node, exclSelf) {
+  let found = false;
+  (function walk(n, root) {
+    if (found || !n || typeof n !== "object") return;
+    if (Array.isArray(n)) return n.forEach((x) => walk(x, false));
+    if (!(root && exclSelf) && isSuspExpr(n)) { found = true; return; }
+    for (const k in n) { if (k === "loc" || k === "start" || k === "end" || k === "leadingComments" || k === "trailingComments") continue; walk(n[k], false); }
+  })(node, true);
+  return found;
+}
+const isHeadNormal = (path) => {                                   // already in a position compileStmt handles
+  const p = path.parentPath;
+  if (p.isExpressionStatement()) return true;
+  if (p.isVariableDeclarator() && p.node.init === path.node) { const d = p.parentPath; return d.node.declarations.length === 1 && (d.parentPath.isBlockStatement() || d.parentPath.isProgram()); }
+  return false;
+};
+function assertSafeContext(path, stmt) {                           // refuse to hoist out of short-circuit / conditional positions
+  let cur = path;
+  while (cur && cur !== stmt) {
+    const par = cur.parentPath;
+    if (par.isLogicalExpression() && par.node.right === cur.node) throw new Error("suspension in the right side of && / || / ?? is not supported (lift it to a statement above)");
+    if (par.isConditionalExpression() && (par.node.consequent === cur.node || par.node.alternate === cur.node)) throw new Error("suspension in a branch of ?: is not supported (use an if statement)");
+    if (par.isOptionalMemberExpression() || par.isOptionalCallExpression()) throw new Error("suspension under optional chaining (?.) is not supported");
+    cur = par;
+  }
+}
+function normalize(fnPath) {
+  let counter = 0;
+  for (let guard = 0; guard < 100000; guard++) {
+    let acted = false;
+    fnPath.traverse({ WhileStatement(p) {                         // while(E) where E suspends -> while(true){ if(!(E)) break; body }
+      if (acted || t.isBooleanLiteral(p.node.test, { value: true }) || !hasSuspInside(p.node.test, false)) return;
+      const body = t.isBlockStatement(p.node.body) ? p.node.body.body : [p.node.body];
+      p.replaceWith(t.whileStatement(t.booleanLiteral(true), t.blockStatement([t.ifStatement(t.unaryExpression("!", p.node.test), t.blockStatement([t.breakStatement()])), ...body])));
+      acted = true; p.stop();
+    } });
+    if (acted) continue;
+    fnPath.traverse({ enter(p) {                                   // hoist one innermost, non-head-normal suspension
+      if (acted) return;
+      const n = p.node;
+      if (!isSuspExpr(n) || hasSuspInside(n, true) || isHeadNormal(p)) return;
+      const stmt = p.getStatementParent();
+      if (stmt.isWhileStatement() || stmt.isForStatement() || stmt.isDoWhileStatement() || stmt.isForOfStatement() || stmt.isForInStatement()) throw new Error("suspension in a loop header is not supported (use while(true) + an explicit break, or assign it inside the body)");
+      assertSafeContext(p, stmt);
+      const name = "__t" + (counter++);
+      stmt.insertBefore(t.variableDeclaration("const", [t.variableDeclarator(t.identifier(name), n)]));
+      p.replaceWith(t.identifier(name));
+      acted = true; p.stop();
+    } });
+    if (!acted) break;
+  }
 }
 const blockStmts = (n) => (t.isBlockStatement(n) ? n.body : [n]);
 const withNext = (ctx, next) => ({ ...ctx, next });
@@ -229,6 +290,7 @@ function compileFn(node) {
 
 // Rewrite a suspendable function's locals/params -> F.x, then compile it to a machine.
 function lower(p) {
+  normalize(p);                                                   // hoist suspensions out of expression positions first
   const node = p.node;
   const params = node.params.map((x) => x.name);
   const locals = new Set();

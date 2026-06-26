@@ -34,6 +34,12 @@ const cases = [
   ["sync throw inside a compiled function", "throwInMachine", "caught:boom"],
   ["nested suspension: callee suspends, multi-frame stack migrates", "sumViaHelper", 12],
   ["cross-frame catch: callee's resource fails, caller catches", "callerCatches", "caught:resource failed"],
+  ["resource value used in an expression (return f()+1)", "returnExpr", 8],
+  ["resource on an assignment RHS (x = api.get())", "assignRhs", 5],
+  ["resource in an if-test", "ifTest", "yes"],
+  ["resource in a while-test (desugared)", "whileTestSusp", 6],
+  ["two resources in a call's args, order preserved", "nestedArgs", 5],
+  ["suspendable-call result used in an expression", "callInExpr", 9],
 ];
 
 let pass = 0;
@@ -45,6 +51,6 @@ for (const [label, fn, expected] of cases) {
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : `  (got ${err ? "ERR:" + err.message : JSON.stringify(got)}, expected ${JSON.stringify(expected)})`}`);
 }
 console.log(pass === cases.length
-  ? `\nPASS — extended control flow survives migration: loops, continue, try/catch/finally, and nested function calls across suspends (${pass}/${cases.length})`
+  ? `\nPASS — extended control flow survives migration: loops, continue, try/catch/finally, nested calls, and suspensions in expression positions (${pass}/${cases.length})`
   : `\nFAIL (${pass}/${cases.length})`);
 process.exit(pass === cases.length ? 0 : 1);

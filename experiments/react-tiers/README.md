@@ -70,7 +70,10 @@ hooks. `api.*` and `commit()` look like ordinary calls.
    `while`/`for`, `break`/`continue`, `return`, `throw`, `try/catch/finally`, and **calls
    between functions** — **including a resource that fails on another tier being caught by
    a `catch` up the call stack in the migrated code**, because the handler stack (`F.__h`)
-   rides along in the serialized continuation. (`control-flow.mjs` proves each of these
+   rides along in the serialized continuation. A suspension may appear in any ordinary
+   **expression position** (`return f(x)`, `out = api.get()`, `a + f(x)`, `g(api.h())`,
+   `if (api.check())`, `while (api.more())`): an ANF pass hoists it into a temp on the
+   frame, in evaluation order, before lowering. (`control-flow.mjs` proves each of these
    survives a wire round-trip at every suspend.)
 
    **Suspendability is inferred.** A function is compiled into a state machine only if it
@@ -150,11 +153,13 @@ node experiments/react-tiers/transform.cjs experiments/react-tiers/cf-fixtures.s
 ## Caveats / not-yet
 
 - `transform.cjs` now covers sequence, `if/else`, `while`/`for`, `break`/`continue`,
-  `return`, `throw`, `try/catch/finally`, and **calls between suspendable functions**
-  (sub-frames; the continuation spans the call stack), all across suspends. Remaining gaps
-  (the compiler throws a clear error rather than miscompile): a `break`/`continue`/`return`
-  that **exits** a `try`, a suspendable call used as a **sub-expression** (assign it to a
-  local first), `switch`, and labeled loops. `@babel/plugin-transform-regenerator` is the
+  `return`, `throw`, `try/catch/finally`, **calls between suspendable functions**
+  (sub-frames; the continuation spans the call stack), and **suspensions in expression
+  positions** (hoisted to frame temps), all across suspends. Remaining gaps (the compiler
+  throws a clear error rather than miscompile): a suspension in a **short-circuit /
+  conditional** position (`&&`, `||`, `??`, `?:`, `?.` — lift it to a statement) or a
+  **loop header** other than a plain `while`, a `break`/`continue`/`return` that **exits**
+  a `try`, `switch`, and labeled loops. `@babel/plugin-transform-regenerator` is the
   reference for the rest, onto this same explicit-frame model.
 - Render runs wholesale on the server and the browser only commits. Splitting render
   itself across tiers (per-component continuation identity) is the larger follow-on.
