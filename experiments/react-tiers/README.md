@@ -111,16 +111,24 @@ hooks. `api.*` and `commit()` look like ordinary calls.
      and click. `verify-live.mjs` drives this live page headlessly with real Chromium
      clicks.
 
-5. **§5 distributed handle heap** (`heap.mjs`). Small locals travel with the continuation;
-   a **big** local stays on its owning tier as an opaque handle (`{owner, id}`) and is
-   fetched only if the other tier actually derefs it — the *stack-smaller-than-heap* win
-   (design.md §5). `encodeWire` flattens each frame's locals into individual roots so a big
-   one excises into the tier's versioned heap while the frame skeleton stays tiny; the
-   project's `Heap`/`Channel`/`makeHost` (`src/runtime/fetch.mjs`) provide fetch-on-deref
-   with **single-writer** coherence (owner is master, bumps a version on mutate, readers
-   hold a version-invalidated snapshot cache). `heap-probe.mjs` shows a 1.1 MB dataset ride
-   as a 463-byte handle (≈2400× smaller wire), fetched coherently only when derefed. (Not
-   yet wired into the live `pump` — it's the codec/coherence layer, proven standalone.)
+5. **§5 distributed handle heap** (`heap.mjs`, `heap-live.mjs`). Small locals travel with
+   the continuation; a **big** local stays on its owning tier as an opaque handle
+   (`{owner, id}`) and is fetched only if the other tier actually touches it — the
+   *stack-smaller-than-heap* win (design.md §5). `encodeWire` flattens each frame's locals
+   into individual roots so a big one excises into the tier's versioned heap while the
+   frame skeleton stays tiny; the project's `Heap`/`Channel`/`makeHost`
+   (`src/runtime/fetch.mjs`) provide fetch-on-deref with **single-writer** coherence (owner
+   is master, bumps a version on mutate, readers hold a version-invalidated snapshot cache).
+   Wired into the live two-tier pump over a **real `ws` socket** (`heap-live.mjs`): a 1.1 MB
+   dataset crosses the commit migration as a **452-byte handle** and is fetched back over
+   the same socket only when the browser derefs it (the §6 fetch path).
+
+6. **Transparent deref** (`--auto-deref`, `heap-auto.mjs`). The developer writes ordinary
+   `rows[i].title` — no `deref()` call. Compiled with `--auto-deref`, the machine guards
+   each read of a data-resource local with `if (isHandle(rows)) rows = deref(rows)`, so the
+   first touch on the tier where it arrived as a handle fetches it and materializes it in
+   place (later touches are cheap checks). On the owning tier the guards are no-ops. This
+   is the interpreter's deref-on-touch, recovered for the compiled continuation.
 
 ## Files
 
@@ -142,6 +150,10 @@ hooks. `api.*` and `commit()` look like ordinary calls.
 | `control-flow.mjs` | headless regression for loops/continue/try-catch-finally across migration — in `npm test` |
 | `heap.mjs` | §5 distributed handle heap: frame-flattening tier-aware wire + `Heap`/`Channel`/`makeHost` reuse |
 | `heap-probe.mjs` | headless proof: big locals stay home as handles, fetched on deref, single-writer coherent — in `npm test` |
+| `heap-app.src.js` → `heap-app.gen.mjs` | a big-data Report (explicit `deref`) for the live heap demo |
+| `heap-live.mjs` | the §5 heap over a **real `ws` socket**: dataset stays server-side, fetched on deref — in `npm test` |
+| `heap-auto.src.js` → `heap-auto.gen.mjs` | the same Report with **no `deref()`** (compiled `--auto-deref`) |
+| `heap-auto.mjs` | proof of **transparent deref**: ordinary `rows[i]` auto-fetches a handle on touch — in `npm test` |
 | `verify-live.mjs` | headless check of the live page via real Chromium clicks (run on demand) |
 
 ## Running
@@ -179,12 +191,12 @@ node experiments/react-tiers/transform.cjs experiments/react-tiers/cf-fixtures.s
   implicitly, so it's intentionally unsupported rather than a missing feature.
 - Render runs wholesale on the server and the browser only commits. Splitting render
   itself across tiers (per-component continuation identity) is the larger follow-on.
-- The §5 handle heap (`heap.mjs`) is proven at the codec/coherence layer but **not yet
-  wired into the live `pump`** — the next step is to excise big locals on a real migration
-  and serve `fetch{id}` over the `ws` socket (the protocol `src/runtime/wss.mjs` already
-  defines). Transparent deref in CPS (touch a foreign handle and it auto-fetches) needs a
-  compiler hook, since the state machine accesses `F.x` directly; today a deref is explicit
-  (via `makeHost`).
+- The §5 handle heap runs over the live `ws` socket (`heap-live.mjs`) and touch-to-fetch is
+  transparent with `--auto-deref` (`heap-auto.mjs`). Remaining heap refinements: the §6
+  migrate-vs-fetch *policy* (when to ship the continuation vs fetch the data) is modeled in
+  `examples/policy` but not yet consulted by the live `pump`; `--auto-deref` guards every
+  read of a data-resource local (pessimistic — a liveness pass could prune the no-op guards
+  on the owning tier).
 - Cross-tier **shared mutable state** now has the design's answer at the data layer:
   single-writer + version-invalidated cache (read-mostly shared data works). **Write-back**
   — a reader's mutation propagating to the owner — is the still-deferred hard problem, as

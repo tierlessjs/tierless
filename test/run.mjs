@@ -65,6 +65,7 @@ const cases = [
   { file: "experiments/react-tiers/control-flow.mjs", needs: ["extended control flow survives migration"] },
   { file: "experiments/react-tiers/heap-probe.mjs",    needs: ["big locals stay home, fetched on deref, single-writer coherent"] },
   { file: "experiments/react-tiers/heap-live.mjs",     needs: ["the dataset stayed on the server, crossing only when the browser derefed it"] },
+  { file: "experiments/react-tiers/heap-auto.mjs",     needs: ["transparent deref: ordinary member access on a handle auto-fetches"] },
 ];
 
 // Build the wasm once up front.
