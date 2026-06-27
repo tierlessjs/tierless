@@ -1,155 +1,145 @@
 # Architecture
 
-This document explains how Stackmix is put together and why. For the original
-vision and the open research questions, see [`design.md`](./design.md) (the
-spec).
+How Stackmix is put together and why. For the original vision and the open
+research questions, see [`design.md`](./design.md) (the spec).
 
 ## The model in one paragraph
 
-You write one program in ordinary TypeScript. You do **not** annotate which parts
-run on the client and which on the server. Instead, placement is *inferred* from
-the resources each call touches — `db.*` forces the server, `ui.*`/`DOM.*` force
-the client. When execution reaches a resource the current tier doesn't have, the
-runtime captures the live continuation (the call stack, as plain serializable
-data), ships it to the tier that does have the resource, and resumes it there.
-The big data stays where it lives; only the small continuation moves.
+You write one program in ordinary JavaScript. You do **not** annotate which parts
+run on the browser and which on the server. Instead, placement is *inferred* from
+the resources each call touches — `api.*` forces the server, `commit()`/`dom.*`
+force the browser. When execution reaches a resource the current tier doesn't have,
+the runtime captures the live continuation (the call stack, as plain serializable
+data), ships it over a WebSocket to the tier that does have the resource, and
+resumes it there. The big data stays where it lives; only the small continuation
+moves.
 
 ## Repository layout
 
 ```
-src/                  the framework (what ships)
-  index.mjs           the public API surface + createRuntime() (composition root)
-  runtime/
-    core.mjs          the interpreter, the IR, the continuation wire format
-    heap.mjs          identity-preserving, cycle-safe graph codec for the wire
-    frame.mjs         length-prefixed framing (JSON header + binary attachment)
-    fetch.mjs         §5 handle deref: local / cached / fetch-from-owner
-  compiler/
-    tsc.mjs           TypeScript -> Stackmix IR, via a real ts.Program + checker
-  wasm/
-    interpreter.wat   the interpreter as a WebAssembly module
-    core.mjs          wasm runtime: instances, capture/restore, heap, policy
-    compile.mjs       the i32 TS subset -> wasm IR
-    build.mjs         interpreter.wat -> interpreter.wasm (via wabt)
-bin/stackmix.mjs      the CLI (compile / run / new)
-types/index.d.ts      hand-written type declarations for the public API
-examples/             runnable demos (spike, wss, wasm, hn-thread, ...)
-bench/                the HN waterfall + Conduit over-fetch benchmarks
-test/                 conformance, differential, decorator, multi-module suites + probes
-templates/basic/      the `stackmix new` scaffold
-docs/                 this document, the design spec
+src/                the framework
+  transform.cjs     the compiler: plain JS -> serializable state machine (Babel)
+  runtime.mjs       the pump — one tier-agnostic continuation driver + the wire envelope
+  graph.mjs         identity/cycle-safe graph codec for the wire
+  heap.mjs          §5 distributed handle heap: encodeWire, makeTier, write-back CAS
+  fetch.mjs         Heap / Channel / makeHost — fetch-on-deref with coherence
+  transport.mjs     WebSocket framing + RPC peer (browser-safe)
+  app/              the demo app (plain components -> serializable vdom)
+  public/           the browser tier (runs in a real tab)
+  *.mjs             the demos and headless proofs (also the regression suite)
+test/               the regression runner + the wire-codec probe
+docs/               this document, the design spec
 ```
 
-The load-bearing framework is `src/`. Everything else is evidence that it works
-(`examples/`, `bench/`, `test/`) or supporting material (`docs/`, `templates/`).
+## How a function becomes migratable
 
-## Public API
+`transform.cjs` is a Babel transform that runs in two passes.
 
-The single supported entry point is `#stackmix` (internally) / `stackmix`
-(as a package), which resolves to `src/index.mjs`. The batteries-included entry
-is `createRuntime()`:
+1. **Allow-list rewrite.** A call to a tier-pinned namespace becomes a suspension:
+   `api.getRows(x)` → `yield R("server", "api.getRows", x)`, `commit(v)` →
+   `yield R("browser", "dom.commit", v)`. The allow-list (`TIER_OF`) is the only
+   place tier identity is declared; everything else is inferred.
+2. **State-machine lowering.** A function that (transitively) touches a resource is
+   **suspendable** and is compiled into a `while (true) switch (F.pc) { … }` machine:
+   control flow becomes `pc` transitions, and every local is hoisted onto an explicit
+   frame object `F` (`F.x`, not a closed-over `x`). Suspensions in expression
+   positions are first hoisted into frame temps (an ANF normalize pass), and loops,
+   `switch`, labeled `break`/`continue`, and `try`/`catch`/`finally` (including
+   `return`/`break`/`continue` *across* a `finally`) all lower to serializable form.
+   A function that touches no resource is **pure** and is emitted verbatim, called
+   inline like any ordinary function.
 
-```js
-import { createRuntime, Tier, serializeContinuation } from "stackmix";
+Because the continuation is just `F` (a plain object: `fn`, `pc`, and named locals)
+plus the small call stack of such frames, it is plain JSON — there is no native
+stack frame and no closure to capture.
 
-const rt = createRuntime();              // an isolated program registry + bound interpreter
-rt.load(tsSource, { entry: "main", resources: ["db.query", "ui.render"] });
-const result = rt.run(tier, frames, host);
+## The pump (`runtime.mjs`)
+
+One tier-agnostic driver runs the continuation on whichever tier holds it:
+
+```
+pump(stack, ownsHere, execHere, incoming?):
+  step the top frame's machine; on a result:
+    return  -> pop the frame (or finish)
+    call    -> push a sub-frame (the continuation spans call boundaries)
+    resource this tier owns      -> run it inline, feed the value back
+    resource this tier does NOT  -> stop, hand back { stack, request } to ship
 ```
 
-A **runtime** owns one program registry and binds the interpreter and the
-TypeScript frontend to it. Two runtimes never share state — this replaced the
-prototype's single process-wide `PROGRAM` global. Lower-level primitives (`run`,
-the wire codec, the compiler functions) are also exported for advanced use; deep
-imports (`#stackmix/runtime/...`, `#stackmix/wasm/...`) exist but carry no
-stability guarantee.
+The same `pump` runs on both tiers; only `ownsHere`/`execHere` differ. A continuation
+therefore flows back and forth across the socket, finishing wherever the last
+resource lands. Exceptions propagate across frames via a serializable handler stack,
+so a resource that throws on one tier is caught by a `try` on the other.
 
-## Core concepts
+## The wire (`graph.mjs` + the envelope)
 
-- **Program / IR.** A program is a plain registry: function name → `{ nlocals,
-  code, pos? }`. The IR is a WASM-shaped stack machine with explicit numbered
-  locals. Every resource access compiles to a single `RES` instruction — the only
-  place a migration can happen. Boundaries are visible at compile time; the
-  decision to migrate is made at runtime.
-- **Tier.** An isolated execution context: its own resource imports and its own
-  heap. The client tier physically cannot call `db.query` — it isn't in its
-  import set. Two tiers run the *same* program (code travels by reference; resume
-  is by instruction offset).
-- **Continuation + wire format.** A captured continuation is the live frame stack
-  plus what it's waiting on. `serializeContinuation` encodes everything reachable
-  through `heap.mjs`'s graph codec: shared references stay shared, cycles survive,
-  and any subgraph larger than `HANDLE_THRESHOLD` becomes an opaque §5 *handle*
-  into the owning tier's heap instead of being copied.
-- **Host / deref.** Dereferencing a handle resolves three ways: it's *local* (use
-  it), it's *cached* (use the snapshot), or it's *remote* — which returns a `Miss`
-  that the interpreter turns into a fetch suspension. Every deref-touching opcode
-  is peek-then-deref, so a miss leaves the stack and instruction pointer intact
-  and the re-run is correct.
+What crosses the socket is an envelope — `{ frames, req, graph }` — where `frames`
+is the call-stack skeleton (`fn`, `pc`, which locals, where they start in the graph),
+`req` is the resource boundary it suspended at (name + tier + already-evaluated
+args), and `graph` is the object graph the locals point into.
+
+`encodeGraph` walks every value reachable from the roots and emits a flat table where
+each distinct object is one entry and every reference is `{k:"r", id}`. That:
+
+- **preserves identity** — a shared object is one entry, referenced by id from
+  everywhere; it does not split into copies;
+- **survives cycles** — an object's id is reserved before its fields recurse, and
+  `decodeGraph` pre-creates every object before filling it, so back-edges resolve;
+- **keeps continuations small** — a subgraph larger than `threshold` becomes a §5
+  *handle* into the owning tier's heap (a leaf — it stays tier-local) instead of being
+  copied;
+- carries the non-JSON cases faithfully (`undefined`, BigInt, symbols, Map/Set,
+  non-enumerable + symbol-keyed props) and ships host globals and well-known symbols
+  by reference rather than copying them.
+
+## The heap (`heap.mjs` + `fetch.mjs`)
+
+The §5 distributed heap is how the big data stays put.
+
+- **Handles.** A big local excises into its owning tier's versioned `Heap` and travels
+  as `{ __stackmix_handle__, owner, id }`. The other tier fetches it (over the same
+  socket) only if it dereferences the handle.
+- **Read coherence (single-master).** The owner is the master and bumps a version on
+  mutation; a reader caches fetched snapshots keyed by version and re-fetches when the
+  master moves. With `--auto-deref` the compiler guards each read of a data-resource
+  local so the first touch fetches transparently.
+- **Write coherence (optimistic CAS).** A reader that mutates a fetched snapshot
+  proposes it back to the master under the version it read (`writeBack`); the master
+  accepts only if no one bumped it in between, else the writer refetches and retries —
+  no lost updates. With `--auto-writeback` the compiler emits that propagation after
+  each member mutation through a data-resource local.
+- **Placement (§6).** At a pure-data boundary the driver can either ship the
+  continuation to the data (migrate) or pull the data back and stay put (fetch),
+  priced from real measured bytes — cheaper side wins, cold defaults to migrate.
 
 ## Why the transportable continuation is ours to build
 
-A reasonable question: modern JS has `async`/`await` and generators — native
-suspension. Why not capture *those*?
-
-Because native async is **suspend-but-not-serialize**. A paused async or generator
-state is engine-internal; you cannot read it out as bytes and ship it to another
-process. (This is the same limitation that makes the WebAssembly stack-switching
-proposal in-process and one-shot — see design `§8`.) So Stackmix reuses async
-*semantics* for the boundary shape — a resource access is just an `await` — but the
-*transportable* continuation is its own data structure, captured at the
-interpreter level in Stackmix's own IR. That is the load-bearing design decision,
-and it's why the prototype does not depend on any unreleased platform feature.
-
-## The two execution paths (intentional)
-
-Stackmix has two interpreters with different jobs:
-
-- **The JS path** (`runtime/core.mjs` + the `compiler/tsc.mjs` frontend) is the
-  language substrate. It runs arbitrary JS values and is where all the language
-  coverage lives — closures, classes + inheritance, generators, async,
-  destructuring, BigInt/Symbol, getters/setters, the metaprogramming surface
-  (Proxy, Reflect + metadata, decorators, type-based DI), and multi-module
-  programs — all proven to survive serialize/resume migration and measured for
-  fidelity against Node's own evaluator.
-- **The WASM path** (`wasm/interpreter.wat`) is the minimal proof that the
-  continuation can live in linear memory — a byte-slice that crosses a real
-  WebSocket between two instances. It is deliberately i32-only; extending it to the full
-  language is not the point. The two are separate tracks, not a coverage gap.
+Modern JS has `async`/`await` and generators — native suspension — so why not capture
+those? Because native async is **suspend-but-not-serialize**: a paused async or
+generator state is engine-internal; you cannot read it out as bytes and ship it to
+another process. (Same limitation as the WebAssembly stack-switching proposal — see
+design `§8`.) Stackmix reuses async *semantics* for the boundary shape (a resource
+access is a suspension), but the *transportable* continuation is its own data
+structure — a plain frame object the compiler produces — so the prototype depends on
+no unreleased platform feature.
 
 ## Known limitations and intentional caveats
 
-These affect only buggy or exotic code; each is a deliberate trade-off in the
-TypeScript frontend, not an accidental gap:
+These are deliberate trade-offs in the compiler, not accidental gaps:
 
-- **TDZ non-enforcement.** Reading a `let`/`const` before its declaration yields
-  `undefined` rather than a `ReferenceError` (enforcing it would cost a sentinel
-  check on every read).
-- **Dynamic accessor keys.** A *static* `obj.x` read does not fire an accessor
-  installed via `Object.defineProperty` or a computed-name accessor; computed
-  access `obj[k]` does. (Belongs with a future reactivity pass.)
-- **Dynamic `new` / `Reflect.construct` on top-level classes.** The inline
-  `new LocalClass()` path is unaffected; only dynamic construction of a *local*
-  class whose methods close over enclosing scope is restricted.
-- **`emitDecoratorMetadata` across imported type *aliases*.** Same-module and
-  imported *classes* resolve via the checker (the dependency-injection case
-  works); following an imported `type X = ...` alias to its ultimate type does
-  not.
+- **Source is a plain function.** `async`/generator *source* is intentionally
+  unsupported — tier calls suspend implicitly, so the developer never writes `await`.
+- **Suspension in an optional-chain conditional.** `obj?.m(api.x())` /
+  `a?.[api.x()]` throws a clear compile error; lift it to a statement (the suspendable
+  *base*, `api.get()?.x`, is fine).
+- **`--auto-deref` guards every read.** This is correct, not merely conservative: a
+  round-trip migration can re-excise a big local back into a handle, so each read must
+  re-check. A liveness pass could prune guards provably dominated by an earlier one
+  with no intervening suspension.
+- **Write-back ships the whole edited object**, not a field-level diff; the §6
+  fetch-size profile is sampled once and locked in (no online re-profiling, by design).
 
-The cross-process continuation-migration and §5 handle-fetch transport is now
-wired over a real WebSocket (`src/runtime/wss.mjs`, exercised in `examples/wss`).
-Broader prototype limits (no native wasm stack capture by design; numeric-only
-wasm path; fixed working-heap size; no in-browser host — DOM resources, bundling —
-or portable source maps yet) are described in the README and tracked in
-[`../ROADMAP.md`](../ROADMAP.md). They line up with the design doc's own open
+Broader open questions — a binary wire format, broader language coverage, the trust
+boundary, content-addressed code identity — are tracked in
+[`../ROADMAP.md`](../ROADMAP.md) and line up with the design doc's own open
 questions (`§10`).
-
-## Evolving the structure
-
-`src/runtime`, `src/compiler`, and `src/wasm` are deliberately clean module
-boundaries: the runtime does not depend on the compiler (you can run IR without
-the TypeScript frontend), and the wasm path is independent of both. If and when
-the project benefits from independently versioned packages, these subdirectories
-are the natural seams to extract into `@stackmix/runtime`, `@stackmix/compiler`,
-and `@stackmix/wasm`. That split is intentionally deferred until it earns its
-keep — a single package with clean internal boundaries is simpler to develop and
-release today.

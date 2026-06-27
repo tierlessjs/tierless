@@ -1,14 +1,4 @@
 node_modules/
 
-# build artifact (compiled from src/wasm/interpreter.wat)
-src/wasm/interpreter.wasm
-
-# bench output
-bench-sweep.csv
-*.tsbuildinfo
-
-# fetched test262 corpus (vendored on demand by test/test262/fetch262.mjs)
-test/test262/vendor/
-
-# react-tiers demo runtime DB (rewritten by api.seed() on each run)
-experiments/react-tiers/app/tasks-db.json
+# browser-tier demo runtime DB (rewritten by api.seed() on each run)
+src/app/tasks-db.json

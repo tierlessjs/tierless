@@ -10,52 +10,65 @@ reports, and improvements to the items on the [roadmap](./ROADMAP.md).
 git clone https://github.com/bfulton/stackmix
 cd stackmix
 npm install
-npm test        # builds the wasm and runs every demo + the conformance/differential suites
+npm test        # runs every demo + probe headless and asserts the headline claims
 ```
 
 Read [`docs/architecture.md`](./docs/architecture.md) first — it explains the
-repository layout, the public API, and the two execution paths.
+repository layout, the compiler, the pump, the wire, and the heap. For the live
+two-tier walkthrough, see [`src/README.md`](./src/README.md).
 
 ## The checks that must pass
 
-CI runs three gates, and they should all be green locally before you open a PR:
+CI runs two gates, and both should be green locally before you open a PR:
 
 ```bash
 npm run lint        # ESLint (correctness-focused)
-npm run typecheck   # tsc against the public type declarations
-npm test            # the full regression suite (every example, bench, probe, and suite)
+npm test            # the full regression suite (every demo + probe)
 ```
 
-`npm test` is not just "exit 0" — `test/run.mjs` asserts the headline claims of
-each demo (continuation sizes, round-trip counts, cross-process correctness) and
-the conformance/differential suites measure language fidelity against Node itself.
-If you change runtime or compiler behavior, the relevant suite should still pass;
-if you add a language feature, add a case to `test/conformance.mjs` (fidelity +
-migration survival) and/or `test/difftest.mjs` (differential vs Node).
+`npm test` is not just "exit 0" — `test/run.mjs` asserts the headline claim of each
+demo (continuation sizes, migrate-vs-fetch decisions, cross-tier correctness). If you
+change runtime or compiler behavior, the relevant proof should still pass; if you add
+behavior, add a proof and wire it into `test/run.mjs`.
+
+## Working with the compiler
+
+The compiler (`src/transform.cjs`) lowers a plain `*.src.js` function into a generated
+`*.gen.mjs` state machine. The generated bundles are **committed** so `npm test` runs
+without a build step. Regenerating them needs the Babel toolchain (not a runtime
+dependency):
+
+```bash
+npm i -D @babel/parser@8 @babel/traverse@8 @babel/generator@8 @babel/types@8
+node src/transform.cjs src/app/App.src.js src/app/bundle.gen.mjs
+node src/transform.cjs src/heap-write.src.js src/heap-write.gen.mjs --bare --auto-deref --auto-writeback
+```
+
+If you change a `*.src.js` input or the compiler, regenerate and commit the matching
+`*.gen.mjs`.
 
 ## Code style
 
-- **Match the surrounding code.** The interpreter (`src/runtime/core.mjs`) is
-  written in a deliberately dense, one-line-per-opcode style; please keep it that
-  way rather than reformatting. There is no Prettier step on purpose — automatic
-  reformatting would hurt the readability of the dispatch loop.
+- **Match the surrounding code.** The pump and the codec are written in a deliberately
+  dense, one-line-per-case style; please keep it that way rather than reformatting.
+  There is no Prettier step on purpose.
 - Two-space indent, LF line endings, UTF-8, final newline (enforced by
   `.editorconfig`).
-- Prefer the public API (`#stackmix`) in examples, benchmarks, and tests; reach
-  for deep imports (`#stackmix/runtime/...`) only when you genuinely need an
-  internal.
+- `*.src.js` (compiler inputs) and `*.gen.mjs` (compiler outputs) are eslint-ignored
+  by design — don't hand-edit a `.gen.mjs`.
 
 ## Where things live
 
 | You want to change... | Edit... |
 |---|---|
-| the interpreter / IR / wire format | `src/runtime/` |
-| TypeScript → IR lowering | `src/compiler/tsc.mjs` |
-| the WASM linear-memory path | `src/wasm/` |
-| the public API surface | `src/index.mjs` + `types/index.d.ts` |
-| the CLI | `bin/stackmix.mjs` |
-| a demo or the getting-started story | `examples/` |
-| a benchmark | `bench/` |
+| the compiler (plain JS → state machine) | `src/transform.cjs` |
+| the pump / wire envelope | `src/runtime.mjs` |
+| the graph/wire codec | `src/graph.mjs` |
+| the §5 heap, write-back, §6 policy | `src/heap.mjs`, `src/fetch.mjs` |
+| the WebSocket transport | `src/transport.mjs` |
+| the demo app | `src/app/` |
+| the browser tier | `src/public/` |
+| a proof / regression case | `src/*.mjs` + `test/run.mjs` |
 
 ## Commits & pull requests
 
@@ -66,10 +79,9 @@ migration survival) and/or `test/difftest.mjs` (differential vs Node).
 
 ## Reporting bugs
 
-For a language-fidelity bug, the most useful report is
-the **smallest** TypeScript snippet that behaves differently under Stackmix than
-under Node, plus what you expected. Security issues should follow
-[`SECURITY.md`](./SECURITY.md) instead of a public issue.
+For a language-fidelity bug, the most useful report is the **smallest** JavaScript
+snippet that behaves differently after migration than when run straight. Security
+issues should follow [`SECURITY.md`](./SECURITY.md) instead of a public issue.
 
-By contributing, you agree that your contributions are licensed under the
-project's [Apache License 2.0](./LICENSE).
+By contributing, you agree that your contributions are licensed under the project's
+[Apache License 2.0](./LICENSE).

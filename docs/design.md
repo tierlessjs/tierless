@@ -2,7 +2,14 @@
 
 **Working title:** Stackmix (WASM Stack Oscillator)
 **Status:** Early design / pre-prototype
-**One line:** Write one TypeScript program that runs across client and server as a single stateful application; the runtime moves execution between tiers as needed instead of making you split it by hand.
+**One line:** Write one program that runs across client and server as a single stateful application; the runtime moves execution between tiers as needed instead of making you split it by hand.
+
+> **Orientation.** This is the original vision and the open research questions — kept as
+> the "why," not a description of the current code. The prototype realizes this goal as a
+> Babel **state-machine transform on V8** (see [`architecture.md`](./architecture.md)); a
+> few sections below explore an IR/WASM continuation representation the prototype does not
+> use. The load-bearing ideas it *does* implement — resource boundaries, the §5 handle
+> heap, the §6 migrate-vs-fetch policy, the §7 trust boundary — are live and proven.
 
 ---
 

@@ -2,71 +2,73 @@
 
 Stackmix is a research-stage framework. The load-bearing claim — small,
 serializable, migratable continuations with placement inferred from resources —
-is proven (see the [README](./README.md) and the test suites). What follows is
-where it goes next. Items are grouped, not strictly ordered; see
+is proven (see the [README](./README.md) and `npm test`). What follows is where
+it goes next. Items are grouped, not strictly ordered; see
 [`docs/design.md`](./docs/design.md) `§10` for the original open questions.
 
-## Language & frontend
+## Wire format
 
-- **Remaining ES-module surface.** Named imports/exports of functions, classes,
-  and consts work today. Still to wire in: `export default`, `export *` /
-  re-exports (`export { x } from ...`), and namespace imports (`import * as M`).
-  The import resolver is checker-based, so these are mostly wiring in
-  `compileProgram`'s declaration resolution and import emission.
-- **Source maps** (design `§10.6`). Every IR instruction already carries its TS
-  position; the unfinished part is emitting that as portable file/line metadata
-  that survives into a standard source map. Design it into the transform, don't
-  bolt it on afterward.
-- **Resolve the documented frontend caveats** where they prove to matter (TDZ
-  enforcement, dynamic accessors; see [`docs/architecture.md`](./docs/architecture.md#known-limitations-and-intentional-caveats)).
+- **Binary wire format.** The continuation wire is JSON today, and the dominant
+  cost is structural tax — each reference is `{"k":"r","id":N}`, each record
+  repeats its keys. The high-leverage bundle: binary type-tags + varint ids (kill
+  the per-node overhead), a **shape table** so same-shaped records emit their keys
+  once and ship `[shapeId, …values]`, and a **string-intern table** for repeated
+  keys and values. Keep the `graph`/`heap`/`fetch` seam so serialization stays
+  swappable.
+- **Typed-array fast path.** A homogeneous numeric array currently spends ~12 bytes
+  per element on `{"k":"p","v":n}`; pack it as a base64 `Float64Array` (or varint
+  deltas).
+- **Incremental / delta capture.** The oscillation cases (a session that crosses
+  many times) re-ship near-identical continuations. The heap already versions
+  objects (`fetch.mjs`); reuse that to ship only what changed since the last capture
+  to a given peer.
+- **Content-addressed subgraphs.** Hash immutable subgraphs (code, class shapes,
+  config); if the peer has the hash, ship the hash, not the bytes. Globals already
+  travel by reference; this generalizes it, and it is the known fix for resume
+  identity under version skew between tiers (Unison's approach).
 
-## Runtime & transport
+## Compiler & language
 
-- **Cross-process handle fetch — wired (WebSocket).** Done: a deref-miss suspends
-  and re-runs correctly (`test/probes/deref.mjs`), the cost model exists
-  (`examples/policy`), and a §5 handle is now fetched on demand across a real
-  WebSocket — `src/runtime/wss.mjs`, exercised end-to-end in `examples/wss`. The
-  migrate/fetch loop is shared by both ends, so fetch works either direction
-  (client→server is the one a demo exercises). Next: the binary wire format below.
-- **Binary wire format.** The continuation wire is JSON today. Espresso's
-  Kryo-vs-Java result (~half the size) motivates moving to a compact binary
-  encoding; keep the `heap`/`fetch` seam so serialization stays swappable.
-- **Incremental snapshotting.** Golem's delta-based capture is the reference for
-  making repeated captures cheap rather than re-serializing the whole state.
-- **Content-addressed code identity.** Resume-by-instruction-offset breaks under
-  version skew between tiers. Unison's content-addressing is the known fix;
-  revisit when tiers may run different builds.
+- **Broader language coverage in the transform.** The suspendable path covers all
+  ordinary control flow with suspensions in any position. Natural extensions:
+  suspensions inside an optional-chain conditional (currently a clear error), and a
+  liveness pass to prune `--auto-deref` guards that are provably dominated by an
+  earlier guard with no intervening suspension.
+- **Field-level write-back.** `--auto-writeback` ships the whole edited object;
+  tracking the mutated path would let it propagate a diff under the same CAS.
+- **Source maps.** Carry each frame's source position through the transform so a
+  migrated continuation can report a portable file/line, not just a `pc`.
 
-## Platform
+## Runtime & framework shape
 
-- **Browser target.** The *transport* is now browser-ready — `connectWss` runs on
-  the browser's native `WebSocket` and the wire codec is `Buffer`-free — but
-  nothing runs in an actual browser yet: no DOM-resource host, no bundle, no
-  headless-browser test. That last mile is the remaining browser-target work.
-- **Compile the IR to WASM (browser execution path).** Reverses the earlier
-  interpret-only stance: the browser should run the program as native WASM, not a
-  bytecode interpreter. Lower IR→WASM via Binaryen (drafting off AssemblyScript for
-  the vanilla codegen), keep continuations serializable with Asyncify — its unwind
-  state lives in linear memory, so it slices out and ships — then layer the §5 heap
-  + resume-by-offset model on top. The load-bearing step is proven in
-  `test/probes/asyncify.mjs`: a compiled-wasm continuation suspended at a resource
-  call, its call stack serialized, and resumed in a *fresh* instance.
+- **Event-dispatch model.** The live page parks the whole continuation on one human
+  click — right for "this flow needs the other tier," but a page with several
+  independent event sources (a click here, a server push there) needs the next event
+  routed to the right resumable point. This is an application-level concern (React
+  already answers it without continuations); the framework's job is only to let a
+  continuation suspend at a boundary, which it does.
+- **A larger, framework-shaped sample app** to shake out what real app code hits now
+  that the control-flow and heap stories are complete.
 
-## Framework shape
+## Security & the trust boundary
 
-- **A multi-file, framework-shaped sample app** (Nest/Angular-shaped: a DI graph,
-  decorated controllers/providers, a request that migrates mid-handler) to shake
-  out what real framework code hits now that imports + decorators + DI work.
-  Likely surfaces: lifecycle hooks, async providers, guard/interceptor chains,
-  request scoping.
-- **Package extraction.** If independently versioned packages earn their keep,
-  split `src/runtime`, `src/compiler`, and `src/wasm` into `@stackmix/*` packages
-  along the existing module seams. Deferred until needed.
+- **Mediated migration toward authority.** The server must never execute
+  client-originated code as server code; an incoming continuation is untrusted data,
+  and the server runs *its own* resource handlers over it. The allow-list is partly
+  this safety mechanism (the browser tier is instantiated without server
+  capabilities). Hardening this boundary is prerequisite to running across a real
+  trust boundary in production (design `§7`).
 
 ## Not on the roadmap (by design)
 
-- **Native WASM stack capture** — not serializable, not in browsers; capture stays
-  at the interpreter level (design `§8`).
-- **Replay/journaling as the migration mechanism** — replay reconstructs state by
-  re-running history, which can't move a *live* mid-call computation across a
-  trust boundary. It's a complementary durability story, not a substitute.
+- **Per-component continuation identity / render-splitting.** Considered and
+  retracted: the framework is general-purpose and React runs *inside* it as ordinary
+  code, so the framework must not know about components. Finer granularity also adds
+  tier crossings (worse in the latency-dominated common case) and buys no parallelism
+  (one event loop per tier; a migrating continuation is a single sequential thread,
+  merely relocated). The coarse unit — migrate the whole continuation, cross only when
+  forced — is the right one.
+- **Native engine stack capture** (async/generator or WASM stack-switching state) —
+  suspend-but-not-serialize, so it can't move a live computation across a process
+  (design `§8`). The transportable continuation stays the compiler's own data
+  structure.

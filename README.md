@@ -4,159 +4,124 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](./package.json)
 
-**One program that runs across client and server, with the runtime moving live
+**One program that runs across browser and server, with the runtime moving live
 execution between tiers as needed — instead of you splitting it by hand.**
 
-You write ordinary TypeScript with no tier annotations. Placement is *inferred*
-from which resources each call touches. When execution crosses a tier boundary
-mid-computation, the live continuation is captured as plain serializable data,
-shipped to the other tier, and resumed there. The big data stays where it lives;
-only the small continuation moves.
+You write ordinary JavaScript with no tier annotations. A build step compiles each
+function that touches a tier resource into a *serializable state machine*. When
+execution reaches a resource the current tier doesn't own, the live continuation is
+captured as plain JSON, shipped over a WebSocket to the other tier, and resumed
+there. The big data stays where it lives; only the small continuation moves.
 
-> **Status: research-stage.** The load-bearing idea is proven and every benchmark
-> below is executed, not modeled — but the API is pre-1.0 and Stackmix is not yet
-> meant to run untrusted code across a trust boundary in production. See
+> **Status: research-stage.** The mechanism is proven end to end — a React-style app
+> renders on the server, migrates into real headless Chromium to commit the DOM,
+> takes a real click, and migrates back — but the API is pre-1.0 and Stackmix is not
+> yet meant to run untrusted code across a trust boundary in production. See
 > [`ROADMAP.md`](./ROADMAP.md).
 
-## Why
+## How it works
 
-The usual client/server split forces you to design an API for every interaction
-ahead of time: a waterfall of dependent requests becomes N round trips, and a
-filter the API didn't anticipate forces you to over-fetch and filter on the
-client. Stackmix lets you write the obvious sequential code and runs it where the
-data is — the runtime migrates the computation, not the data.
-
-The central empirical bet: **does the continuation actually stay small on real
-code?** Yes. A program queries a large dataset on the server, filters it, and
-renders the result on the client, forced to cross once each way:
-
-```
-continuation crossing the wire : 8.2 KB
-full dataset, had we shipped it : 8.00 MB
-ratio                          : ~978x smaller
-```
+- **Resources are the boundaries.** An allow-list pins each tier call: `api.*` is the
+  server tier, `commit()` / `dom.*` is the browser tier. Every tier call compiles to a
+  single suspension point — the only place a migration can happen. Placement is
+  *inferred* (you only leave a tier when forced) and decided at runtime.
+- **The compiler turns plain functions into serializable state machines.**
+  `transform.cjs` (Babel) lowers a function's control flow into a `while/switch`
+  machine whose locals live on an explicit frame object `F` — no native stack, no
+  closures captured in the continuation, so the continuation is plain JSON. A function
+  that touches no resource is emitted verbatim and runs inline.
+- **The continuation is data you own.** It's the live frame stack encoded through an
+  identity-preserving, cycle-safe graph codec. A subgraph larger than a threshold
+  becomes an opaque §5 *handle* into the owning tier's heap instead of being copied —
+  the big dataset stays put and is fetched only if actually touched. Reads auto-fetch
+  on touch (`--auto-deref`); writes auto-propagate back to the owner under optimistic
+  CAS (`--auto-writeback`).
+- **The runtime is one tier-agnostic pump.** The same `pump()` drives both tiers: it
+  runs resources this tier owns inline and stops at the first foreign resource, handing
+  the continuation across the socket. When the continuation is large and the data
+  small, it can fetch the data instead of migrating — priced from real bytes (§6).
 
 ## Quick start
-
-Stackmix is not yet published to npm; run it from a checkout:
 
 ```bash
 git clone https://github.com/bfulton/stackmix
 cd stackmix
 npm install
-npm test          # builds the wasm, runs every demo + the conformance suites
+npm test          # runs every demo + probe headless and asserts the headline claims
 ```
 
-Scaffold a starter app with the CLI:
+Open the live two-tier page (a real browser tab, real clicks):
 
 ```bash
-node bin/stackmix.mjs new my-app
+npm run live      # then open the printed URL and click the dashboard
 ```
 
-Or use the API directly. One program, two tiers, migrating in-process:
+## The developer's code
+
+The whole app is straight-line logic — [`src/app/App.src.js`](./src/app/App.src.js):
 
 ```js
-import {
-  createRuntime, Tier, Suspend,
-  serializeContinuation, deserializeContinuation, initialFrames,
-} from "stackmix";
-
-const rt = createRuntime();
-rt.load(`
-  declare const db: { products(): { name: string; price: number }[] };
-  declare const ui: { show(lines: string[]): number };
-  function main(): number {
-    const cheap = [];
-    for (const p of db.products()) if (p.price < 50) cheap.push(p.name);
-    return ui.show(cheap);            // migrates to the client to render
+function App() {
+  let filter = "all";
+  while (true) {
+    const tasks = api.getTasks({ status: filter });   // server resource
+    const stats = api.getStats();                     // server resource
+    const vdom  = render(h(Dashboard, { tasks, stats, filter }));
+    const ev    = commit(vdom);                       // browser resource — suspends here
+    if (ev.ev === "filter") filter = ev.value;
+    else if (ev.ev === "add") api.addTask({ title: ev.title });
+    else if (ev.ev === "cycle") api.setStatus(ev.id, ev.next);
+    else if (ev.ev === "delete") api.deleteTask(ev.id);
+    else break;
   }
-`, { entry: "main", resources: ["db.products", "ui.show"] });
-
-const server = new Tier("server", { "db.products": () => [/* ...big list... */] });
-const client = new Tier("client", { "ui.show": ([lines]) => lines.length });
-// ...drive rt.run(tier, frames, host), migrating the continuation on Suspend.
+  return "session ended";
+}
 ```
 
-`templates/basic/` (what `stackmix new` copies) is a complete, runnable version of
-this. The CLI also offers `stackmix compile <file.ts>` (lower TypeScript to IR) and
-`stackmix run <file.ts>` (run a resource-free program).
+No `async`, no `fetch`, no client/server boilerplate, no hand-written state machine, no
+hooks. `api.*` and `commit()` look like ordinary calls; the render starts on the server
+and finishes in the browser the instant the vdom touches the real DOM.
 
 ## The evidence
 
-`npm test` runs all of the following and asserts their headline claims hold.
+`npm test` runs all of these headless and asserts their headline claims hold:
 
-### Benchmark 1 — Hacker News waterfall (round trips / latency)
+| proof | what it shows |
+| --- | --- |
+| `test/probes/codec.mjs` | the wire codec preserves identity, survives cycles, excises big subgraphs to §5 handles, and round-trips exotic values (undefined, BigInt) |
+| `src/verify.mjs` | the auto-compiled tier-split continuation reproduces the correct session across migrations |
+| `src/control-flow.mjs` | loops, `break`/`continue`, labeled loops, `switch`, and `try`/`catch`/`finally` (including `return`/`break` across a `finally`) all survive migration |
+| `src/heap-probe.mjs`, `src/heap-live.mjs` | a 1.1 MB dataset crosses a commit migration as a ~450-byte §5 handle and is fetched back over a real socket only when the browser derefs it |
+| `src/heap-auto.mjs`, `src/heap-write.mjs` | transparent deref (reads auto-fetch on touch) and transparent write-back (a browser edit propagates to the server master under §5 CAS), with no `deref()`/`writeBack()` in the source |
+| `src/heap-writeback.mjs` | optimistic version-checked CAS: conflicts detected, refetch + retry, no lost updates |
+| `src/policy-live.mjs` | at a data boundary the driver prices migrate-vs-fetch from real bytes and steers what crosses (§6) — flipping to fetch a 23 B fact rather than ship a 97 KB continuation |
 
-Loading an HN thread is the canonical client-side waterfall: fetch the story,
-then each comment, then its children — one dependent request per node. The same
-traversal, run under the runtime across a 2×2 of concurrency × placement (all four
-cells executed, not modeled):
-
-```
-                       per-item (sequential)     per-level (concurrent)
-  client (REST, stay)   13208ms / 254 rt            312ms /   6 rt
-  Stackmix  (migrate)      608ms /   2 rt            112ms /   2 rt
-```
-
-Stackmix (migrate + concurrent) = **112ms** beats naive REST (13208ms, **118×**)
-and even a hand-tuned parallel client (312ms, **2.8×**): the client still pays one
-round trip per tree level, while Stackmix pays 2 client round trips total
-regardless of depth. `npm run bench:sweep` shows this as a curve — REST round trips
-grow O(nodes), the parallel client O(depth), Stackmix stays flat at 2.
-
-### Benchmark 2 — Conduit home feed (bandwidth / over-fetch)
-
-A feed filtered by a predicate the public API doesn't support: a REST client must
-drag every article body to the client to filter and join locally, plus an N+1 hop
-per author. Stackmix runs the same assembly on the server and ships back only the
-small projected feed:
-
-```
-  strategy               round trips    bytes      latency
-  REST (over-fetch)       202 rt     4.08 MB    10504ms
-  Stackmix (migrate)        2 rt     11.3 KB      504ms
-       -> 362x less data, 21x faster, identical result
-```
-
-Run them yourself: `npm run bench:hn`, `npm run bench:sweep`, `npm run bench:conduit`
-(add `--real` to inject real network sleeps for genuine wall-clock numbers).
-
-## How it works
-
-- **Resources are the boundaries.** Every resource access compiles to a single
-  `RES` instruction — the only place a migration can happen. Boundaries are
-  visible at compile time; the decision to migrate is made at runtime, and lazy
-  placement falls out for free (you only leave a tier when forced).
-- **The continuation is data you own.** It's the live frame stack encoded through
-  an identity-preserving, cycle-safe graph codec. A subgraph larger than a
-  threshold becomes an opaque *handle* into the owning tier's heap instead of being
-  copied — so the big dataset stays put and is fetched only if actually touched.
-- **Two execution paths, on purpose.** A JS interpreter is the language substrate
-  (it spans essentially the whole language — closures, classes, generators, async,
-  decorators + DI, multi-module programs — all proven to survive migration). A
-  minimal WASM interpreter proves the same continuation can live in linear memory
-  and cross a real WebSocket between instances.
-
-For the full picture see [`docs/architecture.md`](./docs/architecture.md); for the
-original vision and open questions, [`docs/design.md`](./docs/design.md).
+`src/demo.mjs` and `src/server-live.mjs` additionally run the whole thing across a real
+WebSocket into **real headless Chromium** (Playwright) with real clicks; they need a
+browser and so run on demand rather than in `npm test`.
 
 ## Repository layout
 
 ```
-src/         the framework (runtime/, compiler/, wasm/, index.mjs)
-bin/         the stackmix CLI
-types/       hand-written public type declarations
-examples/    runnable demos (spike, wss, wasm, hn-thread, ...)
-bench/       the HN and Conduit benchmarks
-test/        conformance, differential, decorator, multi-module suites + probes
-templates/   the `stackmix new` scaffold
-docs/        architecture, design spec
+src/              the framework
+  transform.cjs   the compiler: plain JS -> serializable state machine (Babel)
+  runtime.mjs     the pump — one tier-agnostic continuation driver + the wire envelope
+  graph.mjs       identity/cycle-safe graph codec for the wire
+  heap.mjs        §5 distributed handle heap: encodeWire, makeTier, write-back CAS
+  fetch.mjs       Heap / Channel / makeHost — fetch-on-deref with coherence
+  transport.mjs   WebSocket framing + RPC peer (browser-safe)
+  app/            the demo app (plain components -> serializable vdom)
+  public/         the browser tier (runs in a real tab)
+  *.mjs           the demos and headless proofs (also the test suite)
+test/             the regression runner + the wire-codec probe
+docs/             architecture, design spec
 ```
 
 ## Documentation
 
-- [Architecture](./docs/architecture.md) — layout, public API, design rationale
-- [Design](./docs/design.md) — the original spec and open questions
+- [`src/README.md`](./src/README.md) — the framework walkthrough (the live demo, what each piece does)
+- [Architecture](./docs/architecture.md) — layout, the pump, the wire, the heap
+- [Design](./docs/design.md) — the original vision and open questions
 - [Roadmap](./ROADMAP.md) · [Contributing](./CONTRIBUTING.md)
 
 ## License
