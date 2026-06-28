@@ -85,6 +85,72 @@ export const PROGRAMS = {
       case 16:
         F.pc = 15; return { op: "resource", tier: "server", name: "api.getFollowing", args: [F.args[0]] };
     }
+  },
+  drilldown(F) {
+    while (true) switch (F.pc) {
+      case 0:
+        F.pc = 13; break;
+      case 1:
+        return { op: "return", value: "(end)" };
+      case 2:
+        return { op: "return", value: F.__t0 };
+      case 3:
+        F.__t0 = F.ret;
+        F.pc = 2; break;
+      case 4:
+        F.pc = 3; return { op: "resource", tier: "browser", name: "dom.commit", args: [{ steps: F.args[0], total: F.total }] };
+      case 5:
+        F.i = 0;
+        F.pc = 6; break;
+      case 6:
+        if (F.i < F.args[0]) { F.pc = 11; } else { F.pc = 4; } break;
+      case 7:
+        F.i = F.i + 1;
+        F.pc = 6; break;
+      case 8:
+        F.slug = F.art.relatedSlug;
+        F.pc = 7; break;
+      case 9:
+        // depends on `slug` produced by the previous step
+F.total = F.total + F.art.favoritesCount;
+        F.pc = 8; break;
+      case 10:
+        F.art = F.ret;
+        F.pc = 9; break;
+      case 11:
+        F.pc = 10; return { op: "resource", tier: "server", name: "api.getArticle", args: [F.slug] };
+      case 12:
+        F.total = 0;
+        F.pc = 5; break;
+      case 13:
+        F.slug = "article-0";
+        F.pc = 12; break;
+    }
+  },
+  articlePage(F) {
+    while (true) switch (F.pc) {
+      case 0:
+        F.pc = 8; break;
+      case 1:
+        return { op: "return", value: "(end)" };
+      case 2:
+        return { op: "return", value: F.__t0 };
+      case 3:
+        F.__t0 = F.ret;
+        F.pc = 2; break;
+      case 4:
+        F.pc = 3; return { op: "resource", tier: "browser", name: "dom.commit", args: [{ article: F.article, comments: F.comments }] };
+      case 5:
+        F.comments = F.ret;
+        F.pc = 4; break;
+      case 6:
+        F.pc = 5; return { op: "resource", tier: "server", name: "api.getComments", args: [F.args[0]] };
+      case 7:
+        F.article = F.ret;
+        F.pc = 6; break;
+      case 8:
+        F.pc = 7; return { op: "resource", tier: "server", name: "api.getArticle", args: [F.args[0]] };
+    }
   }
 };
 

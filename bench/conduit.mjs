@@ -1,10 +1,11 @@
 // RealWorld / Conduit, combined into one Stackmix program — measured against the stock
-// REST split it replaces. The orchestration (bench/conduit.src.js) is the only thing that
-// changed; the backend service functions and the rendered fields are exactly RealWorld's.
+// REST split it replaces. Only the orchestration (bench/conduit.src.js) changed; the backend
+// service functions and the rendered fields are RealWorld's.
 //
-// Per scenario we report round trips, the DATA DELIVERED to render (REST's JSON responses
-// vs the payload Stackmix commits to the browser — full article bodies stay home as a §5
-// handle), the modeled wall-clock, and the overhead Stackmix ADDS, so the net is honest.
+// Honest latency model: independent requests PARALLELIZE (a real client fires them at once,
+// ~1 round-trip wave per CONC connections); a DEPENDENT chain cannot (one round trip per
+// step). That distinction is the whole story — Stackmix's robust latency win is the round
+// trips you can't parallelize away.
 //
 //   node bench/conduit.mjs
 import { PROGRAMS } from "./conduit.gen.mjs";
@@ -25,16 +26,25 @@ const ARTICLES = Array.from({ length: 500 }, (_, i) => {
     slug: "article-" + i, title: "Article number " + i,
     description: "A short one-line description of article " + i + ", shown in the preview.",
     body: "## " + author + "'s post\n\n" + (PARA.repeat(paras)),         // FULL body — the over-fetch
+    relatedSlug: "article-" + ((i * 7 + 1) % 500),                       // a "related article" link (for the dependent chain)
     tagList: [TAGS[i % TAGS.length], TAGS[(i * 3) % TAGS.length]],
     createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-02T00:00:00.000Z",
     author: { username: author, bio: "", image: "https://example.com/u/" + author + ".png", following: false },
     favorited: false, favoritesCount: Math.floor(rnd() * 60),
   };
 });
-const FAVS = new Map(USERS.map((u) => [u, []]));                         // user -> [slug] (kept OUT of the article JSON)
+const BY_SLUG = new Map(ARTICLES.map((a) => [a.slug, a]));
+const FAVS = new Map(USERS.map((u) => [u, []]));
 for (const a of ARTICLES) for (const u of USERS) if (rnd() < 0.04) FAVS.get(u).push(a.slug);
+const COMMENTS = new Map(ARTICLES.map((a) => {
+  const n = Math.floor(rnd() * 8);
+  return [a.slug, Array.from({ length: n }, (_, k) => ({
+    id: a.slug + "-c" + k, body: "Great post — comment " + k + ". " + PARA.slice(0, 70),
+    author: { username: USERS[(k * 11) % USERS.length], image: "https://example.com/u/x.png" }, createdAt: "2026-01-03T00:00:00.000Z",
+  }))];
+}));
 const ME = "user0";
-const FOLLOWING = USERS.filter((_, i) => i % 5 === 1).slice(0, 10);      // I follow 10 people
+const FOLLOWING = USERS.filter((_, i) => i % 5 === 1).slice(0, 10);
 
 // --- the backend's real service functions (the server tier's api.* resources) -----------
 function getArticles({ limit, tag, author, favorited } = {}) {
@@ -42,12 +52,14 @@ function getArticles({ limit, tag, author, favorited } = {}) {
   if (tag) r = r.filter((a) => a.tagList.includes(tag));
   if (author) r = r.filter((a) => a.author.username === author);
   if (favorited) { const set = new Set(FAVS.get(favorited)); r = r.filter((a) => set.has(a.slug)); }
-  return (limit != null ? r.slice(0, limit) : r);                       // full articles, bodies included
+  return (limit != null ? r.slice(0, limit) : r);
 }
 const apiExec = (req) => {
   const a = req.args[0];
   if (req.name === "api.getTags") return TAGS;
   if (req.name === "api.getArticles") return getArticles(a);
+  if (req.name === "api.getArticle") return BY_SLUG.get(a);
+  if (req.name === "api.getComments") return COMMENTS.get(a) || [];
   if (req.name === "api.getFollowing") return FOLLOWING;
   throw new Error("no resource " + req.name);
 };
@@ -61,16 +73,12 @@ function runStackmix(fn, args) {
     if (r.op === "return") { stack.pop(); if (!stack.length) return { done: true, value: r.value }; stack[stack.length - 1].ret = r.value; }
     else if (r.op === "call") { stack.push({ fn: r.fn, pc: 0, args: r.args }); }
     else if (r.tier === "server") { stack[stack.length - 1].ret = apiExec(r); }
-    else return { request: r, stack };                                  // commit -> the one migration
+    else return { request: r, stack };
   }
 }
-// DELIVERED bytes = the commit payload that the browser must receive to render (the previews),
-// codec-encoded as it crosses, with NO excision — because the previews genuinely travel.
-const deliveredBytes = (res) =>
+const deliveredBytes = (res) =>                                          // codec bytes the browser receives to render (no excision)
   encodeWire([{ fn: "_", pc: 0, args: [] }], { op: "resource", tier: "browser", name: "dom.commit", args: [res.request.args[0]] }, {}).length;
-// how many big locals (the full-body article sets) stayed home as §5 handles on the migration
 const bodiesHome = (res) => wireHandles(encodeWire(res.stack, res.request, { tier: makeTier("server"), threshold: 8192 })).length;
-// overhead Stackmix ADDS: encode+decode of its actual migrated continuation (best-of-batches)
 function serdeUs(res) {
   let best = Infinity;
   for (let b = 0; b < 8; b++) {
@@ -81,45 +89,63 @@ function serdeUs(res) {
   return best / 1000;
 }
 
-// --- latency model: round-trips × RTT + bytes ÷ bandwidth --------------------------------
-const RTT_MS = 50, BW_BPS = 12e6;                                       // 50 ms RTT, 12 Mbps (typical 4G)
-const wallMs = (rt, b) => rt * RTT_MS + (b * 8 / BW_BPS) * 1000;
-
-function report(name, rest, sx) {
-  console.log(`\n${name}`);
-  console.log(`                        round trips     data delivered      modeled wall-clock`);
-  console.log(`   stock REST split     ${String(rest.rt).padStart(7)}        ${fmt(rest.bytes).padStart(11)}        ${rest.wall.toFixed(0).padStart(6)} ms`);
-  console.log(`   Stackmix (1 migrate) ${String(sx.rt).padStart(7)}        ${fmt(sx.bytes).padStart(11)}        ${sx.wall.toFixed(0).padStart(6)} ms`);
-  console.log(`   =>  ${(rest.bytes / sx.bytes).toFixed(1)}x less data, ${(rest.wall / sx.wall).toFixed(1)}x faster.  Overhead Stackmix added: ${sx.serde.toFixed(1)} µs to serialize`);
-  console.log(`       its continuation; the full article bodies stayed on the server (${sx.home} §5 handle(s)),`);
-  console.log(`       fetched only if the user opens an article.`);
-}
+// --- latency model: parallel waves (independent) or sequential (dependent) ---------------
+const RTT_MS = 50, BW_BPS = 12e6, CONC = 6;                             // 50 ms RTT, 12 Mbps, 6 concurrent connections
+const wall = (rt, bytes, dependent) => (dependent ? rt : Math.ceil(rt / CONC)) * RTT_MS + (bytes * 8 / BW_BPS) * 1000;
 
 console.log("RealWorld / Conduit — one combined Stackmix program vs the stock REST split");
-console.log(`(${ARTICLES.length} articles w/ full Markdown bodies; RTT ${RTT_MS} ms, bandwidth ${BW_BPS / 1e6} Mbps; bytes uncompressed)`);
+console.log(`(${ARTICLES.length} articles w/ full bodies; RTT ${RTT_MS} ms, ${BW_BPS / 1e6} Mbps, ${CONC} parallel connections; uncompressed)`);
 
-// === Scenario A: the home feed (over-fetch) ===
-{
-  const restBytes = jsonBytes({ tags: TAGS }) + jsonBytes({ articles: getArticles({ limit: 10 }), articlesCount: ARTICLES.length });
-  const rest = { rt: 2, bytes: restBytes, wall: wallMs(2, restBytes) };
-  const res = runStackmix("homeFeed", [10]);
-  const b = deliveredBytes(res);
-  const sx = { rt: 1, bytes: b, wall: wallMs(1, b), serde: serdeUs(res), home: bodiesHome(res) };
-  report("Scenario A — home feed: render 10 previews; stock GET /articles drags all 10 FULL bodies", rest, sx);
+function row(label, rt, bytes, wall_) {
+  return `   ${label.padEnd(22)} ${String(rt).padStart(3)} rt   ${fmt(bytes).padStart(11)}   ${wall_.toFixed(0).padStart(6)} ms`;
 }
 
-// === Scenario B: "articles favorited by people I follow" (a query no single endpoint serves) ===
+// === A: home feed — over-fetch (REST's 2 requests are independent -> parallel) ===
 {
-  let restBytes = 0, rt = 0;
-  for (const u of FOLLOWING) { restBytes += jsonBytes({ articles: getArticles({ favorited: u }), articlesCount: 0 }); rt++; }  // one GET /articles?favorited= per followed user
-  const rest = { rt, bytes: restBytes, wall: wallMs(rt, restBytes) };
-  const res = runStackmix("favoritedByFollowed", [ME]);
-  const b = deliveredBytes(res);
-  const sx = { rt: 1, bytes: b, wall: wallMs(1, b), serde: serdeUs(res), home: bodiesHome(res) };
-  report(`Scenario B — articles favorited by the ${FOLLOWING.length} people I follow: REST fans out 1 request per followed user`, rest, sx);
+  const rb = jsonBytes({ tags: TAGS }) + jsonBytes({ articles: getArticles({ limit: 10 }), articlesCount: ARTICLES.length });
+  const res = runStackmix("homeFeed", [10]); const sb = deliveredBytes(res);
+  console.log("\nA) home feed — render 10 previews; stock GET /articles drags all 10 FULL bodies");
+  console.log(row("REST (2 parallel)", 2, rb, wall(2, rb, false)));
+  console.log(row("Stackmix (1 migrate)", 1, sb, wall(1, sb, false)));
+  console.log(`   => ${(rb / sb).toFixed(1)}x less data, ${(wall(2, rb, false) / wall(1, sb, false)).toFixed(1)}x faster — a BYTES win; bodies stay home (${bodiesHome(res)} §5 handle), +${serdeUs(res).toFixed(0)} µs serialize`);
 }
 
-console.log("\nNotes (kept honest): bytes are uncompressed — gzip would shrink the over-fetched bodies and");
-console.log("narrow Scenario A's data gap, but not the round-trip gap that dominates Scenario B. Stackmix's");
-console.log("wire is the verbose graph codec (a binary format, on the roadmap, would shrink its side further).");
-console.log("Only the orchestration changed; the backend functions and rendered fields are RealWorld's.");
+// === B: favorited-by-followed — independent fan-out (parallelizable) ===
+{
+  let rb = 0, rt = 0; for (const u of FOLLOWING) { rb += jsonBytes({ articles: getArticles({ favorited: u }), articlesCount: 0 }); rt++; }
+  const res = runStackmix("favoritedByFollowed", [ME]); const sb = deliveredBytes(res);
+  console.log("\nB) articles favorited by the 10 people I follow — REST fans out 1 request/user (independent -> parallel)");
+  console.log(row(`REST (${rt} parallel)`, rt, rb, wall(rt, rb, false)));
+  console.log(row("Stackmix (1 migrate)", 1, sb, wall(1, sb, false)));
+  console.log(`   => ${(rb / sb).toFixed(1)}x less data, ${rt}->1 requests, ${(wall(rt, rb, false) / wall(1, sb, false)).toFixed(1)}x faster — bytes + request-count win`);
+}
+
+// === C: dependent drill-down — CANNOT parallelize; the win scales with depth ===
+console.log("\nC) a DEPENDENT chain — each step needs the previous article's link, so REST pays one");
+console.log("   round trip PER STEP (no parallelism possible). This is Stackmix's robust latency win.");
+console.log("        depth      REST              Stackmix          speedup");
+for (const depth of [2, 5, 10, 20]) {
+  let rb = 0; let slug = "article-0";
+  for (let i = 0; i < depth; i++) { rb += jsonBytes({ article: BY_SLUG.get(slug) }); slug = BY_SLUG.get(slug).relatedSlug; }
+  const res = runStackmix("drilldown", [depth]); const sb = deliveredBytes(res);
+  const rW = wall(depth, rb, true), sW = wall(1, sb, false);
+  console.log(`   ${String(depth).padStart(8)}   ${(String(depth) + " rt / " + rW.toFixed(0) + " ms").padEnd(16)}  ${("1 rt / " + sW.toFixed(0) + " ms").padEnd(16)}  ${(rW / sW).toFixed(1)}x faster`);
+}
+
+// === D: a single article page — nothing to project; Stackmix's codec overhead makes it a wash/loss ===
+{
+  const slug = "article-7";
+  const rb = jsonBytes({ article: BY_SLUG.get(slug) }) + jsonBytes({ comments: COMMENTS.get(slug) });
+  const res = runStackmix("articlePage", [slug]); const sb = deliveredBytes(res);
+  console.log("\nD) a single article page — the body IS rendered and comments are independent: the stock");
+  console.log("   API already serves it in ~1 parallel round trip, with nothing to project away.");
+  console.log(row("REST (2 parallel)", 2, rb, wall(2, rb, false)));
+  console.log(row("Stackmix (1 migrate)", 1, sb, wall(1, sb, false)));
+  const faster = wall(2, rb, false) / wall(1, sb, false);
+  console.log(`   => ${faster >= 1 ? faster.toFixed(2) + "x faster" : (1 / faster).toFixed(2) + "x SLOWER"}; nothing to save here — Stackmix just pays its verbose-codec overhead (+${serdeUs(res).toFixed(0)} µs).`);
+}
+
+console.log("\nThe lesson: Stackmix wins (1) BYTES, by not over-fetching (A, B), and (2) LATENCY only for");
+console.log("round trips you can't parallelize away — DEPENDENT chains (C), where the win grows with depth.");
+console.log("For well-composed, fully-used responses (D) it's a wash or slight loss (codec overhead). The");
+console.log("overhead it adds is always tens of µs. Use it where the API over-fetches or forces waterfalls.");

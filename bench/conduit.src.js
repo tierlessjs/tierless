@@ -43,3 +43,26 @@ function favoritedByFollowed(me) {
   }
   return commit({ articles: previewsOf(collected) });
 }
+
+// Scenario C — a DEPENDENT chain: each step needs the previous article's `relatedSlug`, so a
+// client can't parallelize it — it pays one sequential round trip per step. Here the chain
+// runs on the server; one migration ships the small result. The win scales with depth.
+function drilldown(depth) {
+  let slug = "article-0";
+  let total = 0;
+  for (let i = 0; i < depth; i = i + 1) {
+    const art = api.getArticle(slug);                 // depends on `slug` produced by the previous step
+    total = total + art.favoritesCount;
+    slug = art.relatedSlug;
+  }
+  return commit({ steps: depth, total: total });
+}
+
+// Scenario D — a single article page. The body IS rendered and the comments are independent
+// of the article, so the stock API serves it in ~one parallel round trip with nothing to
+// project away. Stackmix has no over-fetch to remove here — it just pays its codec overhead.
+function articlePage(slug) {
+  const article = api.getArticle(slug);
+  const comments = api.getComments(slug);
+  return commit({ article: article, comments: comments });   // everything here is rendered
+}
