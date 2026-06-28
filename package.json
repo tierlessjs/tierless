@@ -35,7 +35,10 @@
   "scripts": {
     "test": "node test/run.mjs",
     "lint": "eslint .",
-    "live": "node src/server-live.mjs"
+    "live": "node src/server-live.mjs",
+    "bench": "node bench/overhead.mjs && node bench/conduit.mjs",
+    "bench:overhead": "node bench/overhead.mjs",
+    "bench:conduit": "node bench/conduit.mjs"
   },
   "dependencies": {
     "ws": "^8.21.0"
