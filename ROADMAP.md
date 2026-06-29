@@ -52,8 +52,21 @@ it goes next. Items are grouped, not strictly ordered; see
   stay flat (~10 µs / ~5 µs) as the model grows from 50 to 3200 records, where rescan climbs to
   ~5 ms / ~4.6 ms — **~490× / ~850×** at 3200 (`npm run bench:delta`). It is exact only if every
   mutation bumps — the guarantee a compiler write-barrier provides; rescan stays the safe fallback
-  when the caller can't cooperate. Folding the bump into the compiler's write path (so plain source
-  mutation tracks automatically) and into the live pump is the remaining integration step.
+  when the caller can't cooperate.
+- **Compiler write-barrier — done (`transform.cjs --track-writes`).** The bump is now emitted by the
+  compiler, so write-tracking works on **plain, unannotated source** — no `touch()` in the developer's
+  code. Each in-place mutation (`o.x = v` / `o[i] = v` / `o.x++` / the in-place array mutators) compiles
+  with its target object wrapped in `__dirty(obj)`, a helper that reports the object to the active delta
+  session and returns it (single-eval, no suspension — a local Set add, not a tier hop). It is scoped to
+  chains rooted at a frame local/param (continuation state, never a global/import). `test/probes/wire-delta-compiled.mjs`
+  compiles an oscillating sample and drives it: the compiler-tracked delta matches the rescan oracle every
+  hop (same ship count, identical reconstruction) and reconstructs the live continuation exactly, with a
+  control proving the barrier is load-bearing (uninstall the sink and an in-place edit goes unshipped).
+  Untracked output is byte-identical (verified against the committed bundles), so the flag is zero-cost
+  when off. The remaining step is the **live pump**: install the session's dirty sink around stepping and
+  take `min(delta, full)` on the real socket (today's socket demos still ship the full binary frame).
+  Other mutators (Map/Set, custom methods) are not yet instrumented — those fall back to rescan, which
+  needs no barrier.
 - **Content-addressed subgraphs.** Hash immutable subgraphs (code, class shapes,
   config); if the peer has the hash, ship the hash, not the bytes. Globals already
   travel by reference; this generalizes it, and it is the known fix for resume

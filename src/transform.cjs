@@ -73,7 +73,7 @@ function allowlist(ast) {
 // ctx threads the targets break/continue/return jump to (brk/cont per loop, labels for
 // labeled loops) plus tryStack — the enclosing trys — so an abrupt exit pops the right
 // handlers and refuses to silently skip a finally.
-let blocks, suspSet, AUTO_DEREF = false, AUTO_WRITEBACK = false;
+let blocks, suspSet, AUTO_DEREF = false, AUTO_WRITEBACK = false, TRACK_WRITES = false;
 const nb = () => (blocks.push({ lines: [], term: null }), blocks.length - 1);
 const isSusp = (s) =>
   (t.isVariableDeclaration(s) && s.declarations.length === 1 && t.isYieldExpression(s.declarations[0].init)) ||
@@ -472,9 +472,49 @@ function insertWriteBacks(p) {
   }
 }
 
+// --track-writes: a compiler write-barrier for the delta wire's write-tracked mode (wire-delta.mjs
+// encodeDeltaTracked). The instant a continuation object is mutated in place, mark it dirty so a
+// later capture ships it WITHOUT re-hashing the whole graph — O(changed), not O(reachable). Each
+// in-place mutation's target object is wrapped in __dirty(obj), a helper that reports the object to
+// the installed sink (the active delta session) and RETURNS it, so the write proceeds unchanged and
+// the base is evaluated exactly once. No suspension — marking is a local Set add, not a tier hop.
+// Scoped to chains ROOTED AT A FRAME LOCAL/PARAM (continuation state), so the dirty set never names
+// a global/import. Covers `o.x = v` / `o[i] = v` (any operator), `o.x++`, and the in-place array
+// mutators; other mutators (Map/Set, custom methods) fall back to rescan, which needs no barrier.
+const ARRAY_MUTATORS = new Set(["push", "pop", "shift", "unshift", "splice", "sort", "reverse", "fill", "copyWithin"]);
+function localNamesOf(p) {                                        // params + declared locals + catch params
+  const names = new Set(p.node.params.filter((x) => t.isIdentifier(x)).map((x) => x.name));
+  p.traverse({ VariableDeclarator(v) { if (t.isIdentifier(v.node.id)) names.add(v.node.id.name); },
+    CatchClause(c) { if (c.node.param && t.isIdentifier(c.node.param)) names.add(c.node.param.name); } });
+  return names;
+}
+function wrapBase(memberPath) {                                   // member.object -> __dirty(member.object), once
+  const objPath = memberPath.get("object");
+  if (t.isCallExpression(objPath.node) && t.isIdentifier(objPath.node.callee, { name: "__dirty" })) return;
+  objPath.replaceWith(t.callExpression(t.identifier("__dirty"), [objPath.node]));
+  objPath.skip();                                                // don't descend into the wrapper just created
+}
+function insertDirtyBarriers(p) {
+  const locals = localNamesOf(p);
+  const rooted = (member) => { const r = rootOfMember(member); return !!r && locals.has(r); };   // a continuation root, not a global
+  p.traverse({
+    AssignmentExpression(ap) { const tgt = ap.node.left; if (t.isMemberExpression(tgt) && rooted(tgt)) wrapBase(ap.get("left")); },
+    UpdateExpression(up) { const tgt = up.node.argument; if (t.isMemberExpression(tgt) && rooted(tgt)) wrapBase(up.get("argument")); },
+    CallExpression(cp) { const c = cp.node.callee; if (t.isMemberExpression(c) && !c.computed && t.isIdentifier(c.property) && ARRAY_MUTATORS.has(c.property.name) && rooted(c)) wrapBase(cp.get("callee")); },
+  });
+}
+// Emitted into the bundle under --track-writes. The owner installs a sink (the delta session's dirty
+// set) around stepping via __setDirtySink (which returns the prior sink for save/restore); with none
+// installed __dirty is a no-op that just returns its argument, so an untracked driver runs identically
+// and serialization is unaffected (no function ever lands on a frame).
+const TRACK_PREAMBLE = `let __DSINK = null;
+export const __setDirtySink = (fn) => { const prev = __DSINK; __DSINK = fn || null; return prev; };
+const __dirty = (o) => { if (__DSINK !== null && o !== null && typeof o === "object") __DSINK(o); return o; };`;
+
 function lower(p) {
   if (AUTO_DEREF) insertDerefGuards(p);                           // before normalize: the guard's `L = deref(L)` is a suspension to hoist
   if (AUTO_WRITEBACK) insertWriteBacks(p);                        // after the guards (so the write-back yield isn't itself deref-guarded)
+  if (TRACK_WRITES) insertDirtyBarriers(p);                       // after writeback/deref — their analyses need the unwrapped mutation target
   normalize(p);                                                   // hoist suspensions out of expression positions first
   const node = p.node;
   const params = node.params.map((x) => x.name);
@@ -525,8 +565,12 @@ function compile(src, preamble) {
   for (let changed = true; changed;) { changed = false; for (const [name, cs] of calls) if (!suspSet.has(name) && [...cs].some((c) => suspSet.has(c))) { suspSet.add(name); changed = true; } }
 
   const pure = [], progs = [];
-  for (const [name, p] of fnPaths) { if (suspSet.has(name)) progs.push(lower(p)); else pure.push(gen(p.node)); }  // pure single-tier fns run wholesale
-  return preamble + "\n" + (pure.length ? pure.join("\n") + "\n" : "") + "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};\n" + DRIVER;
+  for (const [name, p] of fnPaths) {                              // pure single-tier fns run wholesale (lower() handles suspendable ones)
+    if (suspSet.has(name)) { progs.push(lower(p)); }
+    else { if (TRACK_WRITES) insertDirtyBarriers(p); pure.push(gen(p.node)); }  // a pure helper can still mutate continuation state
+  }
+  const head = preamble + (TRACK_WRITES ? "\n" + TRACK_PREAMBLE : "");
+  return head + "\n" + (pure.length ? pure.join("\n") + "\n" : "") + "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};\n" + DRIVER;
 }
 
 const DRIVER = `
@@ -580,9 +624,10 @@ export const start = (fn, args = []) => run([{ fn, pc: 0, args }]);
 const args = process.argv.slice(2);
 const flags = args.filter((a) => a.startsWith("--"));
 const [inPath, outPath] = args.filter((a) => !a.startsWith("--"));
-if (!inPath || !outPath) { console.error("usage: node transform.cjs <in.js> <out.gen.mjs> [--bare] [--auto-deref] [--auto-writeback]"); process.exit(2); }
+if (!inPath || !outPath) { console.error("usage: node transform.cjs <in.js> <out.gen.mjs> [--bare] [--auto-deref] [--auto-writeback] [--track-writes]"); process.exit(2); }
 AUTO_WRITEBACK = flags.includes("--auto-writeback");
 AUTO_DEREF = flags.includes("--auto-deref") || AUTO_WRITEBACK;   // a write through a handle must first materialize it (deref)
+TRACK_WRITES = flags.includes("--track-writes");                 // emit __dirty(obj) write-barriers for the delta wire's tracked mode
 const preamble = flags.includes("--bare") ? "" : 'import { h } from "./h.mjs";\nimport { Dashboard } from "./components.mjs";\nimport { render } from "./render.mjs";';
 fs.writeFileSync(outPath, "// GENERATED by transform.cjs from " + inPath + " — do not edit by hand.\n" + compile(fs.readFileSync(inPath, "utf8"), preamble));
 console.log("wrote " + outPath);

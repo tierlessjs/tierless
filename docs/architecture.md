@@ -109,12 +109,16 @@ content versions are shallow — children by id). The strategy is `min(delta, fu
 message (the §6 cost decision), so the cold first hop falls back to the full frame and the wire
 is never worse than full; warm hops ship a flat ~175 B regardless of model size. *Finding* the
 change has two modes over the same wire: **rescan** re-hashes the reachable graph each capture
-(O(reachable), no cooperation needed) and **write-tracked** marks an object dirty when it is
-mutated (`touch()`, the same hook `--auto-writeback` emits) and ships the dirty set directly —
-O(changed), so warm encode/apply stay flat (~10 µs / ~5 µs) where rescan climbs into the
-milliseconds as the model grows (`npm run bench:delta`). Both reconstruct identically (the probe
-cross-checks write-tracked against rescan as the oracle). It is a proven codec
-(`test/probes/wire-delta.mjs`), the next optimization to fold into the live pump.
+(O(reachable), no cooperation needed) and **write-tracked** marks an object dirty the instant it
+is mutated and ships the dirty set directly — O(changed), so warm encode/apply stay flat (~10 µs /
+~5 µs) where rescan climbs into the milliseconds as the model grows (`npm run bench:delta`). The
+mark is emitted by the **compiler** (`transform.cjs --track-writes`, the symmetric cousin of
+`--auto-writeback`): every in-place mutation compiles with its target wrapped in `__dirty(obj)`,
+so write-tracking works on **plain unannotated source** — no `touch()` in the developer's code.
+Both modes reconstruct identically; the probes cross-check write-tracked against rescan as the
+oracle, including end-to-end on compiled plain source (`test/probes/wire-delta{,-compiled}.mjs`).
+The remaining step is to fold it into the live pump (install the dirty sink around stepping and take
+`min(delta, full)` on the socket).
 
 ## The heap (`heap.mjs` + `fetch.mjs`)
 

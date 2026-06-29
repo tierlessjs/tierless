@@ -210,6 +210,9 @@ export function touch(session, ...objs) {
 // object. Found by a walk seeded from the roots AND the dirty set (a dirty object can hang under a
 // clean ancestor), recursing only through dirty/new objects and PRUNING at clean, already-shipped
 // ones — their whole subgraph is already on the peer. Cost O(changed + frontier), not O(reachable).
+// Contract: a mutated object is assumed to stay reachable (true for continuation edits). If code
+// mutates an object and then orphans it within one uninterrupted run, the orphan still ships — a
+// harmless extra (the peer never references it from the roots), never a wrong reconstruction.
 function selectDirty(session, rootVals) {
   const sidOf = sidOfFn(session);
   const ship = new Set(), fresh = [];
