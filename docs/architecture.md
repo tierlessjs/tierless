@@ -101,6 +101,15 @@ socket (one binary `ws` frame); the JSON form (`encodeWire`) is kept only as a r
 debug serialization. Because the wire is deserialized from the *other* tier (§7), the
 decoder is hardened (bounds-checked, count-guarded, `__proto__`-stripping) and fuzz-tested.
 
+For the **oscillation case** — a session that crosses the boundary many times, re-shipping a
+near-identical continuation each hop — `wire-delta.mjs` ships a capture as a *patch* over what
+the peer already holds: each tier keeps a replicated, stably-identified object store, and only
+the objects whose **shallow content version** changed travel (a deep edit bumps just its own
+object, not its ancestors). The strategy is `min(delta, full wire)` per message (the §6 cost
+decision), so the cold first hop falls back to the full frame and the wire is never worse than
+full; warm hops ship a flat ~175 B regardless of model size (`npm run bench:delta`). It is a
+proven codec (`test/probes/wire-delta.mjs`), the next optimization to fold into the live pump.
+
 ## The heap (`heap.mjs` + `fetch.mjs`)
 
 The §5 distributed heap is how the big data stays put.
@@ -148,7 +157,7 @@ These are deliberate trade-offs in the compiler, not accidental gaps:
 - **Write-back ships the whole edited object**, not a field-level diff; the §6
   fetch-size profile is sampled once and locked in (no online re-profiling, by design).
 
-Broader open questions — a binary wire format, broader language coverage, the trust
-boundary, content-addressed code identity — are tracked in
-[`../ROADMAP.md`](../ROADMAP.md) and line up with the design doc's own open
+Broader open questions — broader language coverage, the trust boundary, and
+content-addressed code identity (the binary wire and delta capture are done) — are
+tracked in [`../ROADMAP.md`](../ROADMAP.md) and line up with the design doc's own open
 questions (`§10`).

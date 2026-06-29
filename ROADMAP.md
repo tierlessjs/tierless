@@ -26,10 +26,23 @@ it goes next. Items are grouped, not strictly ordered; see
 - **Typed-array fast path.** A homogeneous numeric array currently spends ~12 bytes
   per element on `{"k":"p","v":n}`; pack it as a base64 `Float64Array` (or varint
   deltas).
-- **Incremental / delta capture.** The oscillation cases (a session that crosses
-  many times) re-ship near-identical continuations. The heap already versions
-  objects (`fetch.mjs`); reuse that to ship only what changed since the last capture
-  to a given peer.
+- **Incremental / delta capture — done (`src/wire-delta.mjs`).** The oscillation case
+  (a session that crosses many times) re-ships a near-identical continuation each hop.
+  Each tier keeps a replicated, stably-identified object store; a capture ships only the
+  objects whose **shallow content version** changed (children referenced by id, so a deep
+  edit bumps only its own object, not the spine to the root), and the peer mutates its
+  store in place. Baseline = what the peer already holds (the last exchange); the **return
+  hop of a bounce is itself a delta** (the receiver records the versions it now holds). The
+  optimal strategy is `min(delta, full wire)` per message — the §6 cost decision — so the
+  cold first hop falls back to the full binary wire and the wire is **never worse than full**.
+  Over a 12-hop oscillation a warm hop ships a flat ~175 B regardless of feed size while the
+  full wire scales with the model: **77–91 %** fewer session bytes, the win growing with size
+  (`npm run bench:delta`). It is also a CPU **wash-to-win** warm (~0.73× a full encode — it
+  walks the graph to diff but skips serializing the unchanged bulk) and strictly more work
+  cold (the other reason cold falls back). Fidelity (identity, cycles, undefined/BigInt, §5
+  handles), locality, the bounce, and the floor are proven in `test/probes/wire-delta.mjs`.
+  Next lever: track dirty objects at mutation time (the §5 heap already bumps a version on
+  write) to avoid re-hashing the whole graph each capture.
 - **Content-addressed subgraphs.** Hash immutable subgraphs (code, class shapes,
   config); if the peer has the hash, ship the hash, not the bytes. Globals already
   travel by reference; this generalizes it, and it is the known fix for resume

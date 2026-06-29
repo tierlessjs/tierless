@@ -36,10 +36,11 @@
     "test": "node test/run.mjs",
     "lint": "eslint .",
     "live": "node src/server-live.mjs",
-    "bench": "node bench/overhead.mjs && node bench/conduit.mjs && node bench/wire.mjs",
+    "bench": "node bench/overhead.mjs && node bench/conduit.mjs && node bench/wire.mjs && node bench/delta.mjs",
     "bench:overhead": "node bench/overhead.mjs",
     "bench:conduit": "node bench/conduit.mjs",
-    "bench:wire": "node bench/wire.mjs"
+    "bench:wire": "node bench/wire.mjs",
+    "bench:delta": "node bench/delta.mjs"
   },
   "dependencies": {
     "ws": "^8.21.0"
