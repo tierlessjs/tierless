@@ -14,7 +14,7 @@ const cases = [
   { file: "test/probes/codec.mjs",       needs: ["wire codec: identity, cycles"] },
   { file: "test/probes/wire-binary.mjs", needs: ["binary wire: identical decode"] },
   { file: "test/probes/wire-fuzz.mjs",   needs: ["property round-trips, differential vs JSON, boundaries, and decode robustness"] },
-  { file: "test/probes/wire-delta.mjs",  needs: ["fidelity, locality, bidirectional bounce, floor, and write-tracked≡rescan all hold"] },
+  { file: "test/probes/wire-delta.mjs",  needs: ["fidelity, locality, bounce, floor, write-tracked≡rescan, Map/Set, and orphan-correctness all hold"] },
   { file: "test/probes/wire-delta-compiled.mjs", needs: ["--track-writes drives write-tracked delta on plain source, matching the rescan oracle"] },
   { file: "src/verify.mjs",         needs: ["PASS — auto-compiled tier-split continuation produced the correct session"] },
   { file: "src/control-flow.mjs",   needs: ["extended control flow survives migration"] },

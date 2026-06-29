@@ -22,64 +22,90 @@ export const PROGRAMS = {
   Session(F) {
     while (true) switch (F.pc) {
       case 0:
-        F.pc = 22; break;
+        F.pc = 30; break;
       case 1:
         return { op: "return", value: "(end)" };
       case 2:
         return { op: "return", value: F.model.hops };
       case 3:
-        F.pc = 21; break;
+        F.pc = 29; break;
       case 4:
-        __dirty(F.model.items).push({ id: F.ev.id, label: F.ev.label, done: false }); // array mutator (push)
+        // array mutator (push)
+__dirty(F.model.byId).set(F.ev.id, F.item); // Map mutator (set)
         F.pc = 3; break;
       case 5:
-        // deep member assignment
-touchCount(F.model.items[F.ev.idx]); // mutation through a pure helper
-        F.pc = 3; break;
+        __dirty(F.model.items).push(F.item); // array mutator (push)
+        F.pc = 4; break;
       case 6:
-        __dirty(F.model.items[F.ev.idx]).done = !F.model.items[F.ev.idx].done; // deep member assignment
+        F.item = { id: F.ev.id, label: F.ev.label, done: false };
         F.pc = 5; break;
       case 7:
+        __dirty(F.model.doneIds).add(F.item.id); // Set mutator (add)
+        F.pc = 3; break;
+      case 8:
+        __dirty(F.model.doneIds).delete(F.item.id);
+        F.pc = 3; break;
+      case 9:
+        if (F.item.done) { F.pc = 7; } else { F.pc = 8; } break;
+      case 10:
+        // deep member assignment
+touchCount(F.item); // mutation through a pure helper
+        F.pc = 9; break;
+      case 11:
+        __dirty(F.item).done = !F.item.done; // deep member assignment
+        F.pc = 10; break;
+      case 12:
+        F.item = F.model.items[F.ev.idx];
+        F.pc = 11; break;
+      case 13:
         // deep member assignment
 touchCount(F.model.items[F.ev.idx]); // mutation through a pure helper
         F.pc = 3; break;
-      case 8:
+      case 14:
         __dirty(F.model.items[F.ev.idx]).label = F.ev.label; // deep member assignment
-        F.pc = 7; break;
-      case 9:
+        F.pc = 13; break;
+      case 15:
         __dirty(F.model.log).push("tick " + F.model.hops); // array mutator on a different object
         F.pc = 3; break;
-      case 10:
-        __dirty(F.model.items).splice(0, F.model.items.length); // array mutator (splice)
-        F.pc = 3; break;
-      case 11:
-        if (F.ev.type === "clear") { F.pc = 10; } else { F.pc = 3; } break;
-      case 12:
-        if (F.ev.type === "tick") { F.pc = 9; } else { F.pc = 11; } break;
-      case 13:
-        if (F.ev.type === "rename") { F.pc = 8; } else { F.pc = 12; } break;
-      case 14:
-        if (F.ev.type === "toggle") { F.pc = 6; } else { F.pc = 13; } break;
-      case 15:
-        if (F.ev.type === "add") { F.pc = 4; } else { F.pc = 14; } break;
       case 16:
-        // field update (assignment through a local)
-__dirty(F.model).last = F.ev.type;
-        F.pc = 15; break;
+        // Map mutator (clear)
+__dirty(F.model.doneIds).clear(); // Set mutator (clear)
+        F.pc = 3; break;
       case 17:
-        __dirty(F.model).hops = F.model.hops + 1; // field update (assignment through a local)
+        // array mutator (splice)
+__dirty(F.model.byId).clear(); // Map mutator (clear)
         F.pc = 16; break;
       case 18:
-        F.pc = 2; break;
+        __dirty(F.model.items).splice(0, F.model.items.length); // array mutator (splice)
+        F.pc = 17; break;
       case 19:
-        if (F.ev.type === "stop") { F.pc = 18; } else { F.pc = 17; } break;
+        if (F.ev.type === "clear") { F.pc = 18; } else { F.pc = 3; } break;
       case 20:
-        F.ev = F.ret;
-        F.pc = 19; break;
+        if (F.ev.type === "tick") { F.pc = 15; } else { F.pc = 19; } break;
       case 21:
-        F.pc = 20; return { op: "resource", tier: "browser", name: "dom.commit", args: [F.model] };
+        if (F.ev.type === "rename") { F.pc = 14; } else { F.pc = 20; } break;
       case 22:
-        F.model = { items: [], log: [], hops: 0, last: null };
+        if (F.ev.type === "toggle") { F.pc = 12; } else { F.pc = 21; } break;
+      case 23:
+        if (F.ev.type === "add") { F.pc = 6; } else { F.pc = 22; } break;
+      case 24:
+        // field update (assignment through a local)
+__dirty(F.model).last = F.ev.type;
+        F.pc = 23; break;
+      case 25:
+        __dirty(F.model).hops = F.model.hops + 1; // field update (assignment through a local)
+        F.pc = 24; break;
+      case 26:
+        F.pc = 2; break;
+      case 27:
+        if (F.ev.type === "stop") { F.pc = 26; } else { F.pc = 25; } break;
+      case 28:
+        F.ev = F.ret;
+        F.pc = 27; break;
+      case 29:
+        F.pc = 28; return { op: "resource", tier: "browser", name: "dom.commit", args: [F.model] };
+      case 30:
+        F.model = { items: [], log: [], hops: 0, last: null, byId: new Map(), doneIds: new Set() };
         F.pc = 3; break;
     }
   }

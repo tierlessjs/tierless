@@ -21,16 +21,28 @@
 //     touches the shipped objects. Correct as long as every mutation bumps — exactly the guarantee
 //     a compiler write-hook gives; rescan is the safe fallback when the caller can't cooperate.
 //
-// Prototype scope: plain objects (own enumerable string keys), arrays, number/string/bool/
-// null/undefined/bigint, and §5 handles — the common continuation shapes. Map/Set/symbols/
+// Scope: plain objects (own enumerable string keys), arrays, Map, Set, number/string/bool/
+// null/undefined/bigint, and §5 handles — with identity and cycles preserved across all of them
+// (a shared object that is also a Map key and a Set member stays one object). Symbols and
 // non-enumerable props extend mechanically (same node table as wire-binary).
 import { isHandle } from "./graph.mjs";
 
 const MAGIC = "SMD1";
 const te = new TextEncoder(), td = new TextDecoder();
 const isObj = (v) => v !== null && typeof v === "object";
+const isMap = (v) => v instanceof Map;
+const isSet = (v) => v instanceof Set;
 const isVarInt = (v) => Number.isInteger(v) && Math.abs(v) < 0x80000000 && !Object.is(v, -0);
 function fnv(s) { let h = 0x811c9dc5 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h >>> 0; }
+// The child values of a container, in a stable order (a §5 handle is an opaque leaf — no children).
+// One definition shared by every graph walk (reach, version, dirty-select) so they never disagree.
+function forEachChild(v, fn) {
+  if (Array.isArray(v)) v.forEach(fn);
+  else if (isHandle(v)) { /* leaf: stays tier-local */ }
+  else if (isMap(v)) for (const [k, val] of v) { fn(k); fn(val); }
+  else if (isSet(v)) for (const val of v) fn(val);
+  else for (const k of Object.keys(v)) fn(v[k]);
+}
 
 class W {
   constructor() { this.buf = new Uint8Array(256); this.n = 0; }
@@ -74,7 +86,12 @@ function emit(session, rootVals, frames, req, changed) {
   for (const f of frames) { si(f.fn); f.keys.forEach(si); }
   if (req) { si(req.op); si(req.tier); si(req.name); }
   rootVals.forEach(internVal);
-  for (const id of changed) { si(id); const v = session.store.get(id); if (isHandle(v)) { si(v.owner); si(String(v.id)); if (v.kind) si(v.kind); } else if (Array.isArray(v)) v.forEach(internVal); else for (const k of Object.keys(v)) { si(k); internVal(v[k]); } }
+  for (const id of changed) {
+    si(id); const v = session.store.get(id);
+    if (isHandle(v)) { si(v.owner); si(String(v.id)); if (v.kind) si(v.kind); }
+    else if (isMap(v) || isSet(v) || Array.isArray(v)) forEachChild(v, internVal);
+    else for (const k of Object.keys(v)) { si(k); internVal(v[k]); }
+  }
 
   const w = new W();
   const node = (v) => {                                                 // a value: ref(sid) | int | float | str | bool | null | undef | bigint
@@ -97,6 +114,8 @@ function emit(session, rootVals, frames, req, changed) {
   for (const id of changed) {
     w.varu(si(id)); const v = session.store.get(id);
     if (isHandle(v)) { w.u8(2); w.varu(si(v.owner)); w.varu(si(String(v.id))); if (v.kind) { w.u8(1); w.varu(si(v.kind)); } else w.u8(0); }
+    else if (isMap(v)) { w.u8(3); w.varu(v.size); for (const [k, val] of v) { node(k); node(val); } }
+    else if (isSet(v)) { w.u8(4); w.varu(v.size); for (const val of v) node(val); }
     else if (Array.isArray(v)) { w.u8(1); w.varu(v.length); for (const e of v) node(e); }
     else { const ks = Object.keys(v); w.u8(0); w.varu(ks.length); for (const k of ks) { w.varu(si(k)); node(v[k]); } }
   }
@@ -121,6 +140,8 @@ function parseDelta(bytes) {
   const changed = []; { const n = r.count(); for (let i = 0; i < n; i++) {
     const sid = S(r.varu()); const kind = r.u8();
     if (kind === 2) { const owner = S(r.varu()), id = S(r.varu()); const h = { __stackmix_handle__: true, owner, id }; if (r.u8()) h.kind = S(r.varu()); changed.push({ sid, kind, handle: h }); }
+    else if (kind === 3) { const c = r.count(), entries = []; for (let j = 0; j < c; j++) { const k = node(); entries.push([k, node()]); } changed.push({ sid, kind, entries }); }
+    else if (kind === 4) { const c = r.count(), vals = []; for (let j = 0; j < c; j++) vals.push(node()); changed.push({ sid, kind, vals }); }
     else if (kind === 1) { const c = r.count(), e = []; for (let j = 0; j < c; j++) e.push(node()); changed.push({ sid, kind, elems: e }); }
     else { const c = r.count(), fields = []; for (let j = 0; j < c; j++) { const k = S(r.varu()); fields.push([k, node()]); } changed.push({ sid, kind, fields }); }
   } }
@@ -132,14 +153,17 @@ function parseDelta(bytes) {
 // values (for a receiver that wants to re-scan), and the list of shipped sids.
 function reconstruct(session, parsed) {
   const { frames, req, rootNodes, changed } = parsed;
+  const shell = (k, h) => (k === 1 ? [] : k === 2 ? h : k === 3 ? new Map() : k === 4 ? new Set() : {});
   for (const ch of changed) {                                            // pass 1: locate-or-create shells
     let obj = session.store.get(ch.sid);
-    if (!obj) { obj = ch.kind === 1 ? [] : ch.kind === 2 ? ch.handle : {}; session.store.set(ch.sid, obj); session.idOf.set(obj, ch.sid); }
+    if (!obj) { obj = shell(ch.kind, ch.handle); session.store.set(ch.sid, obj); session.idOf.set(obj, ch.sid); }
     ch.obj = obj;
   }
   const deref = (nd) => ("ref" in nd ? session.store.get(nd.ref) : nd.v);  // store has every referenced id
   for (const ch of changed) {                                            // pass 2: fill (mutate in place)
     if (ch.kind === 2) { const h = ch.obj; h.owner = ch.handle.owner; h.id = ch.handle.id; if (ch.handle.kind !== undefined) h.kind = ch.handle.kind; }
+    else if (ch.kind === 3) { ch.obj.clear(); for (const [kn, vn] of ch.entries) ch.obj.set(deref(kn), deref(vn)); }
+    else if (ch.kind === 4) { ch.obj.clear(); for (const vn of ch.vals) ch.obj.add(deref(vn)); }
     else if (ch.kind === 1) { ch.obj.length = 0; for (const nd of ch.elems) ch.obj.push(deref(nd)); }
     else { for (const k of Object.keys(ch.obj)) delete ch.obj[k]; for (const [k, nd] of ch.fields) ch.obj[k] = deref(nd); }
   }
@@ -160,14 +184,16 @@ export function makeDeltaSession(tier) {
 function scan(session, rootVals) {
   const sidOf = sidOfFn(session);
   const reach = new Map();
-  const visit = (v) => { if (!isObj(v)) return; const id = sidOf(v); if (reach.has(id)) return; reach.set(id, v); if (Array.isArray(v)) v.forEach(visit); else if (!isHandle(v)) for (const k of Object.keys(v)) visit(v[k]); };
+  const visit = (v) => { if (!isObj(v)) return; const id = sidOf(v); if (reach.has(id)) return; reach.set(id, v); forEachChild(v, visit); };
   rootVals.forEach(visit);
   const canon = (v) => (isObj(v) ? "r" + session.idOf.get(v) : v === undefined ? "u" : typeof v === "bigint" ? "B" + v : typeof v + ":" + v);
   const ver = new Map();
   for (const [id, v] of reach) {
     const c = isHandle(v) ? "H|" + v.owner + "|" + v.id + "|" + (v.kind || "")
-      : Array.isArray(v) ? "a|" + v.map(canon).join("|")
-        : "o|" + Object.keys(v).map((k) => k + "=" + canon(v[k])).join("|");
+      : isMap(v) ? "M|" + [...v].map(([k, val]) => canon(k) + "=" + canon(val)).join("|")
+        : isSet(v) ? "S|" + [...v].map(canon).join("|")
+          : Array.isArray(v) ? "a|" + v.map(canon).join("|")
+            : "o|" + Object.keys(v).map((k) => k + "=" + canon(v[k])).join("|");
     ver.set(id, fnv(c));
   }
   return { reach, ver };
@@ -226,8 +252,7 @@ function selectDirty(session, rootVals) {
     if (ship.has(id)) return;                                          // already queued (also breaks cycles)
     ship.add(id);
     if (isNew) fresh.push(id);
-    if (isHandle(v)) return;
-    if (Array.isArray(v)) v.forEach(recurse); else for (const k of Object.keys(v)) recurse(v[k]);
+    forEachChild(v, recurse);
   };
   rootVals.forEach(recurse);
   for (const o of session.dirty) recurse(o);                            // dirty objects under a clean ancestor

@@ -15,17 +15,22 @@ function touchCount(item) {
   item.touches = (item.touches || 0) + 1;                 // in-place mutation of a caller-owned object
 }
 function Session() {
-  const model = { items: [], log: [], hops: 0, last: null };
+  const model = { items: [], log: [], hops: 0, last: null, byId: new Map(), doneIds: new Set() };
   while (true) {
     const ev = commit(model);                              // suspend: hand the continuation across the boundary
     if (ev.type === "stop") break;
     model.hops = model.hops + 1;                           // field update (assignment through a local)
     model.last = ev.type;
     if (ev.type === "add") {
-      model.items.push({ id: ev.id, label: ev.label, done: false });   // array mutator (push)
+      const item = { id: ev.id, label: ev.label, done: false };
+      model.items.push(item);                                          // array mutator (push)
+      model.byId.set(ev.id, item);                                     // Map mutator (set)
     } else if (ev.type === "toggle") {
-      model.items[ev.idx].done = !model.items[ev.idx].done;            // deep member assignment
-      touchCount(model.items[ev.idx]);                                 // mutation through a pure helper
+      const item = model.items[ev.idx];
+      item.done = !item.done;                                          // deep member assignment
+      touchCount(item);                                               // mutation through a pure helper
+      if (item.done) model.doneIds.add(item.id);                       // Set mutator (add)
+      else model.doneIds.delete(item.id);                             // Set mutator (delete)
     } else if (ev.type === "rename") {
       model.items[ev.idx].label = ev.label;                           // deep member assignment
       touchCount(model.items[ev.idx]);                                 // mutation through a pure helper
@@ -33,6 +38,8 @@ function Session() {
       model.log.push("tick " + model.hops);                           // array mutator on a different object
     } else if (ev.type === "clear") {
       model.items.splice(0, model.items.length);                      // array mutator (splice)
+      model.byId.clear();                                             // Map mutator (clear)
+      model.doneIds.clear();                                          // Set mutator (clear)
     }
   }
   return model.hops;

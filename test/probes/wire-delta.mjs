@@ -227,5 +227,61 @@ console.log("Probe: the delta wire codec — fidelity, locality, bidirectional b
   check("write-tracked: it ships exactly the mutated array + the one new object (2)", enc.shipped === 2);
 }
 
-console.log(`\n  delta wire: ${pass ? "fidelity, locality, bidirectional bounce, floor, and write-tracked≡rescan all hold" : "FAILURES above"}`);
+// ---------------------------------------------------------------------------------------------
+// 7) MAP / SET — first-class in the delta codec: identity and cycles preserved (a shared object
+//    that is a Map key AND a Set member AND a frame local stays ONE object), and a Map.set / Set
+//    mutation ships only the changed container, matching the rescan oracle.
+// ---------------------------------------------------------------------------------------------
+{
+  const A = makeDeltaSession("server"), B = makeDeltaSession("browser");
+  const shared = { tag: "s" };
+  const m = new Map([["k", 1], [shared, { v: 10 }], ["arr", [1, 2, 3]]]);
+  const set = new Set([shared, "x", 42]);
+  const cyc = new Map(); cyc.set("self", cyc);                           // a cyclic Map
+  const stack = [{ fn: "App", pc: 1, m, set, shared, cyc }];
+  const { stack: s } = applyDelta(B, encodeDelta(A, stack, null).bytes);
+  check("map/set: Map and Set reconstruct with the right size and entries",
+    s[0].m instanceof Map && s[0].m.size === 3 && s[0].m.get("arr").length === 3 && s[0].set instanceof Set && s[0].set.has(42));
+  const mapKey = [...s[0].m.keys()].find((k) => k && k.tag === "s");
+  check("map/set: a shared object is ONE instance across a Map key, a Set member, and a local",
+    mapKey === s[0].shared && s[0].set.has(s[0].shared));
+  check("map/set: a cyclic Map (m.self === m) round-trips", s[0].cyc.get("self") === s[0].cyc);
+}
+{
+  // Map.set ships only the changed Map, matching the rescan oracle
+  const rs = makeDeltaSession("server"), rp = makeDeltaSession("browser");
+  const ts = makeTrackedSession("server"), tp = makeTrackedSession("browser");
+  const mk = () => [{ fn: "F", pc: 0, cache: new Map([["a", { n: 1 }], ["b", { n: 2 }]]), tags: new Set(["x"]) }];
+  const rl = mk(), tl = mk();
+  applyDelta(rp, encodeDelta(rs, rl, null).bytes); applyDeltaTracked(tp, encodeDeltaTracked(ts, tl, null).bytes);
+  rl[0].cache.set("c", { n: 3 }); rl[0].tags.add("y");
+  tl[0].cache.set("c", { n: 3 }); tl[0].tags.add("y"); touch(ts, tl[0].cache, tl[0].tags);
+  const re = encodeDelta(rs, rl, null), te = encodeDeltaTracked(ts, tl, null);
+  const rb = applyDelta(rp, re.bytes), tb = applyDeltaTracked(tp, te.bytes);
+  check("map/set: a Map.set + Set.add ship the same count tracked as rescan", re.shipped === te.shipped);
+  check("map/set: both reconstruct the grown Map (3) and Set (2)",
+    rb.stack[0].cache.size === 3 && tb.stack[0].cache.size === 3 && tb.stack[0].tags.has("y") && tb.stack[0].cache.get("c").n === 3);
+}
+
+// ---------------------------------------------------------------------------------------------
+// 8) ORPHAN — write-tracked is O(changed), so it cannot cheaply prove reachability; if code mutates
+//    an object then orphans it in the SAME run, the orphan ships as a harmless extra. Assert the
+//    RECONSTRUCTION is still correct (the contract is correctness, not always byte-minimality).
+// ---------------------------------------------------------------------------------------------
+{
+  const s = makeTrackedSession("server"), p = makeTrackedSession("browser");
+  const live = [{ fn: "F", pc: 0, list: [{ id: 0, n: 0 }, { id: 1, n: 0 }] }];
+  applyDeltaTracked(p, encodeDeltaTracked(s, live, null).bytes);         // baseline holds both rows
+  const victim = live[0].list[0];
+  victim.n = 99; touch(s, victim);                                       // mutate row 0…
+  live[0].list.shift(); touch(s, live[0].list);                          // …then orphan it (remove from the list)
+  const enc = encodeDeltaTracked(s, live, null);
+  const { stack: recv } = applyDeltaTracked(p, enc.bytes);
+  check("orphan: the reconstruction is correct — list is [{id:1}], the orphaned row is gone",
+    recv[0].list.length === 1 && recv[0].list[0].id === 1 && !recv[0].list.some((r) => r.id === 0));
+  check("orphan: a subsequent clean capture ships nothing new (the stray was bounded to one hop)",
+    (live[0].list.push({ id: 2, n: 0 }), touch(s, live[0].list), encodeDeltaTracked(s, live, null).shipped) <= 2);
+}
+
+console.log(`\n  delta wire: ${pass ? "fidelity, locality, bounce, floor, write-tracked≡rescan, Map/Set, and orphan-correctness all hold" : "FAILURES above"}`);
 process.exit(pass ? 0 : 1);

@@ -63,10 +63,14 @@ it goes next. Items are grouped, not strictly ordered; see
   hop (same ship count, identical reconstruction) and reconstructs the live continuation exactly, with a
   control proving the barrier is load-bearing (uninstall the sink and an in-place edit goes unshipped).
   Untracked output is byte-identical (verified against the committed bundles), so the flag is zero-cost
-  when off. The remaining step is the **live pump**: install the session's dirty sink around stepping and
-  take `min(delta, full)` on the real socket (today's socket demos still ship the full binary frame).
-  Other mutators (Map/Set, custom methods) are not yet instrumented — those fall back to rescan, which
-  needs no barrier.
+  when off. **Map and Set are first-class** in the delta codec (identity/cycles preserved across Map keys
+  and Set members) and the compiler instruments their mutators (`set`/`add`/`delete`/`clear`) alongside
+  the array ones; a custom method that mutates without one of those names isn't seen and that continuation
+  falls back to rescan. The reachability contract is correctness-first: write-tracking is O(changed), so it
+  can't cheaply prove reachability — if code mutates an object then orphans it in one run, the orphan
+  ships as a harmless extra (bounded to one hop), never a wrong reconstruction (`test/probes/wire-delta.mjs`
+  proves both). The remaining step is the **live pump**: install the session's dirty sink around stepping
+  and take `min(delta, full)` on the real socket (today's socket demos still ship the full binary frame).
 - **Content-addressed subgraphs.** Hash immutable subgraphs (code, class shapes,
   config); if the peer has the hash, ship the hash, not the bytes. Globals already
   travel by reference; this generalizes it, and it is the known fix for resume

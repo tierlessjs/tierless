@@ -479,9 +479,11 @@ function insertWriteBacks(p) {
 // the installed sink (the active delta session) and RETURNS it, so the write proceeds unchanged and
 // the base is evaluated exactly once. No suspension — marking is a local Set add, not a tier hop.
 // Scoped to chains ROOTED AT A FRAME LOCAL/PARAM (continuation state), so the dirty set never names
-// a global/import. Covers `o.x = v` / `o[i] = v` (any operator), `o.x++`, and the in-place array
-// mutators; other mutators (Map/Set, custom methods) fall back to rescan, which needs no barrier.
-const ARRAY_MUTATORS = new Set(["push", "pop", "shift", "unshift", "splice", "sort", "reverse", "fill", "copyWithin"]);
+// a global/import. Covers `o.x = v` / `o[i] = v` (any operator), `o.x++`, the in-place array mutators,
+// and the Map/Set mutators (set/add/delete/clear) — the delta codec models Map/Set as first-class.
+// A custom method that mutates without one of these names isn't seen; that continuation falls back
+// to rescan, which needs no barrier. (Marking a same-named method on a non-container only over-ships.)
+const MUTATOR_METHODS = new Set(["push", "pop", "shift", "unshift", "splice", "sort", "reverse", "fill", "copyWithin", "set", "add", "delete", "clear"]);
 function localNamesOf(p) {                                        // params + declared locals + catch params
   const names = new Set(p.node.params.filter((x) => t.isIdentifier(x)).map((x) => x.name));
   p.traverse({ VariableDeclarator(v) { if (t.isIdentifier(v.node.id)) names.add(v.node.id.name); },
@@ -500,7 +502,7 @@ function insertDirtyBarriers(p) {
   p.traverse({
     AssignmentExpression(ap) { const tgt = ap.node.left; if (t.isMemberExpression(tgt) && rooted(tgt)) wrapBase(ap.get("left")); },
     UpdateExpression(up) { const tgt = up.node.argument; if (t.isMemberExpression(tgt) && rooted(tgt)) wrapBase(up.get("argument")); },
-    CallExpression(cp) { const c = cp.node.callee; if (t.isMemberExpression(c) && !c.computed && t.isIdentifier(c.property) && ARRAY_MUTATORS.has(c.property.name) && rooted(c)) wrapBase(cp.get("callee")); },
+    CallExpression(cp) { const c = cp.node.callee; if (t.isMemberExpression(c) && !c.computed && t.isIdentifier(c.property) && MUTATOR_METHODS.has(c.property.name) && rooted(c)) wrapBase(cp.get("callee")); },
   });
 }
 // Emitted into the bundle under --track-writes. The owner installs a sink (the delta session's dirty
