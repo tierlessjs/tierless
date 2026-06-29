@@ -90,10 +90,13 @@ it goes next. Items are grouped, not strictly ordered; see
   only the UI changes ride each hop. `test/probes/wire-delta-handle.mjs`: a continuation with a 2000-row dataset
   + a small UI ships an **80 KB inline capture as 115 B** (the dataset became a handle), preserves shared
   identity (two aliases → one handle), resolves on deref from the owning heap, keeps the warm deltas tiny and flat
-  over an oscillation (the handle is never re-shipped), and survives a bounce with the data still home. One open
-  edge: composing excision with the `min(delta, full)` *full-binary* path needs the two excision decisions to
-  agree on handle ids — so the live socket runs excision delta-only for now (the cold delta is already tiny, as
-  there is no big data inline to compact).
+  over an oscillation (the handle is never re-shipped), and survives a bounce with the data still home. Excision
+  also composes with the `min(delta, full)` **full-binary path**: `exciseForCapture` runs first so both paths excise
+  the same objects to the same handles, `subForFullWire` rebuilds the small spine with handle leaves for the full
+  frame, and `adoptBaseline` substitutes too, so ids stay consistent across a full↔delta switch. `src/delta-live.mjs`
+  now runs the **whole composition over a real socket** — a continuation bounces server↔browser carrying a 124 KB
+  catalog that excises to a §5 handle (4.9 KB total wire vs 124 KB inline), ships `min(delta, full)` each crossing,
+  and the browser derefs the catalog over the same socket — all on plain `--track-writes` source, in `npm test`.
 - **Content-addressed subgraphs.** Hash immutable subgraphs (code, class shapes,
   config); if the peer has the hash, ship the hash, not the bytes. Globals already
   travel by reference; this generalizes it, and it is the known fix for resume

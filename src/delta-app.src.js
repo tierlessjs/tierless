@@ -6,8 +6,9 @@
 //
 //   node transform.cjs delta-app.src.js delta-app.gen.mjs --bare --track-writes
 function Board() {
-  const model = { rows: [], log: [], hops: 0, cursor: 0, byId: new Map() };
-  while (true) {
+  const catalog = api.getCatalog();                 // big reference dataset, fetched once — its OWN local, so it
+  const model = { rows: [], log: [], hops: 0, cursor: 0, byId: new Map() };   // excises to a §5 handle and stays home
+  while (catalog !== null) {
     const data = api.poll(model.cursor);            // SERVER resource — returns the next scripted change
     if (data.stop) break;
     model.hops = model.hops + 1;

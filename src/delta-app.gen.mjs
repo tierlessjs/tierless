@@ -7,13 +7,13 @@ export const PROGRAMS = {
   Board(F) {
     while (true) switch (F.pc) {
       case 0:
-        F.pc = 23; break;
+        F.pc = 25; break;
       case 1:
         return { op: "return", value: "(end)" };
       case 2:
         return { op: "return", value: F.model.hops };
       case 3:
-        F.pc = 22; break;
+        if (F.catalog !== null) { F.pc = 22; } else { F.pc = 2; } break;
       case 4:
         F.pc = 2; break;
       case 5:
@@ -65,8 +65,14 @@ __dirty(F.model.byId).set(F.data.id, F.row); // Map mutator
       case 22:
         F.pc = 21; return { op: "resource", tier: "server", name: "api.poll", args: [F.model.cursor] };
       case 23:
-        F.model = { rows: [], log: [], hops: 0, cursor: 0, byId: new Map() };
+        // big reference dataset, fetched once — its OWN local, so it
+F.model = { rows: [], log: [], hops: 0, cursor: 0, byId: new Map() }; // excises to a §5 handle and stays home
         F.pc = 3; break;
+      case 24:
+        F.catalog = F.ret;
+        F.pc = 23; break;
+      case 25:
+        F.pc = 24; return { op: "resource", tier: "server", name: "api.getCatalog", args: [] };
     }
   }
 };

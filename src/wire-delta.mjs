@@ -341,11 +341,13 @@ export function applyDeltaTracked(session, bytes) {
 // (this is also where accumulated orphans are collected). After this, the next capture is a delta.
 export function adoptBaseline(session, stack, request) {
   const { rootVals } = rootsOf(stack, request);
+  const sub = subFn(session);                                          // excised objects appear as their handle leaf
   session.store = new Map();
   session.seen = new Set();
   session.dirty.clear();
   let n = 0;
   const assign = (v) => {
+    v = sub(v);
     if (!isObj(v)) return;
     const prior = session.idOf.get(v);
     if (prior !== undefined && session.store.has(prior)) return;        // already placed in THIS baseline (sharing/cycles)
@@ -355,4 +357,32 @@ export function adoptBaseline(session, stack, request) {
   };
   rootVals.forEach(assign);
   session.based = true;
+}
+
+// Rebuild { stack, request } with every excised object replaced by its §5 handle leaf, for the
+// min(delta, full) FULL path: encodeWireBinary then sees handles where the big subgraphs were and
+// ships them as leaves — the same handles the delta path uses (both run after exciseBig), so the two
+// paths agree on handle ids and adoptBaseline (which also subs) stays deterministic. Order- and
+// identity-preserving (a shared object rebuilds once via the memo; cycles are memoized before
+// recursion), and the spine is small (the big data is gone), so it is cheap.
+export function subForFullWire(session, stack, request) {
+  const sub = subFn(session), memo = new Map();
+  const rebuild = (v) => {
+    v = sub(v);
+    if (!isObj(v) || isHandle(v)) return v;
+    if (memo.has(v)) return memo.get(v);
+    if (Array.isArray(v)) { const a = []; memo.set(v, a); for (const e of v) a.push(rebuild(e)); return a; }
+    if (isMap(v)) { const m = new Map(); memo.set(v, m); for (const [k, val] of v) m.set(rebuild(k), rebuild(val)); return m; }
+    if (isSet(v)) { const s = new Set(); memo.set(v, s); for (const e of v) s.add(rebuild(e)); return s; }
+    const o = {}; memo.set(v, o); for (const k of ownKeys(v)) o[k] = rebuild(v[k]); return o;
+  };
+  const stk = stack.map((f) => { const g = {}; for (const k of Object.keys(f)) g[k] = (k === "fn" || k === "pc") ? f[k] : rebuild(f[k]); return g; });
+  const req = request ? { ...request, args: (request.args || []).map(rebuild) } : null;
+  return { stack: stk, request: req };
+}
+
+// Populate session.handleOf for a capture (the min(delta,full) caller runs this once, before BOTH the
+// full path (subForFullWire) and the delta path, so they excise the same objects to the same handles).
+export function exciseForCapture(session, stack, request, tier, threshold = 64 * 1024) {
+  exciseBig(session, rootsOf(stack, request).rootVals, tier, threshold);
 }
