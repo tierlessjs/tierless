@@ -69,7 +69,17 @@ for (const [label, fn, expected] of cases) {
   if (ok) pass++;
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : `  (got ${err ? "ERR:" + err.message : JSON.stringify(got)}, expected ${JSON.stringify(expected)})`}`);
 }
-console.log(pass === cases.length
-  ? `\nPASS — extended control flow survives migration: loops, continue, try/catch/finally, nested calls, expression positions, &&/||/?:, switch, labeled break/continue, do-while, and loop headers (${pass}/${cases.length})`
-  : `\nFAIL (${pass}/${cases.length})`);
-process.exit(pass === cases.length ? 0 : 1);
+
+// Safety net: a frame whose pc has no case (a transform bug, or a continuation mangled in transit)
+// must hard-error at once, never spin `while (true)` forever. Drive a real machine with an
+// out-of-range pc and assert it throws RangeError instead of hanging.
+let guardErr = null;
+try { PROGRAMS.forContinue({ fn: "forContinue", pc: 0xbeef, args: [] }); } catch (e) { guardErr = e; }
+const pcGuardOk = guardErr instanceof RangeError && /invalid pc/.test(guardErr.message);
+console.log(`  ${pcGuardOk ? "PASS" : "FAIL"}  out-of-range pc hard-errors (no infinite loop)`);
+
+const allOk = pass === cases.length && pcGuardOk;
+console.log(allOk
+  ? `\nPASS — extended control flow survives migration: loops, continue, try/catch/finally, nested calls, expression positions, &&/||/?:, switch, labeled break/continue, do-while, loop headers, and the pc safety net (${pass}/${cases.length} + guard)`
+  : `\nFAIL (${pass}/${cases.length}${pcGuardOk ? "" : ", pc guard failed"})`);
+process.exit(allOk ? 0 : 1);

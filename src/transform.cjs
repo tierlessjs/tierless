@@ -408,7 +408,10 @@ function compileFn(node) {
     throw new Error("bad terminator " + tm.kind);
   };
   const cases = ids.map((id) => { const blk = blocks[id]; const lines = blk.lines.slice(); lines.push(emitTerm(blk.term)); return `      case ${R(id)}:\n        ${lines.join("\n        ")}`; }).join("\n");
-  return `  ${fnName}(F) {\n    while (true) switch (F.pc) {\n${cases}\n    }\n  }`;
+  // default: every reachable pc has a case, so landing here means a corrupt frame — a transform bug, or
+  // a continuation mangled in transit. Hard-error at once instead of letting `while (true)` spin forever:
+  // fail fast and loud rather than hang. (No valid run reaches it; this is a safety net, not control flow.)
+  return `  ${fnName}(F) {\n    while (true) switch (F.pc) {\n${cases}\n      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in ${fnName}");\n    }\n  }`;
 }
 
 // Rewrite a suspendable function's locals/params -> F.x, then compile it to a machine.

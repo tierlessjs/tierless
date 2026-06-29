@@ -37,6 +37,7 @@ export const PROGRAMS = {
         F.pc = 6; break;
       case 8:
         F.pc = 7; return { op: "resource", tier: "server", name: "api.getTags", args: [] };
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in homeFeed");
     }
   },
   favoritedByFollowed(F) {
@@ -84,6 +85,7 @@ export const PROGRAMS = {
         F.pc = 14; break;
       case 16:
         F.pc = 15; return { op: "resource", tier: "server", name: "api.getFollowing", args: [F.args[0]] };
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in favoritedByFollowed");
     }
   },
   drilldown(F) {
@@ -125,6 +127,7 @@ F.total = F.total + F.art.favoritesCount;
       case 13:
         F.slug = "article-0";
         F.pc = 12; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in drilldown");
     }
   },
   articlePage(F) {
@@ -150,6 +153,7 @@ F.total = F.total + F.art.favoritesCount;
         F.pc = 6; break;
       case 8:
         F.pc = 7; return { op: "resource", tier: "server", name: "api.getArticle", args: [F.args[0]] };
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in articlePage");
     }
   }
 };

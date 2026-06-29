@@ -73,6 +73,7 @@ F.model = { rows: [], log: [], hops: 0, cursor: 0, byId: new Map() }; // excises
         F.pc = 23; break;
       case 25:
         F.pc = 24; return { op: "resource", tier: "server", name: "api.getCatalog", args: [] };
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in Board");
     }
   }
 };

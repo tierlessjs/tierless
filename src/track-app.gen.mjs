@@ -107,6 +107,7 @@ __dirty(F.model).last = F.ev.type;
       case 30:
         F.model = { items: [], log: [], hops: 0, last: null, byId: new Map(), doneIds: new Set() };
         F.pc = 3; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in Session");
     }
   }
 };

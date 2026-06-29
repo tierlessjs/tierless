@@ -35,6 +35,7 @@ F.sum = F.sum + F.x;
       case 11:
         F.sum = 0;
         F.pc = 3; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in forContinue");
     }
   },
   whileBreak(F) {
@@ -69,6 +70,7 @@ F.acc = F.acc + F.v;
       case 11:
         F.n = 0;
         F.pc = 10; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in whileBreak");
     }
   },
   catchAcrossTier(F) {
@@ -105,6 +107,7 @@ F.r = "got:" + F.v;
       case 11:
         F.r = "start";
         F.pc = 3; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in catchAcrossTier");
     }
   },
   finallyRuns(F) {
@@ -143,6 +146,7 @@ F.log = F.log + F.v;
       case 12:
         F.log = "";
         F.pc = 3; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in finallyRuns");
     }
   },
   catchFinally(F) {
@@ -195,6 +199,7 @@ F.log = F.log + F.v;
       case 17:
         F.log = "";
         F.pc = 3; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in catchFinally");
     }
   },
   fetchDouble(F) {
@@ -210,6 +215,7 @@ F.log = F.log + F.v;
         F.pc = 2; break;
       case 4:
         F.pc = 3; return { op: "resource", tier: "server", name: "api.get", args: [F.args[0]] };
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in fetchDouble");
     }
   },
   sumViaHelper(F) {
@@ -240,6 +246,7 @@ F.total = F.total + F.r;
       case 9:
         F.total = 0;
         F.pc = 3; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in sumViaHelper");
     }
   },
   failingFetch(F) {
@@ -255,6 +262,7 @@ F.total = F.total + F.r;
         F.pc = 2; break;
       case 4:
         F.pc = 3; return { op: "resource", tier: "server", name: "api.fail", args: [1] };
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in failingFetch");
     }
   },
   callerCatches(F) {
@@ -291,6 +299,7 @@ F.r = "ok:" + F.v;
       case 11:
         F.r = "start";
         F.pc = 3; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in callerCatches");
     }
   },
   throwInMachine(F) {
@@ -325,6 +334,7 @@ F.r = "ok:" + F.v;
         F.pc = 3; break;
       case 11:
         F.pc = 10; return { op: "resource", tier: "server", name: "api.get", args: [1] };
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in throwInMachine");
     }
   },
   returnExpr(F) {
@@ -340,6 +350,7 @@ F.r = "ok:" + F.v;
         F.pc = 2; break;
       case 4:
         F.pc = 3; return { op: "resource", tier: "server", name: "api.get", args: [7] };
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in returnExpr");
     }
   },
   assignRhs(F) {
@@ -361,6 +372,7 @@ F.r = "ok:" + F.v;
       case 6:
         F.out = "a";
         F.pc = 5; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in assignRhs");
     }
   },
   ifTest(F) {
@@ -380,6 +392,7 @@ F.r = "ok:" + F.v;
         F.pc = 4; break;
       case 6:
         F.pc = 5; return { op: "resource", tier: "server", name: "api.get", args: [1] };
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in ifTest");
     }
   },
   whileTestSusp(F) {
@@ -414,6 +427,7 @@ F.sum = F.sum + F.i;
       case 11:
         F.i = 3;
         F.pc = 10; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in whileTestSusp");
     }
   },
   nestedArgs(F) {
@@ -434,6 +448,7 @@ F.sum = F.sum + F.i;
         F.pc = 4; break;
       case 6:
         F.pc = 5; return { op: "resource", tier: "server", name: "api.get", args: [2] };
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in nestedArgs");
     }
   },
   callInExpr(F) {
@@ -449,6 +464,7 @@ F.sum = F.sum + F.i;
         F.pc = 2; break;
       case 4:
         F.pc = 3; return { op: "call", fn: "fetchDouble", args: [4] };
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in callInExpr");
     }
   },
   ternaryPick(F) {
@@ -483,6 +499,7 @@ F.sum = F.sum + F.i;
       case 11:
         F.hi = 1;
         F.pc = 10; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in ternaryPick");
     }
   },
   shortCircuit(F) {
@@ -529,6 +546,7 @@ F.b = F.__t1; // && short-circuits: api.fail never runs
       case 15:
         F.off = 0;
         F.pc = 14; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in shortCircuit");
     }
   },
   switchPick(F) {
@@ -577,6 +595,7 @@ F.b = F.__t1; // && short-circuits: api.fail never runs
       case 17:
         F.k = 2;
         F.pc = 16; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in switchPick");
     }
   },
   switchFall(F) {
@@ -625,6 +644,7 @@ F.b = F.__t1; // && short-circuits: api.fail never runs
       case 17:
         F.k = 1;
         F.pc = 16; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in switchFall");
     }
   },
   labeledBreak(F) {
@@ -666,6 +686,7 @@ F.b = F.__t1; // && short-circuits: api.fail never runs
       case 14:
         F.found = 0;
         F.pc = 3; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in labeledBreak");
     }
   },
   doWhileSusp(F) {
@@ -698,6 +719,7 @@ F.sum = F.sum + F.v;
       case 10:
         F.i = 0;
         F.pc = 9; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in doWhileSusp");
     }
   },
   forHeaderSusp(F) {
@@ -727,6 +749,7 @@ F.sum = F.sum + F.i;
       case 9:
         F.sum = 0;
         F.pc = 8; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in forHeaderSusp");
     }
   },
   returnInTry(F) {
@@ -757,6 +780,7 @@ F.sum = F.sum + F.i;
       case 9:
         F.__h.pop();
         return { op: "return", value: -1 };
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in returnInTry");
     }
   },
   breakOutOfTry(F) {
@@ -806,6 +830,7 @@ F.sum = F.sum + F.v;
       case 16:
         F.sum = 0;
         F.pc = 3; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in breakOutOfTry");
     }
   },
   returnThroughFinally(F) {
@@ -842,6 +867,7 @@ F.sum = F.sum + F.v;
       case 12:
         F.log = 0;
         F.pc = 2; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in returnThroughFinally");
     }
   },
   forUpdateSusp(F) {
@@ -884,6 +910,7 @@ F.sum = F.sum + F.i;
       case 14:
         F.sum = 0;
         F.pc = 13; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in forUpdateSusp");
     }
   },
   doWhileTestSusp(F) {
@@ -931,6 +958,7 @@ F.sum = F.sum + F.i;
       case 16:
         F.i = 0;
         F.pc = 15; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in doWhileTestSusp");
     }
   },
   unbracedBranchSusp(F) {
@@ -975,6 +1003,7 @@ F.sum = F.sum + F.i;
       case 15:
         F.route = "a";
         F.pc = 14; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in unbracedBranchSusp");
     }
   },
   unbracedLoopBodySusp(F) {
@@ -1006,6 +1035,7 @@ F.sum = F.sum + F.i;
       case 10:
         F.sum = 0;
         F.pc = 3; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in unbracedLoopBodySusp");
     }
   }
 };
