@@ -8,20 +8,21 @@ it goes next. Items are grouped, not strictly ordered; see
 
 ## Wire format
 
-- **Binary wire format — core landed (`src/wire-binary.mjs`).** 1-byte type tags +
-  LEB128 varints (instead of `{"k":"r","id":N}`), a **string-intern table**, and a
-  **shape table** so same-shaped records emit their keys once and ship just their
-  values. It decodes identically to the JSON wire — identity, cycles, non-enumerable
-  + symbol-keyed props, Map/Set, BigInt, §5 handles all survive (`test/probes/wire-binary.mjs`)
-  — at **1.9×–5.4× smaller** on record-heavy payloads (`npm run bench:wire`), enough
-  to flip the well-composed article-page case from a slight loss to a wash vs REST's
-  plain JSON. The decoder is **hardened** (bounds-checked reads, length-capped varints,
-  count guards, `__proto__` stripping) and **fuzz-tested** (`test/probes/wire-fuzz.mjs`:
-  property round-trips, a differential against the JSON wire, boundary tables, and
-  truncated/corrupted/hostile-byte robustness) — it must not crash, hang, or pollute on
-  input from the other tier (§7). Remaining: a **typed-array fast path** (homogeneous
-  numeric arrays as packed `Float64Array`/varint deltas), wiring it into the **live `ws`
-  transport** (the binary frame slot already exists), and the delta-capture work below.
+- **Binary wire format — done (`src/wire-binary.mjs`).** 1-byte type tags + LEB128
+  varints (instead of `{"k":"r","id":N}`), a **string-intern table**, a **shape table**
+  so same-shaped records emit their keys once, and a **typed-array fast path** (homogeneous
+  numeric arrays pack with no per-element tag — varint deltas or `Float64`, ~18× on an int
+  column). It decodes identically to the JSON form — identity, cycles, non-enumerable +
+  symbol-keyed props, Map/Set, BigInt, §5 handles all survive — at **1.9×–5.4×** smaller on
+  record-heavy payloads (`npm run bench:wire`). The decoder is **hardened** (bounds-checked
+  reads, length-capped varints, count guards, `__proto__` stripping) and **fuzz-tested**
+  (`test/probes/wire-fuzz.mjs`: property round-trips, a differential against JSON, boundary
+  tables, and truncated/corrupted/hostile-byte robustness) — it must not crash, hang, or
+  pollute on input from the other tier (§7). **It is now THE wire** — every socket-crossing
+  demo (heap-live, policy-live, demo, the live page) ships the continuation as the binary
+  frame, and the §6 policy prices the real binary bytes; `encodeWire` (JSON) is kept only as
+  a readable debug serialization. The remaining wire-adjacent work is below: delta capture
+  and content-addressing.
 - **Typed-array fast path.** A homogeneous numeric array currently spends ~12 bytes
   per element on `{"k":"p","v":n}`; pack it as a base64 `Float64Array` (or varint
   deltas).

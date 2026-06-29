@@ -14,7 +14,7 @@
 // Run:  node src/policy-live.mjs
 import { createRequire } from "node:module";
 import { wsPort, makePeer } from "./transport.mjs";
-import { encodeWire, decodeWire } from "./heap.mjs";
+import { encodeWireBinary, decodeWireBinary } from "./wire-binary.mjs";   // the §6 decision prices the real (binary) wire
 import { PROGRAMS } from "./policy-app.gen.mjs";
 
 const { WebSocketServer, WebSocket } = createRequire("/home/user/stackmix/")("ws");
@@ -65,12 +65,12 @@ const serverReady = new Promise((resolve) => {
       const result = apiExec(m.request);
       return { obj: { type: "rpcResult", result, bytes: Buffer.byteLength(JSON.stringify(result)) } };
     });
-    peer.on("resume", (m) => {                                // MIGRATE: run the migrated continuation here to completion
+    peer.on("resume", (payload, bin) => {                     // MIGRATE: run the migrated continuation here to completion
       try {
-        const { stack, request } = decodeWire(m.wire);
+        const { stack, request } = decodeWireBinary(bin);
         const r = pumpLocal(stack, ownsServer, apiExec, request);  // `request` = the api.fetchData we suspended on; run it here
         if (r.done) return { obj: { type: "done", value: r.value } };
-        return { obj: { type: "suspend", wire: encodeWire(r.stack, r.request, {}) } };
+        return { obj: { type: "suspend" }, bin: encodeWireBinary(r.stack, r.request, {}) };
       } catch (e) { return { obj: { type: "error", message: String((e && e.message) || e) } }; }
     });
     resolve();
@@ -96,20 +96,20 @@ async function runSurvey(workSize, dataKey, { mode, profile, site }) {
   let report = null, crossed = 0;
   while (!res.done) {
     const req = res.request;
-    const contBytes = encodeWire(res.stack, req, {}).length;        // ship-the-continuation cost (full working set, real bytes)
+    const contBytes = encodeWireBinary(res.stack, req, {}).length;  // ship-the-continuation cost (full working set, real binary bytes)
     const fetchBytes = profile.has(site) ? profile.get(site) : Infinity;
     const d = decide(contBytes, fetchBytes, mode);
     report = { choice: d.choice, why: d.why, contBytes, fetchBytes, cold: decide(contBytes, fetchBytes, "cold").choice };
     if (d.choice === "migrate") {
-      let wire = encodeWire(res.stack, req, {});                    // the continuation crosses
-      crossed += Buffer.byteLength(wire);
-      let reply = (await peer.request({ type: "resume", wire })).obj;
+      let wire = encodeWireBinary(res.stack, req, {});              // the continuation crosses (binary frame)
+      crossed += wire.length;
+      let { obj: reply, bin } = await peer.request({ type: "resume" }, wire);
       while (reply.type === "suspend") {                            // (Survey never bounces back, but keep the loop correct)
-        const got = decodeWire(reply.wire);
+        const got = decodeWireBinary(bin);
         const r2 = pumpLocal(got.stack, ownsBrowser, browserExec, got.request);
         if (r2.done) { reply = { type: "done", value: r2.value }; break; }
-        wire = encodeWire(r2.stack, r2.request, {}); crossed += Buffer.byteLength(wire);
-        reply = (await peer.request({ type: "resume", wire })).obj;
+        wire = encodeWireBinary(r2.stack, r2.request, {}); crossed += wire.length;
+        ({ obj: reply, bin } = await peer.request({ type: "resume" }, wire));
       }
       if (reply.type === "error") throw new Error("server: " + reply.message);
       return { value: reply.value, report, crossed };

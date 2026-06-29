@@ -71,7 +71,7 @@ therefore flows back and forth across the socket, finishing wherever the last
 resource lands. Exceptions propagate across frames via a serializable handler stack,
 so a resource that throws on one tier is caught by a `try` on the other.
 
-## The wire (`graph.mjs` + the envelope)
+## The wire (`graph.mjs` + `wire-binary.mjs`)
 
 What crosses the socket is an envelope — `{ frames, req, graph }` — where `frames`
 is the call-stack skeleton (`fn`, `pc`, which locals, where they start in the graph),
@@ -91,6 +91,15 @@ each distinct object is one entry and every reference is `{k:"r", id}`. That:
 - carries the non-JSON cases faithfully (`undefined`, BigInt, symbols, Map/Set,
   non-enumerable + symbol-keyed props) and ships host globals and well-known symbols
   by reference rather than copying them.
+
+That `{ frames, req, graph }` structure is serialized for the socket by the **binary wire
+codec** (`wire-binary.mjs`): 1-byte type tags + LEB128 varints replace the `{k,id}` ref
+objects, a **string table** interns every key and value, a **shape table** lets same-shaped
+records emit their keys once, and homogeneous numeric arrays pack with no per-element tag —
+1.9×–5.4× smaller than the JSON form on record-heavy payloads. This is what crosses the
+socket (one binary `ws` frame); the JSON form (`encodeWire`) is kept only as a readable
+debug serialization. Because the wire is deserialized from the *other* tier (§7), the
+decoder is hardened (bounds-checked, count-guarded, `__proto__`-stripping) and fuzz-tested.
 
 ## The heap (`heap.mjs` + `fetch.mjs`)
 

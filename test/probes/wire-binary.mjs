@@ -57,5 +57,15 @@ const bigReq = { op: "resource", tier: "browser", name: "dom.commit", args: [{}]
 const hb = decodeWireBinary(encodeWireBinary(big, bigReq, { tier: makeTier("server"), threshold: 8192 }));
 check("a big local excised to a §5 handle survives the binary wire (small locals intact)", isHandle(hb.stack[0].dataset) && hb.stack[0].small === "k");
 
-console.log(`\n${pass ? "PASS" : "FAIL"} — binary wire: identical decode (identity/cycles/exotics/handles) at ${(jsonBytes / binBytes).toFixed(1)}x smaller than JSON on a record feed`);
+// --- typed-array fast path: numeric arrays pack with no per-element tag, round-trip exactly ---
+const ids = Array.from({ length: 1000 }, (_, i) => i * 3);             // monotonic int column -> zigzag deltas
+const flo = Array.from({ length: 500 }, (_, i) => Math.sin(i) * 1e6);  // floats -> f64 pack
+const ta = decodeWireBinary(encodeWireBinary([{ fn: "T", pc: 0, ids, flo, special: [NaN, Infinity, -0, 5], mixed: [1, "two", { x: 3 }], args: [] }], null, {})).stack[0];
+check("numeric arrays round-trip exactly (int column, floats, NaN/Inf/-0; a mixed array stays generic)",
+  ta.ids[999] === 2997 && ta.flo[3] === Math.sin(3) * 1e6 && Object.is(ta.special[0], NaN) && Object.is(ta.special[2], -0) && ta.mixed[1] === "two" && ta.mixed[2].x === 3);
+const idStack = [{ fn: "T", pc: 0, ids, args: [] }];
+const idJson = te.encode(encodeWire(idStack, null, {})).length, idBin = encodeWireBinary(idStack, null, {}).length;
+check(`a 1000-int column packs tightly (${idBin} B binary vs ${idJson} B JSON = ${(idJson / idBin).toFixed(1)}x)`, idBin * 4 < idJson);
+
+console.log(`\n${pass ? "PASS" : "FAIL"} — binary wire: identical decode (identity/cycles/exotics/handles/typed-arrays) at ${(jsonBytes / binBytes).toFixed(1)}x smaller than JSON on a record feed`);
 process.exit(pass ? 0 : 1);

@@ -45,6 +45,7 @@ class R {
 // integers small enough for a compact zigzag varint travel as `int`; everything else (floats,
 // NaN/Infinity/-0, huge ints) travels as an exact 8-byte f64.
 const isVarInt = (v) => Number.isInteger(v) && Math.abs(v) < 0x80000000 && !Object.is(v, -0);
+const zlen = (x) => { let v = x >= 0 ? x * 2 : -x * 2 - 1, n = 1; while (v >= 128) { v = Math.floor(v / 128); n++; } return n; };  // bytes of zigzag varint(x)
 
 function writeNode(w, n, intern) {
   switch (n.k) {
@@ -132,7 +133,19 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
   w.varu(graph.objs.length);
   for (let i = 0; i < graph.objs.length; i++) {
     const s = graph.objs[i];
-    if (s.k === "a") { w.u8(0); w.varu(s.e.length); for (const e of s.e) writeNode(w, e, intern); }
+    if (s.k === "a") {
+      // typed-array fast path: an array of only number primitives pays no per-element tag.
+      const nums = s.e.length && s.e.every((n) => n.k === "p" && typeof n.v === "number") ? s.e.map((n) => n.v) : null;
+      if (!nums) { w.u8(0); w.varu(s.e.length); for (const e of s.e) writeNode(w, e, intern); }   // generic (mixed) array
+      else if (!nums.every(isVarInt)) { w.u8(6); w.varu(nums.length); w.u8(1); for (const x of nums) w.f64(x); }  // f64 pack (floats/NaN/Inf/-0/big)
+      else {                                                                                       // all small ints: plain varints vs deltas, whichever is smaller
+        let plain = 0, delta = 0, prev = 0;
+        for (const x of nums) { plain += zlen(x); delta += zlen(x - prev); prev = x; }
+        w.u8(6); w.varu(nums.length);
+        if (delta < plain) { w.u8(2); let p = 0; for (const x of nums) { w.vari(x - p); p = x; } }  // zigzag deltas (wins on id columns)
+        else { w.u8(0); for (const x of nums) w.vari(x); }
+      }
+    }
     else if (s.k === "o") {
       w.u8(1); w.varu(slotShape[i]);
       for (const k of Object.keys(s.f)) writeNode(w, s.f[k], intern);
@@ -163,6 +176,12 @@ export function decodeWireBinary(bytes) {
     else if (t === 3) { const c = r.count(), e = []; for (let j = 0; j < c; j++) e.push(readNode(r, S)); objs.push({ k: "set", e }); }
     else if (t === 4) { const owner = S(r.varu()), id = S(r.varu()); const h = { __stackmix_handle__: true, owner, id }; if (r.u8()) h.kind = S(r.varu()); objs.push({ k: "H", h }); }
     else if (t === 5) { objs.push({ k: "symu", d: r.u8() ? S(r.varu()) : undefined }); }
+    else if (t === 6) { const c = r.count(), sub = r.u8(), e = [];
+      if (sub === 0) { for (let j = 0; j < c; j++) e.push({ k: "p", v: r.vari() }); }
+      else if (sub === 1) { for (let j = 0; j < c; j++) e.push({ k: "p", v: r.f64() }); }
+      else if (sub === 2) { let p = 0; for (let j = 0; j < c; j++) { p += r.vari(); e.push({ k: "p", v: p }); } }
+      else throw new RangeError("wire-binary: bad numeric-array sub-kind " + sub);
+      objs.push({ k: "a", e }); }
     else throw new RangeError("wire-binary: bad slot tag " + t);
   } }
   const vals = decodeGraph({ roots, objs });

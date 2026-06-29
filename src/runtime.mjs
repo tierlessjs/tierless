@@ -7,19 +7,11 @@
 // owns inline and STOPS at the first resource it doesn't, handing the caller a
 // {stack, request} to ship to the owning tier. The same pump runs on both tiers — only
 // `ownsHere`/`execHere` differ — so one continuation flows back and forth across the
-// wire, finishing wherever the last resource lands.
-//
-// The wire codec is the framework's own identity/cycle-preserving graph codec (graph.mjs).
+// wire, finishing wherever the last resource lands. The {stack, request} it hands back is
+// serialized for the socket by the binary wire codec (wire-binary.mjs).
 import { PROGRAMS, __unwind } from "./app/bundle.gen.mjs";
-import { encodeGraph, decodeGraph } from "./graph.mjs";
 
 export const initialStack = (fn, args = []) => [{ fn, pc: 0, args }];
-
-// A plain JSON string — the boundary between tiers is a true serialize/deserialize
-// (no shared memory), so a separate process or machine resumes it identically. The
-// stack may hold several frames (a callee suspended under its caller); they all travel.
-export const encodeWire = (stack, request) => JSON.stringify(encodeGraph([{ stack, request }]));
-export const decodeWire = (wire) => decodeGraph(JSON.parse(wire))[0];
 
 // Run a resource and route a failure into the continuation: if a try/catch is active in
 // any frame on the stack (__unwind walks frames), jump to its catch/finally; otherwise

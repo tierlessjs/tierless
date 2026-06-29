@@ -24,7 +24,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { wsPort, makePeer } from "./transport.mjs";
-import { pump, initialStack, encodeWire, decodeWire } from "./runtime.mjs";
+import { pump, initialStack } from "./runtime.mjs";
+import { encodeWireBinary, decodeWireBinary } from "./wire-binary.mjs";
 import * as api from "./app/api.mjs";
 
 const { WebSocketServer } = createRequire(import.meta.url)("ws");
@@ -127,10 +128,10 @@ wss.on("connection", async (ws) => {
     let res = await pump(initialStack("App"), ownsServer, apiExec);   // render starts here, runs to first dom.*
     while (!res.done) {
       console.log(`  ── migrate → browser (${res.request.name})`);
-      const { obj: reply } = await peer.request({ type: "resume", wire: encodeWire(res.stack, res.request) });
+      const { obj: reply, bin } = await peer.request({ type: "resume" }, encodeWireBinary(res.stack, res.request));
       if (reply.type === "error") throw new Error("browser: " + reply.message);
       if (reply.type === "done") { res = { done: true, value: reply.value }; break; }
-      const { stack, request } = decodeWire(reply.wire);              // browser migrated it back at a server resource
+      const { stack, request } = decodeWireBinary(bin);               // browser migrated it back at a server resource
       console.log(`  ── migrate ← browser (${request.name})`);
       res = await pump(stack, ownsServer, apiExec, request);
     }

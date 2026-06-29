@@ -94,11 +94,12 @@ hooks. `api.*` and `commit()` look like ordinary calls.
    multi-frame) frame stack to ship. The same pump runs on both sides; only "what do I own"
    differs. Errors unwind across frames, so a callee's failure reaches a caller's `catch`.
 
-3. **Real transport** (`transport.mjs`, the project's own). The continuation
-   serializes through the project's identity/cycle-preserving graph codec
-   (`graph.mjs`) to a JSON string and crosses a real `ws` socket via
-   `wsPort`/`makePeer`. The boundary is a true serialize/deserialize — no shared memory —
-   so a separate process or machine would resume it identically.
+3. **Real transport** (`transport.mjs`, the project's own). The continuation serializes
+   through the **binary wire codec** (`wire-binary.mjs` — type tags + varints + a string and
+   a shape table over the identity/cycle-safe graph codec) and crosses a real `ws` socket as
+   one binary frame via `wsPort`/`makePeer`. The boundary is a true serialize/deserialize —
+   no shared memory — so a separate process or machine resumes it identically. (A readable
+   JSON form, `encodeWire`, is kept for debugging.)
 
 4. **Real DOM + real clicks.** Two browser tiers are included:
    - `demo.mjs` — a scripted, deterministic run: a Node+Playwright tier paints the vdom

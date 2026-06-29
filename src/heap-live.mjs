@@ -10,7 +10,8 @@ import { createRequire } from "node:module";
 import { wsPort, makePeer } from "./transport.mjs";
 import { encodeGraph, decodeGraph } from "./graph.mjs";
 import { initialStack } from "./runtime.mjs";
-import { makeTier, encodeWire, decodeWire } from "./heap.mjs";
+import { makeTier } from "./heap.mjs";
+import { encodeWireBinary, decodeWireBinary } from "./wire-binary.mjs";   // the binary continuation wire crosses the socket
 import { PROGRAMS } from "./heap-app.gen.mjs";
 
 const { WebSocketServer, WebSocket } = createRequire("/home/user/stackmix/")("ws");
@@ -59,12 +60,12 @@ const serverDone = new Promise((resolve, reject) => {
     try {
       let res = await pumpLocal(initialStack("Report"), ownsServer, apiExec);   // render starts here, runs to commit
       while (!res.done) {
-        const wire = encodeWire(res.stack, res.request, { tier: serverTier, threshold: THRESH });  // excise big locals into serverTier.heap
+        const wire = encodeWireBinary(res.stack, res.request, { tier: serverTier, threshold: THRESH });  // excise big locals into serverTier.heap
         net.resumeBytes += wire.length;
-        const { obj: reply } = await peer.request({ type: "resume", wire });
+        const { obj: reply, bin } = await peer.request({ type: "resume" }, wire);   // continuation rides the binary frame
         if (reply.type === "error") throw new Error("browser: " + reply.message);
         if (reply.type === "done") { res = { done: true, value: reply.value }; break; }
-        const { stack, request } = decodeWire(reply.wire);
+        const { stack, request } = decodeWireBinary(bin);
         res = await pumpLocal(stack, ownsServer, apiExec, request);
       }
       resolve(res.value);
@@ -103,12 +104,12 @@ async function pumpBrowser(stack, incoming) {
   }
   return res;
 }
-peer.on("resume", async (req) => {
+peer.on("resume", async (payload, bin) => {
   try {
-    const { stack, request } = decodeWire(req.wire);
+    const { stack, request } = decodeWireBinary(bin);
     const res = await pumpBrowser(stack, request);
     if (res.done) return { obj: { type: "done", value: res.value } };
-    return { obj: { type: "suspend", wire: encodeWire(res.stack, res.request, { tier: browserTier, threshold: THRESH }) } };
+    return { obj: { type: "suspend" }, bin: encodeWireBinary(res.stack, res.request, { tier: browserTier, threshold: THRESH }) };
   } catch (e) { return { obj: { type: "error", message: String((e && e.message) || e) } }; }
 });
 await new Promise((r, j) => { ws.on("open", r); ws.on("error", j); });

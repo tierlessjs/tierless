@@ -18,7 +18,8 @@
 // Run:  node src/demo.mjs        (needs Playwright Chromium)
 import { createRequire } from "node:module";
 import { wsPort, makePeer } from "./transport.mjs";
-import { pump, initialStack, encodeWire, decodeWire } from "./runtime.mjs";
+import { pump, initialStack } from "./runtime.mjs";
+import { encodeWireBinary, decodeWireBinary } from "./wire-binary.mjs";
 import { vdomToHtml, shell } from "./dom.mjs";
 import * as api from "./app/api.mjs";
 
@@ -46,10 +47,10 @@ const serverDone = new Promise((resolve, reject) => {
       let res = await pump(initialStack("App"), ownsServer, apiExec);  // render starts here, runs to first dom.*
       while (!res.done) {
         trace.push(`  ── migrate → browser (${res.request.name})`);
-        const { obj: reply } = await peer.request({ type: "resume", wire: encodeWire(res.stack, res.request) });
+        const { obj: reply, bin } = await peer.request({ type: "resume" }, encodeWireBinary(res.stack, res.request));
         if (reply.type === "error") throw new Error("browser: " + reply.message);
         if (reply.type === "done") { res = { done: true, value: reply.value }; break; }
-        const { stack, request } = decodeWire(reply.wire);             // browser migrated it back at a server resource
+        const { stack, request } = decodeWireBinary(bin);              // browser migrated it back at a server resource
         trace.push(`  ── migrate ← browser (${request.name})`);
         res = await pump(stack, ownsServer, apiExec, request);
       }
@@ -117,12 +118,12 @@ async function domCommit(req) {                                          // req 
 const ownsBrowser = (tier) => tier === "browser";
 const ws = new WebSocket(`ws://localhost:${PORT}`);
 const peer = makePeer(wsPort(ws));
-peer.on("resume", async (req) => {                                       // server migrated the continuation here
+peer.on("resume", async (payload, bin) => {                              // server migrated the continuation here
   try {
-    const { stack, request } = decodeWire(req.wire);
+    const { stack, request } = decodeWireBinary(bin);
     const res = await pump(stack, ownsBrowser, domCommit, request);     // commit, read the click, run until a server resource
     if (res.done) return { obj: { type: "done", value: res.value } };
-    return { obj: { type: "suspend", wire: encodeWire(res.stack, res.request) } };
+    return { obj: { type: "suspend" }, bin: encodeWireBinary(res.stack, res.request) };
   } catch (e) { return { obj: { type: "error", message: String((e && e.message) || e) } }; }
 });
 await new Promise((r, j) => { ws.on("open", r); ws.on("error", j); });

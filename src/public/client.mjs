@@ -17,7 +17,8 @@
 // the served repo root: its relative imports (./app/bundle.gen.mjs and ./graph.mjs) resolve
 // over HTTP because the server (server-live.mjs) serves the repo root as the web root.
 import { wsPort, makePeer } from "./transport.mjs";
-import { pump, encodeWire, decodeWire } from "/src/runtime.mjs";
+import { pump } from "/src/runtime.mjs";
+import { encodeWireBinary, decodeWireBinary } from "/src/wire-binary.mjs";
 
 const ownsBrowser = (tier) => tier === "browser";
 const root = document.getElementById("root");
@@ -88,16 +89,16 @@ function connect() {
   // The server migrated the continuation here. Finish the render locally, commit
   // to the real DOM, wait for the click, then either report done or hand the
   // continuation back to the server (suspend) at the next api.* resource.
-  peer.on("resume", async (req) => {
+  peer.on("resume", async (payload, bin) => {
     try {
-      const { stack, request } = decodeWire(req.wire);
+      const { stack, request } = decodeWireBinary(bin);
       const res = await pump(stack, ownsBrowser, domCommit, request);
       if (res.done) {
         setStatus("session ended: " + JSON.stringify(res.value));
         return { obj: { type: "done", value: res.value } };
       }
       setStatus("migrating ← server (" + res.request.name + ")");
-      return { obj: { type: "suspend", wire: encodeWire(res.stack, res.request) } };
+      return { obj: { type: "suspend" }, bin: encodeWireBinary(res.stack, res.request) };
     } catch (e) {
       setStatus("client error: " + ((e && e.message) || e));
       return { obj: { type: "error", message: String((e && e.message) || e) } };

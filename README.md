@@ -31,7 +31,8 @@ there. The big data stays where it lives; only the small continuation moves.
   closures captured in the continuation, so the continuation is plain JSON. A function
   that touches no resource is emitted verbatim and runs inline.
 - **The continuation is data you own.** It's the live frame stack encoded through an
-  identity-preserving, cycle-safe graph codec. A subgraph larger than a threshold
+  identity-preserving, cycle-safe graph codec and shipped as one **compact binary frame**
+  (type tags + varints + string/shape tables). A subgraph larger than a threshold
   becomes an opaque §5 *handle* into the owning tier's heap instead of being copied —
   the big dataset stays put and is fetched only if actually touched. Reads auto-fetch
   on touch (`--auto-deref`); writes auto-propagate back to the owner under optimistic
@@ -107,6 +108,7 @@ src/              the framework
   transform.cjs   the compiler: plain JS -> serializable state machine (Babel)
   runtime.mjs     the pump — one tier-agnostic continuation driver + the wire envelope
   graph.mjs       identity/cycle-safe graph codec for the wire
+  wire-binary.mjs the compact binary wire (type tags + varints + string/shape tables)
   heap.mjs        §5 distributed handle heap: encodeWire, makeTier, write-back CAS
   fetch.mjs       Heap / Channel / makeHost — fetch-on-deref with coherence
   transport.mjs   WebSocket framing + RPC peer (browser-safe)
