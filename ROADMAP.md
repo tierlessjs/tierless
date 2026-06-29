@@ -8,13 +8,16 @@ it goes next. Items are grouped, not strictly ordered; see
 
 ## Wire format
 
-- **Binary wire format.** The continuation wire is JSON today, and the dominant
-  cost is structural tax — each reference is `{"k":"r","id":N}`, each record
-  repeats its keys. The high-leverage bundle: binary type-tags + varint ids (kill
-  the per-node overhead), a **shape table** so same-shaped records emit their keys
-  once and ship `[shapeId, …values]`, and a **string-intern table** for repeated
-  keys and values. Keep the `graph`/`heap`/`fetch` seam so serialization stays
-  swappable.
+- **Binary wire format — core landed (`src/wire-binary.mjs`).** 1-byte type tags +
+  LEB128 varints (instead of `{"k":"r","id":N}`), a **string-intern table**, and a
+  **shape table** so same-shaped records emit their keys once and ship just their
+  values. It decodes identically to the JSON wire — identity, cycles, non-enumerable
+  + symbol-keyed props, Map/Set, BigInt, §5 handles all survive (`test/probes/wire-binary.mjs`)
+  — at **1.9×–5.4× smaller** on record-heavy payloads (`npm run bench:wire`), enough
+  to flip the well-composed article-page case from a slight loss to a wash vs REST's
+  plain JSON. Remaining: a **typed-array fast path** (homogeneous numeric arrays as
+  packed `Float64Array`/varint deltas), wiring it into the **live `ws` transport**
+  (the binary frame slot already exists), and the delta-capture work below.
 - **Typed-array fast path.** A homogeneous numeric array currently spends ~12 bytes
   per element on `{"k":"p","v":n}`; pack it as a base64 `Float64Array` (or varint
   deltas).
