@@ -122,8 +122,18 @@ it goes next. Items are grouped, not strictly ordered; see
   routed to the right resumable point. This is an application-level concern (React
   already answers it without continuations); the framework's job is only to let a
   continuation suspend at a boundary, which it does.
-- **A larger, framework-shaped sample app** to shake out what real app code hits now
-  that the control-flow and heap stories are complete.
+- **A larger, framework-shaped sample app — done (`src/conduit/`).** A RealWorld/Conduit reader
+  written as ONE tier-fluid program: a routing loop across three views (home feed ↔ article page ↔
+  editor) with tag filtering, favorites, comments, a new-article form, and a publish that validates
+  on the server and is caught by a `try`/`catch` in the app across the tier boundary. It runs as one
+  compiled continuation — `src/conduit-verify.mjs` drives an eleven-step user journey headlessly and
+  asserts the rendered state at each `commit` (in `npm test`). Writing it shook out a real compiler
+  bug exactly as intended: a suspendable call on an assignment RHS in an UNBRACED `if`-branch
+  (`if (route === "home") vdom = loadHome(tag);`) had its hoisted temp land *before* the `if`, so it
+  ran unconditionally. Fixed in `transform.cjs` (normalize now blockifies a branch/loop-body when its
+  suspension will be hoisted, gated so head-normal statements and Tasks-style code are untouched —
+  every existing bundle regenerates byte-identical) and locked with two focused cases in
+  `control-flow.mjs` that throw if it regresses.
 
 ## Security & the trust boundary
 

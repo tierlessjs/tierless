@@ -57,6 +57,8 @@ const cases = [
   ["return through a finally (which itself suspends)", "returnThroughFinally", 7],
   ["suspending for-update", "forUpdateSusp", 6],
   ["suspending do-while test", "doWhileTestSusp", 3],
+  ["unbraced if-branch: suspension runs ONLY in the taken branch", "unbracedBranchSusp", 10],
+  ["unbraced loop-body if with a suspending branch", "unbracedLoopBodySusp", 100],
 ];
 
 let pass = 0;

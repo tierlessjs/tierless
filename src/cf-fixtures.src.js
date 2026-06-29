@@ -237,3 +237,17 @@ function doWhileTestSusp() {
   } while (api.lt3(i));                     // suspending do-while test (re-evaluated each pass)
   return sum;                              // 0 + 1 + 2 = 3
 }
+function unbracedBranchSusp() {
+  let route = "a";
+  let out = 0;
+  if (route === "a") out = api.get(10);    // UNBRACED if-branch: a suspendable call on an assignment RHS;
+  else if (route === "b") out = api.fail(99); // this must NOT run when route !== "b" (it would throw).
+  else out = api.get(30);                  // The hoisted temp must land INSIDE the branch, not before the if.
+  return out;                              // 10 — only the taken branch's resource ran
+}
+function unbracedLoopBodySusp() {
+  let sum = 0;
+  for (let i = 0; i < 3; i = i + 1)
+    if (i === 1) sum = sum + api.get(100); // unbraced for-body (an if) with a suspending branch
+  return sum;                              // 100 — the resource runs only on i===1, not every pass
+}

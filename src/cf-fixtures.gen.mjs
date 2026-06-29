@@ -932,6 +932,81 @@ F.sum = F.sum + F.i;
         F.i = 0;
         F.pc = 15; break;
     }
+  },
+  unbracedBranchSusp(F) {
+    while (true) switch (F.pc) {
+      case 0:
+        F.pc = 15; break;
+      case 1:
+        return { op: "return", value: "(end)" };
+      case 2:
+        return { op: "return", value: F.out };
+      case 3:
+        F.out = F.__t0;
+        F.pc = 2; break;
+      case 4:
+        F.__t0 = F.ret;
+        F.pc = 3; break;
+      case 5:
+        F.pc = 4; return { op: "resource", tier: "server", name: "api.get", args: [10] };
+      case 6:
+        F.out = F.__t1;
+        F.pc = 2; break;
+      case 7:
+        F.__t1 = F.ret;
+        F.pc = 6; break;
+      case 8:
+        F.pc = 7; return { op: "resource", tier: "server", name: "api.fail", args: [99] };
+      case 9:
+        F.out = F.__t2;
+        F.pc = 2; break;
+      case 10:
+        F.__t2 = F.ret;
+        F.pc = 9; break;
+      case 11:
+        F.pc = 10; return { op: "resource", tier: "server", name: "api.get", args: [30] };
+      case 12:
+        if (F.route === "b") { F.pc = 8; } else { F.pc = 11; } break;
+      case 13:
+        if (F.route === "a") { F.pc = 5; } else { F.pc = 12; } break;
+      case 14:
+        F.out = 0;
+        F.pc = 13; break;
+      case 15:
+        F.route = "a";
+        F.pc = 14; break;
+    }
+  },
+  unbracedLoopBodySusp(F) {
+    while (true) switch (F.pc) {
+      case 0:
+        F.pc = 10; break;
+      case 1:
+        return { op: "return", value: "(end)" };
+      case 2:
+        return { op: "return", value: F.sum };
+      case 3:
+        F.i = 0;
+        F.pc = 4; break;
+      case 4:
+        if (F.i < 3) { F.pc = 9; } else { F.pc = 2; } break;
+      case 5:
+        F.i = F.i + 1;
+        F.pc = 4; break;
+      case 6:
+        F.sum = F.sum + F.__t0;
+        F.pc = 5; break;
+      case 7:
+        F.__t0 = F.ret;
+        F.pc = 6; break;
+      case 8:
+        F.pc = 7; return { op: "resource", tier: "server", name: "api.get", args: [100] };
+      case 9:
+        if (F.i === 1) { F.pc = 8; } else { F.pc = 5; } break;
+      case 10:
+        F.sum = 0;
+        F.pc = 3; break;
+    }
   }
 };
 
