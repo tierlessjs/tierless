@@ -21,6 +21,7 @@ export const PROGRAMS = {
         F.pc = 4; break;
       case 6:
         F.pc = 5; return { op: "resource", tier: "server", name: "api.getTasks", args: [{ status: F.args[0] }] };
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in loadView (forged continuation?)");
     }
   },
   App(F) {
@@ -71,6 +72,7 @@ export const PROGRAMS = {
       case 20:
         F.filter = "all";
         F.pc = 3; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in App (forged continuation?)");
     }
   }
 };

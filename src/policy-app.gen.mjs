@@ -26,6 +26,7 @@ export const PROGRAMS = {
       case 5:
         F.work = build(F.args[0]); // the live working set — its size sets the CONTINUATION (migrate) cost
         F.pc = 4; break;
+      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in Survey (forged continuation?)");
     }
   }
 };
