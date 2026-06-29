@@ -13,6 +13,7 @@ const node = (rel, extra = []) => spawnSync(process.execPath, [rel, ...extra], {
 const cases = [
   { file: "test/probes/codec.mjs",       needs: ["wire codec: identity, cycles"] },
   { file: "test/probes/wire-binary.mjs", needs: ["binary wire: identical decode"] },
+  { file: "test/probes/wire-fuzz.mjs",   needs: ["property round-trips, differential vs JSON, boundaries, and decode robustness"] },
   { file: "src/verify.mjs",         needs: ["PASS — auto-compiled tier-split continuation produced the correct session"] },
   { file: "src/control-flow.mjs",   needs: ["extended control flow survives migration"] },
   { file: "src/heap-probe.mjs",     needs: ["big locals stay home, fetched on deref, single-writer coherent"] },

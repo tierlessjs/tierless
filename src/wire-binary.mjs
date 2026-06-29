@@ -26,13 +26,20 @@ class W {
   f64(x) { this.ensure(8); new DataView(this.buf.buffer, this.n, 8).setFloat64(0, x, true); this.n += 8; }
   done() { return this.buf.subarray(0, this.n); }
 }
+// The reader is hardened: every read is bounds-checked and varints are length-capped, so a
+// truncated or hostile buffer fails with a clean RangeError instead of reading past the end,
+// looping, or silently returning garbage. The wire is deserialized from the other tier
+// (§7 trust boundary), so this is load-bearing, not belt-and-suspenders.
 class R {
-  constructor(buf) { this.buf = buf; this.n = 0; this.dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength); }
-  u8() { return this.buf[this.n++]; }
-  raw(k) { const s = this.buf.subarray(this.n, this.n + k); this.n += k; return s; }
-  varu() { let v = 0, shift = 1, b; do { b = this.buf[this.n++]; v += (b & 0x7f) * shift; shift *= 128; } while (b & 0x80); return v; }
+  constructor(buf) { this.buf = buf; this.n = 0; this.len = buf.length; this.dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength); }
+  need(k) { if (k < 0 || this.n + k > this.len) throw new RangeError("wire-binary: truncated/out-of-bounds read"); }
+  u8() { this.need(1); return this.buf[this.n++]; }
+  raw(k) { this.need(k); const s = this.buf.subarray(this.n, this.n + k); this.n += k; return s; }
+  varu() { let v = 0, shift = 1, b, i = 0; do { this.need(1); b = this.buf[this.n++]; v += (b & 0x7f) * shift; shift *= 128; if (++i > 9) throw new RangeError("wire-binary: varint too long"); } while (b & 0x80); return v; }
+  // a count must be representable in the bytes that remain (each item is ≥ 1 byte) — caps work at O(buffer).
+  count() { const c = this.varu(); if (c > this.len - this.n) throw new RangeError("wire-binary: declared count exceeds buffer"); return c; }
   vari() { const zz = this.varu(); return zz % 2 === 0 ? zz / 2 : -(zz + 1) / 2; }
-  f64() { const v = this.dv.getFloat64(this.n, true); this.n += 8; return v; }
+  f64() { this.need(8); const v = this.dv.getFloat64(this.n, true); this.n += 8; return v; }
 }
 
 // integers small enough for a compact zigzag varint travel as `int`; everything else (floats,
@@ -58,22 +65,22 @@ function writeNode(w, n, intern) {
     }
   }
 }
-function readNode(r, strs) {
+function readNode(r, S) {
   const t = r.u8();
   switch (t) {
     case 0: return { k: "r", id: r.varu() };
     case 1: return { k: "p", v: r.vari() };
     case 2: return { k: "p", v: r.f64() };
-    case 3: return { k: "p", v: strs[r.varu()] };
+    case 3: return { k: "p", v: S(r.varu()) };
     case 4: return { k: "p", v: true };
     case 5: return { k: "p", v: false };
     case 6: return { k: "p", v: null };
     case 7: return { k: "u" };
-    case 8: return { k: "big", v: strs[r.varu()] };
-    case 9: return { k: "glob", name: strs[r.varu()] };
-    case 10: return { k: "symw", name: strs[r.varu()] };
-    case 11: return { k: "symf", key: strs[r.varu()] };
-    default: throw new Error("wire-binary: bad node tag " + t);
+    case 8: return { k: "big", v: S(r.varu()) };
+    case 9: return { k: "glob", name: S(r.varu()) };
+    case 10: return { k: "symw", name: S(r.varu()) };
+    case 11: return { k: "symf", key: S(r.varu()) };
+    default: throw new RangeError("wire-binary: bad node tag " + t);
   }
 }
 
@@ -139,22 +146,24 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
 }
 
 export function decodeWireBinary(bytes) {
-  const r = new R(bytes);
-  if (td.decode(r.raw(4)) !== MAGIC) throw new Error("wire-binary: bad magic");
-  const strs = []; { const n = r.varu(); for (let i = 0; i < n; i++) strs.push(td.decode(r.raw(r.varu()))); }
-  const shapes = []; { const n = r.varu(); for (let i = 0; i < n; i++) { const kc = r.varu(); const sh = []; for (let j = 0; j < kc; j++) { const si = r.varu(); sh.push([si, r.u8()]); } shapes.push(sh); } }
-  const frames = []; { const n = r.varu(); for (let i = 0; i < n; i++) { const fn = strs[r.varu()]; const pc = r.varu(); const kc = r.varu(); const keys = []; for (let j = 0; j < kc; j++) keys.push(strs[r.varu()]); frames.push({ fn, pc, keys, b0: r.varu() }); } }
-  let req = null; if (r.u8()) { const op = strs[r.varu()], tier = strs[r.varu()], name = strs[r.varu()], a0 = r.varu(), argc = r.varu(); req = { op, tier, name, a0, argc }; }
-  const roots = []; { const n = r.varu(); for (let i = 0; i < n; i++) roots.push(readNode(r, strs)); }
-  const objs = []; { const n = r.varu(); for (let i = 0; i < n; i++) {
+  const r = new R(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
+  if (td.decode(r.raw(4)) !== MAGIC) throw new RangeError("wire-binary: bad magic");
+  const strs = []; { const n = r.count(); for (let i = 0; i < n; i++) strs.push(td.decode(r.raw(r.count()))); }
+  const S = (i) => { if (i < 0 || i >= strs.length) throw new RangeError("wire-binary: string index out of range"); return strs[i]; };
+  const shapes = []; { const n = r.count(); for (let i = 0; i < n; i++) { const kc = r.count(); const sh = []; for (let j = 0; j < kc; j++) { const si = r.varu(); sh.push([si, r.u8()]); } shapes.push(sh); } }
+  const SH = (i) => { if (i < 0 || i >= shapes.length) throw new RangeError("wire-binary: shape index out of range"); return shapes[i]; };
+  const frames = []; { const n = r.count(); for (let i = 0; i < n; i++) { const fn = S(r.varu()); const pc = r.varu(); const kc = r.count(); const keys = []; for (let j = 0; j < kc; j++) keys.push(S(r.varu())); frames.push({ fn, pc, keys, b0: r.varu() }); } }
+  let req = null; if (r.u8()) { const op = S(r.varu()), tier = S(r.varu()), name = S(r.varu()), a0 = r.varu(), argc = r.varu(); req = { op, tier, name, a0, argc }; }
+  const roots = []; { const n = r.count(); for (let i = 0; i < n; i++) roots.push(readNode(r, S)); }
+  const objs = []; { const n = r.count(); for (let i = 0; i < n; i++) {
     const t = r.u8();
-    if (t === 0) { const c = r.varu(), e = []; for (let j = 0; j < c; j++) e.push(readNode(r, strs)); objs.push({ k: "a", e }); }
-    else if (t === 1) { const sh = shapes[r.varu()]; const f = {}, h = {}; for (const [si, ne] of sh) { const key = strs[si]; f[key] = readNode(r, strs); if (ne) h[key] = 1; } const slot = { k: "o", f }; if (Object.keys(h).length) slot.h = h; const sfn = r.varu(); if (sfn) { slot.sf = []; for (let j = 0; j < sfn; j++) { const kn = readNode(r, strs), vn = readNode(r, strs); slot.sf.push([kn, vn, r.u8()]); } } objs.push(slot); }
-    else if (t === 2) { const c = r.varu(), e = []; for (let j = 0; j < c; j++) e.push([readNode(r, strs), readNode(r, strs)]); objs.push({ k: "map", e }); }
-    else if (t === 3) { const c = r.varu(), e = []; for (let j = 0; j < c; j++) e.push(readNode(r, strs)); objs.push({ k: "set", e }); }
-    else if (t === 4) { const owner = strs[r.varu()], id = strs[r.varu()]; const h = { __stackmix_handle__: true, owner, id }; if (r.u8()) h.kind = strs[r.varu()]; objs.push({ k: "H", h }); }
-    else if (t === 5) { objs.push({ k: "symu", d: r.u8() ? strs[r.varu()] : undefined }); }
-    else throw new Error("wire-binary: bad slot tag " + t);
+    if (t === 0) { const c = r.count(), e = []; for (let j = 0; j < c; j++) e.push(readNode(r, S)); objs.push({ k: "a", e }); }
+    else if (t === 1) { const sh = SH(r.varu()); const f = {}, h = {}; for (const [si, ne] of sh) { const key = S(si); const val = readNode(r, S); if (key === "__proto__") continue; f[key] = val; if (ne) h[key] = 1; } const slot = { k: "o", f }; if (Object.keys(h).length) slot.h = h; const sfn = r.count(); if (sfn) { slot.sf = []; for (let j = 0; j < sfn; j++) { const kn = readNode(r, S), vn = readNode(r, S); slot.sf.push([kn, vn, r.u8()]); } } objs.push(slot); }
+    else if (t === 2) { const c = r.count(), e = []; for (let j = 0; j < c; j++) e.push([readNode(r, S), readNode(r, S)]); objs.push({ k: "map", e }); }
+    else if (t === 3) { const c = r.count(), e = []; for (let j = 0; j < c; j++) e.push(readNode(r, S)); objs.push({ k: "set", e }); }
+    else if (t === 4) { const owner = S(r.varu()), id = S(r.varu()); const h = { __stackmix_handle__: true, owner, id }; if (r.u8()) h.kind = S(r.varu()); objs.push({ k: "H", h }); }
+    else if (t === 5) { objs.push({ k: "symu", d: r.u8() ? S(r.varu()) : undefined }); }
+    else throw new RangeError("wire-binary: bad slot tag " + t);
   } }
   const vals = decodeGraph({ roots, objs });
   const stack = frames.map((f) => { const fr = { fn: f.fn, pc: f.pc }; f.keys.forEach((k, i) => { fr[k] = vals[f.b0 + i]; }); return fr; });

@@ -15,9 +15,13 @@ it goes next. Items are grouped, not strictly ordered; see
   + symbol-keyed props, Map/Set, BigInt, §5 handles all survive (`test/probes/wire-binary.mjs`)
   — at **1.9×–5.4× smaller** on record-heavy payloads (`npm run bench:wire`), enough
   to flip the well-composed article-page case from a slight loss to a wash vs REST's
-  plain JSON. Remaining: a **typed-array fast path** (homogeneous numeric arrays as
-  packed `Float64Array`/varint deltas), wiring it into the **live `ws` transport**
-  (the binary frame slot already exists), and the delta-capture work below.
+  plain JSON. The decoder is **hardened** (bounds-checked reads, length-capped varints,
+  count guards, `__proto__` stripping) and **fuzz-tested** (`test/probes/wire-fuzz.mjs`:
+  property round-trips, a differential against the JSON wire, boundary tables, and
+  truncated/corrupted/hostile-byte robustness) — it must not crash, hang, or pollute on
+  input from the other tier (§7). Remaining: a **typed-array fast path** (homogeneous
+  numeric arrays as packed `Float64Array`/varint deltas), wiring it into the **live `ws`
+  transport** (the binary frame slot already exists), and the delta-capture work below.
 - **Typed-array fast path.** A homogeneous numeric array currently spends ~12 bytes
   per element on `{"k":"p","v":n}`; pack it as a base64 `Float64Array` (or varint
   deltas).
