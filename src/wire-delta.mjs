@@ -32,6 +32,9 @@ const te = new TextEncoder(), td = new TextDecoder();
 const isObj = (v) => v !== null && typeof v === "object";
 const isMap = (v) => v instanceof Map;
 const isSet = (v) => v instanceof Set;
+// Own enumerable string keys, minus __proto__ — never ship it, so a round-trip can't set a
+// reconstructed object's prototype from the wire (the decoder skips it too, defending a hostile peer).
+const ownKeys = (v) => Object.keys(v).filter((k) => k !== "__proto__");
 const isVarInt = (v) => Number.isInteger(v) && Math.abs(v) < 0x80000000 && !Object.is(v, -0);
 function fnv(s) { let h = 0x811c9dc5 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h >>> 0; }
 // The child values of a container, in a stable order (a §5 handle is an opaque leaf — no children).
@@ -41,7 +44,7 @@ function forEachChild(v, fn) {
   else if (isHandle(v)) { /* leaf: stays tier-local */ }
   else if (isMap(v)) for (const [k, val] of v) { fn(k); fn(val); }
   else if (isSet(v)) for (const val of v) fn(val);
-  else for (const k of Object.keys(v)) fn(v[k]);
+  else for (const k of ownKeys(v)) fn(v[k]);
 }
 
 class W {
@@ -90,7 +93,7 @@ function emit(session, rootVals, frames, req, changed) {
     si(id); const v = session.store.get(id);
     if (isHandle(v)) { si(v.owner); si(String(v.id)); if (v.kind) si(v.kind); }
     else if (isMap(v) || isSet(v) || Array.isArray(v)) forEachChild(v, internVal);
-    else for (const k of Object.keys(v)) { si(k); internVal(v[k]); }
+    else for (const k of ownKeys(v)) { si(k); internVal(v[k]); }
   }
 
   const w = new W();
@@ -117,7 +120,7 @@ function emit(session, rootVals, frames, req, changed) {
     else if (isMap(v)) { w.u8(3); w.varu(v.size); for (const [k, val] of v) { node(k); node(val); } }
     else if (isSet(v)) { w.u8(4); w.varu(v.size); for (const val of v) node(val); }
     else if (Array.isArray(v)) { w.u8(1); w.varu(v.length); for (const e of v) node(e); }
-    else { const ks = Object.keys(v); w.u8(0); w.varu(ks.length); for (const k of ks) { w.varu(si(k)); node(v[k]); } }
+    else { const ks = ownKeys(v); w.u8(0); w.varu(ks.length); for (const k of ks) { w.varu(si(k)); node(v[k]); } }
   }
   return w.done();
 }
@@ -165,7 +168,7 @@ function reconstruct(session, parsed) {
     else if (ch.kind === 3) { ch.obj.clear(); for (const [kn, vn] of ch.entries) ch.obj.set(deref(kn), deref(vn)); }
     else if (ch.kind === 4) { ch.obj.clear(); for (const vn of ch.vals) ch.obj.add(deref(vn)); }
     else if (ch.kind === 1) { ch.obj.length = 0; for (const nd of ch.elems) ch.obj.push(deref(nd)); }
-    else { for (const k of Object.keys(ch.obj)) delete ch.obj[k]; for (const [k, nd] of ch.fields) ch.obj[k] = deref(nd); }
+    else { for (const k of Object.keys(ch.obj)) delete ch.obj[k]; for (const [k, nd] of ch.fields) if (k !== "__proto__") ch.obj[k] = deref(nd); }   // skip __proto__: a hostile peer must not set a reconstructed object's prototype
   }
   const rootVals = rootNodes.map(deref);
   const stack = frames.map((f) => { const fr = { fn: f.fn, pc: f.pc }; f.keys.forEach((k, i) => { fr[k] = rootVals[f.b0 + i]; }); return fr; });
@@ -193,7 +196,7 @@ function scan(session, rootVals) {
       : isMap(v) ? "M|" + [...v].map(([k, val]) => canon(k) + "=" + canon(val)).join("|")
         : isSet(v) ? "S|" + [...v].map(canon).join("|")
           : Array.isArray(v) ? "a|" + v.map(canon).join("|")
-            : "o|" + Object.keys(v).map((k) => k + "=" + canon(v[k])).join("|");
+            : "o|" + ownKeys(v).map((k) => k + "=" + canon(v[k])).join("|");
     ver.set(id, fnv(c));
   }
   return { reach, ver };

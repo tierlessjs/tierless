@@ -16,6 +16,7 @@ const cases = [
   { file: "test/probes/wire-fuzz.mjs",   needs: ["property round-trips, differential vs JSON, boundaries, and decode robustness"] },
   { file: "test/probes/wire-delta.mjs",  needs: ["fidelity, locality, bounce, floor, write-tracked≡rescan, Map/Set, and orphan-correctness all hold"] },
   { file: "test/probes/wire-delta-compiled.mjs", needs: ["--track-writes drives write-tracked delta on plain source, matching the rescan oracle"] },
+  { file: "test/probes/wire-delta-fuzz.mjs", needs: ["property round-trips, differential, boundaries, and decode robustness all hold"] },
   { file: "src/verify.mjs",         needs: ["PASS — auto-compiled tier-split continuation produced the correct session"] },
   { file: "src/control-flow.mjs",   needs: ["extended control flow survives migration"] },
   { file: "src/heap-probe.mjs",     needs: ["big locals stay home, fetched on deref, single-writer coherent"] },
