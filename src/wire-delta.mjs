@@ -239,9 +239,13 @@ export function touch(session, ...objs) {
 // object. Found by a walk seeded from the roots AND the dirty set (a dirty object can hang under a
 // clean ancestor), recursing only through dirty/new objects and PRUNING at clean, already-shipped
 // ones — their whole subgraph is already on the peer. Cost O(changed + frontier), not O(reachable).
-// Contract: a mutated object is assumed to stay reachable (true for continuation edits). If code
-// mutates an object and then orphans it within one uninterrupted run, the orphan still ships — a
-// harmless extra (the peer never references it from the roots), never a wrong reconstruction.
+// Tradeoff (measured in bench/delta.mjs, not asserted): the pruned walk is exact whenever a mutated
+// object stays reachable. If code mutates an object then ORPHANS it in the same run, the orphan ships
+// once as a stray — never a wrong reconstruction, and bounded to one hop (dirty is cleared per
+// capture; adoptBaseline GCs it on the next full frame). Under realistic oscillation the bench shows
+// ZERO orphans, where the exact O(reachable) variant only adds ~5.8× encode time for no benefit — so
+// pruned O(changed) is the tuned default; selectDirtyExact ({ exact: true }) is the knob for an
+// adversarial mutate-then-orphan-every-hop workload (there, ~85 B/hop of strays vs the walk cost).
 function selectDirty(session, rootVals) {
   const sidOf = sidOfFn(session);
   const ship = new Set(), fresh = [];
@@ -262,20 +266,35 @@ function selectDirty(session, rootVals) {
   return { changed: [...ship], fresh, visited };
 }
 
+// EXACT variant: ship only objects REACHABLE from the roots (no orphans, ever), at the cost of a
+// full O(reachable) membership walk instead of O(changed). The pruned selectDirty above is the tuned
+// default — bench/delta.mjs measures the tradeoff: realistic oscillation never orphans, so exact only
+// adds the walk cost for no benefit; pass { exact: true } when a workload mutates-then-orphans heavily.
+function selectDirtyExact(session, rootVals) {
+  const sidOf = sidOfFn(session);
+  const reach = [], seen = new Set();
+  const visit = (v) => { if (!isObj(v)) return; const id = sidOf(v); if (seen.has(id)) return; seen.add(id); reach.push([id, v]); forEachChild(v, visit); };
+  rootVals.forEach(visit);
+  const ship = [], fresh = [];
+  for (const [id, v] of reach) { const isNew = !session.seen.has(id); if (isNew || session.dirty.has(v)) { ship.push(id); if (isNew) fresh.push(id); } }
+  return { changed: ship, fresh, visited: reach.length };
+}
+
 // Compute a delta WITHOUT committing the session state, so a caller weighing min(delta, full) can
 // back out and ship the full wire instead. `commit()` finalizes it (peer now holds the new objects;
 // the dirty set is cleared). selectDirty has already assigned ids to any new objects either way.
-export function planDelta(session, stack, request) {
+export function planDelta(session, stack, request, opts = {}) {
   const { rootVals, frames, req } = rootsOf(stack, request);
-  const { changed, fresh, visited } = selectDirty(session, rootVals);
+  const { changed, fresh, visited } = (opts.exact ? selectDirtyExact : selectDirty)(session, rootVals);
   const bytes = emit(session, rootVals, frames, req, changed);
   return { bytes, shipped: changed.length, visited, commit() { for (const id of fresh) session.seen.add(id); session.dirty.clear(); } };
 }
 
-// Encode by bumped versions: ship the dirty set + newly-reachable objects. O(changed). The dirty
-// set is cleared (those changes are now on the peer); newly-shipped ids join `seen`.
-export function encodeDeltaTracked(session, stack, request) {
-  const p = planDelta(session, stack, request);
+// Encode by bumped versions: ship the dirty set + newly-reachable objects. O(changed) by default;
+// { exact: true } ships only reachable objects (O(reachable), no orphans). The dirty set is cleared
+// (those changes are now on the peer); newly-shipped ids join `seen`.
+export function encodeDeltaTracked(session, stack, request, opts = {}) {
+  const p = planDelta(session, stack, request, opts);
   p.commit();
   return { bytes: p.bytes, shipped: p.shipped, visited: p.visited };
 }

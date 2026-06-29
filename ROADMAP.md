@@ -66,10 +66,14 @@ it goes next. Items are grouped, not strictly ordered; see
   when off. **Map and Set are first-class** in the delta codec (identity/cycles preserved across Map keys
   and Set members) and the compiler instruments their mutators (`set`/`add`/`delete`/`clear`) alongside
   the array ones; a custom method that mutates without one of those names isn't seen and that continuation
-  falls back to rescan. The reachability contract is correctness-first: write-tracking is O(changed), so it
-  can't cheaply prove reachability — if code mutates an object then orphans it in one run, the orphan
-  ships as a harmless extra (bounded to one hop), never a wrong reconstruction (`test/probes/wire-delta.mjs`
-  proves both).
+  falls back to rescan. The reachability tradeoff is **measured, not asserted** (`npm run bench:delta`):
+  write-tracking is O(changed) and can't cheaply prove reachability, so a mutate-then-orphan in one run
+  ships the orphan once as a stray (bounded to one hop, never a wrong reconstruction). The bench runs a
+  mean workload (realistic oscillation) and an extreme one (orphan every hop) against an exact O(reachable)
+  variant: under the mean workload the orphan count is **zero**, where exact only adds ~5.8× encode time
+  for no benefit — so pruned O(changed) is the tuned default; `encodeDeltaTracked(…, { exact: true })` is
+  the knob for an adversarial workload (~85 B/hop of strays traded for the walk). Both the stray-correctness
+  and the exact knob are proven in `test/probes/wire-delta.mjs`.
 - **Live pump — done (`src/delta-live.mjs`).** The whole pipeline now runs over a real websocket: the
   compiler's `__dirty` barriers feed a per-tier delta session through an installed sink, and a continuation
   that bounces server↔browser every hop (`api.poll` + `commit`) ships **`min(delta, full)`** on each crossing

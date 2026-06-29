@@ -282,6 +282,26 @@ console.log("Probe: the delta wire codec — fidelity, locality, bidirectional b
   check("orphan: a subsequent clean capture ships nothing new (the stray was bounded to one hop)",
     (live[0].list.push({ id: 2, n: 0 }), touch(s, live[0].list), encodeDeltaTracked(s, live, null).shipped) <= 2);
 }
+{
+  // the { exact: true } knob (selectDirtyExact) ships ZERO strays under the same mutate-then-orphan,
+  // and reconstructs identically — the tuned escape hatch for orphan-heavy workloads (bench/delta).
+  const s = makeTrackedSession("server"), p = makeTrackedSession("browser");
+  const sP = makeTrackedSession("server"), pP = makeTrackedSession("browser");
+  const mk = () => [{ fn: "F", pc: 0, list: [{ id: 0, n: 0 }, { id: 1, n: 0 }, { id: 2, n: 0 }] }];
+  const le = mk(), lp = mk();
+  applyDeltaTracked(p, encodeDeltaTracked(s, le, null, { exact: true }).bytes);
+  applyDeltaTracked(pP, encodeDeltaTracked(sP, lp, null).bytes);
+  for (const [live, sess] of [[le, s], [lp, sP]]) {                            // same mutate-then-orphan on both
+    live[0].list[0].n = 7; touch(sess, live[0].list[0]);
+    live[0].list.shift(); touch(sess, live[0].list);
+  }
+  const ex = encodeDeltaTracked(s, le, null, { exact: true });
+  const pr = encodeDeltaTracked(sP, lp, null);
+  const { stack: exRecv } = applyDeltaTracked(p, ex.bytes);
+  check("orphan: { exact:true } ships strictly fewer objects than pruned on a mutate-then-orphan (no stray)", ex.shipped < pr.shipped);
+  check("orphan: { exact:true } still reconstructs correctly — list is [{id:1},{id:2}]",
+    exRecv[0].list.length === 2 && exRecv[0].list[0].id === 1 && exRecv[0].list[1].id === 2);
+}
 
 console.log(`\n  delta wire: ${pass ? "fidelity, locality, bounce, floor, write-tracked≡rescan, Map/Set, and orphan-correctness all hold" : "FAILURES above"}`);
 process.exit(pass ? 0 : 1);

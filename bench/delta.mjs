@@ -157,3 +157,42 @@ console.log(`times stay FLAT — encode ships the dirty set, apply writes only t
 console.log(`touching the unchanged bulk. That is the bump-version-on-write win: O(changed), not O(reachable),`);
 console.log(`on both ends. It is exact only if every mutation bumps — the guarantee a compiler write-barrier`);
 console.log(`(the --auto-writeback hook) provides; rescan stays the safe fallback when the caller can't.`);
+
+// ---- The orphan tradeoff: pruned O(changed) vs exact O(reachable) ----------------------------
+// The pruned selectDirty ships every dirty object (seeded directly), so if code mutates an object
+// then ORPHANS it in the same run, the orphan ships once as a stray — not minimal. The exact variant
+// ships only reachable objects (no strays) but pays a full O(reachable) walk. Which is optimal is a
+// data question, not an assertion: measure the orphan rate, the wasted bytes, and the CPU under a
+// MEAN workload (realistic oscillation, never orphans) and an EXTREME one (orphans every hop).
+function runWorkload(rows, hops, exact, extreme) {
+  const s = makeTrackedSession("server"), p = makeTrackedSession("browser");
+  const live = makeContinuation(rows);
+  applyDeltaTracked(p, encodeDeltaTracked(s, live, null, { exact }).bytes);     // cold baseline
+  let bytes = 0, objs = 0;
+  for (let hop = 0; hop < hops; hop++) {
+    live[0].ui.tick = hop + 1; touch(s, live[0].ui);                            // a normal in-place edit
+    const k = hop % live[0].model.feed.length;
+    live[0].model.feed[k].done = !live[0].model.feed[k].done; touch(s, live[0].model.feed[k]);
+    if (extreme) { touch(s, live[0].model.feed[k]); live[0].model.feed.splice(k, 1); touch(s, live[0].model.feed); live[0].model.total--; touch(s, live[0].model); }  // mutate-then-orphan the row
+    const enc = encodeDeltaTracked(s, live, null, { exact });
+    bytes += enc.bytes.length; objs += enc.shipped;
+  }
+  return { bytes, objs };
+}
+
+console.log(`\nThe orphan tradeoff — pruned O(changed) vs exact O(reachable), 200 rows, 40 hops:\n`);
+console.log("   workload                       pruned objs   exact objs   orphans   wasted bytes   pruned/exact enc");
+for (const [label, extreme] of [["mean (realistic oscillation)", false], ["extreme (orphan every hop)", true]]) {
+  const pr = runWorkload(200, 40, false, extreme), ex = runWorkload(200, 40, true, extreme);
+  const orphans = pr.objs - ex.objs, wasted = pr.bytes - ex.bytes;
+  // CPU: a single warm encode under each mode on a primed session holding a one-row edit
+  const mk = (exact) => { const s = makeTrackedSession("server"), p = makeTrackedSession("browser"); const l = makeContinuation(200); applyDeltaTracked(p, encodeDeltaTracked(s, l, null, { exact }).bytes); return () => { l[0].ui.tick++; touch(s, l[0].ui); l[0].model.feed[0].done = !l[0].model.feed[0].done; touch(s, l[0].model.feed[0]); return encodeDeltaTracked(s, l, null, { exact }).bytes; }; };
+  const tP = best(mk(false)), tE = best(mk(true));
+  console.log(`   ${label.padEnd(30)} ${String(pr.objs).padStart(8)}   ${String(ex.objs).padStart(10)}   ${String(orphans).padStart(7)}   ${fmt(Math.max(0, wasted)).padStart(11)}   ${tP.toFixed(1)}/${tE.toFixed(1)} µs`);
+}
+console.log(`\nTuned conclusion: under realistic oscillation the orphan count is ZERO — pruned wastes nothing and`);
+console.log(`exact only adds the O(reachable) walk (slower for no benefit), so pruned O(changed) is the optimal`);
+console.log(`default. Only an adversarial mutate-then-orphan-every-hop loop produces strays, each bounded to one`);
+console.log(`hop (dirty is cleared per capture; adoptBaseline GCs them on the next full frame). For such a`);
+console.log(`workload encodeDeltaTracked(..., { exact: true }) trades the walk cost to ship zero strays. The`);
+console.log(`default is tuned to the mean; the knob covers the extreme.`);
