@@ -25,7 +25,7 @@
 // null/undefined/bigint, and §5 handles — with identity and cycles preserved across all of them
 // (a shared object that is also a Map key and a Set member stays one object). Symbols and
 // non-enumerable props extend mechanically (same node table as wire-binary).
-import { isHandle } from "./graph.mjs";
+import { isHandle, approxExceeds } from "./graph.mjs";
 
 const MAGIC = "SMD1";
 const te = new TextEncoder(), td = new TextDecoder();
@@ -78,14 +78,34 @@ function rootsOf(stack, request) {
 }
 
 const sidOfFn = (session) => (v) => { let id = session.idOf.get(v); if (id === undefined) { id = session.tier + "#" + (session.next++); session.idOf.set(v, id); session.store.set(id, v); } return id; };
+// Substitute an excised object with its §5 handle, so every graph walk (reach, version, ship, emit)
+// sees the small handle leaf the wire carries, never the big subgraph that stayed home.
+const subFn = (session) => { const h = session.handleOf; return h ? (v) => (isObj(v) && h.has(v) ? h.get(v) : v) : (v) => v; };
+
+// §5 excision for the delta path: a big NEW subgraph stays tier-local as a handle. Walk the roots; the
+// first time an object's subgraph exceeds `threshold`, put it in `tier.heap` and remember a stable
+// handle (session.handleOf) so the wire carries that handle leaf in its place and the big data never
+// crosses unless the peer derefs it. The mapping persists across hops — a §5 handle is a leaf the delta
+// ships once — so a big immutable dataset rides every later capture for free, only UI deltas crossing.
+function exciseBig(session, rootVals, tier, threshold) {
+  const handleOf = session.handleOf, seen = new Set();
+  const walk = (v) => {
+    if (!isObj(v) || isHandle(v) || handleOf.has(v) || seen.has(v)) return;
+    seen.add(v);
+    if (approxExceeds(v, threshold)) { handleOf.set(v, { __stackmix_handle__: true, owner: tier.id, id: tier.heapPut(v), kind: Array.isArray(v) ? "array" : "object" }); return; }  // excise; don't descend
+    forEachChild(v, walk);
+  };
+  rootVals.forEach(walk);
+}
 
 // Serialize { frames, req, roots, changed-objects } to bytes. Shared by both encoders — the wire
 // is identical; only the choice of `changed` (the sids to ship) differs. `changed` objects are
 // read from session.store (sidOf put every live object there); every value reference is its sid.
 function emit(session, rootVals, frames, req, changed) {
+  const sub = subFn(session);
   const strMap = new Map(), strs = [];
   const si = (s) => { let i = strMap.get(s); if (i === undefined) { i = strs.length; strMap.set(s, i); strs.push(s); } return i; };
-  const internVal = (v) => { if (isObj(v)) si(session.idOf.get(v)); else if (typeof v === "string") si(v); else if (typeof v === "bigint") si(String(v)); };
+  const internVal = (v) => { v = sub(v); if (isObj(v)) si(session.idOf.get(v)); else if (typeof v === "string") si(v); else if (typeof v === "bigint") si(String(v)); };
   for (const f of frames) { si(f.fn); f.keys.forEach(si); }
   if (req) { si(req.op); si(req.tier); si(req.name); }
   rootVals.forEach(internVal);
@@ -98,6 +118,7 @@ function emit(session, rootVals, frames, req, changed) {
 
   const w = new W();
   const node = (v) => {                                                 // a value: ref(sid) | int | float | str | bool | null | undef | bigint
+    v = sub(v);
     if (isObj(v)) { w.u8(0); w.varu(si(session.idOf.get(v))); }
     else if (v === null) w.u8(6);
     else if (v === true) w.u8(4);
@@ -179,17 +200,17 @@ function reconstruct(session, parsed) {
 // ============================== RESCAN mode (no cooperation needed) ==============================
 
 export function makeDeltaSession(tier) {
-  return { tier, idOf: new WeakMap(), next: 1, store: new Map(), peerVer: new Map() };
+  return { tier, idOf: new WeakMap(), next: 1, store: new Map(), peerVer: new Map(), handleOf: new WeakMap() };
 }
 
 // Walk every reachable object, assign/reuse ids, and compute each one's shallow content version.
 // Returns reach: sid -> object, and ver: sid -> version. O(reachable).
 function scan(session, rootVals) {
-  const sidOf = sidOfFn(session);
+  const sidOf = sidOfFn(session), sub = subFn(session);
   const reach = new Map();
-  const visit = (v) => { if (!isObj(v)) return; const id = sidOf(v); if (reach.has(id)) return; reach.set(id, v); forEachChild(v, visit); };
+  const visit = (v) => { v = sub(v); if (!isObj(v)) return; const id = sidOf(v); if (reach.has(id)) return; reach.set(id, v); forEachChild(v, visit); };
   rootVals.forEach(visit);
-  const canon = (v) => (isObj(v) ? "r" + session.idOf.get(v) : v === undefined ? "u" : typeof v === "bigint" ? "B" + v : typeof v + ":" + v);
+  const canon = (v) => { v = sub(v); return isObj(v) ? "r" + session.idOf.get(v) : v === undefined ? "u" : typeof v === "bigint" ? "B" + v : typeof v + ":" + v; };
   const ver = new Map();
   for (const [id, v] of reach) {
     const c = isHandle(v) ? "H|" + v.owner + "|" + v.id + "|" + (v.kind || "")
@@ -204,8 +225,9 @@ function scan(session, rootVals) {
 
 // Encode the continuation as a delta vs what `session` believes the peer holds, detecting change
 // by re-hashing the reachable graph. Returns the bytes + reachable/shipped counts.
-export function encodeDelta(session, stack, request) {
+export function encodeDelta(session, stack, request, opts = {}) {
   const { rootVals, frames, req } = rootsOf(stack, request);
+  if (opts.tier) exciseBig(session, rootVals, opts.tier, opts.threshold || 64 * 1024);
   const { reach, ver } = scan(session, rootVals);
   const changed = [...reach.keys()].filter((id) => session.peerVer.get(id) !== ver.get(id));
   const bytes = emit(session, rootVals, frames, req, changed);
@@ -225,7 +247,7 @@ export function applyDelta(session, bytes) {
 // =========================== WRITE-TRACKED mode (bump version on write) ==========================
 
 export function makeTrackedSession(tier) {
-  return { tier, idOf: new WeakMap(), next: 1, store: new Map(), seen: new Set(), dirty: new Set() };
+  return { tier, idOf: new WeakMap(), next: 1, store: new Map(), seen: new Set(), dirty: new Set(), handleOf: new WeakMap() };
 }
 
 // Bump the version of one or more objects: mark them dirty the instant they are mutated. This is
@@ -247,10 +269,11 @@ export function touch(session, ...objs) {
 // pruned O(changed) is the tuned default; selectDirtyExact ({ exact: true }) is the knob for an
 // adversarial mutate-then-orphan-every-hop workload (there, ~85 B/hop of strays vs the walk cost).
 function selectDirty(session, rootVals) {
-  const sidOf = sidOfFn(session);
+  const sidOf = sidOfFn(session), sub = subFn(session);
   const ship = new Set(), fresh = [];
   let visited = 0;
   const recurse = (v) => {
+    v = sub(v);
     if (!isObj(v)) return;
     visited++;
     const id = sidOf(v);
@@ -271,9 +294,9 @@ function selectDirty(session, rootVals) {
 // default — bench/delta.mjs measures the tradeoff: realistic oscillation never orphans, so exact only
 // adds the walk cost for no benefit; pass { exact: true } when a workload mutates-then-orphans heavily.
 function selectDirtyExact(session, rootVals) {
-  const sidOf = sidOfFn(session);
+  const sidOf = sidOfFn(session), sub = subFn(session);
   const reach = [], seen = new Set();
-  const visit = (v) => { if (!isObj(v)) return; const id = sidOf(v); if (seen.has(id)) return; seen.add(id); reach.push([id, v]); forEachChild(v, visit); };
+  const visit = (v) => { v = sub(v); if (!isObj(v)) return; const id = sidOf(v); if (seen.has(id)) return; seen.add(id); reach.push([id, v]); forEachChild(v, visit); };
   rootVals.forEach(visit);
   const ship = [], fresh = [];
   for (const [id, v] of reach) { const isNew = !session.seen.has(id); if (isNew || session.dirty.has(v)) { ship.push(id); if (isNew) fresh.push(id); } }
@@ -285,6 +308,7 @@ function selectDirtyExact(session, rootVals) {
 // the dirty set is cleared). selectDirty has already assigned ids to any new objects either way.
 export function planDelta(session, stack, request, opts = {}) {
   const { rootVals, frames, req } = rootsOf(stack, request);
+  if (opts.tier) exciseBig(session, rootVals, opts.tier, opts.threshold || 64 * 1024);
   const { changed, fresh, visited } = (opts.exact ? selectDirtyExact : selectDirty)(session, rootVals);
   const bytes = emit(session, rootVals, frames, req, changed);
   return { bytes, shipped: changed.length, visited, commit() { for (const id of fresh) session.seen.add(id); session.dirty.clear(); } };

@@ -30,7 +30,7 @@ const WELLKNOWN = new Map(Object.getOwnPropertyNames(Symbol).filter((k) => typeo
 export const CTORS = { Map, Set, WeakMap, WeakSet, Date, Error, TypeError, RangeError, SyntaxError, ReferenceError, EvalError, URIError, RegExp };
 
 // Cycle-safe, early-exiting size estimate (never JSON.stringify a cyclic graph).
-function approxExceeds(root, limit) {
+export function approxExceeds(root, limit) {
   let total = 0;
   const seen = new Set();
   const stack = [root];

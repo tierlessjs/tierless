@@ -122,7 +122,10 @@ server↔browser each hop ships `min(delta, full)` — the compact full binary f
 (both tiers then `adoptBaseline` to a shared, DFS-deterministic baseline so ids agree), a
 write-tracked delta on every warm hop, and a fall back to full + re-adopt if a near-total change
 ever makes a delta no smaller. Map and Set are first-class kinds in the delta codec, with identity
-preserved across Map keys and Set members.
+preserved across Map keys and Set members. The delta also **composes with §5 excision**
+(`encodeDeltaTracked(…, { tier, threshold })`): a big subgraph excises into the owning tier's heap
+and the delta carries a handle leaf in its place, so the big data stays home *and* only the changed
+UI ships — an 80 KB inline capture becomes 115 B (`test/probes/wire-delta-handle.mjs`).
 
 ## The heap (`heap.mjs` + `fetch.mjs`)
 

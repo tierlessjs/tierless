@@ -82,8 +82,18 @@ it goes next. Items are grouped, not strictly ordered; see
   to a full frame + re-`adoptBaseline` if a near-total change ever makes a delta no smaller. In the demo the
   continuation crosses 28× shipping 27 deltas + 1 full, 37 % under re-shipping the full frame each hop on a
   small model (the bench shows 77–91 % at scale), and the session computes the right result. It is wired into
-  `npm test`. Remaining wire-adjacent work: content-addressed subgraphs (below) and §5-handle excision inside
-  the delta path (the demo keeps the model inline; the two compose but aren't yet exercised together).
+  `npm test`.
+- **§5 excision inside the delta path — done (`encodeDeltaTracked(…, { tier, threshold })`).** The framework's
+  two wire moves now compose: "ship only the small continuation" (the delta) and "big data stays home" (the §5
+  handle). When a capture is given a tier, a big NEW subgraph excises into that tier's heap and the delta carries
+  a stable handle leaf in its place (`session.handleOf` maps it once and reuses it, so it never re-ships), while
+  only the UI changes ride each hop. `test/probes/wire-delta-handle.mjs`: a continuation with a 2000-row dataset
+  + a small UI ships an **80 KB inline capture as 115 B** (the dataset became a handle), preserves shared
+  identity (two aliases → one handle), resolves on deref from the owning heap, keeps the warm deltas tiny and flat
+  over an oscillation (the handle is never re-shipped), and survives a bounce with the data still home. One open
+  edge: composing excision with the `min(delta, full)` *full-binary* path needs the two excision decisions to
+  agree on handle ids — so the live socket runs excision delta-only for now (the cold delta is already tiny, as
+  there is no big data inline to compact).
 - **Content-addressed subgraphs.** Hash immutable subgraphs (code, class shapes,
   config); if the peer has the hash, ship the hash, not the bytes. Globals already
   travel by reference; this generalizes it, and it is the known fix for resume
