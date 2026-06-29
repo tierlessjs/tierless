@@ -5,11 +5,21 @@
 //
 // Model: each tier keeps a replicated, stably-identified object store. An object's STABLE ID
 // (a WeakMap, tier-prefixed like a §5 handle so the two stores never collide) persists across
-// captures. Its VERSION is a SHALLOW content hash — children referenced by id, not recursively
-// — so a deep change bumps only that object's version, not its ancestors'. The wire carries
-// the root references + only the changed objects; the peer resolves unchanged ids from its
-// store and MUTATES changed objects in place, so an unchanged ancestor sees its changed
-// descendant's update for free. Bytes are proportional to actual change, not total size.
+// captures. The wire carries the root references + only the changed objects; the peer resolves
+// unchanged ids from its store and MUTATES changed objects in place, so an unchanged ancestor
+// sees its changed descendant's update for free. Bytes are proportional to actual change.
+//
+// Two ways to find "what changed" — same wire, same store, same apply, different cost:
+//   • RESCAN (encodeDelta): no cooperation needed. Walk the reachable graph and give each object
+//     a SHALLOW content version (children by id, so a deep edit bumps only its own object, not
+//     its ancestors'); ship those whose version differs from the peer's. O(reachable) per capture.
+//   • WRITE-TRACKED (encodeDeltaTracked): bump a version on write. `touch(obj)` marks an object
+//     dirty the instant it is mutated (the same hook --auto-writeback already emits after a member
+//     write); the encoder then ships the dirty set directly — plus any newly-reachable objects,
+//     found by a walk that PRUNES at clean, already-shipped objects (their subgraph is known). So
+//     it costs O(changed), not O(reachable): no per-object hashing, and the receiver's apply only
+//     touches the shipped objects. Correct as long as every mutation bumps — exactly the guarantee
+//     a compiler write-hook gives; rescan is the safe fallback when the caller can't cooperate.
 //
 // Prototype scope: plain objects (own enumerable string keys), arrays, number/string/bool/
 // null/undefined/bigint, and §5 handles — the common continuation shapes. Map/Set/symbols/
@@ -43,12 +53,8 @@ class R {
   f64() { this.need(8); const v = this.dv.getFloat64(this.n, true); this.n += 8; return v; }
 }
 
-export function makeDeltaSession(tier) {
-  return { tier, idOf: new WeakMap(), next: 1, store: new Map(), peerVer: new Map() };
-}
-
 // Flatten a frame stack + request into the linear list of root values the graph hangs off.
-function rootsOf(session, stack, request) {
+function rootsOf(stack, request) {
   const rootVals = [];
   const frames = stack.map((f) => { const keys = Object.keys(f).filter((k) => k !== "fn" && k !== "pc"); const b0 = rootVals.length; for (const k of keys) rootVals.push(f[k]); return { fn: f.fn, pc: f.pc, keys, b0 }; });
   let req = null;
@@ -56,41 +62,19 @@ function rootsOf(session, stack, request) {
   return { rootVals, frames, req };
 }
 
-// Walk every object reachable from the roots, assign/reuse stable ids, and compute each one's
-// SHALLOW content version (children referenced by id, so a deep change bumps only its own object,
-// not its ancestors'). Returns reach: sid -> object, and ver: sid -> version. Pure on an already-
-// identified graph (the receiver side): it assigns no new ids and mutates no store entry.
-function scan(session, rootVals) {
-  const sidOf = (v) => { let id = session.idOf.get(v); if (id === undefined) { id = session.tier + "#" + (session.next++); session.idOf.set(v, id); session.store.set(id, v); } return id; };
-  const reach = new Map();                                              // sid -> object (reachable this capture)
-  const visit = (v) => { if (!isObj(v)) return; const id = sidOf(v); if (reach.has(id)) return; reach.set(id, v); if (Array.isArray(v)) v.forEach(visit); else if (!isHandle(v)) for (const k of Object.keys(v)) visit(v[k]); };
-  rootVals.forEach(visit);
-  const canon = (v) => (isObj(v) ? "r" + session.idOf.get(v) : v === undefined ? "u" : typeof v === "bigint" ? "B" + v : typeof v + ":" + v);
-  const ver = new Map();
-  for (const [id, v] of reach) {
-    const c = isHandle(v) ? "H|" + v.owner + "|" + v.id + "|" + (v.kind || "")
-      : Array.isArray(v) ? "a|" + v.map(canon).join("|")
-        : "o|" + Object.keys(v).map((k) => k + "=" + canon(v[k])).join("|");
-    ver.set(id, fnv(c));
-  }
-  return { reach, ver };
-}
+const sidOfFn = (session) => (v) => { let id = session.idOf.get(v); if (id === undefined) { id = session.tier + "#" + (session.next++); session.idOf.set(v, id); session.store.set(id, v); } return id; };
 
-// Encode the continuation as a delta vs what `session` believes the peer holds. Returns the
-// bytes and, for reporting, how many objects were reachable vs actually shipped.
-export function encodeDelta(session, stack, request) {
-  const { rootVals, frames, req } = rootsOf(session, stack, request);
-  const { reach, ver } = scan(session, rootVals);
-  const changed = [...reach.keys()].filter((id) => session.peerVer.get(id) !== ver.get(id));
-
-  // intern strings (keys, string/bigint values, sids, fn/req names)
+// Serialize { frames, req, roots, changed-objects } to bytes. Shared by both encoders — the wire
+// is identical; only the choice of `changed` (the sids to ship) differs. `changed` objects are
+// read from session.store (sidOf put every live object there); every value reference is its sid.
+function emit(session, rootVals, frames, req, changed) {
   const strMap = new Map(), strs = [];
   const si = (s) => { let i = strMap.get(s); if (i === undefined) { i = strs.length; strMap.set(s, i); strs.push(s); } return i; };
   const internVal = (v) => { if (isObj(v)) si(session.idOf.get(v)); else if (typeof v === "string") si(v); else if (typeof v === "bigint") si(String(v)); };
   for (const f of frames) { si(f.fn); f.keys.forEach(si); }
   if (req) { si(req.op); si(req.tier); si(req.name); }
   rootVals.forEach(internVal);
-  for (const id of changed) { si(id); const v = reach.get(id); if (isHandle(v)) { si(v.owner); si(String(v.id)); if (v.kind) si(v.kind); } else if (Array.isArray(v)) v.forEach(internVal); else for (const k of Object.keys(v)) { si(k); internVal(v[k]); } }
+  for (const id of changed) { si(id); const v = session.store.get(id); if (isHandle(v)) { si(v.owner); si(String(v.id)); if (v.kind) si(v.kind); } else if (Array.isArray(v)) v.forEach(internVal); else for (const k of Object.keys(v)) { si(k); internVal(v[k]); } }
 
   const w = new W();
   const node = (v) => {                                                 // a value: ref(sid) | int | float | str | bool | null | undef | bigint
@@ -111,18 +95,16 @@ export function encodeDelta(session, stack, request) {
   w.varu(rootVals.length); for (const v of rootVals) node(v);
   w.varu(changed.length);
   for (const id of changed) {
-    w.varu(si(id)); const v = reach.get(id);
+    w.varu(si(id)); const v = session.store.get(id);
     if (isHandle(v)) { w.u8(2); w.varu(si(v.owner)); w.varu(si(String(v.id))); if (v.kind) { w.u8(1); w.varu(si(v.kind)); } else w.u8(0); }
     else if (Array.isArray(v)) { w.u8(1); w.varu(v.length); for (const e of v) node(e); }
     else { const ks = Object.keys(v); w.u8(0); w.varu(ks.length); for (const k of ks) { w.varu(si(k)); node(v[k]); } }
   }
-
-  for (const [id, vv] of ver) session.peerVer.set(id, vv);              // the peer will hold these versions after applying
-  return { bytes: w.done(), reachable: reach.size, shipped: changed.length };
+  return w.done();
 }
 
-// Apply a delta to `session`, reconstructing { stack, request } and updating the store.
-export function applyDelta(session, bytes) {
+// Parse a delta to a plain structure (no session, no store mutation) — the hardened reader.
+function parseDelta(bytes) {
   const r = new R(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
   if (td.decode(r.raw(4)) !== MAGIC) throw new RangeError("wire-delta: bad magic");
   const strs = []; { const n = r.count(); for (let i = 0; i < n; i++) strs.push(td.decode(r.raw(r.count()))); }
@@ -136,34 +118,135 @@ export function applyDelta(session, bytes) {
     case 8: return { v: BigInt(S(r.varu())) };
     default: throw new RangeError("wire-delta: bad node tag " + t); } };
   const rootNodes = []; { const n = r.count(); for (let i = 0; i < n; i++) rootNodes.push(node()); }
-
-  // read changed objects; pass 1 locate-or-create their store shells (mutate in place to keep ancestor refs valid)
   const changed = []; { const n = r.count(); for (let i = 0; i < n; i++) {
     const sid = S(r.varu()); const kind = r.u8();
     if (kind === 2) { const owner = S(r.varu()), id = S(r.varu()); const h = { __stackmix_handle__: true, owner, id }; if (r.u8()) h.kind = S(r.varu()); changed.push({ sid, kind, handle: h }); }
     else if (kind === 1) { const c = r.count(), e = []; for (let j = 0; j < c; j++) e.push(node()); changed.push({ sid, kind, elems: e }); }
     else { const c = r.count(), fields = []; for (let j = 0; j < c; j++) { const k = S(r.varu()); fields.push([k, node()]); } changed.push({ sid, kind, fields }); }
   } }
-  for (const ch of changed) {
+  return { frames, req, rootNodes, changed };
+}
+
+// Apply a parsed delta against `session.store`, MUTATING changed objects in place (so an ancestor
+// that still references them sees the update). Returns the reconstructed stack/request, the root
+// values (for a receiver that wants to re-scan), and the list of shipped sids.
+function reconstruct(session, parsed) {
+  const { frames, req, rootNodes, changed } = parsed;
+  for (const ch of changed) {                                            // pass 1: locate-or-create shells
     let obj = session.store.get(ch.sid);
     if (!obj) { obj = ch.kind === 1 ? [] : ch.kind === 2 ? ch.handle : {}; session.store.set(ch.sid, obj); session.idOf.set(obj, ch.sid); }
     ch.obj = obj;
   }
-  const deref = (nd) => ("ref" in nd ? session.store.get(nd.ref) : nd.v);  // resolve a node -> value (store has every referenced id)
-  for (const ch of changed) {                                          // pass 2: fill (mutate in place)
+  const deref = (nd) => ("ref" in nd ? session.store.get(nd.ref) : nd.v);  // store has every referenced id
+  for (const ch of changed) {                                            // pass 2: fill (mutate in place)
     if (ch.kind === 2) { const h = ch.obj; h.owner = ch.handle.owner; h.id = ch.handle.id; if (ch.handle.kind !== undefined) h.kind = ch.handle.kind; }
     else if (ch.kind === 1) { ch.obj.length = 0; for (const nd of ch.elems) ch.obj.push(deref(nd)); }
     else { for (const k of Object.keys(ch.obj)) delete ch.obj[k]; for (const [k, nd] of ch.fields) ch.obj[k] = deref(nd); }
   }
-
   const rootVals = rootNodes.map(deref);
   const stack = frames.map((f) => { const fr = { fn: f.fn, pc: f.pc }; f.keys.forEach((k, i) => { fr[k] = rootVals[f.b0 + i]; }); return fr; });
   const request = req ? { op: req.op, tier: req.tier, name: req.name, args: rootVals.slice(req.a0, req.a0 + req.argc) } : null;
+  return { stack, request, rootVals, shipped: changed.map((c) => c.sid) };
+}
 
-  // After applying, the receiver holds the current version of every reachable object — and the
-  // sender knows it does. Record that so an encode back to the sender ships only what changes
-  // from HERE (the return hop of a migration bounce is itself a delta, not a full re-ship).
+// ============================== RESCAN mode (no cooperation needed) ==============================
+
+export function makeDeltaSession(tier) {
+  return { tier, idOf: new WeakMap(), next: 1, store: new Map(), peerVer: new Map() };
+}
+
+// Walk every reachable object, assign/reuse ids, and compute each one's shallow content version.
+// Returns reach: sid -> object, and ver: sid -> version. O(reachable).
+function scan(session, rootVals) {
+  const sidOf = sidOfFn(session);
+  const reach = new Map();
+  const visit = (v) => { if (!isObj(v)) return; const id = sidOf(v); if (reach.has(id)) return; reach.set(id, v); if (Array.isArray(v)) v.forEach(visit); else if (!isHandle(v)) for (const k of Object.keys(v)) visit(v[k]); };
+  rootVals.forEach(visit);
+  const canon = (v) => (isObj(v) ? "r" + session.idOf.get(v) : v === undefined ? "u" : typeof v === "bigint" ? "B" + v : typeof v + ":" + v);
+  const ver = new Map();
+  for (const [id, v] of reach) {
+    const c = isHandle(v) ? "H|" + v.owner + "|" + v.id + "|" + (v.kind || "")
+      : Array.isArray(v) ? "a|" + v.map(canon).join("|")
+        : "o|" + Object.keys(v).map((k) => k + "=" + canon(v[k])).join("|");
+    ver.set(id, fnv(c));
+  }
+  return { reach, ver };
+}
+
+// Encode the continuation as a delta vs what `session` believes the peer holds, detecting change
+// by re-hashing the reachable graph. Returns the bytes + reachable/shipped counts.
+export function encodeDelta(session, stack, request) {
+  const { rootVals, frames, req } = rootsOf(stack, request);
+  const { reach, ver } = scan(session, rootVals);
+  const changed = [...reach.keys()].filter((id) => session.peerVer.get(id) !== ver.get(id));
+  const bytes = emit(session, rootVals, frames, req, changed);
+  for (const [id, vv] of ver) session.peerVer.set(id, vv);              // the peer will hold these versions
+  return { bytes, reachable: reach.size, shipped: changed.length };
+}
+
+// Apply a rescan delta. The receiver re-scans to learn the versions it now holds, so an encode
+// back to the sender is itself a delta (the return hop of a bounce). O(reachable).
+export function applyDelta(session, bytes) {
+  const { stack, request, rootVals } = reconstruct(session, parseDelta(bytes));
   const { ver } = scan(session, rootVals);
   for (const [id, vv] of ver) session.peerVer.set(id, vv);
+  return { stack, request };
+}
+
+// =========================== WRITE-TRACKED mode (bump version on write) ==========================
+
+export function makeTrackedSession(tier) {
+  return { tier, idOf: new WeakMap(), next: 1, store: new Map(), seen: new Set(), dirty: new Set() };
+}
+
+// Bump the version of one or more objects: mark them dirty the instant they are mutated. This is
+// the hook a compiler write-barrier (the --auto-writeback shape) emits after a member write.
+export function touch(session, ...objs) {
+  for (const o of objs) if (isObj(o)) session.dirty.add(o);
+  return objs[0];
+}
+
+// Select the sids to ship WITHOUT hashing the graph: every dirty object, plus every newly-reachable
+// object. Found by a walk seeded from the roots AND the dirty set (a dirty object can hang under a
+// clean ancestor), recursing only through dirty/new objects and PRUNING at clean, already-shipped
+// ones — their whole subgraph is already on the peer. Cost O(changed + frontier), not O(reachable).
+function selectDirty(session, rootVals) {
+  const sidOf = sidOfFn(session);
+  const ship = new Set(), fresh = [];
+  let visited = 0;
+  const recurse = (v) => {
+    if (!isObj(v)) return;
+    visited++;
+    const id = sidOf(v);
+    const isNew = !session.seen.has(id);
+    if (!isNew && !session.dirty.has(v)) return;                        // clean & known → prune (subgraph held)
+    if (ship.has(id)) return;                                          // already queued (also breaks cycles)
+    ship.add(id);
+    if (isNew) fresh.push(id);
+    if (isHandle(v)) return;
+    if (Array.isArray(v)) v.forEach(recurse); else for (const k of Object.keys(v)) recurse(v[k]);
+  };
+  rootVals.forEach(recurse);
+  for (const o of session.dirty) recurse(o);                            // dirty objects under a clean ancestor
+  return { changed: [...ship], fresh, visited };
+}
+
+// Encode by bumped versions: ship the dirty set + newly-reachable objects. O(changed). The dirty
+// set is cleared (those changes are now on the peer); newly-shipped ids join `seen`.
+export function encodeDeltaTracked(session, stack, request) {
+  const { rootVals, frames, req } = rootsOf(stack, request);
+  const { changed, fresh, visited } = selectDirty(session, rootVals);
+  const bytes = emit(session, rootVals, frames, req, changed);
+  for (const id of fresh) session.seen.add(id);                        // peer now holds these new objects
+  session.dirty.clear();
+  return { bytes, shipped: changed.length, visited };
+}
+
+// Apply a tracked delta. Only the shipped objects are written, and only their sids join `seen` —
+// O(shipped), no re-scan. The applied objects are NOT marked dirty (the change came from the peer,
+// who already has it), so an encode back ships only what THIS side then mutates.
+export function applyDeltaTracked(session, bytes) {
+  const { stack, request, shipped } = reconstruct(session, parseDelta(bytes));
+  for (const id of shipped) session.seen.add(id);
   return { stack, request };
 }

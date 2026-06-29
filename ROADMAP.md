@@ -41,8 +41,19 @@ it goes next. Items are grouped, not strictly ordered; see
   walks the graph to diff but skips serializing the unchanged bulk) and strictly more work
   cold (the other reason cold falls back). Fidelity (identity, cycles, undefined/BigInt, §5
   handles), locality, the bounce, and the floor are proven in `test/probes/wire-delta.mjs`.
-  Next lever: track dirty objects at mutation time (the §5 heap already bumps a version on
-  write) to avoid re-hashing the whole graph each capture.
+- **Bump version on write — done (`encodeDeltaTracked`).** The rescan encoder above costs
+  O(reachable): it re-hashes the whole graph each capture to find the change. The write-tracked
+  encoder instead marks an object dirty the instant it is mutated (`touch()` — the version bump,
+  the same hook `--auto-writeback` already emits after a member write), then ships the dirty set
+  directly, plus any newly-reachable object (a walk that PRUNES at clean, already-shipped objects).
+  The receiver's apply writes only the shipped objects. Same wire, same store, **identical
+  reconstruction** as rescan — proven by cross-checking against rescan as the oracle every hop in
+  `test/probes/wire-delta.mjs`. Cost drops to **O(changed)** on both ends: warm encode and apply
+  stay flat (~10 µs / ~5 µs) as the model grows from 50 to 3200 records, where rescan climbs to
+  ~5 ms / ~4.6 ms — **~490× / ~850×** at 3200 (`npm run bench:delta`). It is exact only if every
+  mutation bumps — the guarantee a compiler write-barrier provides; rescan stays the safe fallback
+  when the caller can't cooperate. Folding the bump into the compiler's write path (so plain source
+  mutation tracks automatically) and into the live pump is the remaining integration step.
 - **Content-addressed subgraphs.** Hash immutable subgraphs (code, class shapes,
   config); if the peer has the hash, ship the hash, not the bytes. Globals already
   travel by reference; this generalizes it, and it is the known fix for resume

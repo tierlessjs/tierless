@@ -104,11 +104,17 @@ decoder is hardened (bounds-checked, count-guarded, `__proto__`-stripping) and f
 For the **oscillation case** — a session that crosses the boundary many times, re-shipping a
 near-identical continuation each hop — `wire-delta.mjs` ships a capture as a *patch* over what
 the peer already holds: each tier keeps a replicated, stably-identified object store, and only
-the objects whose **shallow content version** changed travel (a deep edit bumps just its own
-object, not its ancestors). The strategy is `min(delta, full wire)` per message (the §6 cost
-decision), so the cold first hop falls back to the full frame and the wire is never worse than
-full; warm hops ship a flat ~175 B regardless of model size (`npm run bench:delta`). It is a
-proven codec (`test/probes/wire-delta.mjs`), the next optimization to fold into the live pump.
+the changed objects travel (a deep edit bumps just its own object, not its ancestors, because
+content versions are shallow — children by id). The strategy is `min(delta, full wire)` per
+message (the §6 cost decision), so the cold first hop falls back to the full frame and the wire
+is never worse than full; warm hops ship a flat ~175 B regardless of model size. *Finding* the
+change has two modes over the same wire: **rescan** re-hashes the reachable graph each capture
+(O(reachable), no cooperation needed) and **write-tracked** marks an object dirty when it is
+mutated (`touch()`, the same hook `--auto-writeback` emits) and ships the dirty set directly —
+O(changed), so warm encode/apply stay flat (~10 µs / ~5 µs) where rescan climbs into the
+milliseconds as the model grows (`npm run bench:delta`). Both reconstruct identically (the probe
+cross-checks write-tracked against rescan as the oracle). It is a proven codec
+(`test/probes/wire-delta.mjs`), the next optimization to fold into the live pump.
 
 ## The heap (`heap.mjs` + `fetch.mjs`)
 

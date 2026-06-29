@@ -13,7 +13,11 @@
 //      learns the versions it now holds, so its encode-back ships only what it then changes.
 //   4. Floor — delta is never pathologically larger than just shipping the full binary wire; the
 //      caller takes min(delta, full) per message (the §6 cost decision), so it can only help.
-import { makeDeltaSession, encodeDelta, applyDelta } from "../../src/wire-delta.mjs";
+//   5. Write-tracked ≡ rescan — the O(changed) "bump version on write" encoder (touch() marks an
+//      object dirty when mutated) ships the SAME set and reconstructs IDENTICALLY to the O(reachable)
+//      rescan encoder, which is the oracle. Same wire, same store, lower cost.
+import { makeDeltaSession, encodeDelta, applyDelta,
+  makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "../../src/wire-delta.mjs";
 import { encodeWireBinary } from "../../src/wire-binary.mjs";
 import { makeTier } from "../../src/heap.mjs";
 
@@ -170,5 +174,58 @@ console.log("Probe: the delta wire codec — fidelity, locality, bidirectional b
     d.bytes.length > full ? chosen === full : true);
 }
 
-console.log(`\n  delta wire: ${pass ? "fidelity, locality, bidirectional bounce, and floor all hold" : "FAILURES above"}`);
+// ---------------------------------------------------------------------------------------------
+// 6) WRITE-TRACKED ≡ RESCAN — drive the SAME mutations through a rescan pair (the oracle) and a
+//    write-tracked pair (touch() on each write). Assert identical ship counts and identical
+//    reconstruction every hop, plus correct detection of a NEW object created mid-oscillation.
+// ---------------------------------------------------------------------------------------------
+{
+  const mk = () => [{ fn: "App", pc: 4,
+    model: { feed: Array.from({ length: 60 }, (_, i) => ({ id: i, title: "A" + i, done: false })), total: 60 },
+    ui: { filter: "all", page: 0, tick: 0 } }];
+
+  const rs = makeDeltaSession("server"), rp = makeDeltaSession("browser");
+  const ts = makeTrackedSession("server"), tp = makeTrackedSession("browser");
+  let rLive = mk(), tLive = mk(), rHere = rs, rThere = rp, tHere = ts, tThere = tp;
+  let countsMatch = true, reconMatch = true, allExact = true;
+
+  for (let hop = 0; hop < 10; hop++) {
+    const rEnc = encodeDelta(rHere, rLive, null);
+    const { stack: rRecv } = applyDelta(rThere, rEnc.bytes);
+    const tEnc = encodeDeltaTracked(tHere, tLive, null);
+    const { stack: tRecv } = applyDeltaTracked(tThere, tEnc.bytes);
+
+    countsMatch = countsMatch && rEnc.shipped === tEnc.shipped;
+    reconMatch = reconMatch && deepEq(rRecv, tRecv);
+    allExact = allExact && deepEq(tRecv, tLive);
+
+    for (const [recv, tracked] of [[rRecv, false], [tRecv, true]]) {
+      recv[0].ui.filter = ["all", "active", "done"][hop % 3];
+      recv[0].ui.tick = hop + 1;
+      const row = recv[0].model.feed[hop % 60]; row.done = !row.done;
+      if (tracked) touch(tThere, recv[0].ui, row);                      // bump version on each write
+    }
+    rLive = rRecv; [rHere, rThere] = [rThere, rHere];
+    tLive = tRecv; [tHere, tThere] = [tThere, tHere];
+  }
+  check("write-tracked ships the SAME object count as the rescan oracle, every hop", countsMatch);
+  check("write-tracked reconstructs IDENTICALLY to the rescan oracle, every hop", reconMatch);
+  check("write-tracked reconstructs the exact continuation it sent, every hop", allExact);
+}
+{
+  // a NEW object created mid-oscillation must be detected and shipped (the walk finds it past the
+  // dirty array that now references it), even though it was never itself touch()ed.
+  const s = makeTrackedSession("server"), p = makeTrackedSession("browser");
+  const live = [{ fn: "F", pc: 0, root: { items: [{ id: 0 }] } }];
+  applyDeltaTracked(p, encodeDeltaTracked(s, live, null).bytes);        // prime
+  live[0].root.items.push({ id: 1, note: "new" });
+  touch(s, live[0].root.items);                                        // bump the mutated array
+  const enc = encodeDeltaTracked(s, live, null);
+  const { stack: recv } = applyDeltaTracked(p, enc.bytes);
+  check("write-tracked: a new object created mid-stream is shipped and linked on the peer",
+    recv[0].root.items.length === 2 && recv[0].root.items[1].note === "new");
+  check("write-tracked: it ships exactly the mutated array + the one new object (2)", enc.shipped === 2);
+}
+
+console.log(`\n  delta wire: ${pass ? "fidelity, locality, bidirectional bounce, floor, and write-tracked≡rescan all hold" : "FAILURES above"}`);
 process.exit(pass ? 0 : 1);

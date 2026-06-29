@@ -15,7 +15,8 @@
 // the full wire grows with the model while the delta stays flat in the (constant) per-hop change.
 //
 //   node bench/delta.mjs
-import { makeDeltaSession, encodeDelta, applyDelta } from "../src/wire-delta.mjs";
+import { makeDeltaSession, encodeDelta, applyDelta,
+  makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "../src/wire-delta.mjs";
 import { encodeWireBinary } from "../src/wire-binary.mjs";
 
 const fmt = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(2) + " MB");
@@ -118,5 +119,41 @@ console.log(`\nReading it: the warm delta still WALKS the whole graph to find wh
 console.log(`object), so it is NOT free — but it skips serializing the unchanged bulk, so vs a full encode it`);
 console.log(`is roughly a wash to a win on CPU while being an order of magnitude smaller on the wire. The cold`);
 console.log(`delta is strictly more work (hash-all + serialize-all) — which is the other reason the cold hop`);
-console.log(`falls back to the full wire. The walk cost is the obvious place to optimize next: track dirty`);
-console.log(`objects at mutation time (the §5 heap already bumps a version on write) to avoid re-hashing all.`);
+console.log(`falls back to the full wire. That O(reachable) walk is what the write-tracked encoder removes:`);
+
+// ---- Bump version on write: O(reachable) rescan vs O(changed) write-tracked ------------------
+// The rescan encoder hashes the whole graph each capture to find what changed — O(reachable),
+// growing with model size even when one field changed. The write-tracked encoder marks an object
+// dirty when it is mutated (touch(), the version bump), so it ships the dirty set directly and the
+// peer's apply touches only the shipped objects — O(changed), FLAT in model size. Same wire, same
+// reconstruction (proven in the probe). Measure encode AND apply, warm, across sizes.
+function warmPairs(rows) {
+  // rescan pair: encoder + a receiver primed with the baseline; encoder holds a 2-object change.
+  const rs = makeDeltaSession("server"), rp = makeDeltaSession("browser");
+  const rl = makeContinuation(rows); applyDelta(rp, encodeDelta(rs, rl, null).bytes);
+  rl[0].ui.tick = 1; rl[0].model.feed[0].done = true;
+  const rPrimed = new Map(rs.peerVer);                                 // baseline the peer holds
+  const rEncode = () => { rs.peerVer = new Map(rPrimed); return encodeDelta(rs, rl, null).bytes; };
+  // tracked pair: same shape, the 2-object change declared via touch (the version bump).
+  const ts = makeTrackedSession("server"), tp = makeTrackedSession("browser");
+  const tl = makeContinuation(rows); applyDeltaTracked(tp, encodeDeltaTracked(ts, tl, null).bytes);
+  tl[0].ui.tick = 1; tl[0].model.feed[0].done = true;
+  const tEncode = () => { touch(ts, tl[0].ui, tl[0].model.feed[0]); return encodeDeltaTracked(ts, tl, null).bytes; };
+  return { rEncode, tEncode, rp, tp };
+}
+
+console.log(`\nbump-on-write — rescan O(reachable) vs write-tracked O(changed), warm encode + apply (µs):\n`);
+console.log("   feed size      rescan enc   tracked enc      rescan apply   tracked apply");
+for (const rows of [50, 200, 800, 3200]) {
+  const w = warmPairs(rows);
+  const encR = best(w.rEncode), encT = best(w.tEncode);
+  const dR = w.rEncode(), dT = w.tEncode();                            // a warm delta from each, to feed apply
+  const applyR = best(() => applyDelta(w.rp, dR));                     // onto the primed receiver (re-scans: O(reachable))
+  const applyT = best(() => applyDeltaTracked(w.tp, dT));              // onto the primed receiver (writes shipped: O(changed))
+  console.log(`   ${String(rows).padStart(5)} recs    ${encR.toFixed(1).padStart(8)} µs  ${encT.toFixed(1).padStart(8)} µs     ${applyR.toFixed(1).padStart(8)} µs  ${applyT.toFixed(1).padStart(8)} µs`);
+}
+console.log(`\nThe rescan times climb with the feed (it re-hashes every object every hop); the write-tracked`);
+console.log(`times stay FLAT — encode ships the dirty set, apply writes only the shipped objects, neither`);
+console.log(`touching the unchanged bulk. That is the bump-version-on-write win: O(changed), not O(reachable),`);
+console.log(`on both ends. It is exact only if every mutation bumps — the guarantee a compiler write-barrier`);
+console.log(`(the --auto-writeback hook) provides; rescan stays the safe fallback when the caller can't.`);
