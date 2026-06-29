@@ -259,15 +259,22 @@ function selectDirty(session, rootVals) {
   return { changed: [...ship], fresh, visited };
 }
 
-// Encode by bumped versions: ship the dirty set + newly-reachable objects. O(changed). The dirty
-// set is cleared (those changes are now on the peer); newly-shipped ids join `seen`.
-export function encodeDeltaTracked(session, stack, request) {
+// Compute a delta WITHOUT committing the session state, so a caller weighing min(delta, full) can
+// back out and ship the full wire instead. `commit()` finalizes it (peer now holds the new objects;
+// the dirty set is cleared). selectDirty has already assigned ids to any new objects either way.
+export function planDelta(session, stack, request) {
   const { rootVals, frames, req } = rootsOf(stack, request);
   const { changed, fresh, visited } = selectDirty(session, rootVals);
   const bytes = emit(session, rootVals, frames, req, changed);
-  for (const id of fresh) session.seen.add(id);                        // peer now holds these new objects
-  session.dirty.clear();
-  return { bytes, shipped: changed.length, visited };
+  return { bytes, shipped: changed.length, visited, commit() { for (const id of fresh) session.seen.add(id); session.dirty.clear(); } };
+}
+
+// Encode by bumped versions: ship the dirty set + newly-reachable objects. O(changed). The dirty
+// set is cleared (those changes are now on the peer); newly-shipped ids join `seen`.
+export function encodeDeltaTracked(session, stack, request) {
+  const p = planDelta(session, stack, request);
+  p.commit();
+  return { bytes: p.bytes, shipped: p.shipped, visited: p.visited };
 }
 
 // Apply a tracked delta. Only the shipped objects are written, and only their sids join `seen` —
@@ -277,4 +284,29 @@ export function applyDeltaTracked(session, bytes) {
   const { stack, request, shipped } = reconstruct(session, parseDelta(bytes));
   for (const id of shipped) session.seen.add(id);
   return { stack, request };
+}
+
+// Establish a SHARED baseline from a full (non-delta) frame. min(delta, full) may ship the compact
+// full binary wire instead of a delta — the cold first hop, or a near-total change — and that frame
+// carries no ids, so both tiers must re-derive matching ones. Each walks the identical graph in the
+// identical DFS pre-order and assigns "@0","@1",… — deterministic, so the two stores agree — then
+// marks every object seen. Objects created AFTER adoption get the tier-prefixed id (next++), which
+// never collides with an "@n". The store is rebuilt, so objects no longer reachable are dropped
+// (this is also where accumulated orphans are collected). After this, the next capture is a delta.
+export function adoptBaseline(session, stack, request) {
+  const { rootVals } = rootsOf(stack, request);
+  session.store = new Map();
+  session.seen = new Set();
+  session.dirty.clear();
+  let n = 0;
+  const assign = (v) => {
+    if (!isObj(v)) return;
+    const prior = session.idOf.get(v);
+    if (prior !== undefined && session.store.has(prior)) return;        // already placed in THIS baseline (sharing/cycles)
+    const id = "@" + (n++);
+    session.idOf.set(v, id); session.store.set(id, v); session.seen.add(id);
+    forEachChild(v, assign);
+  };
+  rootVals.forEach(assign);
+  session.based = true;
 }

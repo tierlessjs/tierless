@@ -117,8 +117,12 @@ mark is emitted by the **compiler** (`transform.cjs --track-writes`, the symmetr
 so write-tracking works on **plain unannotated source** — no `touch()` in the developer's code.
 Both modes reconstruct identically; the probes cross-check write-tracked against rescan as the
 oracle, including end-to-end on compiled plain source (`test/probes/wire-delta{,-compiled}.mjs`).
-The remaining step is to fold it into the live pump (install the dirty sink around stepping and take
-`min(delta, full)` on the socket).
+This runs **live over a real socket** (`src/delta-live.mjs`): a continuation that bounces
+server↔browser each hop ships `min(delta, full)` — the compact full binary frame on the cold hop
+(both tiers then `adoptBaseline` to a shared, DFS-deterministic baseline so ids agree), a
+write-tracked delta on every warm hop, and a fall back to full + re-adopt if a near-total change
+ever makes a delta no smaller. Map and Set are first-class kinds in the delta codec, with identity
+preserved across Map keys and Set members.
 
 ## The heap (`heap.mjs` + `fetch.mjs`)
 

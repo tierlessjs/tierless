@@ -69,8 +69,17 @@ it goes next. Items are grouped, not strictly ordered; see
   falls back to rescan. The reachability contract is correctness-first: write-tracking is O(changed), so it
   can't cheaply prove reachability — if code mutates an object then orphans it in one run, the orphan
   ships as a harmless extra (bounded to one hop), never a wrong reconstruction (`test/probes/wire-delta.mjs`
-  proves both). The remaining step is the **live pump**: install the session's dirty sink around stepping
-  and take `min(delta, full)` on the real socket (today's socket demos still ship the full binary frame).
+  proves both).
+- **Live pump — done (`src/delta-live.mjs`).** The whole pipeline now runs over a real websocket: the
+  compiler's `__dirty` barriers feed a per-tier delta session through an installed sink, and a continuation
+  that bounces server↔browser every hop (`api.poll` + `commit`) ships **`min(delta, full)`** on each crossing
+  — the compact full binary wire on the cold first hop (then both tiers `adoptBaseline` to a shared, DFS-
+  deterministic baseline so ids agree), a write-tracked delta on every warm hop, and an automatic fall back
+  to a full frame + re-`adoptBaseline` if a near-total change ever makes a delta no smaller. In the demo the
+  continuation crosses 28× shipping 27 deltas + 1 full, 37 % under re-shipping the full frame each hop on a
+  small model (the bench shows 77–91 % at scale), and the session computes the right result. It is wired into
+  `npm test`. Remaining wire-adjacent work: content-addressed subgraphs (below) and §5-handle excision inside
+  the delta path (the demo keeps the model inline; the two compose but aren't yet exercised together).
 - **Content-addressed subgraphs.** Hash immutable subgraphs (code, class shapes,
   config); if the peer has the hash, ship the hash, not the bytes. Globals already
   travel by reference; this generalizes it, and it is the known fix for resume

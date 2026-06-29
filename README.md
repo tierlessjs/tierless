@@ -96,6 +96,8 @@ and finishes in the browser the instant the vdom touches the real DOM.
 | `src/heap-auto.mjs`, `src/heap-write.mjs` | transparent deref (reads auto-fetch on touch) and transparent write-back (a browser edit propagates to the server master under §5 CAS), with no `deref()`/`writeBack()` in the source |
 | `src/heap-writeback.mjs` | optimistic version-checked CAS: conflicts detected, refetch + retry, no lost updates |
 | `src/policy-live.mjs` | at a data boundary the driver prices migrate-vs-fetch from real bytes and steers what crosses (§6) — flipping to fetch a 23 B fact rather than ship a 97 KB continuation |
+| `test/probes/wire-delta.mjs`, `test/probes/wire-delta-compiled.mjs` | the delta wire ships a capture as a patch over what the peer holds; `--track-writes` makes the compiler bump a version on every in-place mutation, so plain source ships only what changed — proven identical to a full re-scan, with Map/Set first-class |
+| `src/delta-live.mjs` | over a real socket a continuation that bounces server↔browser each hop ships `min(delta, full)` — a compiler-tracked delta on warm hops, a full binary frame on the cold hop — reconstructing exactly and computing the right result |
 
 `src/demo.mjs` and `src/server-live.mjs` additionally run the whole thing across a real
 WebSocket into **real headless Chromium** (Playwright) with real clicks; they need a

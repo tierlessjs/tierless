@@ -24,6 +24,7 @@ const cases = [
   { file: "src/heap-writeback.mjs", needs: ["optimistic CAS, conflicts detected and retried, no lost updates"] },
   { file: "src/heap-write.mjs",     needs: ["transparent write-back: an ordinary member assignment propagated to the owning master"] },
   { file: "src/policy-live.mjs",    needs: ["informed FETCH", "priced migrate vs fetch from real bytes and steered the socket"] },
+  { file: "src/delta-live.mjs",     needs: ["the compiler-tracked continuation shipped deltas, min(delta, full), end to end"] },
 ];
 
 let failed = 0;
