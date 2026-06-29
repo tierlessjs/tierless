@@ -26,7 +26,6 @@ export const PROGRAMS = {
         F.pc = 2; break;
       case 4:
         F.pc = 3; return { op: "resource", tier: "server", name: "api.seed", args: [] };
-      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in realistic (forged continuation?)");
     }
   },
   worst(F) {
@@ -62,7 +61,6 @@ F.acc = F.seed;
         F.pc = 9; break;
       case 11:
         F.pc = 10; return { op: "resource", tier: "server", name: "api.seed", args: [] };
-      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in worst (forged continuation?)");
     }
   }
 };

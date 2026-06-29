@@ -137,22 +137,12 @@ it goes next. Items are grouped, not strictly ordered; see
 
 ## Security & the trust boundary
 
-- **Mediated migration toward authority — guard landed (`src/secure-host.mjs`).** The server never
-  executes client-originated code — it runs its OWN compiled `PROGRAMS` by name — but an incoming
-  continuation from the untrusted browser tier is hostile data, so `makeGuard().check()` is the
-  acceptance test the server runs before resuming. It rejects: a frame naming an **unknown program**
-  or a non-integer/negative **pc**; a forged in-range pc is then stopped at resume by the compiler's
-  new `default: throw` machine guard (a hard error, never an infinite loop in `while (true)`); a
-  **fabricated / wrong-tier resource** request (only names in the allow-list, for this tier, run); a
-  malformed stack or handler stack; and — the key one — a **forged §5 handle**: a handle owned by
-  this tier is honored only if this host `mint`ed it to the peer, so a handle id is a **capability,
-  not an address** and the peer cannot read arbitrary heap objects by guessing ids.
-  `test/probes/secure-boundary.mjs` runs a malicious peer through all of these (and proves the guard
-  is transparent to a real multi-step journey). **Still open** (so this is not yet a production trust
-  boundary): per-call authority — *may THIS session delete THIS article* — is the resource handler's
-  job, because a forged pc can jump the continuation to any resource the app uses anywhere, so a
-  handler must authorize each call itself and never trust the control flow that reached it; plus
-  resource-exhaustion budgets, and rate/size limits beyond the wire decoder's existing guards.
+- **Mediated migration toward authority.** The server must never execute
+  client-originated code as server code; an incoming continuation is untrusted data,
+  and the server runs *its own* resource handlers over it. The allow-list is partly
+  this safety mechanism (the browser tier is instantiated without server
+  capabilities). Hardening this boundary is prerequisite to running across a real
+  trust boundary in production (design `§7`).
 
 ## Not on the roadmap (by design)
 

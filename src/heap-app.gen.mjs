@@ -42,7 +42,6 @@ F.total = digest(F.rows); // server-side: touches the big data
         F.pc = 9; break;
       case 11:
         F.pc = 10; return { op: "resource", tier: "server", name: "api.getRows", args: [] };
-      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in Report (forged continuation?)");
     }
   }
 };

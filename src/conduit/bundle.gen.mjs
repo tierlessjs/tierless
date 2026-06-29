@@ -20,7 +20,6 @@ export const PROGRAMS = {
         F.pc = 4; break;
       case 6:
         F.pc = 5; return { op: "resource", tier: "server", name: "api.getTags", args: [] };
-      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in loadHome (forged continuation?)");
     }
   },
   loadArticle(F) {
@@ -41,7 +40,6 @@ export const PROGRAMS = {
         F.pc = 4; break;
       case 6:
         F.pc = 5; return { op: "resource", tier: "server", name: "api.getArticle", args: [F.args[0]] };
-      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in loadArticle (forged continuation?)");
     }
   },
   App(F) {
@@ -187,7 +185,6 @@ F.draft = { title: F.ev.title, body: F.ev.body, tags: F.ev.tags };
       case 54:
         F.route = "home";
         F.pc = 53; break;
-      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in App (forged continuation?)");
     }
   }
 };

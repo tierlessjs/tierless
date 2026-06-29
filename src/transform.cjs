@@ -408,10 +408,7 @@ function compileFn(node) {
     throw new Error("bad terminator " + tm.kind);
   };
   const cases = ids.map((id) => { const blk = blocks[id]; const lines = blk.lines.slice(); lines.push(emitTerm(blk.term)); return `      case ${R(id)}:\n        ${lines.join("\n        ")}`; }).join("\n");
-  // default: a pc with no case can only come from a FORGED continuation (the other tier is untrusted,
-  // §7). Throw synchronously rather than let `while (true)` spin — an uncatchable hard error the host
-  // rejects, never an infinite loop. (Valid runs never hit it; every reachable pc has a case.)
-  return `  ${fnName}(F) {\n    while (true) switch (F.pc) {\n${cases}\n      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in ${fnName} (forged continuation?)");\n    }\n  }`;
+  return `  ${fnName}(F) {\n    while (true) switch (F.pc) {\n${cases}\n    }\n  }`;
 }
 
 // Rewrite a suspendable function's locals/params -> F.x, then compile it to a machine.

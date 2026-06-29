@@ -64,7 +64,6 @@ F.total = digest(F.rows); // server-side read (guard is a no-op there)
         F.pc = 19; break;
       case 21:
         F.pc = 20; return { op: "resource", tier: "server", name: "api.getRows", args: [] };
-      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in Report (forged continuation?)");
     }
   }
 };

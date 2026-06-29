@@ -99,7 +99,6 @@ and finishes in the browser the instant the vdom touches the real DOM.
 | `src/policy-live.mjs` | at a data boundary the driver prices migrate-vs-fetch from real bytes and steers what crosses (§6) — flipping to fetch a 23 B fact rather than ship a 97 KB continuation |
 | `test/probes/wire-delta.mjs`, `test/probes/wire-delta-compiled.mjs` | the delta wire ships a capture as a patch over what the peer holds; `--track-writes` makes the compiler bump a version on every in-place mutation, so plain source ships only what changed — proven identical to a full re-scan, with Map/Set first-class |
 | `src/delta-live.mjs` | over a real socket a continuation that bounces server↔browser each hop ships `min(delta, full)` — a compiler-tracked delta on warm hops, a full binary frame on the cold hop — reconstructing exactly and computing the right result |
-| `test/probes/secure-boundary.mjs` | the server treats an incoming continuation as hostile data: a malicious peer's forged programs, pcs, fabricated resource calls, and forged §5 handles (capability-checked, so no arbitrary heap read) are all rejected, while a real journey flows untouched (design §7) |
 
 `src/demo.mjs` and `src/server-live.mjs` additionally run the whole thing across a real
 WebSocket into **real headless Chromium** (Playwright) with real clicks; they need a

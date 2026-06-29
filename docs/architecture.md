@@ -24,7 +24,6 @@ src/                the framework
   heap.mjs          §5 distributed handle heap: encodeWire, makeTier, write-back CAS
   fetch.mjs         Heap / Channel / makeHost — fetch-on-deref with coherence
   wire-delta.mjs    delta wire: ship a continuation as a patch over what the peer holds
-  secure-host.mjs   the trust boundary — reject a forged continuation from an untrusted peer (§7)
   transport.mjs     WebSocket framing + RPC peer (browser-safe)
   app/              the Tasks demo app (plain components -> serializable vdom)
   conduit/          the larger RealWorld/Conduit sample app (routing across three views)
@@ -149,23 +148,6 @@ The §5 distributed heap is how the big data stays put.
 - **Placement (§6).** At a pure-data boundary the driver can either ship the
   continuation to the data (migrate) or pull the data back and stay put (fetch),
   priced from real measured bytes — cheaper side wins, cold defaults to migrate.
-
-## The trust boundary (`secure-host.mjs`)
-
-A continuation that migrates from the browser to the server crosses a trust boundary: the
-browser is untrusted, so the incoming `{ stack, request }` is hostile **data**. The server
-never runs client code — it runs its own compiled `PROGRAMS` by name — but it must reject a
-forged continuation before resuming. `makeGuard().check()` is that gate. It rejects a frame
-naming an unknown program or a bad `pc` (a forged in-range `pc` is then caught at resume by the
-machine's `default: throw` — a hard error, never a `while (true)` spin); a fabricated or
-wrong-tier resource request (only allow-listed names run); a malformed stack or handler stack;
-and a **forged §5 handle** — a handle owned by this tier is honored only if the host `mint`ed it
-to the peer, so a handle id is a *capability, not an address*, and the peer cannot read arbitrary
-heap objects by guessing ids. What the framework cannot decide is *per-call* authority (may this
-session delete this article): because a forged `pc` can jump the continuation to any resource the
-app uses anywhere, each resource handler must authorize its own call and never trust the control
-flow that reached it. The guard guarantees only that a handler runs on well-formed input it
-permitted; `test/probes/secure-boundary.mjs` exercises a malicious peer against all of the above.
 
 ## Why the transportable continuation is ours to build
 

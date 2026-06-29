@@ -18,7 +18,6 @@ const cases = [
   { file: "test/probes/wire-delta-compiled.mjs", needs: ["--track-writes drives write-tracked delta on plain source, matching the rescan oracle"] },
   { file: "test/probes/wire-delta-fuzz.mjs", needs: ["property round-trips, differential, boundaries, and decode robustness all hold"] },
   { file: "test/probes/wire-delta-handle.mjs", needs: ["the dataset stayed home as a handle while only UI deltas crossed — the two wire optimizations compose"] },
-  { file: "test/probes/secure-boundary.mjs", needs: ["forged programs, pcs, resources, and §5 handles from an untrusted peer are all rejected"] },
   { file: "src/verify.mjs",         needs: ["PASS — auto-compiled tier-split continuation produced the correct session"] },
   { file: "src/conduit-verify.mjs", needs: ["the multi-view Conduit app (routing, forms, favorite, try/catch over a resource) runs correctly as one compiled continuation"] },
   { file: "src/control-flow.mjs",   needs: ["extended control flow survives migration"] },

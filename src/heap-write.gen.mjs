@@ -57,7 +57,6 @@ F.rows[F.ev.idx].score = F.ev.score; // browser edits a row -> auto-deref fetche
         F.pc = 19; break;
       case 21:
         F.pc = 20; return { op: "resource", tier: "server", name: "api.getRows", args: [] };
-      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in Edit (forged continuation?)");
     }
   }
 };
