@@ -237,8 +237,10 @@ These are deliberate trade-offs in the compiler, not accidental gaps:
 - **Write-back is a delta to the master** (`openSnapshot`/`diffSnapshot`/`applySnapshot`): it ships
   only the objects that changed in the snapshot — member edits and collection mutations alike, since
   the codec diffs the result, not the operation — applied in place under the same CAS, never larger than
-  the old whole-object form (`min(delta, whole)`). Granularity is per-object (a changed array ships its
-  ref-list); per-field/element is the next refinement, and would live in the shared codec. The §6
+  the old whole-object form (`min(delta, whole)`). With the codec's `session.fields` mode it ships only
+  the changed *slots* of a changed container (an object's changed keys, an array's touched indices, a
+  Map/Set's set/deleted entries) — per-field/element, sharpening both write-back and the oscillation
+  delta, opt-in and order-preserving. The §6
   fetch-size profile is sampled once and locked in (no online re-profiling, by design).
 
 Broader open questions — broader language coverage and content-addressed code identity

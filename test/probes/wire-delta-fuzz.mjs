@@ -138,5 +138,56 @@ let hostileOut = null, threw = false; try { hostileOut = applyDelta(makeDeltaSes
 check("decoder skips a hostile __proto__ field: no global or per-object prototype pollution",
   ({}).polluted === undefined && !threw && Object.getPrototypeOf(hostileOut) === Object.prototype && !("polluted" in hostileOut));
 
+// === 6) per-field/element PATCH mode (session.fields): warm hops ship only the changed slots ===
+// Walk the reachable containers and apply a few random mutations to each kind, then ship a fields-mode
+// delta and assert it reconstructs identically — across several warm hops, so the patch encode/apply
+// for object/array/Map/Set all run repeatedly against a moving baseline.
+function mutateRandom(frames, rnd) {
+  const conts = [], seen = new Set();
+  const walk = (v) => {
+    if (!v || typeof v !== "object" || seen.has(v) || isHandle(v)) return;
+    seen.add(v); conts.push(v);
+    if (Array.isArray(v)) v.forEach(walk);
+    else if (v instanceof Map) for (const [k, val] of v) { walk(k); walk(val); }
+    else if (v instanceof Set) for (const e of v) walk(e);
+    else for (const k of Object.keys(v)) walk(v[k]);
+  };
+  frames.forEach((f) => { for (const k of Object.keys(f)) if (k !== "fn" && k !== "pc") walk(f[k]); });
+  const leaf = () => Math.floor(rnd() * 1000) - 500;
+  const m = 1 + Math.floor(rnd() * 4);
+  for (let i = 0; i < m && conts.length; i++) {
+    const c = conts[Math.floor(rnd() * conts.length)], r = rnd();
+    if (Array.isArray(c)) { if (r < 0.4) c.push(leaf()); else if (r < 0.6 && c.length) c.pop(); else if (c.length) c[Math.floor(rnd() * c.length)] = leaf(); }
+    else if (c instanceof Map) { if (r < 0.6) c.set("nk" + Math.floor(rnd() * 6), leaf()); else if (c.size) c.delete([...c.keys()][0]); }
+    else if (c instanceof Set) { if (r < 0.6) c.add("nm" + Math.floor(rnd() * 6)); else if (c.size) c.delete([...c][0]); }
+    else { const ks = Object.keys(c); if (r < 0.5 || !ks.length) c["nk" + Math.floor(rnd() * 6)] = leaf(); else delete c[ks[Math.floor(rnd() * ks.length)]]; }
+  }
+}
+let fieldsFail = -1;
+for (let i = 0; i < 1500 && fieldsFail < 0; i++) {
+  const rnd = rng(0xf1e1d + i);
+  const { frames } = makeGraph(rnd);
+  const A = makeDeltaSession("server"); A.fields = true;
+  const B = makeDeltaSession("browser"); B.fields = true;
+  try {
+    applyDelta(B, encodeDelta(A, frames, null).bytes);                  // cold: establish baselines on both sides
+    for (let hop = 0; hop < 4 && fieldsFail < 0; hop++) {
+      mutateRandom(frames, rnd);
+      const back = applyDelta(B, encodeDelta(A, frames, null).bytes);   // warm: patches of only the changed slots
+      if (!sameCont({ stack: frames, request: null }, back)) fieldsFail = i;
+    }
+  } catch (e) { console.log("    fields threw at iter " + i + ": " + e.message); fieldsFail = i; break; }
+}
+check("fields-mode patches (object/array/Map/Set): random graphs reconstruct identically across warm hops (1500)", fieldsFail < 0, fieldsFail < 0 ? "" : "first failure at iter " + fieldsFail);
+
+// robustness: a delta CARRYING patch kinds (5–8) must also truncate/garble cleanly.
+const pA = makeDeltaSession("s"); pA.fields = true;
+const pStack = [{ fn: "F", pc: 0, x: { a: 1, b: 2, c: 3 }, arr: [1, 2, 3], mp: new Map([["k", 1]]), st: new Set([1, 2]) }];
+encodeDelta(pA, pStack, null);
+pStack[0].x.b = 99; pStack[0].arr.push(4); pStack[0].mp.set("k2", 2); pStack[0].st.add(3); pStack[0].st.delete(1);
+const validPatch = encodeDelta(pA, pStack, null).bytes;
+let pTrunc = 0; for (let len = 0; len <= validPatch.length; len++) if (tryApply(validPatch.subarray(0, len))) pTrunc++;
+check("every truncation of a patch-bearing delta terminates cleanly", pTrunc === validPatch.length + 1);
+
 console.log(`\n${pass ? "PASS" : "FAIL"} — delta wire codec: property round-trips, differential, boundaries, and decode robustness all hold`);
 process.exit(pass ? 0 : 1);

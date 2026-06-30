@@ -47,6 +47,25 @@ function forEachChild(v, fn) {
   else for (const k of ownKeys(v)) fn(v[k]);
 }
 
+// The canonical token of a value, identifying it for change detection: an object is its id (so a deep
+// edit is invisible to an ancestor — children by id), everything else is its type+value.
+function canonOf(idOf, sub, v) {
+  v = sub(v);
+  return isObj(v) ? "r" + idOf.get(v) : v === undefined ? "u" : typeof v === "bigint" ? "B" + v : typeof v + ":" + v;
+}
+// A container's slots as Map<slotId, { key, canon }> — the per-FIELD/element shape, so a diff can ship
+// only the slots that changed (per-field granularity), not the whole container. slotId is the index
+// (arrays), the string key (objects), or the key/member's canon (Map/Set, which keep the key object so a
+// deletion can name it). One definition for all four kinds.
+function slotsOf(idOf, sub, v) {
+  const m = new Map();
+  if (Array.isArray(v)) for (let i = 0; i < v.length; i++) m.set(i, { key: i, canon: canonOf(idOf, sub, v[i]) });
+  else if (isMap(v)) for (const [k, val] of v) m.set(canonOf(idOf, sub, k), { key: k, canon: canonOf(idOf, sub, val) });
+  else if (isSet(v)) for (const e of v) m.set(canonOf(idOf, sub, e), { key: e, canon: "1" });
+  else for (const k of ownKeys(v)) m.set(k, { key: k, canon: canonOf(idOf, sub, v[k]) });
+  return m;
+}
+
 class W {
   constructor() { this.buf = new Uint8Array(256); this.n = 0; }
   ensure(k) { if (this.n + k > this.buf.length) { let c = this.buf.length * 2; while (c < this.n + k) c *= 2; const b = new Uint8Array(c); b.set(this.buf.subarray(0, this.n)); this.buf = b; } }
@@ -99,22 +118,78 @@ function exciseBig(session, rootVals, tier, threshold, content) {
   rootVals.forEach(walk);
 }
 
+// Plan how to ship one changed object: a full record (the whole container — kinds o/a/m/s) or, under
+// per-field mode (session.fields) when a baseline exists, a PATCH of only the slots that changed (op/ap/
+// mp/sp). The patch is taken only when it touches FEWER slots than the whole — a strict per-object min,
+// backed by the message-level min(delta, full) so a write-back/hop is never larger overall. Advances the
+// sender's per-slot baseline either way.
+// Object/Map/Set iterate in INSERTION order, which is observable, so a patch is only safe when applying
+// it (delete the removed slots, append the new ones) reproduces the current order exactly. A reorder
+// (delete-then-re-add a key) keeps membership but moves it — there a patch would leave the peer's order
+// stale, so we ship the whole container instead (which carries the order). Arrays are index-addressed,
+// so their patch is order-correct by construction and needs no check.
+function orderPreserved(base, cur) {
+  const survivors = [...base.keys()].filter((sid) => cur.has(sid));
+  const news = [...cur.keys()].filter((sid) => !base.has(sid));
+  if (survivors.length + news.length !== cur.size) return false;
+  let i = 0;
+  for (const sid of cur.keys()) { const want = i < survivors.length ? survivors[i] : news[i - survivors.length]; if (sid !== want) return false; i++; }
+  return true;
+}
+function planRecord(session, sub, id) {
+  const v = session.store.get(id);
+  if (isHandle(v)) return { id, kind: "H", v };
+  const base = session.fields ? session.peerSlots.get(id) : undefined;
+  let cur;
+  if (session.fields) { cur = slotsOf(session.idOf, sub, v); session.peerSlots.set(id, cur); }
+  if (base) {                                                           // we know what the peer holds slot-by-slot -> consider a patch
+    if (Array.isArray(v)) {
+      const sets = [];
+      for (const [i, info] of cur) { const b = base.get(i); if (!b || b.canon !== info.canon) sets.push([i, v[i]]); }
+      if (sets.length < cur.size) return { id, kind: "ap", len: v.length, sets };       // a push/edit/truncate -> just the touched indices + length
+    } else if (isMap(v)) {
+      const sets = [], dels = [];
+      for (const [sid, info] of cur) { const b = base.get(sid); if (!b || b.canon !== info.canon) sets.push([info.key, v.get(info.key)]); }
+      for (const [sid, info] of base) if (!cur.has(sid)) dels.push(info.key);
+      if (sets.length + dels.length < cur.size && orderPreserved(base, cur)) return { id, kind: "mp", sets, dels };
+    } else if (isSet(v)) {
+      const adds = [], dels = [];
+      for (const [sid, info] of cur) if (!base.has(sid)) adds.push(info.key);
+      for (const [sid, info] of base) if (!cur.has(sid)) dels.push(info.key);
+      if (adds.length + dels.length < cur.size && orderPreserved(base, cur)) return { id, kind: "sp", adds, dels };
+    } else {
+      const sets = [], dels = [];
+      for (const [k, info] of cur) { const b = base.get(k); if (!b || b.canon !== info.canon) sets.push([k, v[k]]); }
+      for (const [k] of base) if (!cur.has(k)) dels.push(k);
+      if (sets.length + dels.length < cur.size && orderPreserved(base, cur)) return { id, kind: "op", sets, dels };
+    }
+  }
+  return { id, kind: isMap(v) ? "m" : isSet(v) ? "s" : Array.isArray(v) ? "a" : "o", v };   // whole container
+}
+
 // Serialize { frames, req, roots, changed-objects } to bytes. Shared by both encoders — the wire
 // is identical; only the choice of `changed` (the sids to ship) differs. `changed` objects are
 // read from session.store (sidOf put every live object there); every value reference is its sid.
 function emit(session, rootVals, frames, req, changed) {
   const sub = subFn(session);
+  const records = changed.map((id) => planRecord(session, sub, id));
   const strMap = new Map(), strs = [];
   const si = (s) => { let i = strMap.get(s); if (i === undefined) { i = strs.length; strMap.set(s, i); strs.push(s); } return i; };
   const internVal = (v) => { v = sub(v); if (isObj(v)) si(session.idOf.get(v)); else if (typeof v === "string") si(v); else if (typeof v === "bigint") si(String(v)); };
   for (const f of frames) { si(f.fn); f.keys.forEach(si); }
   if (req) { si(req.op); si(req.tier); si(req.name); }
   rootVals.forEach(internVal);
-  for (const id of changed) {
-    si(id); const v = session.store.get(id);
-    if (isHandle(v)) { si(v.owner); si(String(v.id)); if (v.kind) si(v.kind); }
-    else if (isMap(v) || isSet(v) || Array.isArray(v)) forEachChild(v, internVal);
-    else for (const k of ownKeys(v)) { si(k); internVal(v[k]); }
+  for (const r of records) {
+    si(r.id);
+    if (r.kind === "H") { si(r.v.owner); si(String(r.v.id)); if (r.v.kind) si(r.v.kind); }
+    else if (r.kind === "o") for (const k of ownKeys(r.v)) { si(k); internVal(r.v[k]); }
+    else if (r.kind === "a") for (const e of r.v) internVal(e);
+    else if (r.kind === "m") for (const [k, val] of r.v) { internVal(k); internVal(val); }
+    else if (r.kind === "s") for (const val of r.v) internVal(val);
+    else if (r.kind === "op") { for (const [k, val] of r.sets) { si(k); internVal(val); } for (const k of r.dels) si(k); }
+    else if (r.kind === "ap") for (const [, val] of r.sets) internVal(val);
+    else if (r.kind === "mp") { for (const [k, val] of r.sets) { internVal(k); internVal(val); } for (const k of r.dels) internVal(k); }
+    else if (r.kind === "sp") { for (const val of r.adds) internVal(val); for (const val of r.dels) internVal(val); }
   }
 
   const w = new W();
@@ -135,14 +210,18 @@ function emit(session, rootVals, frames, req, changed) {
   w.varu(frames.length); for (const f of frames) { w.varu(si(f.fn)); w.varu(f.pc); w.varu(f.keys.length); for (const k of f.keys) w.varu(si(k)); w.varu(f.b0); }
   w.u8(req ? 1 : 0); if (req) { w.varu(si(req.op)); w.varu(si(req.tier)); w.varu(si(req.name)); w.varu(req.a0); w.varu(req.argc); }
   w.varu(rootVals.length); for (const v of rootVals) node(v);
-  w.varu(changed.length);
-  for (const id of changed) {
-    w.varu(si(id)); const v = session.store.get(id);
-    if (isHandle(v)) { w.u8(2); w.varu(si(v.owner)); w.varu(si(String(v.id))); if (v.kind) { w.u8(1); w.varu(si(v.kind)); } else w.u8(0); }
-    else if (isMap(v)) { w.u8(3); w.varu(v.size); for (const [k, val] of v) { node(k); node(val); } }
-    else if (isSet(v)) { w.u8(4); w.varu(v.size); for (const val of v) node(val); }
-    else if (Array.isArray(v)) { w.u8(1); w.varu(v.length); for (const e of v) node(e); }
-    else { const ks = ownKeys(v); w.u8(0); w.varu(ks.length); for (const k of ks) { w.varu(si(k)); node(v[k]); } }
+  w.varu(records.length);
+  for (const r of records) {
+    w.varu(si(r.id));
+    if (r.kind === "H") { w.u8(2); w.varu(si(r.v.owner)); w.varu(si(String(r.v.id))); if (r.v.kind) { w.u8(1); w.varu(si(r.v.kind)); } else w.u8(0); }
+    else if (r.kind === "o") { const ks = ownKeys(r.v); w.u8(0); w.varu(ks.length); for (const k of ks) { w.varu(si(k)); node(r.v[k]); } }
+    else if (r.kind === "a") { w.u8(1); w.varu(r.v.length); for (const e of r.v) node(e); }
+    else if (r.kind === "m") { w.u8(3); w.varu(r.v.size); for (const [k, val] of r.v) { node(k); node(val); } }
+    else if (r.kind === "s") { w.u8(4); w.varu(r.v.size); for (const val of r.v) node(val); }
+    else if (r.kind === "op") { w.u8(5); w.varu(r.sets.length); for (const [k, val] of r.sets) { w.varu(si(k)); node(val); } w.varu(r.dels.length); for (const k of r.dels) w.varu(si(k)); }
+    else if (r.kind === "ap") { w.u8(6); w.varu(r.len); w.varu(r.sets.length); for (const [i, val] of r.sets) { w.varu(i); node(val); } }
+    else if (r.kind === "mp") { w.u8(7); w.varu(r.sets.length); for (const [k, val] of r.sets) { node(k); node(val); } w.varu(r.dels.length); for (const k of r.dels) node(k); }
+    else if (r.kind === "sp") { w.u8(8); w.varu(r.adds.length); for (const val of r.adds) node(val); w.varu(r.dels.length); for (const val of r.dels) node(val); }
   }
   return w.done();
 }
@@ -164,11 +243,16 @@ function parseDelta(bytes) {
   const rootNodes = []; { const n = r.count(); for (let i = 0; i < n; i++) rootNodes.push(node()); }
   const changed = []; { const n = r.count(); for (let i = 0; i < n; i++) {
     const sid = S(r.varu()); const kind = r.u8();
-    if (kind === 2) { const owner = S(r.varu()), id = S(r.varu()); const h = { __stackmix_handle__: true, owner, id }; if (r.u8()) h.kind = S(r.varu()); changed.push({ sid, kind, handle: h }); }
-    else if (kind === 3) { const c = r.count(), entries = []; for (let j = 0; j < c; j++) { const k = node(); entries.push([k, node()]); } changed.push({ sid, kind, entries }); }
-    else if (kind === 4) { const c = r.count(), vals = []; for (let j = 0; j < c; j++) vals.push(node()); changed.push({ sid, kind, vals }); }
-    else if (kind === 1) { const c = r.count(), e = []; for (let j = 0; j < c; j++) e.push(node()); changed.push({ sid, kind, elems: e }); }
-    else { const c = r.count(), fields = []; for (let j = 0; j < c; j++) { const k = S(r.varu()); fields.push([k, node()]); } changed.push({ sid, kind, fields }); }
+    if (kind === 0) { const c = r.count(), fields = []; for (let j = 0; j < c; j++) { const k = S(r.varu()); fields.push([k, node()]); } changed.push({ sid, kind, fields }); }                       // whole object
+    else if (kind === 1) { const c = r.count(), e = []; for (let j = 0; j < c; j++) e.push(node()); changed.push({ sid, kind, elems: e }); }                                                                 // whole array
+    else if (kind === 2) { const owner = S(r.varu()), id = S(r.varu()); const h = { __stackmix_handle__: true, owner, id }; if (r.u8()) h.kind = S(r.varu()); changed.push({ sid, kind, handle: h }); }       // §5 handle
+    else if (kind === 3) { const c = r.count(), entries = []; for (let j = 0; j < c; j++) { const k = node(); entries.push([k, node()]); } changed.push({ sid, kind, entries }); }                            // whole Map
+    else if (kind === 4) { const c = r.count(), vals = []; for (let j = 0; j < c; j++) vals.push(node()); changed.push({ sid, kind, vals }); }                                                                // whole Set
+    else if (kind === 5) { const sc = r.count(), sets = []; for (let j = 0; j < sc; j++) { const k = S(r.varu()); sets.push([k, node()]); } const dc = r.count(), dels = []; for (let j = 0; j < dc; j++) dels.push(S(r.varu())); changed.push({ sid, kind, sets, dels }); } // object PATCH
+    else if (kind === 6) { const len = r.varu(); const sc = r.count(), sets = []; for (let j = 0; j < sc; j++) { const idx = r.varu(); sets.push([idx, node()]); } changed.push({ sid, kind, len, sets }); }   // array PATCH
+    else if (kind === 7) { const sc = r.count(), sets = []; for (let j = 0; j < sc; j++) { const k = node(); sets.push([k, node()]); } const dc = r.count(), dels = []; for (let j = 0; j < dc; j++) dels.push(node()); changed.push({ sid, kind, sets, dels }); } // Map PATCH
+    else if (kind === 8) { const ac = r.count(), adds = []; for (let j = 0; j < ac; j++) adds.push(node()); const dc = r.count(), dels = []; for (let j = 0; j < dc; j++) dels.push(node()); changed.push({ sid, kind, adds, dels }); }      // Set PATCH
+    else throw new RangeError("wire-delta: bad changed-object kind " + kind);
   } }
   return { frames, req, rootNodes, changed };
 }
@@ -178,7 +262,7 @@ function parseDelta(bytes) {
 // values (for a receiver that wants to re-scan), and the list of shipped sids.
 function reconstruct(session, parsed) {
   const { frames, req, rootNodes, changed } = parsed;
-  const shell = (k, h) => (k === 1 ? [] : k === 2 ? h : k === 3 ? new Map() : k === 4 ? new Set() : {});
+  const shell = (k, h) => (k === 1 || k === 6 ? [] : k === 2 ? h : k === 3 || k === 7 ? new Map() : k === 4 || k === 8 ? new Set() : {});
   for (const ch of changed) {                                            // pass 1: locate-or-create shells
     let obj = session.store.get(ch.sid);
     if (!obj) { obj = shell(ch.kind, ch.handle); session.store.set(ch.sid, obj); session.idOf.set(obj, ch.sid); }
@@ -186,13 +270,19 @@ function reconstruct(session, parsed) {
   }
   const deref = (nd) => ("ref" in nd ? session.store.get(nd.ref) : nd.v);  // store has every referenced id
   for (const ch of changed) {                                            // pass 2: fill (mutate in place)
-    if (ch.kind === 2) { const h = ch.obj; h.owner = ch.handle.owner; h.id = ch.handle.id; if (ch.handle.kind !== undefined) h.kind = ch.handle.kind; }
+    if (ch.kind === 0) { for (const k of Object.keys(ch.obj)) delete ch.obj[k]; for (const [k, nd] of ch.fields) if (k !== "__proto__") ch.obj[k] = deref(nd); }   // skip __proto__: a hostile peer must not set a reconstructed object's prototype
+    else if (ch.kind === 1) { ch.obj.length = 0; for (const nd of ch.elems) ch.obj.push(deref(nd)); }
+    else if (ch.kind === 2) { const h = ch.obj; h.owner = ch.handle.owner; h.id = ch.handle.id; if (ch.handle.kind !== undefined) h.kind = ch.handle.kind; }
     else if (ch.kind === 3) { ch.obj.clear(); for (const [kn, vn] of ch.entries) ch.obj.set(deref(kn), deref(vn)); }
     else if (ch.kind === 4) { ch.obj.clear(); for (const vn of ch.vals) ch.obj.add(deref(vn)); }
-    else if (ch.kind === 1) { ch.obj.length = 0; for (const nd of ch.elems) ch.obj.push(deref(nd)); }
-    else { for (const k of Object.keys(ch.obj)) delete ch.obj[k]; for (const [k, nd] of ch.fields) if (k !== "__proto__") ch.obj[k] = deref(nd); }   // skip __proto__: a hostile peer must not set a reconstructed object's prototype
+    else if (ch.kind === 5) { for (const [k, nd] of ch.sets) if (k !== "__proto__") ch.obj[k] = deref(nd); for (const k of ch.dels) delete ch.obj[k]; }   // object PATCH: update/remove only the named keys
+    else if (ch.kind === 6) { ch.obj.length = ch.len; for (const [idx, nd] of ch.sets) ch.obj[idx] = deref(nd); }                                       // array PATCH: set length, then the changed indices
+    else if (ch.kind === 7) { for (const [kn, vn] of ch.sets) ch.obj.set(deref(kn), deref(vn)); for (const kn of ch.dels) ch.obj.delete(deref(kn)); }   // Map PATCH
+    else if (ch.kind === 8) { for (const nd of ch.adds) ch.obj.add(deref(nd)); for (const nd of ch.dels) ch.obj.delete(deref(nd)); }                    // Set PATCH
   }
   const rootVals = rootNodes.map(deref);
+  // per-slot baseline upkeep: a fields-mode receiver that later sends back must know what it now holds.
+  if (session.fields) { const sub = subFn(session); for (const ch of changed) if (ch.kind !== 2) session.peerSlots.set(ch.sid, slotsOf(session.idOf, sub, ch.obj)); }
   const stack = frames.map((f) => { const fr = { fn: f.fn, pc: f.pc }; f.keys.forEach((k, i) => { fr[k] = rootVals[f.b0 + i]; }); return fr; });
   const request = req ? { op: req.op, tier: req.tier, name: req.name, args: rootVals.slice(req.a0, req.a0 + req.argc) } : null;
   return { stack, request, rootVals, shipped: changed.map((c) => c.sid) };
@@ -201,7 +291,7 @@ function reconstruct(session, parsed) {
 // ============================== RESCAN mode (no cooperation needed) ==============================
 
 export function makeDeltaSession(tier) {
-  return { tier, idOf: new WeakMap(), next: 1, store: new Map(), peerVer: new Map(), handleOf: new WeakMap() };
+  return { tier, idOf: new WeakMap(), next: 1, store: new Map(), peerVer: new Map(), handleOf: new WeakMap(), fields: false, peerSlots: new Map() };
 }
 
 // Walk every reachable object, assign/reuse ids, and compute each one's shallow content version.
@@ -248,7 +338,7 @@ export function applyDelta(session, bytes) {
 // =========================== WRITE-TRACKED mode (bump version on write) ==========================
 
 export function makeTrackedSession(tier) {
-  return { tier, idOf: new WeakMap(), next: 1, store: new Map(), seen: new Set(), dirty: new Set(), handleOf: new WeakMap() };
+  return { tier, idOf: new WeakMap(), next: 1, store: new Map(), seen: new Set(), dirty: new Set(), handleOf: new WeakMap(), fields: false, peerSlots: new Map() };
 }
 
 // Bump the version of one or more objects: mark them dirty the instant they are mutated. This is
@@ -357,6 +447,7 @@ export function adoptBaseline(session, stack, request) {
     forEachChild(v, assign);
   };
   rootVals.forEach(assign);
+  if (session.fields) { session.peerSlots = new Map(); for (const [id, v] of session.store) session.peerSlots.set(id, slotsOf(session.idOf, sub, v)); }   // per-slot baseline, so the next diff can patch
   session.based = true;
 }
 
@@ -410,9 +501,10 @@ const snapStack = (v) => [{ fn: "@snap", pc: 0, v }];
 // ships only what changed since.
 export function openSnapshot(tierId, value) {
   const session = makeTrackedSession(tierId);
-  adoptBaseline(session, snapStack(value), null);                       // deterministic ids, shared with the owner's baseline
+  session.fields = true;                                                 // per-field/element granularity: a write-back ships only the slots that changed
+  adoptBaseline(session, snapStack(value), null);                       // deterministic ids + per-slot baseline, shared with the owner's baseline
   session.peerVer = new Map();
-  const { ver } = scan(session, [value]);                               // baseline content versions
+  const { ver } = scan(session, [value]);                               // baseline content versions (per object)
   for (const [id, vv] of ver) session.peerVer.set(id, vv);
   return session;
 }

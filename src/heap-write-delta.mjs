@@ -3,8 +3,9 @@
 // wire is proportional to the change, not the snapshot. And it is never larger than the old whole-object
 // write-back — the host ships min(delta, whole). This is the collapse: write-back and the oscillation
 // delta are the same mechanism, so collections come for free (the codec diffs the RESULT, not the
-// operation). Granularity is per-OBJECT — a changed array ships its element ref-list (the per-element
-// floor that (B) sharpens), but a changed element's CONTENT, and every unchanged object, stays home.
+// operation). Granularity is per-FIELD/element: a changed array ships a splice patch (the touched
+// indices + length), a Map/Set ship their added/removed entries, an object ships its changed keys — so
+// even a changed container's UNCHANGED slots stay home, not just every unchanged object.
 import { openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot } from "./wire-delta.mjs";
 import { encodeGraph, decodeGraph } from "./graph.mjs";
 
@@ -51,9 +52,9 @@ const wholeOf = (v) => wholeSnapshot("browser", v).length;
   copy.index.set("fresh", 30);                                             // MAP set
   copy.tags.add("urgent");                                               // SET add
   const delta = diffSnapshot(session, copy);
-  // smaller than the whole snapshot (the 1500 unchanged rows' CONTENT never re-ships — only the changed
-  // array's ref-list, the new row, and the two small containers do). Per-object, not per-element: (B).
-  check(`collection mutations ship the changed containers, not the whole (${fmt(delta.length)} vs ${fmt(whole)} whole)`, delta.length * 4 < whole);
+  // per-element: the push ships a splice patch (one new element + length), the Map/Set ship their added
+  // entries — the 1500 unchanged rows never cross, neither their content NOR the array's ref-list.
+  check(`collection mutations ship per-element patches, not the whole container (${fmt(delta.length)} vs ${fmt(whole)} whole, ${(whole / delta.length).toFixed(0)}x smaller)`, delta.length * 50 < whole);
   applySnapshot("server", master, delta);
   check("ARRAY push landed (a new row at the end)", master.rows.length === 1501 && master.rows[1500].id === 9999);
   check("MAP set landed (index.fresh)", master.index.get("fresh") === 30 && master.index.size === 3);

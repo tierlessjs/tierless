@@ -135,14 +135,18 @@ it goes next. Items are grouped, not strictly ordered; see
   content-based — it diffs the *result*, not the operation — **collections fall out for free**: a member
   edit, an array push, a `Map.set`, a `Set.add` are all handled, only the changed containers crossing.
   The host ships `min(delta, whole)`, so it is **never larger** than the old whole-object write-back.
-  `src/heap-write-delta.mjs` measures it: member edits in a 1500-row dataset cross at **96×** smaller,
-  collection mutations at ~5× (the changed array's ref-list still rides — the per-object floor), and the
-  near-total case falls back to whole. Granularity is per-**object**; per-**field/element** is the next
-  notch:
-- **Field-level (per-element) granularity.** The delta ships a changed array/object whole (its
-  ref/field list). Tracking which field or element changed — a finer write-barrier + sub-object diffs in
-  the codec — would ship a push as "append X", not the whole ref-list, benefiting **both** write-back and
-  the oscillation delta (they share the codec).
+  `src/heap-write-delta.mjs` measures it: member edits in a 1500-row dataset cross at **96×** smaller and
+  collection mutations at **94×** (per the finer mode below), and the near-total case falls back to whole.
+- **Per-field/element granularity — done (`session.fields`).** The delta now ships a changed container's
+  changed *slots*, not the whole thing: an object's changed keys (+ deletes), an array's touched indices
+  + length (a `push` is `splice(len-1, 0, [x])`), a Map's set/deleted entries, a Set's added/removed
+  members. Per-object min (the patch is taken only when it touches fewer slots than the whole), backed by
+  the message-level `min(delta, full)` for "never larger". It lives in the **shared codec**, so it sharpens
+  **both** write-back (the array push that was 12.7 KB is now 738 B) and the oscillation delta (a push in
+  an 800-element array crosses **113×** smaller). Opt-in — with it off the wire is byte-for-byte unchanged,
+  and insertion order is preserved (a reorder that a patch can't reproduce falls back to the whole
+  container). `test/probes/wire-delta-fields.mjs` proves all four kinds both directions of an oscillation;
+  `wire-delta-fuzz` round-trips fields-mode over random mutating graphs and fuzzes the new patch tags.
 - **Source maps — done (`transform.cjs --source-map`).** The transform stamps each block with the
   line of the statement it lowered and emits a per-program `pc`->line table plus a `frameSite` /
   `stackSites` helper, so a migrated continuation reports a portable `file:line`, not just a `pc`.
