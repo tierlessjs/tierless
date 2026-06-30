@@ -137,12 +137,25 @@ it goes next. Items are grouped, not strictly ordered; see
 
 ## Security & the trust boundary
 
-- **Mediated migration toward authority.** The server must never execute
-  client-originated code as server code; an incoming continuation is untrusted data,
-  and the server runs *its own* resource handlers over it. The allow-list is partly
-  this safety mechanism (the browser tier is instantiated without server
-  capabilities). Hardening this boundary is prerequisite to running across a real
-  trust boundary in production (design `§7`).
+- **The api as an external reference monitor — landed (`src/api/`).** The right axis: Stackmix's
+  client is a fat web app that sometimes runs in Node, so BOTH halves — the browser client and the
+  backend client (the "server" tier) — are untrusted. Authority therefore lives outside them, in the
+  **api**: a small, stateless reference monitor in its own OS process, reached over a local pipe
+  (sidecar) so a chained call stays a cheap same-host hop rather than a network round trip. It never
+  trusts the control flow that reached a call — a forged continuation can jump anywhere, so every call
+  is re-authorized against a freshly-verified principal. The interface is `api.fn(name, { authorize,
+  run })` with **authorize mandatory at load time** (exposure and authorization are one act; `PUBLIC`
+  and `DENY` are the explicit sentinels), and the principal is a **signed bearer token the monitor
+  verifies** (`JwtApi` for the standard HMAC regime; any `Api` subclass for your own). Default-deny is
+  the floor. `src/api-verify.mjs` proves it end to end (in `npm test`), including — across a real
+  forked process and pipe — that neither a forged continuation (an admin-only call reached as a
+  non-admin) nor a forged token (a client-flipped `role` claim that breaks the signature) can escalate
+  (design `§7`). This corrects an earlier false start that validated the incoming continuation *inside*
+  the untrusted server — the wrong side of the boundary.
+- **Still open: wire the live pump through the sidecar, plus production limits.** The demos still
+  service `api.*` in-process; routing the live pump's `api.*` resource path through the `SidecarClient`
+  is the integration step that makes this the production boundary. Beyond it: per-call resource budgets
+  and rate/size limits past the wire decoder's existing guards.
 
 ## Not on the roadmap (by design)
 

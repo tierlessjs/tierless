@@ -25,6 +25,7 @@ src/                the framework
   fetch.mjs         Heap / Channel / makeHost — fetch-on-deref with coherence
   wire-delta.mjs    delta wire: ship a continuation as a patch over what the peer holds
   transport.mjs     WebSocket framing + RPC peer (browser-safe)
+  api/              the trust boundary — reference-monitor sidecar (api.mjs, sidecar.mjs, server-fns.mjs)
   app/              the Tasks demo app (plain components -> serializable vdom)
   conduit/          the larger RealWorld/Conduit sample app (routing across three views)
   public/           the browser tier (runs in a real tab)
@@ -149,6 +150,56 @@ The §5 distributed heap is how the big data stays put.
   continuation to the data (migrate) or pull the data back and stay put (fetch),
   priced from real measured bytes — cheaper side wins, cold defaults to migrate.
 
+## The trust boundary (`src/api/`)
+
+Stackmix is a fat web-app *client* that grew too fat for the browser, so it sometimes runs in Node
+too. "The client" is therefore two halves — the **browser client** and the **backend client** (what
+the rest of these docs call the "server tier") — and the business trusts **neither**. Both are just
+relocated app code; a continuation arriving from either is untrusted data that can be forged, replayed,
+or mangled, so no authorization, access control, or audit can live inside them.
+
+Authority lives instead in the **api**: a small, stateless **reference monitor** that runs in its own
+OS process and mediates every resource call. The three reference-monitor properties map onto the
+process boundary directly:
+
+- **complete mediation** — every call goes through one gate (`Api.handle`); there is no side door;
+- **tamperproof** — it runs in a separate process, so the untrusted client holds only a pipe to it (a
+  `SidecarClient`), never its memory, its signing key, or its registry;
+- **verifiable** — it is small, and every path that is not an explicit allow falls through to deny.
+
+The decisive property is that **the monitor never trusts the control flow that reached a call.** A
+forged continuation can jump to any `api.*` the app mentions anywhere, so authority is re-checked at
+*this* call, for *this* verified principal, every time. From the monitor's side a forged continuation
+is indistinguishable from a hostile client invoking the endpoint directly — which is the whole point:
+authorizing the *call* rather than validating the *continuation* is what makes it robust. (An earlier
+attempt validated the incoming continuation *inside* the server; that was the wrong axis — you cannot
+validate your way out of an untrusted process, you move authority into a trusted one.)
+
+**Co-location, not co-trust.** The api boundary is an RPC, but it is implemented as a **local OS pipe**
+(a sidecar on the same host), so a chained call costs a cheap same-host hop, not a network round trip.
+A browser→api call is "migrate the continuation one socket hop to the backend client, then RPC one pipe
+hop to the monitor"; the pipe hop is ~free next to the network hop, so the whole thing still reads as a
+single api round trip — the cost a traditional client→server call already pays — with the trust
+boundary where it belongs.
+
+**The interface (`src/api/api.mjs`).** A server-only function is `api.fn(name, { authorize, run })`.
+`authorize` is **mandatory**: exposing an endpoint and stating who may call it are the same act, so
+omitting it is a **load-time error** (thrown at registration, before the process serves a single call)
+— an unauthorized endpoint cannot ship. To mean "anyone" you say so with the `PUBLIC` sentinel; `DENY`
+wires an endpoint closed. The framework is *not* prescriptive about the regime: the principal is a
+**signed bearer token the client carries and the monitor verifies** — never injected, never a frame
+local, so a forged continuation can swap args but cannot forge a valid principal. `JwtApi` ships a
+standard HMAC regime (Cognito/OIDC is the same shape with an RS256-over-JWKS `verify`); rolling your
+own is just an `Api` subclass overriding `verify`. The base `Api` is a safe floor — it trusts no token,
+so without a regime only `PUBLIC` calls pass.
+
+`src/api-verify.mjs` proves all of this headless (in `npm test`): the load-time mandate, default-deny,
+`PUBLIC`/`DENY`, the JWT regime (sign/verify/tamper/expiry), fail-closed authorizers, and roll-your-own
+— then, **across a real forked process and pipe**, that neither a forged continuation (reaching an
+admin-only call as a non-admin) nor a forged token (a client-flipped `role` claim that breaks the
+signature) can escalate. What remains is routing the live pump's `api.*` path through the sidecar
+(today the demos service `api.*` in-process); the monitor itself is the proven piece.
+
 ## Why the transportable continuation is ours to build
 
 Modern JS has `async`/`await` and generators — native suspension — so why not capture
@@ -176,7 +227,7 @@ These are deliberate trade-offs in the compiler, not accidental gaps:
 - **Write-back ships the whole edited object**, not a field-level diff; the §6
   fetch-size profile is sampled once and locked in (no online re-profiling, by design).
 
-Broader open questions — broader language coverage, the trust boundary, and
-content-addressed code identity (the binary wire and delta capture are done) — are
+Broader open questions — broader language coverage and content-addressed code identity
+(the binary wire, delta capture, and the trust-boundary reference monitor are done) — are
 tracked in [`../ROADMAP.md`](../ROADMAP.md) and line up with the design doc's own open
 questions (`§10`).

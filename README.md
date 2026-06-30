@@ -92,6 +92,7 @@ and finishes in the browser the instant the vdom touches the real DOM.
 | `test/probes/codec.mjs` | the wire codec preserves identity, survives cycles, excises big subgraphs to §5 handles, and round-trips exotic values (undefined, BigInt) |
 | `src/verify.mjs` | the auto-compiled tier-split continuation reproduces the correct session across migrations |
 | `src/conduit-verify.mjs` | a larger, framework-shaped app — a RealWorld/Conduit reader with routing across three views (feed ↔ article ↔ editor), favorites, comments, a new-article form, and a server-side validation `throw` caught across the tier boundary — runs correctly as one compiled continuation |
+| `src/api-verify.mjs` | the trust boundary done right: the api is an external **reference monitor** in its own process (a local-pipe sidecar), `authorize` is mandatory at load time, and the principal is a signed token it verifies — so across a real forked process neither a forged continuation nor a forged token can escalate (authority is re-checked at every call, never inferred from control flow) |
 | `src/control-flow.mjs` | loops, `break`/`continue`, labeled loops, `switch`, and `try`/`catch`/`finally` (including `return`/`break` across a `finally`) all survive migration |
 | `src/heap-probe.mjs`, `src/heap-live.mjs` | a 1.1 MB dataset crosses a commit migration as a ~450-byte §5 handle and is fetched back over a real socket only when the browser derefs it |
 | `src/heap-auto.mjs`, `src/heap-write.mjs` | transparent deref (reads auto-fetch on touch) and transparent write-back (a browser edit propagates to the server master under §5 CAS), with no `deref()`/`writeBack()` in the source |
@@ -115,6 +116,7 @@ src/              the framework
   heap.mjs        §5 distributed handle heap: encodeWire, makeTier, write-back CAS
   fetch.mjs       Heap / Channel / makeHost — fetch-on-deref with coherence
   transport.mjs   WebSocket framing + RPC peer (browser-safe)
+  api/            the trust boundary — a reference-monitor sidecar (mediates every resource call)
   app/            the demo app (plain components -> serializable vdom)
   public/         the browser tier (runs in a real tab)
   *.mjs           the demos and headless proofs (also the test suite)
