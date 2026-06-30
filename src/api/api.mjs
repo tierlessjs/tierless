@@ -24,7 +24,17 @@ export const PUBLIC = Symbol("stackmix.api.PUBLIC");   // deliberately no author
 export const DENY   = Symbol("stackmix.api.DENY");     // deliberately always reject (disabled / placeholder)
 
 export class Api {
-  constructor() { this._fns = new Map(); this._audit = []; }
+  // opts.maxArgsBytes — reject a call whose args serialize larger than this (a forged continuation
+  //   can't hammer the monitor with a huge payload). opts.rate = { max, windowMs } — per-principal
+  //   call budget. Both off by default; they are transient counters, not business state, so the
+  //   monitor stays stateless in the sense that matters (nothing it must persist).
+  constructor(opts = {}) {
+    this._fns = new Map();
+    this._audit = [];
+    this._maxArgsBytes = opts.maxArgsBytes || 0;
+    this._rate = opts.rate || null;
+    this._calls = new Map();                               // principal -> { start, count } sliding window
+  }
 
   // Register a server-only function. authorize is MANDATORY: exposing an endpoint and stating who may
   // call it are the same act, so they cannot be separated. Omitting authorize throws HERE — at
@@ -63,8 +73,14 @@ export class Api {
     const entry = this._fns.get(name);
     if (!entry) return this._deny(name, null, "unknown");
 
+    // Resource budget: reject an oversized payload before doing any crypto or running anything.
+    if (this._maxArgsBytes) { let n; try { n = JSON.stringify(args).length; } catch { n = Infinity; } if (n > this._maxArgsBytes) return this._deny(name, null, "oversize"); }
+
     let principal = null;
     try { principal = await this.verify(token); } catch { principal = null; }
+
+    // Rate budget: a per-principal sliding window (anonymous callers share one bucket).
+    if (this._rate && !this._allowRate((principal && principal.sub) || "anon")) return this._deny(name, principal, "ratelimited");
 
     let allowed = false;
     const { authorize, run } = entry;
@@ -76,6 +92,14 @@ export class Api {
 
     try { const value = await run(args, principal); this._log(name, principal, "ok"); return { ok: true, value }; }
     catch (e) { this._log(name, principal, "error"); return { ok: false, error: String((e && e.message) || e) }; }
+  }
+
+  _allowRate(key) {
+    const now = Date.now();
+    let s = this._calls.get(key);
+    if (!s || now - s.start >= this._rate.windowMs) { s = { start: now, count: 0 }; this._calls.set(key, s); }
+    s.count++;
+    return s.count <= this._rate.max;
   }
 
   _deny(name, principal, reason) { this._log(name, principal, "deny:" + reason); return { ok: false, error: "denied" }; }
@@ -95,7 +119,7 @@ const b64url = (s) => Buffer.from(s, "utf8").toString("base64url");
 const unb64url = (s) => Buffer.from(s, "base64url").toString("utf8");
 
 export class JwtApi extends Api {
-  constructor(secret) { super(); if (!secret) throw new Error("JwtApi: a signing secret is required"); this._secret = secret; }
+  constructor(secret, opts) { super(opts); if (!secret) throw new Error("JwtApi: a signing secret is required"); this._secret = secret; }
 
   // Issue a token for a principal. In a real system your auth server does this at login; here it sits
   // next to verify so `login` can mint one. ttlSeconds adds an exp claim (omit for a non-expiring token).

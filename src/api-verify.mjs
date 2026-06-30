@@ -84,6 +84,18 @@ check("a duplicate name is a load-time error",
   check("roll-your-own verify: an unknown API key is denied", (await k.handle({ name: "ping", token: "k-bogus" })).ok === false);
 }
 
+// A7 — resource budgets: an oversized payload and a spent per-principal rate budget both deny before
+// running anything (a forged continuation cannot hammer the monitor or smuggle a huge payload past it).
+{
+  const a = new JwtApi("s", { maxArgsBytes: 64, rate: { max: 3, windowMs: 60000 } });
+  a.fn("echo", { authorize: PUBLIC, run: ([x]) => x });
+  check("budget: an oversized payload is denied before it runs", (await a.handle({ name: "echo", args: ["x".repeat(200)] })).ok === false);
+  check("budget: a normal payload runs", (await a.handle({ name: "echo", args: ["hi"] })).ok === true);  // rate call 1/3
+  await a.handle({ name: "echo", args: ["2"] });          // 2/3
+  await a.handle({ name: "echo", args: ["3"] });          // 3/3
+  check("budget: the rate limit denies once the window's call budget is spent", (await a.handle({ name: "echo", args: ["4"] })).ok === false);
+}
+
 // ── B. The real boundary (a forked process, over a pipe) ─────────────────────────────────────────────
 console.log("\nB. across the process boundary (the sidecar)");
 

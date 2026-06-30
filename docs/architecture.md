@@ -197,8 +197,12 @@ so without a regime only `PUBLIC` calls pass.
 `PUBLIC`/`DENY`, the JWT regime (sign/verify/tamper/expiry), fail-closed authorizers, and roll-your-own
 — then, **across a real forked process and pipe**, that neither a forged continuation (reaching an
 admin-only call as a non-admin) nor a forged token (a client-flipped `role` claim that breaks the
-signature) can escalate. What remains is routing the live pump's `api.*` path through the sidecar
-(today the demos service `api.*` in-process); the monitor itself is the proven piece.
+signature) can escalate. `src/api-pump.mjs` then runs a **real compiled continuation across two tiers** with every
+`api.*` serviced by the monitor over the pipe — authorized per principal, the denial caught by the app's
+`try`/`catch` across the tier (same continuation, admin allowed / user denied) — so the *integration* is
+proven, not just the component. The monitor also enforces per-call resource budgets (`maxArgsBytes` and
+a per-principal rate window). What remains is making the sidecar the **default** in the other live demos
+and the runtime's own pump, which still wire in-process `api.*` handlers.
 
 ## Why the transportable continuation is ours to build
 

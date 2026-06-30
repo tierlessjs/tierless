@@ -152,10 +152,14 @@ it goes next. Items are grouped, not strictly ordered; see
   non-admin) nor a forged token (a client-flipped `role` claim that breaks the signature) can escalate
   (design `§7`). This corrects an earlier false start that validated the incoming continuation *inside*
   the untrusted server — the wrong side of the boundary.
-- **Still open: wire the live pump through the sidecar, plus production limits.** The demos still
-  service `api.*` in-process; routing the live pump's `api.*` resource path through the `SidecarClient`
-  is the integration step that makes this the production boundary. Beyond it: per-call resource budgets
-  and rate/size limits past the wire decoder's existing guards.
+- **Pump integration — landed (`src/api-pump.mjs`), with per-call budgets.** A real compiled
+  continuation migrates across two tiers with every `api.*` serviced by the monitor over the pipe,
+  authorized per principal, and the denial caught by the app's `try`/`catch` across the tier — the
+  integration, not just the component. Same continuation, admin allowed / user denied / anonymous can't
+  start. The monitor now also enforces per-call resource budgets (`maxArgsBytes`) and a per-principal
+  rate window. **Still open:** make the sidecar the *default* in the other live demos and the runtime
+  pump (they still wire in-process `api.*` handlers), and size/rate limits tuned for production past the
+  wire decoder's existing guards.
 
 ## Not on the roadmap (by design)
 
