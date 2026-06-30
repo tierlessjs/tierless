@@ -48,11 +48,12 @@ export function approxExceeds(root, limit) {
   return false;
 }
 
-export function encodeGraph(values, { tier = null, threshold = 64 * 1024 } = {}) {
-  const objs = [];          // id -> { k:"a"|"o"|"H", ... }
+export function encodeGraph(values, { tier = null, threshold = 64 * 1024, content = null } = {}) {
+  const objs = [];          // id -> { k:"a"|"o"|"H"|"c", ... }
   const idOf = new Map();   // object -> id (identity + cycle handling)
 
   function enc(v) {
+    let cah;                                                          // set if v is a registered immutable subgraph shipped inline this once (tags its slot for the receiver to cache)
     if (v === undefined) return { k: "u" };
     if (typeof v === "bigint") return { k: "big", v: v.toString() };   // BigInt isn't JSON-safe
     if (typeof v === "symbol") {                                       // well-known by name; Symbol.for by key; unique by graph node (identity within a round-trip)
@@ -64,6 +65,13 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024 } = {})
     if (v === null || typeof v !== "object") return { k: "p", v };
     if (idOf.has(v)) return { k: "r", id: idOf.get(v) };
     if (isHandle(v)) { const id = objs.length; idOf.set(v, id); objs.push({ k: "H", h: v }); return { k: "r", id }; }
+    if (content) {                                                    // content-addressed immutable subgraph (code / class shapes / config)
+      const h = content.store.hashFor(v);
+      if (h !== undefined) {
+        if (content.peer.has(h)) { const id = objs.length; idOf.set(v, id); objs.push({ k: "c", h }); return { k: "r", id }; } // peer holds it -> ship the hash, not the bytes
+        content.peer.add(h); cah = h;                                 // first time: ship inline once and tag so the receiver caches it by hash
+      }
+    }
     // big subgraph -> §5 handle into the owning tier's heap (stays tier-local)
     if (tier && approxExceeds(v, threshold)) {
       const id = objs.length; idOf.set(v, id);
@@ -71,10 +79,10 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024 } = {})
       return { k: "r", id };
     }
     const id = objs.length; idOf.set(v, id);              // reserve id BEFORE recursing (cycle-safe)
-    if (v instanceof Map) { const slot = { k: "map", e: [] }; objs.push(slot); for (const [mk, mv] of v) slot.e.push([enc(mk), enc(mv)]); return { k: "r", id }; }
-    if (v instanceof Set) { const slot = { k: "set", e: [] }; objs.push(slot); for (const sv of v) slot.e.push(enc(sv)); return { k: "r", id }; }
-    if (Array.isArray(v)) { const slot = { k: "a", e: [] }; objs.push(slot); for (let i = 0; i < v.length; i++) slot.e.push(enc(v[i])); return { k: "r", id }; } // by index: holes -> undefined
-    const slot = { k: "o", f: {} }; objs.push(slot);
+    if (v instanceof Map) { const slot = { k: "map", e: [] }; objs.push(slot); if (cah !== undefined) slot.cah = cah; for (const [mk, mv] of v) slot.e.push([enc(mk), enc(mv)]); return { k: "r", id }; }
+    if (v instanceof Set) { const slot = { k: "set", e: [] }; objs.push(slot); if (cah !== undefined) slot.cah = cah; for (const sv of v) slot.e.push(enc(sv)); return { k: "r", id }; }
+    if (Array.isArray(v)) { const slot = { k: "a", e: [] }; objs.push(slot); if (cah !== undefined) slot.cah = cah; for (let i = 0; i < v.length; i++) slot.e.push(enc(v[i])); return { k: "r", id }; } // by index: holes -> undefined
+    const slot = { k: "o", f: {} }; objs.push(slot); if (cah !== undefined) slot.cah = cah;
     for (const key of Object.getOwnPropertyNames(v)) {           // include non-enumerable (instance methods/tags) so behavior survives the wire
       const desc = Object.getOwnPropertyDescriptor(v, key);
       if (!("value" in desc)) continue;                          // skip host getters/setters (not our data)
@@ -92,15 +100,16 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024 } = {})
   return { roots: values.map(enc), objs };
 }
 
-export function decodeGraph({ roots, objs }) {
-  const built = objs.map((s) => (s.k === "a" ? [] : s.k === "o" ? {} : s.k === "map" ? new Map() : s.k === "set" ? new Set() : s.k === "symu" ? Symbol(s.d) : s.h)); // pre-create for cycles/sharing
+export function decodeGraph({ roots, objs }, { content = null } = {}) {
+  const built = objs.map((s) => (s.k === "a" ? [] : s.k === "o" ? {} : s.k === "map" ? new Map() : s.k === "set" ? new Set() : s.k === "symu" ? Symbol(s.d) : s.k === "c" ? (content && content.store.get(s.h)) : s.h)); // pre-create for cycles/sharing; k:"c" resolves to the held immutable subgraph
   const dec = (n) => (n.k === "u" ? undefined : n.k === "big" ? BigInt(n.v) : n.k === "glob" ? GLOBALS[n.name] : n.k === "symw" ? Symbol[n.name] : n.k === "symf" ? Symbol.for(n.key) : n.k === "p" ? n.v : built[n.id]);
   objs.forEach((s, i) => {
     if (s.k === "a") for (const n of s.e) built[i].push(dec(n));
     else if (s.k === "o") { for (const key in s.f) { const val = dec(s.f[key]); if ((s.h && s.h[key]) || key === "__proto__") Object.defineProperty(built[i], key, { value: val, writable: true, enumerable: !(s.h && s.h[key]), configurable: true }); else built[i][key] = val; } if (s.sf) for (const [kn, vn, en] of s.sf) { const key = dec(kn), val = dec(vn); if (en) built[i][key] = val; else Object.defineProperty(built[i], key, { value: val, writable: true, enumerable: false, configurable: true }); } }
     else if (s.k === "map") for (const [kn, vn] of s.e) built[i].set(dec(kn), dec(vn));
     else if (s.k === "set") for (const vn of s.e) built[i].add(dec(vn));
-    // k:"H" -> built[i] is already the handle object
+    // k:"H" -> built[i] is already the handle object; k:"c" -> already resolved to the held subgraph
+    if (content && s.cah !== undefined) content.store.put(s.cah, built[i]);   // first arrival of an immutable subgraph: cache it by hash for later hash-only refs
   });
   return roots.map(dec);
 }

@@ -97,10 +97,17 @@ it goes next. Items are grouped, not strictly ordered; see
   now runs the **whole composition over a real socket** — a continuation bounces server↔browser carrying a 124 KB
   catalog that excises to a §5 handle (4.9 KB total wire vs 124 KB inline), ships `min(delta, full)` each crossing,
   and the browser derefs the catalog over the same socket — all on plain `--track-writes` source, in `npm test`.
-- **Content-addressed subgraphs.** Hash immutable subgraphs (code, class shapes,
-  config); if the peer has the hash, ship the hash, not the bytes. Globals already
-  travel by reference; this generalizes it, and it is the known fix for resume
-  identity under version skew between tiers (Unison's approach).
+- **Content-addressed subgraphs — done (`src/content.mjs`).** Some subgraphs are immutable — code,
+  class shapes, config — so they need not travel as bytes more than once. The producer registers an
+  immutable root (naming it by a content hash); the codec ships it inline the first time and ships just
+  the hash on every later hop, and the receiver resolves the hash to the copy it cached — identity by
+  content. It generalizes how globals already travel (a `Math` ships by name, never copied) from
+  well-known names to any immutable subgraph, and is the known fix for resume identity under version
+  skew between tiers (Unison's approach). `test/probes/wire-content.mjs`: a 36 KB config ships inline
+  once then as a 319 B hash reference (**113×**), resolves to the same held instance across hops,
+  preserves shared identity, and leaves the rest of the codec untouched (an unregistered cyclic object
+  still round-trips). Opt-in via `encodeGraph(…, { content })`; folding it into the binary wire and the
+  delta path (as §5 excision was folded in) is the natural follow-on.
 
 ## Compiler & language
 

@@ -91,6 +91,10 @@ each distinct object is one entry and every reference is `{k:"r", id}`. That:
 - **keeps continuations small** — a subgraph larger than `threshold` becomes a §5
   *handle* into the owning tier's heap (a leaf — it stays tier-local) instead of being
   copied;
+- **content-addresses immutable subgraphs** — a registered immutable subgraph (code,
+  class shapes, config) ships inline once and then by content hash, resolving on the
+  peer to the copy it cached (`content.mjs`); the same by-reference idea as globals,
+  generalized from well-known names to any immutable subgraph;
 - carries the non-JSON cases faithfully (`undefined`, BigInt, symbols, Map/Set,
   non-enumerable + symbol-keyed props) and ships host globals and well-known symbols
   by reference rather than copying them.
