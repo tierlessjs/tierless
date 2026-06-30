@@ -127,8 +127,22 @@ it goes next. Items are grouped, not strictly ordered; see
 - **Broader language coverage in the transform.** The suspendable path covers all ordinary control flow
   with suspensions in any position. The remaining natural extension is a suspension inside an
   optional-chain conditional (`obj?.m(api.x())`), today a clear compile error.
-- **Field-level write-back.** `--auto-writeback` ships the whole edited object;
-  tracking the mutated path would let it propagate a diff under the same CAS.
+- **Write-back IS a delta — landed (`openSnapshot`/`diffSnapshot`/`applySnapshot`).** A write-back and
+  the oscillation delta were the same operation wearing two hats — *ship the objects that changed to a
+  holder of the prior version, applied in place.* So `--auto-writeback` no longer ships the whole edited
+  snapshot; the host baselines a snapshot on fetch and, on write-back, ships only the changed objects
+  (the §5 master is just another replica), applied in place under the same CAS. Because the codec is
+  content-based — it diffs the *result*, not the operation — **collections fall out for free**: a member
+  edit, an array push, a `Map.set`, a `Set.add` are all handled, only the changed containers crossing.
+  The host ships `min(delta, whole)`, so it is **never larger** than the old whole-object write-back.
+  `src/heap-write-delta.mjs` measures it: member edits in a 1500-row dataset cross at **96×** smaller,
+  collection mutations at ~5× (the changed array's ref-list still rides — the per-object floor), and the
+  near-total case falls back to whole. Granularity is per-**object**; per-**field/element** is the next
+  notch:
+- **Field-level (per-element) granularity.** The delta ships a changed array/object whole (its
+  ref/field list). Tracking which field or element changed — a finer write-barrier + sub-object diffs in
+  the codec — would ship a push as "append X", not the whole ref-list, benefiting **both** write-back and
+  the oscillation delta (they share the codec).
 - **Source maps — done (`transform.cjs --source-map`).** The transform stamps each block with the
   line of the statement it lowered and emits a per-program `pc`->line table plus a `frameSite` /
   `stackSites` helper, so a migrated continuation reports a portable `file:line`, not just a `pc`.

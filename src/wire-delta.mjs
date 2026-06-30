@@ -396,3 +396,53 @@ export function exciseForCapture(session, stack, request, tier, threshold = 64 *
 // that re-frames does NOT re-ship immutable code/config, and the warm path needs no content leaf. Both
 // arms stay id-consistent because neither subForFullWire nor adoptBaseline collapses the subgraph to a
 // leaf — they walk it in full, exactly as the receiver does after resolving the hash to its cached copy.
+
+// ================= §5 write-back AS a delta =====================================================
+// A write-back is a delta whose target is the §5 master: ship the objects that changed in the reader's
+// snapshot to the holder of the prior version, applied in place. The codec is content-based (it diffs
+// the RESULT, not the operation), so a member assignment, an array push, a Map set, and a Set add are
+// all handled uniformly — only the changed objects travel, never the whole snapshot. Stable ids come
+// from adoptBaseline's deterministic DFS: the reader baselines the snapshot it fetched and the owner
+// baselines its (still-identical, CAS-checked) master, so the two agree without coordinating ids.
+const snapStack = (v) => [{ fn: "@snap", pc: 0, v }];
+
+// Reader side: open a session over a freshly-fetched snapshot, recording the baseline so a later diff
+// ships only what changed since.
+export function openSnapshot(tierId, value) {
+  const session = makeTrackedSession(tierId);
+  adoptBaseline(session, snapStack(value), null);                       // deterministic ids, shared with the owner's baseline
+  session.peerVer = new Map();
+  const { ver } = scan(session, [value]);                               // baseline content versions
+  for (const [id, vv] of ver) session.peerVer.set(id, vv);
+  return session;
+}
+
+// Reader side: diff the (now-mutated) snapshot against its baseline and emit the changed objects. The
+// baseline advances, so a second write-back from the same snapshot ships only what changed since the first.
+export function diffSnapshot(session, value) {
+  const { reach, ver } = scan(session, [value]);
+  const changed = [...reach.keys()].filter((id) => session.peerVer.get(id) !== ver.get(id));
+  const bytes = emit(session, [value], [{ fn: "@snap", pc: 0, keys: ["v"], b0: 0 }], null, changed);
+  for (const [id, vv] of ver) session.peerVer.set(id, vv);
+  return bytes;
+}
+
+// Reader side: encode the WHOLE snapshot (every reachable object) in the same wire, so the caller can
+// take min(delta, whole) — the write-back can never be larger than shipping the whole object did before.
+// applySnapshot decodes it identically (a "whole" is just a delta in which everything changed).
+export function wholeSnapshot(tierId, value) {
+  const session = makeTrackedSession(tierId);
+  adoptBaseline(session, snapStack(value), null);
+  const { reach } = scan(session, [value]);
+  return emit(session, [value], [{ fn: "@snap", pc: 0, keys: ["v"], b0: 0 }], null, [...reach.keys()]);
+}
+
+// Owner side: apply a snapshot delta onto the master IN PLACE. Baselines the master (matching ids — it
+// is unchanged since the reader fetched, guaranteed by the CAS the caller already checked), then mutates
+// only the shipped objects; unchanged objects resolve to the master's own instances (identity preserved).
+export function applySnapshot(tierId, master, bytes) {
+  const session = makeTrackedSession(tierId);
+  adoptBaseline(session, snapStack(master), null);
+  reconstruct(session, parseDelta(bytes));
+  return master;
+}

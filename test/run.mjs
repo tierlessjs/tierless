@@ -31,6 +31,7 @@ const cases = [
   { file: "src/heap-auto.mjs",      needs: ["transparent deref: ordinary member access on a handle auto-fetches"] },
   { file: "src/heap-writeback.mjs", needs: ["optimistic CAS, conflicts detected and retried, no lost updates"] },
   { file: "src/heap-write.mjs",     needs: ["transparent write-back: an ordinary member assignment propagated to the owning master"] },
+  { file: "src/heap-write-delta.mjs", needs: ["a §5 write-back ships only the changed objects (member edits and collection mutations alike), far smaller than the whole snapshot, and min(delta, whole) is never larger"] },
   { file: "src/policy-live.mjs",    needs: ["informed FETCH", "priced migrate vs fetch from real bytes and steered the socket"] },
   { file: "src/delta-live.mjs",     needs: ["bounce + min(delta,full) + §5 excision + deref all compose, end to end"] },
 ];

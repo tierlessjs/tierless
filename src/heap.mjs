@@ -11,6 +11,7 @@
 // hold a version-invalidated snapshot cache; write-back lifts that to optimistic CAS.
 import { encodeGraph, decodeGraph, isHandle } from "./graph.mjs";
 import { Heap } from "./fetch.mjs";
+import { openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot } from "./wire-delta.mjs";
 
 export { Channel, makeHost } from "./fetch.mjs";
 
@@ -99,8 +100,9 @@ export function commitWrite(channel, handle, mutator, { tries = 5 } = {}) {
 // the version so other tiers' caches invalidate.
 const PROV = Symbol("stackmix.provenance");
 export function makeCoherentHost(localTier, channel) {
-  const cache = new Map();   // id -> { version, copy }
-  const stats = { fetches: 0, hits: 0, localUses: 0, writeBacks: 0, conflicts: 0 };
+  const cache = new Map();      // id -> { version, copy }
+  const sessions = new Map();   // id -> a delta session baselined at fetch, so a write-back ships only the change
+  const stats = { fetches: 0, hits: 0, localUses: 0, writeBacks: 0, conflicts: 0, wire: 0, whole: 0 };
   const tag = (obj, owner, id, version) => {
     if (obj && typeof obj === "object") Object.defineProperty(obj, PROV, { value: { owner, id, version }, enumerable: false, writable: true, configurable: true });
     return obj;
@@ -116,16 +118,30 @@ export function makeCoherentHost(localTier, channel) {
       const { copy, version } = channel.fetch(h);
       tag(copy, h.owner, h.id, version);
       cache.set(h.id, { version, copy });
+      sessions.set(h.id, openSnapshot(localTier.id, copy));                         // baseline this snapshot for a future write-back delta
       stats.fetches++;
       return copy;
     },
+    // A write-back IS a delta to the master: ship only the objects that changed in the snapshot (member
+    // edits, array push, Map set, Set add — all handled by the content-based codec), applied in place
+    // under the same CAS. min(delta, whole) so it is never larger than the old whole-object write-back.
     writeBack(obj) {
       const prov = obj && obj[PROV];
       if (!prov) return obj;                                                        // untracked value — nothing to propagate
       const ownerHeap = channel.tiers[prov.owner].heap;
-      const res = writeBack(ownerHeap, prov.id, prov.version, obj);                 // optimistic CAS under the version we read
-      if (res.ok) { prov.version = res.version; cache.set(prov.id, { version: res.version, copy: obj }); stats.writeBacks++; }
-      else { stats.conflicts++; }                                                   // a real reader would refetch+retry (commitWrite); no contention here
+      if (prov.owner === localTier.id) {                                            // local master: edited in place, just bump the version
+        ownerHeap.ver.set(prov.id, ownerHeap.version(prov.id) + 1); prov.version = ownerHeap.version(prov.id); stats.writeBacks++; return obj;
+      }
+      if (ownerHeap.version(prov.id) !== prov.version) { stats.conflicts++; return obj; } // optimistic CAS: stale -> reject (a real reader refetches+retries via commitWrite)
+      const session = sessions.get(prov.id);
+      const delta = session ? diffSnapshot(session, obj) : null;
+      const whole = wholeSnapshot(localTier.id, obj);                              // the floor: what shipping the whole snapshot would cost, same codec
+      const bytes = delta && delta.length < whole.length ? delta : whole;          // min(delta, whole)
+      applySnapshot(prov.owner, ownerHeap.get(prov.id), bytes);                    // mutate the master in place by matching id
+      ownerHeap.ver.set(prov.id, prov.version + 1);
+      prov.version += 1;
+      cache.set(prov.id, { version: prov.version, copy: obj });
+      stats.writeBacks++; stats.wire += bytes.length; stats.whole += whole.length;
       return obj;
     },
   };

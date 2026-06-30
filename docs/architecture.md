@@ -234,7 +234,11 @@ These are deliberate trade-offs in the compiler, not accidental gaps:
   each straight-line run and prunes the rest, re-guarding after any hop (a tier resource or a
   suspendable call) or control-flow join — so correctness is unchanged and the repeated
   re-checks are gone (`test/probes/deref-liveness.mjs`).
-- **Write-back ships the whole edited object**, not a field-level diff; the §6
+- **Write-back is a delta to the master** (`openSnapshot`/`diffSnapshot`/`applySnapshot`): it ships
+  only the objects that changed in the snapshot — member edits and collection mutations alike, since
+  the codec diffs the result, not the operation — applied in place under the same CAS, never larger than
+  the old whole-object form (`min(delta, whole)`). Granularity is per-object (a changed array ships its
+  ref-list); per-field/element is the next refinement, and would live in the shared codec. The §6
   fetch-size profile is sampled once and locked in (no online re-profiling, by design).
 
 Broader open questions — broader language coverage and content-addressed code identity
