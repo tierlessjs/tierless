@@ -74,7 +74,8 @@ function allowlist(ast) {
 // labeled loops) plus tryStack — the enclosing trys — so an abrupt exit pops the right
 // handlers and refuses to silently skip a finally.
 let blocks, suspSet, AUTO_DEREF = false, AUTO_WRITEBACK = false, TRACK_WRITES = false;
-const nb = () => (blocks.push({ lines: [], term: null }), blocks.length - 1);
+let SOURCE_MAP = false, curLine = 0, srcFile = "", fnSites = {};   // --source-map: stamp each block with its source line so a migrated frame reports file:line, not just a pc
+const nb = () => { const b = { lines: [], term: null }; if (SOURCE_MAP) b.line = curLine; blocks.push(b); return blocks.length - 1; };
 const isSusp = (s) =>
   (t.isVariableDeclaration(s) && s.declarations.length === 1 && t.isYieldExpression(s.declarations[0].init)) ||
   (t.isExpressionStatement(s) && t.isYieldExpression(s.expression));
@@ -244,6 +245,7 @@ function compileStmts(stmts, ctx) { let cont = ctx.next; for (let i = stmts.leng
 const regLabel = (ctx, brk, brkDepth, cont, contDepth) => (ctx.label ? { ...ctx.labels, [ctx.label]: { brk, brkDepth, cont, contDepth } } : ctx.labels);
 
 function compileStmt(s, ctx) {
+  if (SOURCE_MAP && s.loc) curLine = s.loc.start.line;            // blocks created while lowering this statement map back to its line
   const { next, tryDepth } = ctx;
 
   if (isSusp(s)) {                                                 // const x = api.f() -> suspend on a resource
@@ -383,6 +385,7 @@ function abruptExit(ctx, targetDepth, completion) {
 function compileFn(node) {
   const fnName = node.id.name;
   blocks = [];
+  if (SOURCE_MAP) curLine = (node.loc && node.loc.start.line) || 0;
   const END = nb(); blocks[END].term = { kind: "ret", value: '"(end)"' };
   const entry = compileStmts(node.body.body, { next: END, brk: END, brkDepth: 0, cont: END, contDepth: 0, tryDepth: 0, tryStack: [], labels: {}, label: undefined });
   const boot = nb(); blocks[boot].term = { kind: "jump", to: entry };  // pc 0 -> entry
@@ -408,6 +411,7 @@ function compileFn(node) {
     throw new Error("bad terminator " + tm.kind);
   };
   const cases = ids.map((id) => { const blk = blocks[id]; const lines = blk.lines.slice(); lines.push(emitTerm(blk.term)); return `      case ${R(id)}:\n        ${lines.join("\n        ")}`; }).join("\n");
+  if (SOURCE_MAP) { const sites = {}; for (const id of ids) { const ln = blocks[id].line; if (ln) sites[R(id)] = ln; } fnSites[fnName] = sites; }  // pc -> source line
   // default: every reachable pc has a case, so landing here means a corrupt frame — a transform bug, or
   // a continuation mangled in transit. Hard-error at once instead of letting `while (true)` spin forever:
   // fail fast and loud rather than hang. (No valid run reaches it; this is a safety net, not control flow.)
@@ -602,6 +606,7 @@ function lower(p) {
 function compile(src, preamble) {
   const ast = parser.parse(src, { sourceType: "module" });
   allowlist(ast);
+  fnSites = {};
   const fnPaths = new Map();
   traverse(ast, { FunctionDeclaration(p) { if (t.isProgram(p.parent)) fnPaths.set(p.node.id.name, p); } });
   // suspendability: directly contains a yield (tier resource), or transitively calls one that does
@@ -620,7 +625,10 @@ function compile(src, preamble) {
     else { if (TRACK_WRITES) insertDirtyBarriers(p); pure.push(gen(p.node)); }  // a pure helper can still mutate continuation state
   }
   const head = preamble + (TRACK_WRITES ? "\n" + TRACK_PREAMBLE : "");
-  return head + "\n" + (pure.length ? pure.join("\n") + "\n" : "") + "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};\n" + DRIVER;
+  // --source-map: a pc->line table per program + a frameSite helper, so a migrated frame reports a
+  // portable file:line. Gated, so without the flag the bundle is byte-for-byte what it was before.
+  const sm = SOURCE_MAP ? `\nexport const SOURCE_FILE = ${JSON.stringify(srcFile)};\nexport const SITES = ${JSON.stringify(fnSites)};\nexport const frameSite = (f) => { const m = SITES[f.fn], ln = m && m[f.pc]; return SOURCE_FILE + ":" + (ln || "?"); };\nexport const stackSites = (stack) => stack.map(frameSite);\n` : "";
+  return head + "\n" + (pure.length ? pure.join("\n") + "\n" : "") + "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};\n" + DRIVER + sm;
 }
 
 const DRIVER = `
@@ -674,10 +682,12 @@ export const start = (fn, args = []) => run([{ fn, pc: 0, args }]);
 const args = process.argv.slice(2);
 const flags = args.filter((a) => a.startsWith("--"));
 const [inPath, outPath] = args.filter((a) => !a.startsWith("--"));
-if (!inPath || !outPath) { console.error("usage: node transform.cjs <in.js> <out.gen.mjs> [--bare] [--head=<file>] [--auto-deref] [--auto-writeback] [--track-writes]"); process.exit(2); }
+if (!inPath || !outPath) { console.error("usage: node transform.cjs <in.js> <out.gen.mjs> [--bare] [--head=<file>] [--auto-deref] [--auto-writeback] [--track-writes] [--source-map]"); process.exit(2); }
 AUTO_WRITEBACK = flags.includes("--auto-writeback");
 AUTO_DEREF = flags.includes("--auto-deref") || AUTO_WRITEBACK;   // a write through a handle must first materialize it (deref)
 TRACK_WRITES = flags.includes("--track-writes");                 // emit __dirty(obj) write-barriers for the delta wire's tracked mode
+SOURCE_MAP = flags.includes("--source-map");                     // emit a pc->line table + frameSite, so a migrated frame reports file:line
+srcFile = inPath;
 // The pure helpers an app's suspendable functions call (h/render/components) live in their own
 // modules; the generated bundle imports them. --head=<file> supplies those import lines for a given
 // app (so a second app can name its own components); the default is the Tasks app's.

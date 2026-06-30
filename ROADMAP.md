@@ -124,8 +124,12 @@ it goes next. Items are grouped, not strictly ordered; see
   optional-chain conditional (`obj?.m(api.x())`), today a clear compile error.
 - **Field-level write-back.** `--auto-writeback` ships the whole edited object;
   tracking the mutated path would let it propagate a diff under the same CAS.
-- **Source maps.** Carry each frame's source position through the transform so a
-  migrated continuation can report a portable file/line, not just a `pc`.
+- **Source maps — done (`transform.cjs --source-map`).** The transform stamps each block with the
+  line of the statement it lowered and emits a per-program `pc`->line table plus a `frameSite` /
+  `stackSites` helper, so a migrated continuation reports a portable `file:line`, not just a `pc`.
+  Gated behind the flag, so a bundle built without it is byte-for-byte unchanged.
+  `test/probes/source-maps.mjs` drives a continuation to each suspension and asserts the parked frame
+  maps to the suspending statement's line (and that the off path is byte-identical).
 
 ## Runtime & framework shape
 
