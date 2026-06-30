@@ -228,10 +228,12 @@ These are deliberate trade-offs in the compiler, not accidental gaps:
 - **Suspension in an optional-chain conditional.** `obj?.m(api.x())` /
   `a?.[api.x()]` throws a clear compile error; lift it to a statement (the suspendable
   *base*, `api.get()?.x`, is fine).
-- **`--auto-deref` guards every read.** This is correct, not merely conservative: a
-  round-trip migration can re-excise a big local back into a handle, so each read must
-  re-check. A liveness pass could prune guards provably dominated by an earlier one
-  with no intervening suspension.
+- **`--auto-deref` guards each read, then prunes the redundant ones.** Guarding every read
+  is correct, not merely conservative: a round-trip migration can re-excise a big local back
+  into a handle, so a read *past a hop* must re-check. A liveness pass keeps the first guard in
+  each straight-line run and prunes the rest, re-guarding after any hop (a tier resource or a
+  suspendable call) or control-flow join — so correctness is unchanged and the repeated
+  re-checks are gone (`test/probes/deref-liveness.mjs`).
 - **Write-back ships the whole edited object**, not a field-level diff; the §6
   fetch-size profile is sampled once and locked in (no online re-profiling, by design).
 

@@ -24,6 +24,7 @@ const cases = [
   { file: "src/api-verify.mjs",     needs: ["the api is an external reference monitor: authority is verified and enforced in a separate process on every call"] },
   { file: "src/api-pump.mjs",       needs: ["the live pump services api.* through the trusted monitor: a migrating continuation is authorized per principal in a separate process on every call"] },
   { file: "src/control-flow.mjs",   needs: ["extended control flow survives migration"] },
+  { file: "test/probes/deref-liveness.mjs", needs: ["the --auto-deref liveness pass prunes redundant guards within a straight-line run and re-guards after any hop"] },
   { file: "src/heap-probe.mjs",     needs: ["big locals stay home, fetched on deref, single-writer coherent"] },
   { file: "src/heap-live.mjs",      needs: ["the dataset stayed on the server, crossing only when the browser derefed it"] },
   { file: "src/heap-auto.mjs",      needs: ["transparent deref: ordinary member access on a handle auto-fetches"] },

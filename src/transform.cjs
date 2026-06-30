@@ -434,16 +434,49 @@ function remotableLocals(p) {
 function insertDerefGuards(p) {
   const remotable = remotableLocals(p);
   if (!remotable.size) return;
-  const guards = new Map();                                       // statement node -> Set of locals to guard before it
+
+  // Collect, per statement, the remotable locals READ at that statement's own level. getStatementParent
+  // attaches a read to its nearest enclosing statement, so a read in an if-test lands on the IfStatement
+  // and a read in the body lands on the body statement — the right guard placement either way.
+  const reads = new Map();                                        // stmt node -> { path, locals:Set }
   p.traverse({ Identifier(ip) {
     const name = ip.node.name;
     if (!remotable.has(name) || !ip.isReferencedIdentifier()) return;   // reads only (not the binding / write target)
     const stmt = ip.getStatementParent();
     if (!stmt) return;
-    if (!guards.has(stmt.node)) guards.set(stmt.node, { path: stmt, locals: new Set() });
-    guards.get(stmt.node).locals.add(name);
+    if (!reads.has(stmt.node)) reads.set(stmt.node, { path: stmt, locals: new Set() });
+    reads.get(stmt.node).locals.add(name);
   } });
-  for (const { path, locals } of guards.values()) {
+
+  // Availability pruning (the liveness pass). A guard's `L = deref(L)` materializes L; once materialized,
+  // L stays a plain object until a MIGRATION — a tier hop can re-excise a big local back into a handle,
+  // so each read past a hop must re-check (this is why the every-read version is correct, not merely
+  // pessimistic). Within a straight-line run of sibling statements with NO intervening migration, then,
+  // only the first read of L needs a guard; the rest are redundant. We never carry availability across a
+  // migration, a control-flow statement (a join/back-edge could reach a read un-materialized), or a block
+  // boundary (each nested list starts fresh) — all conservative, so the result stays exactly correct,
+  // just without the repeated re-checks. A migration here is a `yield` (every YieldExpression is a real
+  // tier hop — the @deref/@writeback guards aren't inserted yet) OR a call to a suspendable function (it
+  // can hop inside its sub-frame), so both clear the available set.
+  const survive = new Map();                                      // path -> Set(locals) to actually guard
+  for (const { path, locals } of reads.values()) survive.set(path, new Set(locals));
+  const hasMigration = (sp) => { let m = false; sp.traverse({ YieldExpression() { m = true; }, CallExpression(cp) { const c = cp.node.callee; if (t.isIdentifier(c) && suspSet.has(c.name)) m = true; } }); return m; };
+  const isControlFlow = (sp) => sp.isIfStatement() || sp.isForStatement() || sp.isWhileStatement() || sp.isDoWhileStatement()
+    || sp.isForOfStatement() || sp.isForInStatement() || sp.isSwitchStatement() || sp.isTryStatement() || sp.isLabeledStatement() || sp.isBlockStatement();
+  const containers = new Map();                                   // sibling array -> its array of sibling paths
+  for (const { path } of reads.values()) if (Array.isArray(path.container) && !containers.has(path.container)) containers.set(path.container, path.parentPath.get(path.listKey));
+  for (const sibs of containers.values()) {
+    const mat = new Set();
+    for (const sp of sibs) {
+      const barrier = hasMigration(sp) || isControlFlow(sp);
+      const entry = reads.get(sp.node);
+      if (entry && !barrier) { const s = survive.get(entry.path); for (const L of entry.locals) { if (mat.has(L)) s.delete(L); else mat.add(L); } }  // prune reads already available
+      if (barrier) mat.clear();                                   // a hop or a join: nothing is known-materialized afterward
+    }
+  }
+
+  for (const [path, locals] of survive) {
+    if (!locals.size) continue;
     const g = [...locals].map((L) => t.ifStatement(t.callExpression(t.identifier("isHandle"), [t.identifier(L)]),
       t.blockStatement([t.expressionStatement(t.assignmentExpression("=", t.identifier(L),
         t.yieldExpression(t.callExpression(t.identifier("R"), [t.stringLiteral("@deref"), t.stringLiteral("deref"), t.identifier(L)]))))])));

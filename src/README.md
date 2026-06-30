@@ -240,12 +240,12 @@ node src/transform.cjs src/heap-write.src.js src/heap-write.gen.mjs --bare --aut
   (`--auto-writeback`, `heap-write.mjs`); the §6 migrate-vs-fetch *policy* (ship the
   continuation vs fetch the data) is consulted by the live driver (`policy-live.mjs`), which
   prices both from real bytes and steers what crosses the socket. Remaining heap refinements
-  are optimizations, not gaps: the deref guard re-checks each read because a round-trip
+  are optimizations, not gaps: the deref guard re-checks each read past a hop because a round-trip
   migration can re-excise a big local back into a handle (so it's *correct*, not merely
-  pessimistic; a liveness pass could still drop guards provably dominated by an earlier one
-  with no intervening suspension), a write-back ships the whole edited object rather than a
-  field-level diff, and the §6 fetch-size profile is sampled once and locked in (no online
-  re-profiling — by design).
+  pessimistic; a liveness pass prunes the guards a straight-line run makes redundant, re-guarding
+  after any hop or join — `test/probes/deref-liveness.mjs`), a write-back ships the whole edited
+  object rather than a field-level diff, and the §6 fetch-size profile is sampled once and locked in
+  (no online re-profiling — by design).
 - Cross-tier **shared mutable state** has the design's full answer now: read-mostly via
   single-master + version-invalidated cache; **write-back** — a reader's mutation propagating
   to the owner — via optimistic version-checked CAS (`heap-writeback.mjs`: conflicts detected,

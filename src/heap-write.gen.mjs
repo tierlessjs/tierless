@@ -4,59 +4,49 @@ export const PROGRAMS = {
   Edit(F) {
     while (true) switch (F.pc) {
       case 0:
-        F.pc = 21; break;
+        F.pc = 17; break;
       case 1:
         return { op: "return", value: "(end)" };
       case 2:
         return { op: "return", value: F.rows[F.ev.idx].score };
       case 3:
-        F.rows = F.__t2;
         F.pc = 2; break;
       case 4:
-        F.__t2 = F.ret;
-        F.pc = 3; break;
+        F.pc = 3; return { op: "resource", tier: "@writeback", name: "writeback", args: [F.rows] };
       case 5:
-        F.pc = 4; return { op: "resource", tier: "@deref", name: "deref", args: [F.rows] };
-      case 6:
-        if (isHandle(F.rows)) { F.pc = 5; } else { F.pc = 2; } break;
-      case 7:
-        F.pc = 6; break;
-      case 8:
-        F.pc = 7; return { op: "resource", tier: "@writeback", name: "writeback", args: [F.rows] };
-      case 9:
         // migrate to the browser; `rows` stays home as a handle
 F.rows[F.ev.idx].score = F.ev.score; // browser edits a row -> auto-deref fetches, auto-writeback propagates back
-        F.pc = 8; break;
-      case 10:
+        F.pc = 4; break;
+      case 6:
         F.rows = F.__t1;
+        F.pc = 5; break;
+      case 7:
+        F.__t1 = F.ret;
+        F.pc = 6; break;
+      case 8:
+        F.pc = 7; return { op: "resource", tier: "@deref", name: "deref", args: [F.rows] };
+      case 9:
+        if (isHandle(F.rows)) { F.pc = 8; } else { F.pc = 5; } break;
+      case 10:
+        F.ev = F.ret;
         F.pc = 9; break;
       case 11:
-        F.__t1 = F.ret;
-        F.pc = 10; break;
+        F.pc = 10; return { op: "resource", tier: "browser", name: "dom.commit", args: [{ count: F.rows.length }] };
       case 12:
-        F.pc = 11; return { op: "resource", tier: "@deref", name: "deref", args: [F.rows] };
-      case 13:
-        if (isHandle(F.rows)) { F.pc = 12; } else { F.pc = 9; } break;
-      case 14:
-        F.ev = F.ret;
-        F.pc = 13; break;
-      case 15:
-        F.pc = 14; return { op: "resource", tier: "browser", name: "dom.commit", args: [{ count: F.rows.length }] };
-      case 16:
         F.rows = F.__t0;
+        F.pc = 11; break;
+      case 13:
+        F.__t0 = F.ret;
+        F.pc = 12; break;
+      case 14:
+        F.pc = 13; return { op: "resource", tier: "@deref", name: "deref", args: [F.rows] };
+      case 15:
+        if (isHandle(F.rows)) { F.pc = 14; } else { F.pc = 11; } break;
+      case 16:
+        F.rows = F.ret;
         F.pc = 15; break;
       case 17:
-        F.__t0 = F.ret;
-        F.pc = 16; break;
-      case 18:
-        F.pc = 17; return { op: "resource", tier: "@deref", name: "deref", args: [F.rows] };
-      case 19:
-        if (isHandle(F.rows)) { F.pc = 18; } else { F.pc = 15; } break;
-      case 20:
-        F.rows = F.ret;
-        F.pc = 19; break;
-      case 21:
-        F.pc = 20; return { op: "resource", tier: "server", name: "api.getRows", args: [] };
+        F.pc = 16; return { op: "resource", tier: "server", name: "api.getRows", args: [] };
       default: throw new RangeError("stackmix: invalid pc " + F.pc + " in Edit");
     }
   }

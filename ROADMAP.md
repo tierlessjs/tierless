@@ -111,11 +111,17 @@ it goes next. Items are grouped, not strictly ordered; see
 
 ## Compiler & language
 
-- **Broader language coverage in the transform.** The suspendable path covers all
-  ordinary control flow with suspensions in any position. Natural extensions:
-  suspensions inside an optional-chain conditional (currently a clear error), and a
-  liveness pass to prune `--auto-deref` guards that are provably dominated by an
-  earlier guard with no intervening suspension.
+- **`--auto-deref` liveness pass — done.** A read of a data-resource local is guarded so the first
+  touch fetches it; once materialized it stays a plain object until a tier hop can re-excise it. The
+  transform now prunes guards dominated by an earlier guard within a straight-line run with no hop
+  between (a `yield` *or* a suspendable call), re-guarding after any hop or control-flow join. Exactly
+  correct — `heap-auto`/`heap-write` are the runtime backstop, and `test/probes/deref-liveness.mjs` pins
+  the guard count on the shapes that matter (consecutive reads → one guard; a re-guard after a
+  commit/suspendable-call/branch; a pure call doesn't break a run). On `heap-write` it drops a redundant
+  guard.
+- **Broader language coverage in the transform.** The suspendable path covers all ordinary control flow
+  with suspensions in any position. The remaining natural extension is a suspension inside an
+  optional-chain conditional (`obj?.m(api.x())`), today a clear compile error.
 - **Field-level write-back.** `--auto-writeback` ships the whole edited object;
   tracking the mutated path would let it propagate a diff under the same CAS.
 - **Source maps.** Carry each frame's source position through the transform so a
