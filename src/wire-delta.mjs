@@ -87,11 +87,12 @@ const subFn = (session) => { const h = session.handleOf; return h ? (v) => (isOb
 // handle (session.handleOf) so the wire carries that handle leaf in its place and the big data never
 // crosses unless the peer derefs it. The mapping persists across hops — a §5 handle is a leaf the delta
 // ships once — so a big immutable dataset rides every later capture for free, only UI deltas crossing.
-function exciseBig(session, rootVals, tier, threshold) {
+function exciseBig(session, rootVals, tier, threshold, content) {
   const handleOf = session.handleOf, seen = new Set();
   const walk = (v) => {
     if (!isObj(v) || isHandle(v) || handleOf.has(v) || seen.has(v)) return;
     seen.add(v);
+    if (content && content.store.hashFor(v) !== undefined) return;       // content-addressed immutable subgraph: ship it by hash, never excise it (content beats excision; don't descend)
     if (approxExceeds(v, threshold)) { handleOf.set(v, { __stackmix_handle__: true, owner: tier.id, id: tier.heapPut(v), kind: Array.isArray(v) ? "array" : "object" }); return; }  // excise; don't descend
     forEachChild(v, walk);
   };
@@ -365,11 +366,12 @@ export function adoptBaseline(session, stack, request) {
 // paths agree on handle ids and adoptBaseline (which also subs) stays deterministic. Order- and
 // identity-preserving (a shared object rebuilds once via the memo; cycles are memoized before
 // recursion), and the spine is small (the big data is gone), so it is cheap.
-export function subForFullWire(session, stack, request) {
+export function subForFullWire(session, stack, request, content = null) {
   const sub = subFn(session), memo = new Map();
   const rebuild = (v) => {
     v = sub(v);
     if (!isObj(v) || isHandle(v)) return v;
+    if (content && content.store.hashFor(v) !== undefined) return v;     // a content-addressed immutable subgraph: keep the original instance so encodeGraph's content option recognizes it by identity and ships it by hash (don't rebuild)
     if (memo.has(v)) return memo.get(v);
     if (Array.isArray(v)) { const a = []; memo.set(v, a); for (const e of v) a.push(rebuild(e)); return a; }
     if (isMap(v)) { const m = new Map(); memo.set(v, m); for (const [k, val] of v) m.set(rebuild(k), rebuild(val)); return m; }
@@ -383,6 +385,14 @@ export function subForFullWire(session, stack, request) {
 
 // Populate session.handleOf for a capture (the min(delta,full) caller runs this once, before BOTH the
 // full path (subForFullWire) and the delta path, so they excise the same objects to the same handles).
-export function exciseForCapture(session, stack, request, tier, threshold = 64 * 1024) {
-  exciseBig(session, rootsOf(stack, request).rootVals, tier, threshold);
+export function exciseForCapture(session, stack, request, tier, threshold = 64 * 1024, content = null) {
+  exciseBig(session, rootsOf(stack, request).rootVals, tier, threshold, content);
 }
+
+// Content-addressing composes with the delta via the min(delta, full) FULL arm, not a new delta kind:
+// pass a { store, peer } to exciseForCapture/subForFullWire/encodeWireBinary, and an immutable subgraph
+// the peer holds ships by hash on every FULL frame (the cold hop and any re-frame), while WARM deltas
+// already never re-ship it (it is clean — immutable — so the dirty/version walk prunes it). So a session
+// that re-frames does NOT re-ship immutable code/config, and the warm path needs no content leaf. Both
+// arms stay id-consistent because neither subForFullWire nor adoptBaseline collapses the subgraph to a
+// leaf — they walk it in full, exactly as the receiver does after resolving the hash to its cached copy.

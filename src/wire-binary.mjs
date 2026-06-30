@@ -14,7 +14,8 @@ const te = new TextEncoder(), td = new TextDecoder();
 const MAGIC = "SMW1";
 
 // node tags: 0 ref, 1 int, 2 float, 3 str, 4 true, 5 false, 6 null, 7 undef, 8 bigint, 9 glob, 10 symw, 11 symf
-// slot tags: 0 array, 1 object, 2 map, 3 set, 4 handle, 5 unique-symbol
+// slot tags: 0 array, 1 object, 2 map, 3 set, 4 handle, 5 unique-symbol, 6 numeric-array,
+//            7 content-ref leaf (peer holds the hash), 8 content-cache wrapper (ship inline once, cache under hash)
 
 class W {
   constructor() { this.buf = new Uint8Array(1024); this.n = 0; }
@@ -87,7 +88,7 @@ function readNode(r, S) {
 
 // Serialize a continuation, mirroring encodeWire's frame-flattening, then writing the
 // {frames, req, {roots, objs}} structure as bytes. opts (tier/threshold) drive §5 excision.
-export function encodeWireBinary(stack, request, { tier = null, threshold = 8192 } = {}) {
+export function encodeWireBinary(stack, request, { tier = null, threshold = 8192, content = null } = {}) {
   const rootsVals = [];
   const frames = stack.map((f) => {
     const keys = Object.keys(f).filter((k) => k !== "fn" && k !== "pc");
@@ -96,7 +97,7 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
   });
   let req = null;
   if (request) { const a0 = rootsVals.length; for (const a of request.args || []) rootsVals.push(a); req = { op: request.op, tier: request.tier, name: request.name, a0, argc: (request.args || []).length }; }
-  const graph = encodeGraph(rootsVals, { tier, threshold });
+  const graph = encodeGraph(rootsVals, { tier, threshold, content });
 
   // pass 1: intern strings and collect object shapes ------------------------------------
   const strMap = new Map(), strs = [];
@@ -109,7 +110,9 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
   for (const n of graph.roots) internNode(n);
   for (let i = 0; i < graph.objs.length; i++) {
     const s = graph.objs[i];
-    if (s.k === "a" || s.k === "set") { for (const e of s.e) internNode(e); }
+    if (s.cah !== undefined) intern(s.cah);                      // a content-addressed subgraph shipped inline once: intern its hash so the receiver caches it
+    if (s.k === "c") { intern(s.h); }                            // a content-ref leaf: just the hash crosses
+    else if (s.k === "a" || s.k === "set") { for (const e of s.e) internNode(e); }
     else if (s.k === "map") { for (const [kn, vn] of s.e) { internNode(kn); internNode(vn); } }
     else if (s.k === "o") {
       const keys = Object.keys(s.f);
@@ -133,6 +136,8 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
   w.varu(graph.objs.length);
   for (let i = 0; i < graph.objs.length; i++) {
     const s = graph.objs[i];
+    if (s.k === "c") { w.u8(7); w.varu(intern(s.h)); continue; }        // content-ref leaf: the peer holds it, so only the hash crosses
+    if (s.cah !== undefined) { w.u8(8); w.varu(intern(s.cah)); }        // wrap: cache the slot that follows under this hash (shipped inline once)
     if (s.k === "a") {
       // typed-array fast path: an array of only number primitives pays no per-element tag.
       const nums = s.e.length && s.e.every((n) => n.k === "p" && typeof n.v === "number") ? s.e.map((n) => n.v) : null;
@@ -158,7 +163,7 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
   return w.done();
 }
 
-export function decodeWireBinary(bytes) {
+export function decodeWireBinary(bytes, { content = null } = {}) {
   const r = new R(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
   if (td.decode(r.raw(4)) !== MAGIC) throw new RangeError("wire-binary: bad magic");
   const strs = []; { const n = r.count(); for (let i = 0; i < n; i++) strs.push(td.decode(r.raw(r.count()))); }
@@ -168,23 +173,29 @@ export function decodeWireBinary(bytes) {
   const frames = []; { const n = r.count(); for (let i = 0; i < n; i++) { const fn = S(r.varu()); const pc = r.varu(); const kc = r.count(); const keys = []; for (let j = 0; j < kc; j++) keys.push(S(r.varu())); frames.push({ fn, pc, keys, b0: r.varu() }); } }
   let req = null; if (r.u8()) { const op = S(r.varu()), tier = S(r.varu()), name = S(r.varu()), a0 = r.varu(), argc = r.varu(); req = { op, tier, name, a0, argc }; }
   const roots = []; { const n = r.count(); for (let i = 0; i < n; i++) roots.push(readNode(r, S)); }
-  const objs = []; { const n = r.count(); for (let i = 0; i < n; i++) {
-    const t = r.u8();
-    if (t === 0) { const c = r.count(), e = []; for (let j = 0; j < c; j++) e.push(readNode(r, S)); objs.push({ k: "a", e }); }
-    else if (t === 1) { const sh = SH(r.varu()); const f = {}, h = {}; for (const [si, ne] of sh) { const key = S(si); const val = readNode(r, S); if (key === "__proto__") continue; f[key] = val; if (ne) h[key] = 1; } const slot = { k: "o", f }; if (Object.keys(h).length) slot.h = h; const sfn = r.count(); if (sfn) { slot.sf = []; for (let j = 0; j < sfn; j++) { const kn = readNode(r, S), vn = readNode(r, S); slot.sf.push([kn, vn, r.u8()]); } } objs.push(slot); }
-    else if (t === 2) { const c = r.count(), e = []; for (let j = 0; j < c; j++) e.push([readNode(r, S), readNode(r, S)]); objs.push({ k: "map", e }); }
-    else if (t === 3) { const c = r.count(), e = []; for (let j = 0; j < c; j++) e.push(readNode(r, S)); objs.push({ k: "set", e }); }
-    else if (t === 4) { const owner = S(r.varu()), id = S(r.varu()); const h = { __stackmix_handle__: true, owner, id }; if (r.u8()) h.kind = S(r.varu()); objs.push({ k: "H", h }); }
-    else if (t === 5) { objs.push({ k: "symu", d: r.u8() ? S(r.varu()) : undefined }); }
+  const readSlot = () => {
+    let t = r.u8(), cah;
+    while (t === 8) { cah = S(r.varu()); t = r.u8(); }                                      // content-cache wrapper — unwrapped ITERATIVELY so a hostile 0x08 chain can't blow the stack
+    let slot;
+    if (t === 7) slot = { k: "c", h: S(r.varu()) };                                         // content-ref leaf — decodeGraph resolves it against the content store
+    else if (t === 0) { const c = r.count(), e = []; for (let j = 0; j < c; j++) e.push(readNode(r, S)); slot = { k: "a", e }; }
+    else if (t === 1) { const sh = SH(r.varu()); const f = {}, h = {}; for (const [si, ne] of sh) { const key = S(si); const val = readNode(r, S); if (key === "__proto__") continue; f[key] = val; if (ne) h[key] = 1; } slot = { k: "o", f }; if (Object.keys(h).length) slot.h = h; const sfn = r.count(); if (sfn) { slot.sf = []; for (let j = 0; j < sfn; j++) { const kn = readNode(r, S), vn = readNode(r, S); slot.sf.push([kn, vn, r.u8()]); } } }
+    else if (t === 2) { const c = r.count(), e = []; for (let j = 0; j < c; j++) e.push([readNode(r, S), readNode(r, S)]); slot = { k: "map", e }; }
+    else if (t === 3) { const c = r.count(), e = []; for (let j = 0; j < c; j++) e.push(readNode(r, S)); slot = { k: "set", e }; }
+    else if (t === 4) { const owner = S(r.varu()), id = S(r.varu()); const h = { __stackmix_handle__: true, owner, id }; if (r.u8()) h.kind = S(r.varu()); slot = { k: "H", h }; }
+    else if (t === 5) { slot = { k: "symu", d: r.u8() ? S(r.varu()) : undefined }; }
     else if (t === 6) { const c = r.count(), sub = r.u8(), e = [];
       if (sub === 0) { for (let j = 0; j < c; j++) e.push({ k: "p", v: r.vari() }); }
       else if (sub === 1) { for (let j = 0; j < c; j++) e.push({ k: "p", v: r.f64() }); }
       else if (sub === 2) { let p = 0; for (let j = 0; j < c; j++) { p += r.vari(); e.push({ k: "p", v: p }); } }
       else throw new RangeError("wire-binary: bad numeric-array sub-kind " + sub);
-      objs.push({ k: "a", e }); }
+      slot = { k: "a", e }; }
     else throw new RangeError("wire-binary: bad slot tag " + t);
-  } }
-  const vals = decodeGraph({ roots, objs });
+    if (cah !== undefined) slot.cah = cah;
+    return slot;
+  };
+  const objs = []; { const n = r.count(); for (let i = 0; i < n; i++) objs.push(readSlot()); }
+  const vals = decodeGraph({ roots, objs }, { content });
   const stack = frames.map((f) => { const fr = { fn: f.fn, pc: f.pc }; f.keys.forEach((k, i) => { fr[k] = vals[f.b0 + i]; }); return fr; });
   const request = req ? { op: req.op, tier: req.tier, name: req.name, args: vals.slice(req.a0, req.a0 + req.argc) } : null;
   return { stack, request };

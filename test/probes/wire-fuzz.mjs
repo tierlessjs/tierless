@@ -11,6 +11,7 @@
 import { encodeWireBinary, decodeWireBinary } from "../../src/wire-binary.mjs";
 import { encodeWire, decodeWire, makeTier } from "../../src/heap.mjs";
 import { isHandle, decodeGraph } from "../../src/graph.mjs";
+import { ContentStore, newPeerView } from "../../src/content.mjs";
 
 let pass = true;
 const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };
@@ -145,6 +146,35 @@ check("decodeGraph defends a hostile __proto__ key (no global or per-object prot
 // a §5 handle still excises + round-trips through the binary wire
 const hb = decodeWireBinary(encodeWireBinary([{ fn: "F", pc: 0, big: { blob: "x".repeat(20000) }, args: [] }], null, { tier: makeTier("server"), threshold: 8192 })).stack[0];
 check("§5 handle excision survives the binary wire", isHandle(hb.big));
+
+// === 5) content-addressing: a registered immutable subgraph round-trips cold (inline + cache) and
+// warm (hash leaf), over random graphs, and a content wire's truncations all fail cleanly. ===
+let contentFail = -1;
+for (let i = 0; i < 800 && contentFail < 0; i++) {
+  const rnd = rng(0x5e7 + i);
+  const { frames } = makeGraph(rnd);
+  const config = makeGraph(rnd).frames[0];                          // a random object, treated as immutable
+  const prod = new ContentStore(), recv = new ContentStore(), peer = newPeerView();
+  const hash = prod.register(config);
+  frames[0].config = config; if (rnd() < 0.5) frames[0].alsoConfig = config;   // referenced once or twice
+  try {
+    const cold = decodeWireBinary(encodeWireBinary(frames, null, { content: { store: prod, peer } }), { content: { store: recv } }); // inline + cache
+    const warm = decodeWireBinary(encodeWireBinary(frames, null, { content: { store: prod, peer } }), { content: { store: recv } }); // hash leaf
+    const ok = sameContinuation({ stack: frames, request: null }, cold)
+      && sameContinuation({ stack: frames, request: null }, warm)
+      && recv.get(hash) === cold.stack[0].config                    // cached on the cold hop
+      && warm.stack[0].config === recv.get(hash);                   // warm hop resolves the hash to that cached instance
+    if (!ok) contentFail = i;
+  } catch (e) { console.log("    content threw at iter " + i + ": " + e.message); contentFail = i; break; }
+}
+check("content-addressing round-trips through the binary wire (cold inline+cache, warm by hash; 800 graphs)", contentFail < 0, contentFail < 0 ? "" : "first failure at iter " + contentFail);
+const cprod = new ContentStore(); const cfg = { schema: "s", fields: [1, 2, 3, 4] }; cprod.register(cfg);
+const cwire = encodeWireBinary([{ fn: "F", pc: 0, cfg, args: [] }], null, { content: { store: cprod, peer: newPeerView() } });
+let cTrunc = 0; for (let len = 0; len < cwire.length; len++) { try { decodeWireBinary(cwire.subarray(0, len), { content: { store: new ContentStore() } }); } catch (e) { if (e instanceof Error) cTrunc++; } }
+check("every truncation of a content wire throws cleanly (the new tags stay bounds-checked)", cTrunc === cwire.length);
+let stackSafe = false; const evilCah = new Uint8Array(64); evilCah.set([83, 77, 87, 49], 0); for (let k = 4; k < 64; k++) evilCah[k] = 8;  // a chain of content-cache wrappers (tag 8)
+try { decodeWireBinary(evilCah, { content: { store: new ContentStore() } }); } catch (e) { stackSafe = e instanceof RangeError; }
+check("a hostile chain of content-cache wrappers fails cleanly, not by stack overflow", stackSafe);
 
 console.log(`\n${pass ? "PASS" : "FAIL"} — binary wire codec: property round-trips, differential vs JSON, boundaries, and decode robustness all hold`);
 process.exit(pass ? 0 : 1);

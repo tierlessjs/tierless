@@ -106,8 +106,13 @@ it goes next. Items are grouped, not strictly ordered; see
   skew between tiers (Unison's approach). `test/probes/wire-content.mjs`: a 36 KB config ships inline
   once then as a 319 B hash reference (**113×**), resolves to the same held instance across hops,
   preserves shared identity, and leaves the rest of the codec untouched (an unregistered cyclic object
-  still round-trips). Opt-in via `encodeGraph(…, { content })`; folding it into the binary wire and the
-  delta path (as §5 excision was folded in) is the natural follow-on.
+  still round-trips). It is now carried through **the binary wire** (the frame that actually crosses the
+  socket — two new slot tags: a content-ref leaf and a content-cache wrapper, both hardened and
+  fuzz-tested) and **composes with the delta**: content rides the `min(delta, full)` FULL arm, so a
+  re-frame ships an immutable subgraph by hash instead of re-inlining it (10.5 KB → 124 B in
+  `wire-content`, composed with §5 excision in the same capture), while warm deltas already clean-prune
+  it. Both arms stay id-consistent because neither `subForFullWire` nor `adoptBaseline` collapses the
+  subgraph to a leaf — they walk it in full, exactly as the receiver does after resolving the hash.
 
 ## Compiler & language
 

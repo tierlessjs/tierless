@@ -11,7 +11,10 @@
 //      across hops, and shared references within a capture stay shared.
 //   4. It is opt-in and composable — an UNregistered object still round-trips normally (identity,
 //      cycles), so content-addressing one subgraph doesn't disturb the rest of the graph.
-import { encodeGraph, decodeGraph } from "../../src/graph.mjs";
+import { encodeGraph, decodeGraph, isHandle } from "../../src/graph.mjs";
+import { encodeWireBinary, decodeWireBinary } from "../../src/wire-binary.mjs";
+import { makeTrackedSession, subForFullWire, exciseForCapture, adoptBaseline } from "../../src/wire-delta.mjs";
+import { makeTier } from "../../src/heap.mjs";
 import { ContentStore, newPeerView, hashOf } from "../../src/content.mjs";
 
 const deepFreeze = (o) => { if (o && typeof o === "object" && !Object.isFrozen(o)) { Object.freeze(o); for (const k of Object.keys(o)) deepFreeze(o[k]); } return o; };
@@ -66,6 +69,42 @@ const node = { name: "n" }; node.self = node;             // a cycle, NOT regist
 const enc3 = encodeGraph([node], { content: { store: prod, peer: newPeerView() } });
 const dec3 = decodeGraph(enc3, { content: { store: recv } })[0];
 check("composable: an unregistered cyclic object still round-trips (content-addressing is opt-in)", dec3.self === dec3 && dec3.name === "n");
+
+// ── Through the BINARY wire — the frame that actually crosses the socket ─────────────────────────────
+const prodB = new ContentStore(), recvB = new ContentStore(), sentB = newPeerView();
+const hashB = prodB.register(CONFIG);
+const b1 = encodeWireBinary([{ fn: "View", pc: 2, config: CONFIG, alsoConfig: CONFIG, ui: { route: "home" } }], null, { content: { store: prodB, peer: sentB } });
+const db1 = decodeWireBinary(b1, { content: { store: recvB } });
+check("binary cold hop: CONFIG reconstructs, shared identity holds, cached by hash", db1.stack[0].config.fields[199].doc === "immutable config field number 199" && db1.stack[0].config === db1.stack[0].alsoConfig && recvB.get(hashB) === db1.stack[0].config);
+const b2 = encodeWireBinary([{ fn: "View", pc: 5, config: CONFIG, alsoConfig: CONFIG, ui: { route: "article" } }], null, { content: { store: prodB, peer: sentB } });
+const db2 = decodeWireBinary(b2, { content: { store: recvB } });
+check(`binary warm hop: only the hash crosses (${b1.length} B -> ${b2.length} B), resolving to the cached instance`, b2.length * 5 < b1.length && db2.stack[0].config === recvB.get(hashB) && db2.stack[0].ui.route === "article");
+
+// ── Composition: content-addressing + §5 excision + the min(delta, full) FULL arm together ──────────
+const tier = makeTier("server"), session = makeTrackedSession(tier);
+const cprod = new ContentStore(), crecv = new ContentStore(), ct = { store: cprod, peer: newPeerView() };
+const chash = cprod.register(CONFIG);
+const DATASET = { rows: Array.from({ length: 3000 }, (_, i) => ({ id: i, v: "row " + i })) };  // big + MUTABLE -> §5 handle (excision), not content
+const THRESH = 8192;
+
+// Cold FULL hop: CONFIG content-addressed (inline + cache), DATASET excised to a §5 handle that stays home.
+const stackC1 = [{ fn: "View", pc: 1, config: CONFIG, data: DATASET, ui: { route: "home" } }];
+exciseForCapture(session, stackC1, null, tier, THRESH, ct);
+const subC1 = subForFullWire(session, stackC1, null, ct);
+const full1 = encodeWireBinary(subC1.stack, subC1.request, { content: ct });
+const dc1 = decodeWireBinary(full1, { content: { store: crecv } });
+adoptBaseline(session, stackC1, null);                    // establish the shared baseline (walks CONFIG in full — content stays id-consistent)
+check("compose cold: CONFIG reconstructs, DATASET stayed home as a §5 handle, CONFIG cached by hash",
+  dc1.stack[0].config.fields.length === 200 && isHandle(dc1.stack[0].data) && crecv.get(chash) === dc1.stack[0].config);
+
+// Re-frame FULL hop (the case min(delta, full) falls back to a full frame): the immutable CONFIG now ships by HASH.
+const stackC2 = [{ fn: "View", pc: 9, config: CONFIG, data: DATASET, ui: { route: "article", scroll: 200 } }];
+exciseForCapture(session, stackC2, null, tier, THRESH, ct);
+const subC2 = subForFullWire(session, stackC2, null, ct);
+const full2 = encodeWireBinary(subC2.stack, subC2.request, { content: ct });
+const dc2 = decodeWireBinary(full2, { content: { store: crecv } });
+check(`compose re-frame: CONFIG ships by hash (not re-inlined), DATASET still a handle (${full1.length} B -> ${full2.length} B)`,
+  full2.length * 5 < full1.length && dc2.stack[0].config === crecv.get(chash) && isHandle(dc2.stack[0].data));
 
 const ok = fail === 0;
 console.log(ok
