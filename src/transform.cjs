@@ -27,13 +27,18 @@
 // resource that fails in a callee is caught by a try/catch in a caller — even across a
 // tier migration.
 //
-// Control flow covered: sequence, if/else, while/for, break/continue, return, throw,
-// try/catch/finally, and cross-function calls/returns. Lowered the way
-// @babel/plugin-transform-regenerator lowers generators, but onto an explicit
-// serializable frame instead of closure variables (which is what makes snapshot/restore
-// possible). Known gaps (the compiler throws a clear error rather than miscompile):
-// break/continue/return that EXITS a try, a suspendable call used as a sub-expression
-// (assign it to a local first), switch, and labeled loops.
+// Control flow covered: sequence, if/else, while / for / for-of / for-in, break/continue
+// (incl. labeled), return, throw, switch, try/catch/finally (incl. return/break/continue that
+// EXITS a try, running the finally), and cross-function calls/returns. Binding forms covered:
+// destructuring declarations, default/destructured/rest parameters, and a suspension used as a
+// sub-expression — all DESUGARED to plain `F.x = expr` frame writes before lowering (see
+// desugarBindings + normalize). Lowered the way @babel/plugin-transform-regenerator lowers
+// generators, but onto an explicit serializable frame instead of closure variables (which is
+// what makes snapshot/restore possible). Genuine gaps (the compiler throws a CLEAR error rather
+// than miscompile): a tier call inside a nested function / callback / comparator / method — it
+// runs synchronously inside native code (Array.map/sort, a method dispatch) that can't suspend
+// or migrate, so lift it to a loop — and a suspension in an optional chain's conditional part
+// (a?.[susp] / a?.(susp)); lift that to a statement.
 //
 // Needs the Babel toolchain to RUN (not a repo dependency, like emscripten for
 // qjs-migrate). The committed *.gen.mjs files are its output, so the demos run without
@@ -565,7 +570,164 @@ const TRACK_PREAMBLE = `let __DSINK = null;
 export const __setDirtySink = (fn) => { const prev = __DSINK; __DSINK = fn || null; return prev; };
 const __dirty = (o) => { if (__DSINK !== null && o !== null && typeof o === "object") __DSINK(o); return o; };`;
 
+// ---- Pre-normalization desugars: lower non-trivial binding forms to simple `id = expr`. ----
+// for-of/for-in, destructuring declarations, and non-simple params (defaults/patterns/rest)
+// aren't things compileStmt or the F.x local-rewrite know how to place on the frame — so we
+// rewrite each into the simple forms they DO handle, BEFORE the auto-* passes and normalize.
+// Run only inside lower() (suspendable fns); a pure single-tier fn keeps its native for-of /
+// destructuring (emitted verbatim, run wholesale), so this is purely additive.
+//
+// Two small runtime helpers are emitted into the bundle ONLY when a construct needs them, so
+// a bundle that uses neither is byte-for-byte unchanged.
+let USED_FORIN = false, USED_OBJREST = false;
+const FORIN_HELPER  = "const __forInKeys = (o) => { const a = []; for (const k in o) a.push(k); return a; };";                                            // for-in key order (incl. inherited enumerable)
+const OBJREST_HELPER = "const __objRest = (o, taken) => { const r = {}; for (const k of Object.keys(o)) if (!taken.includes(k)) r[k] = o[k]; return r; };"; // { ...rest } = own enumerable minus taken
+
+// Bind `target` (an Identifier / pattern / default) from the value `access` reads, appending
+// the resulting simple declarations to `out`. Recurses through nested patterns and defaults.
+function bindValue(target, access, out, fresh, kind) {
+  const decl = (name, init) => out.push(t.variableDeclaration(kind, [t.variableDeclarator(t.identifier(name), init)]));
+  if (t.isAssignmentPattern(target)) {                            // x = D  (default applies when the slot is undefined)
+    const p = fresh();
+    decl(p, access);
+    const chosen = t.conditionalExpression(t.binaryExpression("===", t.identifier(p), t.identifier("undefined")), target.right, t.identifier(p));
+    if (t.isIdentifier(target.left)) { decl(target.left.name, chosen); return; }
+    const q = fresh(); decl(q, chosen); flattenPattern(target.left, t.identifier(q), out, fresh, kind); return;
+  }
+  if (t.isIdentifier(target)) { decl(target.name, access); return; }
+  const tmp = fresh(); decl(tmp, access); flattenPattern(target, t.identifier(tmp), out, fresh, kind);   // nested pattern: eval the source once
+}
+
+// Expand a destructuring pattern reading from `access` into a flat list of simple declarations.
+// `access` is embedded in several sibling positions, so clone it each time — an AST node must have
+// a single parent or the later F.x rewrite traversal mishandles it.
+function flattenPattern(pattern, access, out, fresh, kind) {
+  const A = () => t.cloneNode(access, true);
+  if (t.isObjectPattern(pattern)) {
+    const taken = [];                                             // keys consumed so far, for a trailing ...rest
+    let hasComputed = false;
+    for (const prop of pattern.properties) {
+      if (t.isRestElement(prop)) {
+        if (hasComputed) throw new Error("stackmix: a computed key together with ...rest in object destructuring is not supported (lift it to a local first)");
+        USED_OBJREST = true;
+        bindValue(prop.argument, t.callExpression(t.identifier("__objRest"), [A(), t.arrayExpression(taken.map((k) => t.stringLiteral(k)))]), out, fresh, kind);
+        continue;
+      }
+      const idKey = t.isIdentifier(prop.key) && !prop.computed;   // { a: v } -> access.a
+      const computed = !idKey;                                    // { "a-b": v } / { 0: v } / { [k]: v } -> access[key]
+      if (prop.computed) hasComputed = true; else taken.push(idKey ? prop.key.name : String(prop.key.value));
+      bindValue(prop.value, t.memberExpression(A(), idKey ? t.identifier(prop.key.name) : prop.key, computed), out, fresh, kind);
+    }
+    return;
+  }
+  // ArrayPattern: normalize the source to an array ONCE — a real array passes through by reference
+  // (zero copy), any other iterable (Set/Map/string/array-like) materializes. Correct for all, cheap
+  // for the common case. Element reads are then index accesses and ...rest is a .slice.
+  const arr = fresh();
+  out.push(t.variableDeclaration(kind, [t.variableDeclarator(t.identifier(arr), t.conditionalExpression(
+    t.callExpression(t.memberExpression(t.identifier("Array"), t.identifier("isArray")), [A()]),
+    A(),
+    t.callExpression(t.memberExpression(t.identifier("Array"), t.identifier("from")), [A()])))]));
+  pattern.elements.forEach((el, i) => {
+    if (el == null) return;                                       // elision: const [, x] = a
+    if (t.isRestElement(el)) { bindValue(el.argument, t.callExpression(t.memberExpression(t.identifier(arr), t.identifier("slice")), [t.numericLiteral(i)]), out, fresh, kind); return; }
+    bindValue(el, t.memberExpression(t.identifier(arr), t.numericLiteral(i), true), out, fresh, kind);
+  });
+}
+
+// `const/let PATTERN = INIT`  ->  `const _t = INIT; <extractions>`. Any RHS that suspends is
+// bound to the temp first, so normalize lowers it like any other suspension.
+function desugarDestructuring(fnPath, fresh) {
+  for (let guard = 0; guard < 100000; guard++) {
+    let acted = false;
+    fnPath.traverse({ VariableDeclaration(p) {
+      if (acted) return;
+      if (t.isForStatement(p.parent) && p.parent.init === p.node) return;   // a C-style for head keeps its own init
+      if (!p.node.declarations.some((d) => !t.isIdentifier(d.id))) return;  // all bindings simple: nothing to do
+      const out = [];
+      for (const d of p.node.declarations) {
+        if (t.isIdentifier(d.id)) { out.push(t.variableDeclaration(p.node.kind, [d])); continue; }
+        const tmp = fresh();
+        out.push(t.variableDeclaration(p.node.kind, [t.variableDeclarator(t.identifier(tmp), d.init)]));
+        flattenPattern(d.id, t.identifier(tmp), out, fresh, p.node.kind);
+      }
+      p.replaceWithMultiple(out); acted = true; p.stop();
+    } });
+    if (!acted) break;
+  }
+}
+
+// for-of / for-in  ->  materialize the sequence once, then a C-style index loop the compiler
+// already lowers. for-of uses Array.from (any iterable); for-in uses __forInKeys (enumerable
+// keys, inherited included). The eager materialization is the price of migratability: a lazy
+// native iterator holds a closure/native cursor that can't be serialized and shipped anyway.
+function desugarForEach(fnPath, fresh) {
+  for (let guard = 0; guard < 100000; guard++) {
+    let acted = false;
+    const visit = (p) => {
+      if (acted) return;
+      const node = p.node, isOf = t.isForOfStatement(node);
+      if (isOf && node.await) throw new Error("stackmix: for-await-of is not supported (no async in this model)");
+      const s = fresh(), i = fresh();
+      const src = isOf ? t.callExpression(t.memberExpression(t.identifier("Array"), t.identifier("from")), [node.right])
+        : (USED_FORIN = true, t.callExpression(t.identifier("__forInKeys"), [node.right]));
+      const elem = t.memberExpression(t.identifier(s), t.identifier(i), true);   // _s[_i]
+      const bind = t.isVariableDeclaration(node.left)
+        ? t.variableDeclaration(node.left.kind, [t.variableDeclarator(node.left.declarations[0].id, elem)])   // const x / const [a,b] = _s[_i]
+        : t.expressionStatement(t.assignmentExpression("=", node.left, elem));                                // x = _s[_i]
+      const body = t.isBlockStatement(node.body) ? node.body.body : [node.body];
+      const loop = t.forStatement(
+        t.variableDeclaration("let", [t.variableDeclarator(t.identifier(i), t.numericLiteral(0))]),
+        t.binaryExpression("<", t.identifier(i), t.memberExpression(t.identifier(s), t.identifier("length"))),
+        t.assignmentExpression("=", t.identifier(i), t.binaryExpression("+", t.identifier(i), t.numericLiteral(1))),
+        t.blockStatement([bind, ...body]));
+      // A labeled `outer: for (x of xs)` must keep the label ON THE LOOP so `continue outer` still
+      // targets a loop, not the wrapping block — move it onto the inner for and replace the label node.
+      const labeled = p.parentPath.isLabeledStatement() && p.parentPath.node.body === node;
+      const inner = labeled ? t.labeledStatement(t.identifier(p.parentPath.node.label.name), loop) : loop;
+      const block = t.blockStatement([t.variableDeclaration("const", [t.variableDeclarator(t.identifier(s), src)]), inner]);
+      (labeled ? p.parentPath : p).replaceWith(block);
+      acted = true; p.stop();
+    };
+    fnPath.traverse({ ForOfStatement: visit, ForInStatement: visit });
+    if (!acted) break;
+  }
+}
+
+// Non-simple params (defaults, destructuring, rest) -> a plain arg identifier + a body prologue.
+// A default becomes `if (x === undefined) x = D` (D may itself suspend); a pattern param becomes
+// a fresh arg + `const {…} = _a` (then desugared); a rest becomes `const xs = F.args.slice(i)`.
+function desugarParams(fnPath, fresh) {
+  const node = fnPath.node;
+  if (!node.params.some((p) => !t.isIdentifier(p))) return;
+  const prologue = [];
+  node.params = node.params.map((param, i) => {
+    if (t.isIdentifier(param)) return param;
+    if (t.isRestElement(param)) {                                 // ...xs  ->  const xs = F.args.slice(i)  (xs is now a frame local)
+      const slice = t.callExpression(t.memberExpression(t.memberExpression(t.identifier("F"), t.identifier("args")), t.identifier("slice")), [t.numericLiteral(i)]);
+      if (t.isIdentifier(param.argument)) prologue.push(t.variableDeclaration("const", [t.variableDeclarator(param.argument, slice)]));
+      else { const a = fresh(); prologue.push(t.variableDeclaration("const", [t.variableDeclarator(t.identifier(a), slice)])); prologue.push(t.variableDeclaration("const", [t.variableDeclarator(param.argument, t.identifier(a))])); }
+      return null;                                                // drop from the param list
+    }
+    let target = param, def = null;
+    if (t.isAssignmentPattern(param)) { target = param.left; def = param.right; }
+    const slot = t.isIdentifier(target) ? target.name : fresh();
+    if (def) prologue.push(t.ifStatement(t.binaryExpression("===", t.identifier(slot), t.identifier("undefined")), t.expressionStatement(t.assignmentExpression("=", t.identifier(slot), def))));
+    if (!t.isIdentifier(target)) prologue.push(t.variableDeclaration("const", [t.variableDeclarator(target, t.identifier(slot))]));   // pattern param -> destructure the slot
+    return t.identifier(slot);
+  }).filter(Boolean);
+  node.body.body.unshift(...prologue);
+}
+
+function desugarBindings(fnPath) {
+  let n = 0; const fresh = () => "__b" + (n++);
+  desugarParams(fnPath, fresh);      // params first (their prologue may add destructuring / loops downstream)
+  desugarForEach(fnPath, fresh);     // then loops (a for-of binding may itself be a pattern)
+  desugarDestructuring(fnPath, fresh); // finally every pattern, incl. those the two passes above introduced
+}
+
 function lower(p) {
+  desugarBindings(p);                                             // for-of/for-in, destructuring, non-simple params -> simple forms
   if (AUTO_DEREF) insertDerefGuards(p);                           // before normalize: the guard's `L = deref(L)` is a suspension to hoist
   if (AUTO_WRITEBACK) insertWriteBacks(p);                        // after the guards (so the write-back yield isn't itself deref-guarded)
   if (TRACK_WRITES) insertDirtyBarriers(p);                       // after writeback/deref — their analyses need the unwrapped mutation target
@@ -575,9 +737,10 @@ function lower(p) {
   const locals = new Set();
   p.traverse({ VariableDeclarator(v) { if (t.isIdentifier(v.node.id)) locals.add(v.node.id.name); } });
   p.traverse({ CatchClause(c) { if (c.node.param && t.isIdentifier(c.node.param)) locals.add(c.node.param.name); } });
-  p.traverse({ CallExpression(cp) {                              // validate suspendable calls are statements
+  p.traverse({ CallExpression(cp) {                              // validate suspendable calls are statements in THIS function
     const c = cp.node.callee;
     if (!(t.isIdentifier(c) && suspSet.has(c.name))) return;
+    if (cp.getFunctionParent().node !== node) throw new Error(`stackmix: a call to suspendable function ${c.name}() inside a nested function / callback is not supported — lift it to a statement in the top-level function body (e.g. \`for (const x of xs) { const r = ${c.name}(x); }\`).`);
     const par = cp.parent;
     if (!((t.isVariableDeclarator(par) && par.init === cp.node) || (t.isExpressionStatement(par) && par.expression === cp.node))) throw new Error(`suspendable call ${c.name}(...) must be a statement, not a sub-expression`);
   } });
@@ -603,9 +766,30 @@ function lower(p) {
   return compileFn(node);
 }
 
+// A suspension is only migratable if it sits directly in a top-level function that becomes a
+// PROGRAM. Inside a nested function / callback / method it would be invoked synchronously by
+// native code (Array.map/sort, a method dispatch) that cannot yield or migrate, so reject it
+// with a precise error rather than silently miscompile. (Runs on tier calls right after the
+// allow-list rewrite; suspendable-call-in-callback is caught per-function in lower().)
+function checkNestedSuspensions(ast) {
+  traverse(ast, { YieldExpression(p) {
+    if (!isResYield(p.node)) return;
+    const fn = p.getFunctionParent();
+    if (fn && t.isFunctionDeclaration(fn.node) && t.isProgram(fn.parentPath.node)) return;
+    const nameArg = p.node.argument.arguments[1];
+    const name = t.isStringLiteral(nameArg) ? nameArg.value : "resource";
+    const where = !fn ? "top-level module code"
+      : t.isObjectMethod(fn.node) || t.isClassMethod(fn.node) ? "an object/class method"
+        : "a nested function / callback";
+    throw new Error(`stackmix: a tier call (${name}) inside ${where} is not supported — a callback runs synchronously inside native code (e.g. Array.map/sort) that cannot suspend or migrate. Lift it to a statement in a top-level function, e.g. \`for (const x of xs) { const r = ${name}(x); }\`.`);
+  } });
+}
+
 function compile(src, preamble) {
   const ast = parser.parse(src, { sourceType: "module" });
   allowlist(ast);
+  checkNestedSuspensions(ast);
+  USED_FORIN = false; USED_OBJREST = false;
   fnSites = {};
   const fnPaths = new Map();
   traverse(ast, { FunctionDeclaration(p) { if (t.isProgram(p.parent)) fnPaths.set(p.node.id.name, p); } });
@@ -625,10 +809,13 @@ function compile(src, preamble) {
     else { if (TRACK_WRITES) insertDirtyBarriers(p); pure.push(gen(p.node)); }  // a pure helper can still mutate continuation state
   }
   const head = preamble + (TRACK_WRITES ? "\n" + TRACK_PREAMBLE : "");
+  // for-of/for-in and object-rest emit a tiny pure helper — but ONLY when a source actually uses
+  // the construct, so a bundle that doesn't is byte-for-byte unchanged.
+  const helpers = (USED_FORIN ? FORIN_HELPER + "\n" : "") + (USED_OBJREST ? OBJREST_HELPER + "\n" : "");
   // --source-map: a pc->line table per program + a frameSite helper, so a migrated frame reports a
   // portable file:line. Gated, so without the flag the bundle is byte-for-byte what it was before.
   const sm = SOURCE_MAP ? `\nexport const SOURCE_FILE = ${JSON.stringify(srcFile)};\nexport const SITES = ${JSON.stringify(fnSites)};\nexport const frameSite = (f) => { const m = SITES[f.fn], ln = m && m[f.pc]; return SOURCE_FILE + ":" + (ln || "?"); };\nexport const stackSites = (stack) => stack.map(frameSite);\n` : "";
-  return head + "\n" + (pure.length ? pure.join("\n") + "\n" : "") + "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};\n" + DRIVER + sm;
+  return head + "\n" + helpers + (pure.length ? pure.join("\n") + "\n" : "") + "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};\n" + DRIVER + sm;
 }
 
 const DRIVER = `

@@ -27,6 +27,7 @@ const cases = [
   { file: "src/control-flow.mjs",   needs: ["extended control flow survives migration"] },
   { file: "test/probes/deref-liveness.mjs", needs: ["the --auto-deref liveness pass prunes redundant guards within a straight-line run and re-guards after any hop"] },
   { file: "test/probes/source-maps.mjs", needs: ["--source-map carries each frame's source position through the transform, so a migrated continuation reports a portable file:line"] },
+  { file: "test/probes/lang-coverage.mjs", needs: ["desugar and migrate correctly; un-migratable tier calls are rejected with a clear error"] },
   { file: "src/heap-probe.mjs",     needs: ["big locals stay home, fetched on deref, single-writer coherent"] },
   { file: "src/heap-live.mjs",      needs: ["the dataset stayed on the server, crossing only when the browser derefed it"] },
   { file: "src/heap-auto.mjs",      needs: ["transparent deref: ordinary member access on a handle auto-fetches"] },

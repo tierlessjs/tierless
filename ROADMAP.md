@@ -124,9 +124,17 @@ it goes next. Items are grouped, not strictly ordered; see
   the guard count on the shapes that matter (consecutive reads → one guard; a re-guard after a
   commit/suspendable-call/branch; a pure call doesn't break a run). On `heap-write` it drops a redundant
   guard.
-- **Broader language coverage in the transform.** The suspendable path covers all ordinary control flow
-  with suspensions in any position. The remaining natural extension is a suspension inside an
-  optional-chain conditional (`obj?.m(api.x())`), today a clear compile error.
+- **Broader language coverage in the transform — largely landed (`test/probes/lang-coverage.mjs`).**
+  The suspendable path covers all ordinary control flow with suspensions in any position, and now the
+  ordinary *binding* forms too: `for`/`of`/`in`, destructuring declarations (object/array/nested/default/
+  rest, with a non-array iterable normalized via an `Array.isArray(x) ? x : Array.from(x)` guard — zero
+  copy for a real array), and default/destructured/rest parameters. Each is desugared to plain frame
+  writes before lowering and proven to migrate across a JSON round-trip at every suspension. The two
+  forms that genuinely *can't* migrate are now rejected with a clear compile error instead of a silent
+  miscompile: a tier call inside a nested function / callback / comparator / method (invoked
+  synchronously by native code — `Array.map`/`sort`, a method dispatch — that can't suspend; lift it to
+  a loop), and a suspension in an optional-chain conditional (`obj?.[api.x()]` / `obj?.(api.x())`), the
+  remaining natural extension.
 - **Write-back IS a delta — landed (`openSnapshot`/`diffSnapshot`/`applySnapshot`).** A write-back and
   the oscillation delta were the same operation wearing two hats — *ship the objects that changed to a
   holder of the prior version, applied in place.* So `--auto-writeback` no longer ships the whole edited
