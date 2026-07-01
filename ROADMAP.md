@@ -124,17 +124,20 @@ it goes next. Items are grouped, not strictly ordered; see
   the guard count on the shapes that matter (consecutive reads → one guard; a re-guard after a
   commit/suspendable-call/branch; a pure call doesn't break a run). On `heap-write` it drops a redundant
   guard.
-- **Broader language coverage in the transform — largely landed (`test/probes/lang-coverage.mjs`).**
+- **Broader language coverage in the transform — landed (`test/probes/lang-coverage.mjs`).**
   The suspendable path covers all ordinary control flow with suspensions in any position, and now the
   ordinary *binding* forms too: `for`/`of`/`in`, destructuring declarations (object/array/nested/default/
   rest, with a non-array iterable normalized via an `Array.isArray(x) ? x : Array.from(x)` guard — zero
-  copy for a real array), and default/destructured/rest parameters. Each is desugared to plain frame
-  writes before lowering and proven to migrate across a JSON round-trip at every suspension. The two
-  forms that genuinely *can't* migrate are now rejected with a clear compile error instead of a silent
-  miscompile: a tier call inside a nested function / callback / comparator / method (invoked
-  synchronously by native code — `Array.map`/`sort`, a method dispatch — that can't suspend; lift it to
-  a loop), and a suspension in an optional-chain conditional (`obj?.[api.x()]` / `obj?.(api.x())`), the
-  remaining natural extension.
+  copy for a real array), default/destructured/rest parameters, and a suspension in an **optional-chain
+  conditional** (`obj?.[api.x()]` / `obj?.(api.x())` / `obj.m?.(api.x())`). The optional chain is peeled
+  into an explicit `== null` guard + temp (Babel's optional-chaining lowering, emitted as statements so
+  the suspension hoists into the non-short-circuit branch), so the tier call is skipped on short-circuit
+  and `this` is preserved — checked against a native-JS oracle for both value and call sequence. Each
+  form is desugared to plain frame writes before lowering and proven to migrate across a JSON round-trip
+  at every suspension. The one form that genuinely *can't* migrate is now rejected with a clear compile
+  error instead of a silent miscompile: a tier call inside a nested function / callback / comparator /
+  method (invoked synchronously by native code — `Array.map`/`sort`, a method dispatch — that can't
+  suspend; lift it to a loop).
 - **Write-back IS a delta — landed (`openSnapshot`/`diffSnapshot`/`applySnapshot`).** A write-back and
   the oscillation delta were the same operation wearing two hats — *ship the objects that changed to a
   holder of the prior version, applied in place.* So `--auto-writeback` no longer ships the whole edited

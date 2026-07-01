@@ -30,15 +30,15 @@
 // Control flow covered: sequence, if/else, while / for / for-of / for-in, break/continue
 // (incl. labeled), return, throw, switch, try/catch/finally (incl. return/break/continue that
 // EXITS a try, running the finally), and cross-function calls/returns. Binding forms covered:
-// destructuring declarations, default/destructured/rest parameters, and a suspension used as a
-// sub-expression — all DESUGARED to plain `F.x = expr` frame writes before lowering (see
-// desugarBindings + normalize). Lowered the way @babel/plugin-transform-regenerator lowers
-// generators, but onto an explicit serializable frame instead of closure variables (which is
-// what makes snapshot/restore possible). Genuine gaps (the compiler throws a CLEAR error rather
-// than miscompile): a tier call inside a nested function / callback / comparator / method — it
-// runs synchronously inside native code (Array.map/sort, a method dispatch) that can't suspend
-// or migrate, so lift it to a loop — and a suspension in an optional chain's conditional part
-// (a?.[susp] / a?.(susp)); lift that to a statement.
+// destructuring declarations, default/destructured/rest parameters, a suspension used as a
+// sub-expression, and a suspension in an optional chain's conditional part (a?.[susp] / a?.(susp)
+// / a.m?.(susp), short-circuit + `this` preserved) — all DESUGARED to plain `F.x = expr` frame
+// writes before lowering (see desugarBindings + desugarOptionalChain + normalize). Lowered the way
+// @babel/plugin-transform-regenerator lowers generators, but onto an explicit serializable frame
+// instead of closure variables (which is what makes snapshot/restore possible). The one genuine gap
+// (the compiler throws a CLEAR error rather than miscompile): a tier call inside a nested function /
+// callback / comparator / method — it runs synchronously inside native code (Array.map/sort, a
+// method dispatch) that can't suspend or migrate, so lift it to a loop.
 //
 // Needs the Babel toolchain to RUN (not a repo dependency, like emscripten for
 // qjs-migrate). The committed *.gen.mjs files are its output, so the demos run without
@@ -141,8 +141,8 @@ function assertSafeContext(path, stmt) {                           // safety net
     if (par.isConditionalExpression() && (par.node.consequent === cur.node || par.node.alternate === cur.node)) throw new Error("suspension in a branch of ?: is not supported");
     // optional chaining: the base (object/callee) is unconditional and may be hoisted; only the
     // conditional part — a computed access ?.[susp] or optional-call args ?.(susp) — is rejected.
-    if (par.isOptionalMemberExpression() && par.node.property === cur.node) throw new Error("suspension in an optional computed access (?.[ ]) is not supported (lift it to a statement)");
-    if (par.isOptionalCallExpression() && par.node.arguments.indexOf(cur.node) >= 0) throw new Error("suspension in optional-call arguments (?.()) is not supported (lift it to a statement)");
+    if (par.isOptionalMemberExpression() && par.node.optional && par.node.property === cur.node) throw new Error("suspension in an optional computed access (?.[ ]) is not supported (lift it to a statement)");
+    if (par.isOptionalCallExpression() && par.node.optional && par.node.arguments.indexOf(cur.node) >= 0) throw new Error("suspension in optional-call arguments (?.()) is not supported (lift it to a statement)");
     cur = par;
   }
 }
@@ -161,6 +161,63 @@ function desugarCondLog(path, name) {
   }
   path.getStatementParent().insertBefore(out);
   path.replaceWith(id());
+}
+// obj?.[api.x()] / obj?.(api.x()) / obj.m?.(api.x()) — a suspension in an optional chain's
+// CONDITIONAL region must evaluate ONLY when the chain hasn't short-circuited. Peel the chain's
+// deepest `?.` into an explicit `== null` guard + temp (Babel's optional-chaining lowering, but
+// emitted as statements so the suspension hoists into the non-short-circuit branch). `this` is
+// preserved: `obj?.m(x)` de-optionalizes only the member, so `_o.m(x)` still binds this=_o; an
+// optional call on a member `obj.m?.(x)` lowers to `_f.call(_o, x)`. Iterated to a fixpoint, so a
+// multi-`?.` chain peels one guard per pass (deepest first, its base being suspension-free).
+function outermostChain(p) {                                      // climb to the top node of p's member/call chain
+  let E = p;
+  for (;;) {
+    const par = E.parentPath;
+    if (par && (par.isMemberExpression() || par.isOptionalMemberExpression()) && par.node.object === E.node) E = par;
+    else if (par && (par.isCallExpression() || par.isOptionalCallExpression()) && par.node.callee === E.node) E = par;
+    else return E;
+  }
+}
+function chainHasOptional(E) {                                     // a real `?.` (optional=true) still present in the spine?
+  for (let cur = E;;) {
+    if ((cur.isOptionalMemberExpression() || cur.isOptionalCallExpression()) && cur.node.optional) return true;
+    if (cur.isMemberExpression() || cur.isOptionalMemberExpression()) cur = cur.get("object");
+    else if (cur.isCallExpression() || cur.isOptionalCallExpression()) cur = cur.get("callee");
+    else return false;
+  }
+}
+function desugarOptionalChain(E, name, fresh) {
+  const cst = (nm, init) => t.variableDeclaration("const", [t.variableDeclarator(t.identifier(nm), init)]);
+  const setR = (v) => t.expressionStatement(t.assignmentExpression("=", t.identifier(name), v));
+  let P = null, cur = E;                                          // deepest optional along the object/callee spine
+  for (;;) {
+    if ((cur.isOptionalMemberExpression() || cur.isOptionalCallExpression()) && cur.node.optional) P = cur;
+    if (cur.isMemberExpression() || cur.isOptionalMemberExpression()) cur = cur.get("object");
+    else if (cur.isCallExpression() || cur.isOptionalCallExpression()) cur = cur.get("callee");
+    else break;
+  }
+  const out = [t.variableDeclaration("let", [t.variableDeclarator(t.identifier(name))])];
+  let guard;
+  if (P.isOptionalCallExpression() && (P.get("callee").isMemberExpression() || P.get("callee").isOptionalMemberExpression())) {
+    const callee = P.node.callee, o = fresh(), f = fresh();       // obj.m?.(args) -> _o=obj; _f=_o.m; _f.call(_o, args)  (this=_o)
+    out.push(cst(o, callee.object), cst(f, t.memberExpression(t.identifier(o), callee.property, callee.computed)));
+    P.replaceWith(t.callExpression(t.memberExpression(t.identifier(f), t.identifier("call")), [t.identifier(o), ...P.node.arguments]));
+    guard = f;
+  } else if (P.isOptionalCallExpression()) {
+    const f = fresh();                                            // f?.(args) -> _f=f; _f(args)  (this=undefined)
+    out.push(cst(f, P.node.callee));
+    P.replaceWith(t.callExpression(t.identifier(f), P.node.arguments));
+    guard = f;
+  } else {
+    const o = fresh();                                            // obj?.prop / obj?.[key] -> _o=obj; _o.prop / _o[key]
+    out.push(cst(o, P.node.object));
+    P.replaceWith(t.memberExpression(t.identifier(o), P.node.property, P.node.computed));   // real member: no residual optional=true
+    guard = o;
+  }
+  out.push(t.ifStatement(t.binaryExpression("==", t.identifier(guard), t.nullLiteral()),
+    t.blockStatement([setR(t.identifier("undefined"))]), t.blockStatement([setR(E.node)])));
+  E.getStatementParent().insertBefore(out);
+  E.replaceWith(t.identifier(name));
 }
 function normalize(fnPath) {
   let counter = 0;
@@ -224,6 +281,14 @@ function normalize(fnPath) {
       const n = p.node;
       if (!(t.isConditionalExpression(n) || t.isLogicalExpression(n)) || !hasSuspInside(n, false)) return;
       desugarCondLog(p, fresh());
+      acted = true; p.stop();
+    } });
+    if (acted) continue;
+    fnPath.traverse({ "OptionalMemberExpression|OptionalCallExpression"(p) {   // peel an optional chain that guards a suspension
+      if (acted) return;
+      const E = outermostChain(p);
+      if (!hasSuspInside(E.node, false) || !chainHasOptional(E)) return;       // only when a real `?.` guards a suspension
+      desugarOptionalChain(E, fresh(), fresh);
       acted = true; p.stop();
     } });
     if (acted) continue;

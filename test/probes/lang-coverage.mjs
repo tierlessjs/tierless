@@ -51,7 +51,7 @@ const service = (name, args) => {
 // Drive a compiled bundle to completion. At every suspension the whole frame stack is put through
 // JSON — a stand-in for the wire — so a bundle that parked a non-serializable value (a closure, a
 // native cursor) would come back wrong. Returns the final value and the ordered resource calls.
-function drive(mod, entry, args = []) {
+function drive(mod, entry, args = [], migrate = true) {
   const calls = [];
   let stack = [{ fn: entry, pc: 0, args }];
   for (let steps = 0; steps < 100000; steps++) {
@@ -62,7 +62,7 @@ function drive(mod, entry, args = []) {
     else if (r.op === "throw") { throw r.value; }
     else if (r.op === "resource") {
       calls.push(r.name);
-      stack = JSON.parse(JSON.stringify(stack));                 // MIGRATE: the continuation is plain data
+      if (migrate) stack = JSON.parse(JSON.stringify(stack));    // MIGRATE: the continuation is plain data (skipped when a frame holds a live closure — unserializable regardless of tiering)
       stack[stack.length - 1].ret = service(r.name, r.args);
     }
   }
@@ -80,6 +80,27 @@ async function supported(label, src, entry, expect, args = []) {
 function declined(label, src, needle) {
   try { compile(src); check(`${label} (should be rejected)`, false, "compiled without error"); }
   catch (e) { const msg = (e.stderr || "").includes(needle) && (e.stderr || "").includes("not supported"); check(`${label} -> clear error`, msg, msg ? undefined : (e.stderr || "").split("\n").filter(Boolean).slice(-2).join(" ⏎ ")); }
+}
+
+// Oracle for optional-chaining: run the SAME source as plain JS with a native `api` (api.get
+// echoes its arg and records the call). The compiled+migrated result must match both the value
+// AND the exact call sequence — so a tier call correctly SKIPPED on short-circuit is proven, not
+// just the happy path, and `this`-binding is checked by the value.
+function oracle(src, entry) {
+  const calls = [];
+  const api = { get: (x) => { calls.push("api.get"); return x; } };
+  return { value: new Function("api", `${src}\nreturn ${entry}();`)(api), calls };
+}
+async function optchain(label, src, entry, migrate = true) {
+  const exp = oracle(src, entry);
+  let mod;
+  try { mod = await import(pathToFileURL(compile(src)).href); }
+  catch (e) { check(label, false, "COMPILE: " + ((e.stderr || e.message).split("\n").find((l) => l.includes("Error")) || "?")); return; }
+  try {
+    const got = drive(mod, entry, [], migrate);
+    const ok = JSON.stringify(got.value) === JSON.stringify(exp.value) && JSON.stringify(got.calls) === JSON.stringify(exp.calls);
+    check(`${label} -> ${JSON.stringify(exp.value)} calls=${JSON.stringify(exp.calls)}`, ok, ok ? undefined : `compiled ${JSON.stringify(got.value)}/${JSON.stringify(got.calls)}`);
+  } catch (e) { check(label, false, "RUNTIME: " + e.message); }
 }
 
 console.log("Probe: language coverage — non-trivial binding forms desugar and migrate; un-migratable forms are rejected\n");
@@ -106,6 +127,28 @@ await supported("object destructuring with string-literal keys + array elision",
 await supported("default parameter that suspends", "function A(x = api.get(5)){ return x + 1; } function B(){ const r = A(); return r; }", "B", 6);
 await supported("destructured parameter", "function A({ a, b }){ return a * b; } function B(){ const o = api.pair(); const r = A(o); return r; }", "B", 2);
 await supported("rest parameter", "function A(a, ...xs){ return a + xs.length; } function B(){ const r = A(api.get(9), 1, 2, 3); return r; }", "B", 12);
+
+console.log("\noptional-chain conditional suspensions (compiled result checked vs a native-JS oracle — value AND call sequence, so short-circuit skipping the tier call is verified):");
+await optchain("obj?.[api.f()] — receiver present", 'function A(){ const o = { b: 42 }; const r = o?.[api.get("b")]; return r; }', "A");
+await optchain("obj?.[api.f()] — receiver null (skip)", 'function A(){ const o = null; const r = o?.[api.get("b")]; return r; }', "A");
+// optional-CALL forms hold a callee/receiver (a function) on the frame across the suspension — a live
+// closure is unserializable regardless of tiering, so drive without the round-trip; the oracle still
+// pins value + call order + this-binding + short-circuit.
+await optchain("fn?.(api.f()) — present", "function A(){ const f = (x) => x + 1; const r = f?.(api.get(5)); return r; }", "A", false);
+await optchain("fn?.(api.f()) — null (skip)", "function A(){ const f = null; const r = f?.(api.get(5)); return r; }", "A", false);
+await optchain("obj.m?.(api.f()) — this preserved via .call", "function A(){ const o = { tag: 7, m(x){ return this.tag + x; } }; const r = o.m?.(api.get(5)); return r; }", "A", false);
+await optchain("obj?.m(api.f()) — optional member, method call", "function A(){ const o = { tag: 7, m(x){ return this.tag + x; } }; const r = o?.m(api.get(5)); return r; }", "A", false);
+await optchain("obj?.m(api.f()) — receiver null (skip)", "function A(){ const o = null; const r = o?.m(api.get(5)); return r; }", "A", false);
+await optchain("a?.b[api.f()] — suspension downstream of ?.", 'function A(){ const o = { b: { c: 3 } }; const r = o?.b[api.get("c")]; return r; }', "A");
+await optchain("a?.b[api.f()] — null (skip whole rest)", 'function A(){ const o = null; const r = o?.b[api.get("c")]; return r; }', "A");
+await optchain("a?.b?.[api.f()] — multi-?., both present", 'function A(){ const o = { b: { c: 9 } }; const r = o?.b?.[api.get("c")]; return r; }', "A");
+await optchain("a?.b?.[api.f()] — middle null (skip)", 'function A(){ const o = { b: null }; const r = o?.b?.[api.get("c")]; return r; }', "A");
+await optchain("(obj?.[api.f()]) ?? default — null coalesces", 'function A(){ const o = null; const r = o?.[api.get("x")] ?? 99; return r; }', "A");
+await optchain("optional-chain in return position", 'function A(){ const o = { b: 8 }; return o?.[api.get("b")]; }', "A");
+await optchain("optional-chain in an if-test", 'function A(){ const o = { b: 1 }; if (o?.[api.get("b")]) { return "hit"; } return "miss"; }', "A");
+await optchain("optional-chain in a while-test", 'function A(){ let n = 0; const o = { go: true }; while (o?.[api.get("go")] && n < 3) { n = n + 1; } return n; }', "A");
+await optchain("non-suspending optional chain stays native, later suspension", 'function A(){ const o = { p: 5 }; const r = o?.p; const s = api.get(r + 1); return s; }', "A");
+await optchain("optional-chain value crosses a later migration", 'function A(){ const o = { b: 5 }; const t = o?.[api.get("b")]; const u = api.get(t + 1); return u; }', "A");
 
 console.log("\nun-migratable forms (must fail with a clear compile error, not silently miscompile):");
 declined("tier call inside a .map callback", "function A(){ const out = [1,2,3].map(i => api.dbl(i)); return out[0]; }", "nested function");
