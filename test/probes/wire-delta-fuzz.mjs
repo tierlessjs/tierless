@@ -7,9 +7,9 @@
 //   4. decode robustness — truncated / garbage / corrupted / bad-magic bytes fail CLEANLY (no hang,
 //      no OOB read, no pollution), applied against a fresh session;
 //   5. prototype-pollution — encode strips a __proto__ key; the decoder skips a hostile one.
-import { makeDeltaSession, encodeDelta, applyDelta, makeTrackedSession, encodeDeltaTracked, applyDeltaTracked } from "stackmix/delta";
-import { isHandle } from "stackmix/graph";
-import { makeTier } from "stackmix/heap";
+import { makeDeltaSession, encodeDelta, applyDelta, makeTrackedSession, encodeDeltaTracked, applyDeltaTracked } from "tierless/delta";
+import { isHandle } from "tierless/graph";
+import { makeTier } from "tierless/heap";
 
 let pass = true;
 const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };
@@ -41,7 +41,7 @@ function makeGraph(rnd) {
     if (kind === 1) { const o = {}; pool.push(o); const n = rint(5); for (let i = 0; i < n; i++) { const key = pick(STRPOOL); if (key !== "__proto__") o[key] = node(d - 1); } return o; }
     if (kind === 2) { const m = new Map(); pool.push(m); const n = rint(4); for (let i = 0; i < n; i++) m.set(rnd() < 0.5 ? pick(STRPOOL) : node(d - 1), node(d - 1)); return m; }
     if (kind === 3) { const s = new Set(); pool.push(s); const n = rint(4); for (let i = 0; i < n; i++) s.add(node(d - 1)); return s; }
-    const h = { __stackmix_handle__: true, owner: "server", id: serverTier.heapPut({ blob: "x".repeat(rint(50)) }), kind: "object" }; pool.push(h); return h;  // §5 handle leaf
+    const h = { __tierless_handle__: true, owner: "server", id: serverTier.heapPut({ blob: "x".repeat(rint(50)) }), kind: "object" }; pool.push(h); return h;  // §5 handle leaf
   }
   const frames = []; const nf = 1 + rint(2);
   for (let fi = 0; fi < nf; fi++) { const fr = { fn: "F" + fi, pc: rint(20) }; const nl = rint(4); for (let i = 0; i < nl; i++) fr["loc" + i] = node(4); frames.push(fr); }

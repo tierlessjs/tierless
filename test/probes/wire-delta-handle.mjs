@@ -4,9 +4,9 @@
 // continuation with a big dataset + a small UI excises the dataset to a handle in the DELTA path, so
 // the big data never crosses (it's a leaf the delta ships once), and only the UI changes ride each
 // hop. Deref still works (the data is in the owning tier's heap); the handle is stable across a bounce.
-import { makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "stackmix/delta";
-import { isHandle } from "stackmix/graph";
-import { makeTier } from "stackmix/heap";
+import { makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "tierless/delta";
+import { isHandle } from "tierless/graph";
+import { makeTier } from "tierless/heap";
 
 let pass = true;
 const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };

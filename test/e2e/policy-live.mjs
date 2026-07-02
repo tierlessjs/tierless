@@ -13,11 +13,11 @@
 //
 // Run:  node src/policy-live.mjs
 import { createRequire } from "node:module";
-import { wsPort, makePeer } from "stackmix/transport";
-import { encodeWireBinary, decodeWireBinary } from "stackmix/wire";   // the §6 decision prices the real (binary) wire
+import { wsPort, makePeer } from "tierless/transport";
+import { encodeWireBinary, decodeWireBinary } from "tierless/wire";   // the §6 decision prices the real (binary) wire
 import { PROGRAMS } from "./policy-app.gen.mjs";
 
-const { WebSocketServer, WebSocket } = createRequire("/home/user/stackmix/")("ws");
+const { WebSocketServer, WebSocket } = createRequire(import.meta.url)("ws");
 const fmt = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB");
 let pass = true;
 const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };

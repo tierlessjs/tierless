@@ -13,9 +13,9 @@
 //     across the tier into the continuation,
 //   - a FORGED token (tampered claims break the signature) buys exactly nothing,
 //   - an oversize payload is rejected by the monitor's resource budget before running.
-import { makePump, initialStack } from "stackmix/runtime";
-import { startSidecar, makeApiExec } from "stackmix/api";
-import { encodeWireBinary, decodeWireBinary } from "stackmix/wire";
+import { makePump, initialStack } from "tierless/runtime";
+import { startSidecar, makeApiExec } from "tierless/api";
+import { encodeWireBinary, decodeWireBinary } from "tierless/wire";
 import { textOf } from "./app/render.mjs";
 import * as bundle from "./app/bundle.gen.mjs";
 

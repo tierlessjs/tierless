@@ -1,8 +1,8 @@
 {
-  "name": "stackmix-repo",
+  "name": "tierless-repo",
   "private": true,
   "type": "module",
-  "description": "Workspace root for Stackmix. The publishable packages live under packages/ (stackmix, create-stackmix); test/e2e/ and test/ prove the claims by importing the real package through its exports map.",
+  "description": "Workspace root for Tierless. The publishable packages live under packages/ (tierless, create-tierless); test/e2e/ and test/ prove the claims by importing the real package through its exports map.",
   "workspaces": [
     "packages/*"
   ],

@@ -1,4 +1,4 @@
-// How much overhead does Stackmix introduce? Two sources, isolated and measured:
+// How much overhead does Tierless introduce? Two sources, isolated and measured:
 //   A) state-machine CPU tax — the compiled while/switch machine vs the plain function,
 //      run entirely on one tier (the resource is owned locally, so NO migration: this is
 //      pure dispatch + frame-object cost, nothing else).
@@ -7,7 +7,7 @@
 //
 //   node bench/overhead.mjs
 import { PROGRAMS } from "./overhead.gen.mjs";
-import { encodeWire, decodeWire, makeTier } from "stackmix/heap";
+import { encodeWire, decodeWire, makeTier } from "tierless/heap";
 
 const SEED = 12345;
 const fmt = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB");
@@ -47,7 +47,7 @@ function nsPerCall(thunk, iters, batches = 8) {
   return best;
 }
 
-console.log("Stackmix overhead — isolated and measured\n");
+console.log("Tierless overhead — isolated and measured\n");
 
 // ============================ A) state-machine CPU tax ============================
 console.log("A) state-machine CPU tax (compiled machine vs plain function, one tier, no migration)\n");

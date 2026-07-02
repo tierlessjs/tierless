@@ -1,6 +1,6 @@
 // Example server-only functions — the trusted compute behind the api boundary. This module runs ONLY
 // in the sidecar process; the untrusted client never imports it, never sees the secret, never reaches
-// the backing store. It is also the sidecar entry point: when forked with STACKMIX_SIDECAR=1 it mints
+// the backing store. It is also the sidecar entry point: when forked with TIERLESS_SIDECAR=1 it mints
 // its own signing secret and serves the pipe (see the tail).
 //
 // The point of the examples is to show the whole authorization vocabulary in one place:
@@ -11,8 +11,8 @@
 // Every one of them is re-checked on every call against a freshly-verified principal, so it does not
 // matter how the (untrusted, possibly forged) continuation arrived at the call.
 
-import { JwtApi, PUBLIC, DENY } from "stackmix/api";
-import { sidecarMain } from "stackmix/api";
+import { JwtApi, PUBLIC, DENY } from "tierless/api";
+import { sidecarMain } from "tierless/api";
 
 // Toy backing state — stands in for whatever real resource the trusted compute talks to. It lives in
 // the sidecar's memory; the client can only reach it through an authorized fn.

@@ -16,8 +16,8 @@
 // Run:  node src/server-live.mjs   (or: npm run live)
 //       then open the printed http://localhost:PORT in a browser and click.
 import { fileURLToPath } from "node:url";
-import { serveApp } from "stackmix/server";
-import { startSidecar, makeApiExec } from "stackmix/api";
+import { serveApp } from "tierless/server";
+import { startSidecar, makeApiExec } from "tierless/api";
 import * as bundle from "./app/bundle.gen.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));   // repo root (the web root: /packages/..., /test/e2e/...)
@@ -28,7 +28,7 @@ const PAGE = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Stackmix — live two-tier React</title>
+<title>Tierless — live two-tier React</title>
 <style>
   :root { color-scheme: light dark; }
   body { font: 14px/1.5 system-ui, sans-serif; margin: 1.5rem; max-width: 720px; }
@@ -54,7 +54,7 @@ const PAGE = `<!doctype html>
 </style>
 </head>
 <body>
-  <h1>Stackmix — live two-tier React</h1>
+  <h1>Tierless — live two-tier React</h1>
   <p class="lead">Render starts on the <strong>backend client</strong>, the continuation
   crosses a real websocket into <strong>this browser</strong> to commit the DOM, and your
   click resumes it — then it migrates back for the next data call, which a
@@ -91,7 +91,7 @@ const app = await serveApp({
   },
 });
 
-console.log(`Stackmix live two-tier demo`);
+console.log(`Tierless live two-tier demo`);
 console.log(`  open  http://localhost:${app.port}  in a browser and click the dashboard.`);
 console.log(`  (api.* is serviced by the reference-monitor sidecar in its own process;`);
 console.log(`   your clicks drive the continuation across the socket)`);

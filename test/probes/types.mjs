@@ -19,29 +19,29 @@ const tsc = (files) => spawnSync(process.execPath, [join(ROOT, "node_modules/typ
 console.log("Probe: the TypeScript surface — every entry typed through the exports map\n");
 
 writeFileSync(join(dir, "ok.ts"), `
-import { makeHost, answerWith, type Bundle } from "stackmix";
-import { makePump, initialStack } from "stackmix/runtime";
-import { attachStackmix, serveApp, WS_PATH } from "stackmix/server";
-import { connect, bindActions, configureStackmix } from "stackmix/browser";
-import { useAction } from "stackmix/react";
-import stackmixPlugin from "stackmix/vite";
-import { defineApi, PUBLIC, DENY, JwtApi, startSidecar, makeApiExec, sidecarMain } from "stackmix/api";
-import { compile, analyze, DEFAULT_RESOURCES } from "stackmix/compiler";
-import { encodeWireBinary, decodeWireBinary } from "stackmix/wire";
-import { makePeer, wsPort } from "stackmix/transport";
+import { makeHost, answerWith, type Bundle } from "tierless";
+import { makePump, initialStack } from "tierless/runtime";
+import { attachTierless, serveApp, WS_PATH } from "tierless/server";
+import { connect, bindActions, configureTierless } from "tierless/browser";
+import { useAction } from "tierless/react";
+import tierlessPlugin from "tierless/vite";
+import { defineApi, PUBLIC, DENY, JwtApi, startSidecar, makeApiExec, sidecarMain } from "tierless/api";
+import { compile, analyze, DEFAULT_RESOURCES } from "tierless/compiler";
+import { encodeWireBinary, decodeWireBinary } from "tierless/wire";
+import { makePeer, wsPort } from "tierless/transport";
 
 const bundle: Bundle = { PROGRAMS: {}, __unwind: () => false };
 const pump = makePump(bundle);
 void pump(initialStack("App"), (t) => t === "server", async () => 1);
 const host = makeHost({ bundle, tier: "server", exec: () => 0 });
 void host.call;
-void answerWith; void attachStackmix; void serveApp; void WS_PATH;
+void answerWith; void attachTierless; void serveApp; void WS_PATH;
 const conn = connect({ url: "ws://x", bundle });
 void conn.call("f", [1]);
-void bindActions(bundle, { module: "m" }); void configureStackmix({});
+void bindActions(bundle, { module: "m" }); void configureTierless({});
 const a = useAction((x: number) => Promise.resolve(x + 1));
 void a.run(2); const r: boolean = a.running; void r;
-const plugin = stackmixPlugin({ api: "./api.server.mjs" });
+const plugin = tierlessPlugin({ api: "./api.server.mjs" });
 void plugin.transform("code", "id");
 const def = defineApi((api) => ({
   login: { authorize: PUBLIC, run: () => api.issue({ sub: "u" }, 60) },
@@ -59,8 +59,8 @@ const ok = tsc([join("test", ".types-fixture", "ok.ts")]);
 check("a consumer exercising every main entry type-checks under --strict", ok.status === 0, (ok.stdout || "").split("\n").slice(0, 3).join(" | "));
 
 writeFileSync(join(dir, "bad.ts"), `
-import { useAction } from "stackmix/react";
-import { defineApi, PUBLIC } from "stackmix/api";
+import { useAction } from "tierless/react";
+import { defineApi, PUBLIC } from "tierless/api";
 useAction("not a function");
 defineApi({ leak: { authorize: PUBLIC, run: () => 1, extra: true } });
 `);

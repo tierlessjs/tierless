@@ -1,6 +1,6 @@
 # Architecture
 
-How Stackmix is put together and why. For the original vision and the open
+How Tierless is put together and why. For the original vision and the open
 research questions, see [`design.md`](./design.md) (the spec).
 
 ## The model in one paragraph
@@ -17,26 +17,26 @@ moves.
 ## Repository layout
 
 ```
-packages/stackmix/  the npm package — what `npm i stackmix` delivers
+packages/tierless/  the npm package — what `npm i tierless` delivers
   src/
     transform.cjs   the compiler: plain JS -> serializable state machine (Babel; importable + CLI)
     runtime.mjs     makePump: one tier-agnostic continuation driver, generic over any bundle
     host.mjs        the session host both tiers share; server.mjs/browser.mjs assemble it
-                    (attachStackmix/serveApp on node, connect/bindActions in the page)
+                    (attachTierless/serveApp on node, connect/bindActions in the page)
     graph.mjs       identity/cycle-safe graph codec for the wire
     wire-binary.mjs the compact binary wire; wire-delta.mjs the delta wire; content.mjs
     heap.mjs        §5 distributed handle heap; fetch.mjs Heap/Channel/makeHost
     transport.mjs   WebSocket framing + RPC peer (browser-safe)
     api/            the trust boundary — the reference monitor + sidecar transport
-    vite.mjs        the Vite plugin ("use mix" modules -> monitor-backed actions)
+    vite.mjs        the Vite plugin ("use tierless" modules -> monitor-backed actions)
     react.mjs       useAction
-  bin/              the stackmix CLI
-packages/create-stackmix/  the scaffolder behind `npm create stackmix`
+  bin/              the tierless CLI
+packages/create-tierless/  the scaffolder behind `npm create tierless`
 test/               the regression runner + all proofs, importing the real package
   probes/           focused single-mechanism proofs
   e2e/              app-shaped end-to-end proofs + the demo apps they drive (Tasks, conduit,
                     the live pages, heap/policy/delta demos, the sample services)
-examples/           react-vite — Stackmix mixed into an ordinary React app
+examples/           react-vite — Tierless mixed into an ordinary React app
 docs/               this document, the design spec
 ```
 
@@ -145,7 +145,7 @@ UI ships — an 80 KB inline capture becomes 115 B (`test/probes/wire-delta-hand
 The §5 distributed heap is how the big data stays put.
 
 - **Handles.** A big local excises into its owning tier's versioned `Heap` and travels
-  as `{ __stackmix_handle__, owner, id }`. The other tier fetches it (over the same
+  as `{ __tierless_handle__, owner, id }`. The other tier fetches it (over the same
   socket) only if it dereferences the handle.
 - **Read coherence (single-master).** The owner is the master and bumps a version on
   mutation; a reader caches fetched snapshots keyed by version and re-fetches when the
@@ -162,7 +162,7 @@ The §5 distributed heap is how the big data stays put.
 
 ## The trust boundary (`test/e2e/api/`)
 
-Stackmix is a fat web-app *client* that grew too fat for the browser, so it sometimes runs in Node
+Tierless is a fat web-app *client* that grew too fat for the browser, so it sometimes runs in Node
 too. "The client" is therefore two halves — the **browser client** and the **backend client** (what
 the rest of these docs call the "server tier") — and the business trusts **neither**. Both are just
 relocated app code; a continuation arriving from either is untrusted data that can be forged, replayed,
@@ -192,7 +192,7 @@ hop to the monitor"; the pipe hop is ~free next to the network hop, so the whole
 single api round trip — the cost a traditional client→server call already pays — with the trust
 boundary where it belongs.
 
-**The interface (`packages/stackmix/src/api/api.mjs`).** A server-only function is `api.fn(name, { authorize, run })`.
+**The interface (`packages/tierless/src/api/api.mjs`).** A server-only function is `api.fn(name, { authorize, run })`.
 `authorize` is **mandatory**: exposing an endpoint and stating who may call it are the same act, so
 omitting it is a **load-time error** (thrown at registration, before the process serves a single call)
 — an unauthorized endpoint cannot ship. To mean "anyone" you say so with the `PUBLIC` sentinel; `DENY`
@@ -213,7 +213,7 @@ signature) can escalate. `test/e2e/api-pump.mjs` then runs a **real compiled con
 proven, not just the component. The monitor also enforces per-call resource budgets (`maxArgsBytes` and
 a per-principal rate window).
 
-**The monitor is the DEFAULT `api.*` path.** A Stackmix program is untrusted client code — all of it,
+**The monitor is the DEFAULT `api.*` path.** A Tierless program is untrusted client code — all of it,
 on every tier; `api.*` and `dom.*` are edges to resources owned by *other principals* (the api by the
 business, guarded by the monitor; the dom by the user, guarded by their browser). The framework is
 opinionated about the **contract** at that edge — `{ name, args, token }` in, verified principal,
@@ -236,7 +236,7 @@ Modern JS has `async`/`await` and generators — native suspension — so why no
 those? Because native async is **suspend-but-not-serialize**: a paused async or
 generator state is engine-internal; you cannot read it out as bytes and ship it to
 another process. (Same limitation as the WebAssembly stack-switching proposal — see
-design `§8`.) Stackmix reuses async *semantics* for the boundary shape (a resource
+design `§8`.) Tierless reuses async *semantics* for the boundary shape (a resource
 access is a suspension), but the *transportable* continuation is its own data
 structure — a plain frame object the compiler produces — so the prototype depends on
 no unreleased platform feature.

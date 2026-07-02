@@ -11,11 +11,11 @@
 //      across hops, and shared references within a capture stay shared.
 //   4. It is opt-in and composable — an UNregistered object still round-trips normally (identity,
 //      cycles), so content-addressing one subgraph doesn't disturb the rest of the graph.
-import { encodeGraph, decodeGraph, isHandle } from "stackmix/graph";
-import { encodeWireBinary, decodeWireBinary } from "stackmix/wire";
-import { makeTrackedSession, subForFullWire, exciseForCapture, adoptBaseline } from "stackmix/delta";
-import { makeTier } from "stackmix/heap";
-import { ContentStore, newPeerView, hashOf } from "stackmix/content";
+import { encodeGraph, decodeGraph, isHandle } from "tierless/graph";
+import { encodeWireBinary, decodeWireBinary } from "tierless/wire";
+import { makeTrackedSession, subForFullWire, exciseForCapture, adoptBaseline } from "tierless/delta";
+import { makeTier } from "tierless/heap";
+import { ContentStore, newPeerView, hashOf } from "tierless/content";
 
 const deepFreeze = (o) => { if (o && typeof o === "object" && !Object.isFrozen(o)) { Object.freeze(o); for (const k of Object.keys(o)) deepFreeze(o[k]); } return o; };
 const size = (enc) => JSON.stringify(enc).length;

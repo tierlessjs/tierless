@@ -6,15 +6,15 @@ proven (33 executable proofs, `npm test`).
 
 ## Toward a first npm release
 
-- **Publish `stackmix` + `create-stackmix`** at 0.1.0 (the packages are shaped
+- **Publish `tierless` + `create-tierless`** at 0.1.0 (the packages are shaped
   and `npm pack`-verified; the README quick start assumes the registry).
 - **TypeScript sources for mix modules.** The public API is fully typed
-  (hand-written `.d.ts`, tsc-verified in `npm test`), but `"use mix"` files are
+  (hand-written `.d.ts`, tsc-verified in `npm test`), but `"use tierless"` files are
   plain JS: the transform needs @babel/parser's TS plugin + type stripping.
-  Richer generated types than `(...args: any[]) => any` from `stackmix types`.
+  Richer generated types than `(...args: any[]) => any` from `tierless types`.
 - **Production build story for the Vite plugin.** Dev is first-class (the
   plugin hosts the endpoint on Vite's own server); prod works today by mounting
-  `attachStackmix` with a CLI-built machine (see `docs/production.md` and
+  `attachTierless` with a CLI-built machine (see `docs/production.md` and
   `examples/react-vite/server.prod.mjs`) but should become a build-time output.
 
 ## Runtime hardening
@@ -32,11 +32,11 @@ proven (33 executable proofs, `npm test`).
 ## From the literature (Stip.js, Fission — see design.md §9)
 
 - **Per-tier dead-code shake.** Stip.js's slicer ships each tier only the code it can
-  run; Stackmix ships every machine to both tiers. The suspendability analysis already
+  run; Tierless ships every machine to both tiers. The suspendability analysis already
   knows which functions can only execute server-side in practice — a bundle shake using
   it would cut the browser payload with no semantic change.
 - **Label-driven excision (Fission-grade confidentiality from existing parts).** Mark an
-  api result `confidential` and compose two things Stackmix already has: the value is
+  api result `confidential` and compose two things Tierless already has: the value is
   FORCED to cross as a §5 handle (never inlined into a continuation headed client-ward),
   and every deref of it is a monitored, per-principal call. Data-flow confidentiality for
   tier-crossing values without whole-program interposition.

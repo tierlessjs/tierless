@@ -1,8 +1,8 @@
 // The PRODUCTION shape of the dev endpoint the Vite plugin hosts — the same contract,
 // mounted yourself. Build first:
 //
-//   npx vite build                                                   # client (plugin transforms "use mix" at build time)
-//   npx stackmix build src/actions.mjs actions.server.gen.mjs --bare # the server copy of the same machine
+//   npx vite build                                                   # client (plugin transforms "use tierless" at build time)
+//   npx tierless build src/actions.mjs actions.server.gen.mjs --bare # the server copy of the same machine
 //   node server.prod.mjs                                             # serve dist/ + the session endpoint
 //
 // The browser bundle's actions carry their build-time module id; the resolver below
@@ -11,8 +11,8 @@
 // auth in front of this in a real deployment (see docs/production.md).
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { serveApp } from "stackmix/server";
-import { startSidecar, makeApiExec } from "stackmix/api";
+import { serveApp } from "tierless/server";
+import { startSidecar, makeApiExec } from "tierless/api";
 import * as actions from "./actions.server.gen.mjs";
 
 const apiService = startSidecar(new URL("./src/api.server.mjs", import.meta.url));

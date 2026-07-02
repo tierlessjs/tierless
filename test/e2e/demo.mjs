@@ -1,5 +1,5 @@
 /* global document, window */
-// Stackmix end-to-end: ONE continuation, compiled from a plain function (app/App.src.js,
+// Tierless end-to-end: ONE continuation, compiled from a plain function (app/App.src.js,
 // no hand-written state machine) by transform.cjs, flows across two real tiers over a
 // real websocket:
 //
@@ -13,12 +13,12 @@
 //
 // Run:  node src/demo.mjs        (needs Playwright Chromium)
 import { createRequire } from "node:module";
-import { serveApp } from "stackmix/server";
-import { connect } from "stackmix/browser";
-import { startSidecar, makeApiExec } from "stackmix/api";
+import { serveApp } from "tierless/server";
+import { connect } from "tierless/browser";
+import { startSidecar, makeApiExec } from "tierless/api";
 import { vdomToHtml, shell } from "./dom.mjs";
 import * as bundle from "./app/bundle.gen.mjs";
-import { WS_PATH } from "stackmix/server";
+import { WS_PATH } from "tierless/server";
 
 const { chromium } = createRequire(process.env.PLAYWRIGHT_REQUIRE || "/opt/node22/lib/node_modules/")("playwright");
 const trace = [];

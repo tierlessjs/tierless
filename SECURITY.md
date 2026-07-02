@@ -1,11 +1,11 @@
 # Security
 
-Stackmix is **research-stage (pre-1.0)** and not yet intended to run untrusted
+Tierless is **research-stage (pre-1.0)** and not yet intended to run untrusted
 code across a trust boundary in production.
 
 ## Model
 
-A Stackmix program is untrusted client code — all of it, on every tier. A
+A Tierless program is untrusted client code — all of it, on every tier. A
 migrating continuation can be forged or replayed, so authority never lives in
 the program: every `api.*` call is mediated by a **reference monitor** in its
 own OS process that re-authorizes each call against a principal it verifies

@@ -1,10 +1,10 @@
-// The TRUSTED side — a separate application the Stackmix program can only call. The Vite
+// The TRUSTED side — a separate application the Tierless program can only call. The Vite
 // plugin forks this module as a reference-monitor sidecar (its own OS process): the dev
 // server holds a pipe and a session token, never this code, never the data. Every call is
 // re-authorized here against the verified principal — a forged/replayed continuation
 // reaching placeOrder without a valid token is denied, whatever path it took.
-import { defineApi, PUBLIC } from "stackmix/api";
-import { sidecarMain } from "stackmix/api";
+import { defineApi, PUBLIC } from "tierless/api";
+import { sidecarMain } from "tierless/api";
 
 const QUOTES = { AAPL: 227.5, MSFT: 415.2, NVDA: 138.8, AMZN: 205.7, GOOG: 178.4 };
 const ORDERS = [];

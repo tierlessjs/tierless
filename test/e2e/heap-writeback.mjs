@@ -7,7 +7,7 @@
 // rejected as a conflict and the writer must refetch (now seeing the winner's change),
 // re-apply, and retry. No lost updates — the CAS guarantee applied to a fetched §5
 // snapshot. Reuses the project's Heap/Channel and the identity/cycle-safe graph codec.
-import { makeTier, Channel, writeBack, commitWrite } from "stackmix/heap";
+import { makeTier, Channel, writeBack, commitWrite } from "tierless/heap";
 
 let pass = true;
 const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };

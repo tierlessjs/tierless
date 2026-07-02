@@ -1,4 +1,4 @@
-// The Tasks app's trusted service — the OTHER side of the boundary. The Stackmix program
+// The Tasks app's trusted service — the OTHER side of the boundary. The Tierless program
 // (src/app/) is untrusted client code on every tier; this module is a separate application
 // that happens to be co-developed in the same repo. It owns the backing store (the
 // file-backed task DB) and exposes it ONLY through the reference monitor: the demos fork it
@@ -15,8 +15,8 @@
 // tests and trusted single-tenant deployments, not the default path (api-live.mjs proves
 // the default path is the monitor).
 import fs from "node:fs";
-import { defineApi, PUBLIC } from "stackmix/api";
-import { sidecarMain } from "stackmix/api";
+import { defineApi, PUBLIC } from "tierless/api";
+import { sidecarMain } from "tierless/api";
 
 // ---- the backing store (trusted state; lives with the service, not the client) ----------
 const FILE = new URL("./tasks-db.json", import.meta.url);

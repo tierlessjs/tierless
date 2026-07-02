@@ -1,4 +1,4 @@
-// Probe: the stackmix CLI — the four subcommands against real fixtures.
+// Probe: the tierless CLI — the four subcommands against real fixtures.
 //   build    compiles a module to a runnable bundle (custom resources included)
 //   explain  prints the suspendability analysis with real line numbers
 //   api      pre-ship check: lists the authorized surface; an endpoint with NO authorize
@@ -10,14 +10,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const BIN = fileURLToPath(new URL("../../packages/stackmix/bin/stackmix.mjs", import.meta.url));
-const SRC = fileURLToPath(new URL("../../packages/stackmix/src/", import.meta.url));
+const BIN = fileURLToPath(new URL("../../packages/tierless/bin/tierless.mjs", import.meta.url));
+const SRC = fileURLToPath(new URL("../../packages/tierless/src/", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "cli-"));
 let pass = 0, fail = 0;
 const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : `  (got ${JSON.stringify(got)})`}`); } };
 const run = (args) => spawnSync(process.execPath, [BIN, ...args], { encoding: "utf8" });
 
-console.log("Probe: the stackmix CLI — build / explain / api / types\n");
+console.log("Probe: the tierless CLI — build / explain / api / types\n");
 
 // ---- build (with a custom resource) ---------------------------------------------------
 writeFileSync(join(dir, "flow.js"), 'function go(x) { const r = db.get(x); return r + 1; }\n');
@@ -29,7 +29,7 @@ const req = mod.PROGRAMS.go(F);
 check("the built machine runs and pins the custom namespace", req.op === "resource" && req.name === "db.get" && req.tier === "server", req);
 
 // ---- explain ----------------------------------------------------------------------------
-writeFileSync(join(dir, "acts.js"), '"use mix";\nexport function fetchAll(xs) { let s = 0; for (const x of xs) { const r = api.get(x); s = s + r; } return s; }\nfunction helper(x) { const r = api.get(x); return r; }\nexport function via(x) { const r = helper(x); return r; }\nexport function pure(x) { return x + 1; }\n');
+writeFileSync(join(dir, "acts.js"), '"use tierless";\nexport function fetchAll(xs) { let s = 0; for (const x of xs) { const r = api.get(x); s = s + r; } return s; }\nfunction helper(x) { const r = api.get(x); return r; }\nexport function via(x) { const r = helper(x); return r; }\nexport function pure(x) { return x + 1; }\n');
 const e = run(["explain", join(dir, "acts.js")]);
 check("explain marks compiled fns with their resource touches", e.status === 0 && e.stdout.includes("fetchAll (exported) — compiled") && e.stdout.includes("api.get → server tier"), e.stdout.split("\n")[2]);
 check("explain shows real line numbers", /line 2: api\.get/.test(e.stdout), (e.stdout.match(/line \d+/) || [])[0]);
@@ -63,10 +63,10 @@ check("types writes a file when given a target", tyOut.status === 0 && tyOut.std
 
 // ---- usage ------------------------------------------------------------------------------
 const u = run([]);
-check("bare invocation prints usage and exits 0", u.status === 0 && (u.stdout + u.stderr).includes("stackmix build"), u.status);
+check("bare invocation prints usage and exits 0", u.status === 0 && (u.stdout + u.stderr).includes("tierless build"), u.status);
 
 const ok = fail === 0;
 console.log(ok
-  ? `\nOK — the stackmix CLI works end to end: build (custom resources), explain (the analysis made visible), api (load-time pre-ship check), types (the api surface as a declaration) (${pass} checks)`
+  ? `\nOK — the tierless CLI works end to end: build (custom resources), explain (the analysis made visible), api (load-time pre-ship check), types (the api surface as a declaration) (${pass} checks)`
   : `\nFAILED (${pass} passed, ${fail} failed)`);
 process.exit(ok ? 0 : 1);

@@ -10,8 +10,8 @@
 // write-tracked delta works on unannotated source because the compiler emits the version bump.
 import { PROGRAMS, __setDirtySink } from "../../test/e2e/track-app.gen.mjs";
 import { makeDeltaSession, encodeDelta, applyDelta,
-  makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "stackmix/delta";
-import { encodeWireBinary } from "stackmix/wire";
+  makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "tierless/delta";
+import { encodeWireBinary } from "tierless/wire";
 
 let pass = true;
 const check = (name, cond) => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}`); pass = pass && cond; };

@@ -17,9 +17,9 @@
 //      object dirty when mutated) ships the SAME set and reconstructs IDENTICALLY to the O(reachable)
 //      rescan encoder, which is the oracle. Same wire, same store, lower cost.
 import { makeDeltaSession, encodeDelta, applyDelta,
-  makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "stackmix/delta";
-import { encodeWireBinary } from "stackmix/wire";
-import { makeTier } from "stackmix/heap";
+  makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "tierless/delta";
+import { encodeWireBinary } from "tierless/wire";
+import { makeTier } from "tierless/heap";
 
 let pass = true;
 const check = (name, cond) => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}`); pass = pass && cond; };
@@ -98,11 +98,11 @@ console.log("Probe: the delta wire codec — fidelity, locality, bidirectional b
 {
   const A = makeDeltaSession("server"), B = makeDeltaSession("browser");
   const tier = makeTier("server");
-  const handle = { __stackmix_handle__: true, owner: tier.id, id: tier.heapPut({ huge: "x".repeat(5000) }), kind: "object" };
+  const handle = { __tierless_handle__: true, owner: tier.id, id: tier.heapPut({ huge: "x".repeat(5000) }), kind: "object" };
   const stack = [{ fn: "App", pc: 2, view: { title: "page" }, data: handle }];
   const { stack: s } = applyDelta(B, encodeDelta(A, stack, null).bytes);
   check("§5 handle travels as a leaf (stays an opaque handle on the peer, not dereferenced/copied)",
-    s[0].data.__stackmix_handle__ === true && s[0].data.owner === tier.id && s[0].data.id === handle.id && s[0].data.kind === "object");
+    s[0].data.__tierless_handle__ === true && s[0].data.owner === tier.id && s[0].data.id === handle.id && s[0].data.kind === "object");
 }
 
 // ---------------------------------------------------------------------------------------------

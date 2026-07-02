@@ -1,10 +1,16 @@
 # Changelog
 
-Stackmix is pre-1.0; this file records what has LANDED, in the same
+- **Renamed: Stackmix → Tierless** (pre-first-publish, so nothing external breaks).
+  Package `tierless`, scaffolder `create-tierless`, CLI `tierless`, directive
+  `"use tierless"` (`"use mix"` remains accepted as an alias), endpoint
+  `/__tierless`, GitHub `tierlessjs/tierless`. The name is the category word the
+  tierless-programming literature coined (see design.md §9).
+
+Tierless is pre-1.0; this file records what has LANDED, in the same
 claim-plus-proof voice the roadmap used while these were in flight. Every entry
 is backed by an executable proof in `npm test` (33 proofs) or `npm run bench`.
 
-- **Binary wire format — done (`packages/stackmix/src/wire-binary.mjs`).** 1-byte type tags + LEB128
+- **Binary wire format — done (`packages/tierless/src/wire-binary.mjs`).** 1-byte type tags + LEB128
   varints (instead of `{"k":"r","id":N}`), a **string-intern table**, a **shape table**
   so same-shaped records emit their keys once, and a **typed-array fast path** (homogeneous
   numeric arrays pack with no per-element tag — varint deltas or `Float64`, ~18× on an int
@@ -19,7 +25,7 @@ is backed by an executable proof in `npm test` (33 proofs) or `npm run bench`.
   frame, and the §6 policy prices the real binary bytes; `encodeWire` (JSON) is kept only as
   a readable debug serialization. The remaining wire-adjacent work is below: delta capture
   and content-addressing.
-- **Incremental / delta capture — done (`packages/stackmix/src/wire-delta.mjs`).** The oscillation case
+- **Incremental / delta capture — done (`packages/tierless/src/wire-delta.mjs`).** The oscillation case
   (a session that crosses many times) re-ships a near-identical continuation each hop.
   Each tier keeps a replicated, stably-identified object store; a capture ships only the
   objects whose **shallow content version** changed (children referenced by id, so a deep
@@ -90,7 +96,7 @@ is backed by an executable proof in `npm test` (33 proofs) or `npm run bench`.
   now runs the **whole composition over a real socket** — a continuation bounces server↔browser carrying a 124 KB
   catalog that excises to a §5 handle (4.9 KB total wire vs 124 KB inline), ships `min(delta, full)` each crossing,
   and the browser derefs the catalog over the same socket — all on plain `--track-writes` source, in `npm test`.
-- **Content-addressed subgraphs — done (`packages/stackmix/src/content.mjs`).** Some subgraphs are immutable — code,
+- **Content-addressed subgraphs — done (`packages/tierless/src/content.mjs`).** Some subgraphs are immutable — code,
   class shapes, config — so they need not travel as bytes more than once. The producer registers an
   immutable root (naming it by a content hash); the codec ships it inline the first time and ships just
   the hash on every later hop, and the receiver resolves the hash to the copy it cached — identity by
@@ -160,20 +166,20 @@ is backed by an executable proof in `npm test` (33 proofs) or `npm run bench`.
 
 ## Ergonomics
 
-- **Mix-in DX — landed.** The framework is an npm package with a real surface (`stackmix`,
+- **Mix-in DX — landed.** The framework is an npm package with a real surface (`tierless`,
   `/api`, `/server`, `/browser`, `/react`, `/vite`, `/compiler`; the Babel toolchain is a real
-  dependency; `bin: stackmix`). The copy-pasted pump/wire/peer loops collapsed into a session
-  host (`makeHost`, `attachStackmix` — mountable on any http server — `serveApp`, `connect`),
-  which is also what enables **actions**: a `"use mix"` module's exported functions become
+  dependency; `bin: tierless`). The copy-pasted pump/wire/peer loops collapsed into a session
+  host (`makeHost`, `attachTierless` — mountable on any http server — `serveApp`, `connect`),
+  which is also what enables **actions**: a `"use tierless"` module's exported functions become
   plain calls from an existing app that run as migratable continuations — the api-heavy
   stretch executing on the server in one round trip through the reference monitor
-  (`stackmix/vite` + `useAction`; `examples/react-vite` is the proof, validated with a real
+  (`tierless/vite` + `useAction`; `examples/react-vite` is the proof, validated with a real
   `vite build` and a Chromium-clicked `vite dev` run). The allow-list is configurable
   (`--resource=ns:tier` / opts.resources), a service is one `defineApi` literal +
-  `sidecarMain` tail call, `npm create stackmix` scaffolds a working two-tier app (proven by
-  a probe that builds, boots, and drives it), and `stackmix explain` makes the compiler's
+  `sidecarMain` tail call, `npm create tierless` scaffolds a working two-tier app (proven by
+  a probe that builds, boots, and drives it), and `tierless explain` makes the compiler's
   suspendability analysis inspectable. Remaining ergonomics threads: a production build story
-  for the Vite plugin (today: dev-first; mount `attachStackmix` yourself with the built
+  for the Vite plugin (today: dev-first; mount `attachTierless` yourself with the built
   module), TypeScript sources for mix modules, and richer generated types than
   `(...args: any[]) => any`.
 
@@ -194,7 +200,7 @@ is backed by an executable proof in `npm test` (33 proofs) or `npm run bench`.
 
 ## Security & the trust boundary
 
-- **The api as an external reference monitor — landed (`test/e2e/api/`).** The right axis: Stackmix's
+- **The api as an external reference monitor — landed (`test/e2e/api/`).** The right axis: Tierless's
   client is a fat web app that sometimes runs in Node, so BOTH halves — the browser client and the
   backend client (the "server" tier) — are untrusted. Authority therefore lives outside them, in the
   **api**: a small, stateless reference monitor in its own OS process, reached over a local pipe
@@ -216,7 +222,7 @@ is backed by an executable proof in `npm test` (33 proofs) or `npm run bench`.
   start. The monitor now also enforces per-call resource budgets (`maxArgsBytes`) and a per-principal
   rate window.
 - **The monitor as the DEFAULT `api.*` path — landed (`test/e2e/api-live.mjs`, `test/e2e/api/tasks-fns.mjs`).**
-  The model, stated plainly: a Stackmix program is untrusted client code — all of it, on every tier —
+  The model, stated plainly: a Tierless program is untrusted client code — all of it, on every tier —
   and `api.*`/`dom.*` are edges to resources owned by other principals. The framework is opinionated
   about the *contract* at the api edge (`{ name, args, token }`, verified principal, mandatory
   `authorize`, default-deny, a denial thrown into the continuation and catchable across tiers —

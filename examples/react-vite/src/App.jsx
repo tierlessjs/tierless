@@ -1,9 +1,9 @@
-// An ordinary React app — React owns the rendering, exactly as before Stackmix arrived.
+// An ordinary React app — React owns the rendering, exactly as before Tierless arrived.
 // The one new thing: `rebalance` is a mix ACTION (src/actions.mjs). The click calls it
 // like a local function; underneath, the continuation runs its api-heavy loop on the
 // server through the reference monitor and comes back with the result.
 import { useState } from "react";
-import { useAction } from "stackmix/react";
+import { useAction } from "tierless/react";
 import { rebalance, quote, fmtUsd } from "./actions.mjs";
 
 const START = [
@@ -18,7 +18,7 @@ export default function App() {
 
   return (
     <main style={{ font: "15px/1.5 system-ui", maxWidth: 640, margin: "2rem auto" }}>
-      <h1>Portfolio — Stackmix actions in a React app</h1>
+      <h1>Portfolio — Tierless actions in a React app</h1>
       <p style={{ color: "#666" }}>
         “Rebalance” is one plain function in <code>actions.mjs</code>: a loop of
         <code> api.getQuote</code> calls, a decision, a loop of <code>api.placeOrder</code> calls.

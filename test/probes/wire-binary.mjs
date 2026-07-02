@@ -2,9 +2,9 @@
 // object identity, cycles, non-enumerable + symbol-keyed properties, Map/Set, BigInt,
 // undefined, and §5 handles — and be smaller. The byte format is new; the graph semantics
 // are the proven encodeGraph/decodeGraph underneath.
-import { encodeWireBinary, decodeWireBinary } from "stackmix/wire";
-import { encodeWire, makeTier } from "stackmix/heap";
-import { isHandle } from "stackmix/graph";
+import { encodeWireBinary, decodeWireBinary } from "tierless/wire";
+import { encodeWire, makeTier } from "tierless/heap";
+import { isHandle } from "tierless/graph";
 
 const te = new TextEncoder();
 let pass = true;

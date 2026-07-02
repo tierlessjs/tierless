@@ -1,14 +1,14 @@
-# Contributing to Stackmix
+# Contributing to Tierless
 
-Thanks for your interest. Stackmix is a research-stage framework, and the most
+Thanks for your interest. Tierless is a research-stage framework, and the most
 valuable contributions right now are sharp test cases, language-fidelity bug
 reports, and improvements to the items on the [roadmap](./ROADMAP.md).
 
 ## Getting started
 
 ```bash
-git clone https://github.com/bfulton/stackmix
-cd stackmix
+git clone https://github.com/tierlessjs/tierless
+cd tierless
 npm install
 npm test        # runs every demo + probe headless and asserts the headline claims
 ```
@@ -33,15 +33,15 @@ behavior, add a proof and wire it into `test/run.mjs`.
 
 ## Working with the compiler
 
-The compiler (`packages/stackmix/src/transform.cjs`) lowers a plain `*.src.js` function into a generated
+The compiler (`packages/tierless/src/transform.cjs`) lowers a plain `*.src.js` function into a generated
 `*.gen.mjs` state machine. The generated bundles are **committed** so `npm test` runs
 without a build step. Regenerating them needs the Babel toolchain (not a runtime
 dependency):
 
 ```bash
 npm i -D @babel/parser@8 @babel/traverse@8 @babel/generator@8 @babel/types@8
-npx stackmix build test/e2e/app/App.src.js test/e2e/app/bundle.gen.mjs
-npx stackmix build test/e2e/heap-write.src.js test/e2e/heap-write.gen.mjs --bare --auto-deref --auto-writeback
+npx tierless build test/e2e/app/App.src.js test/e2e/app/bundle.gen.mjs
+npx tierless build test/e2e/heap-write.src.js test/e2e/heap-write.gen.mjs --bare --auto-deref --auto-writeback
 ```
 
 If you change a `*.src.js` input or the compiler, regenerate and commit the matching
@@ -61,11 +61,11 @@ If you change a `*.src.js` input or the compiler, regenerate and commit the matc
 
 | You want to change... | Edit... |
 |---|---|
-| the compiler (plain JS → state machine) | `packages/stackmix/src/transform.cjs` |
-| the pump / wire envelope | `packages/stackmix/src/runtime.mjs` |
-| the graph/wire codec | `packages/stackmix/src/graph.mjs` |
-| the §5 heap, write-back, §6 policy | `packages/stackmix/src/heap.mjs`, `packages/stackmix/src/fetch.mjs` |
-| the WebSocket transport | `packages/stackmix/src/transport.mjs` |
+| the compiler (plain JS → state machine) | `packages/tierless/src/transform.cjs` |
+| the pump / wire envelope | `packages/tierless/src/runtime.mjs` |
+| the graph/wire codec | `packages/tierless/src/graph.mjs` |
+| the §5 heap, write-back, §6 policy | `packages/tierless/src/heap.mjs`, `packages/tierless/src/fetch.mjs` |
+| the WebSocket transport | `packages/tierless/src/transport.mjs` |
 | the demo app | `test/e2e/app/` |
 | the browser tier | `test/e2e/public/` |
 | a proof / regression case | `test/e2e/*.mjs` + `test/run.mjs` |

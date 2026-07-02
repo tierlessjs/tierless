@@ -16,8 +16,8 @@
 //
 //   node bench/delta.mjs
 import { makeDeltaSession, encodeDelta, applyDelta,
-  makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "stackmix/delta";
-import { encodeWireBinary } from "stackmix/wire";
+  makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "tierless/delta";
+import { encodeWireBinary } from "tierless/wire";
 
 const fmt = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(2) + " MB");
 const sum = (a) => a.reduce((x, y) => x + y, 0);

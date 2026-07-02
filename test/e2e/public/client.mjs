@@ -8,7 +8,7 @@
 // locals, pinned to neither tier — it just rides the socket back and forth.
 //
 // Imports resolve over HTTP because the server serves the repo root as the web root.
-import { connect } from "/packages/stackmix/src/browser.mjs";
+import { connect } from "/packages/tierless/src/browser.mjs";
 import * as bundle from "/test/e2e/app/bundle.gen.mjs";
 
 const root = document.getElementById("root");

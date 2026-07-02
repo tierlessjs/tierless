@@ -1,15 +1,15 @@
 # Production notes — the honesty list
 
-Stackmix is research-stage (0.1). This page says exactly what IS and ISN'T solved for
+Tierless is research-stage (0.1). This page says exactly what IS and ISN'T solved for
 deployment, so nothing here surprises you in an afternoon of testing.
 
 ## What works today
 
 - **Prod serving shape (actions mode).** The Vite plugin is dev-first, but production is
   the same contract mounted yourself: build the client with Vite as usual (the plugin
-  transforms `"use mix"` modules at build time), compile the server copy of the actions
-  with `npx stackmix build src/actions.mjs actions.server.gen.mjs --bare`, and mount
-  `attachStackmix(yourHttpServer, { bundle, session })` — see
+  transforms `"use tierless"` modules at build time), compile the server copy of the actions
+  with `npx tierless build src/actions.mjs actions.server.gen.mjs --bare`, and mount
+  `attachTierless(yourHttpServer, { bundle, session })` — see
   [`examples/react-vite/server.prod.mjs`](../examples/react-vite/server.prod.mjs).
   The browser and server machines are identical because the same compiler emitted both.
 - **The trust boundary.** Run the api service as a sidecar (`startSidecar`) or any
@@ -33,7 +33,7 @@ deployment, so nothing here surprises you in an afternoon of testing.
   deployments provision a shared secret (pass it to `def.create(secret)` yourself) or
   subclass `Api.verify` onto your identity provider (OIDC/JWKS is the same shape).
 - **TLS.** Terminate `wss://` in front (nginx/ALB/etc.); the endpoint is a plain
-  websocket at `WS_PATH` (`/__stackmix`).
+  websocket at `WS_PATH` (`/__tierless`).
 - **Resource budgets are a floor, not a WAF.** `maxArgsBytes` + rate windows bound one
   class of abuse; put the endpoint behind your normal edge protections.
 

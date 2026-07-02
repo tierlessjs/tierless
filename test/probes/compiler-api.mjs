@@ -2,7 +2,7 @@
 // the allow-list is configurable (opts.resources / --resource=ns:tier), and a real module
 // shape compiles: `export function` becomes a named PROGRAM (the actions surface), imports
 // and top-level state are preserved, pure exported helpers stay exported. This is the
-// surface the Vite plugin and the stackmix CLI build on.
+// surface the Vite plugin and the tierless CLI build on.
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { writeFileSync, mkdtempSync } from "node:fs";
@@ -11,8 +11,8 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
-const { compile, analyze, DEFAULT_RESOURCES } = require("../../packages/stackmix/src/transform.cjs");
-const TX = fileURLToPath(new URL("../../packages/stackmix/src/transform.cjs", import.meta.url));
+const { compile, analyze, DEFAULT_RESOURCES } = require("../../packages/tierless/src/transform.cjs");
+const TX = fileURLToPath(new URL("../../packages/tierless/src/transform.cjs", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "capi-"));
 
 let pass = 0, fail = 0;
@@ -33,8 +33,8 @@ const drive = (mod, entry, args, exec) => {
 
 console.log("Probe: the compiler as a library — compile()/analyze(), configurable resources, module shapes\n");
 
-// ---- a real "use mix" module: exports, imports, top-level state, a custom resource ----
-const SRC = `"use mix";
+// ---- a real "use tierless" module: exports, imports, top-level state, a custom resource ----
+const SRC = `"use tierless";
 import { helper } from "./helper.mjs";
 const RATE = 3;
 export function quote(x) { const q = db.lookup(x); return helper(q) * RATE; }
@@ -59,7 +59,7 @@ check("the compiled module runs: import + top-level const + custom resource all 
 const o = drive(mod, "outer", [5], (r) => r.args[0] * 2);
 check("an exported fn calling a private suspendable helper pushes a sub-frame", o === 11, o);
 
-// ---- analyze(): the suspendability report (what `stackmix explain` prints) -------------
+// ---- analyze(): the suspendability report (what `tierless explain` prints) -------------
 const rep = analyze(SRC, { resources: { db: "server" } });
 const by = Object.fromEntries(rep.functions.map((f) => [f.name, f]));
 check("analyze marks direct resource touches", by.quote.suspendable && by.quote.direct && by.quote.suspensions.some((s) => s.name === "db.lookup" && s.tier === "server"));

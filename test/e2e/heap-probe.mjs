@@ -5,7 +5,7 @@
 // a §5 handle — the wire ships the small projection, not the dataset — and the other tier
 // fetches the dataset only if it derefs the handle, coherently (single-writer + version-
 // invalidated cache). Reuses the project's Heap/Channel/makeHost and graph codec.
-import { makeTier, encodeWire, decodeWire, wireHandles, Channel, makeHost } from "stackmix/heap";
+import { makeTier, encodeWire, decodeWire, wireHandles, Channel, makeHost } from "tierless/heap";
 
 const fmt = (n) => (n < 1024 ? n + " B" : n < 1024 * 1024 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB");
 let pass = true;
@@ -40,7 +40,7 @@ const got = decodeWire(handleWire);
 check("decoded frame keeps fn/pc and the small locals", got.stack[0].fn === "App" && got.stack[0].pc === 17 && got.stack[0].filter === "all");
 check("decoded summary survived intact", got.stack[0].summary.count === 1500 && got.request.args[0].top === rows[0].title);
 const handle = got.stack[0].dataset;
-check("dataset arrived as a §5 handle, not a copy", handle && handle.__stackmix_handle__ === true && handle.owner === "server");
+check("dataset arrived as a §5 handle, not a copy", handle && handle.__tierless_handle__ === true && handle.owner === "server");
 
 // --- deref on the browser: fetch from the server, identity/cycle-safe ---------------
 const channel = new Channel({ server, browser });

@@ -8,8 +8,8 @@
 // tier. Same continuation, three principals — authority is enforced at the boundary, never inferred from
 // how control flow arrived.
 import { PROGRAMS, __unwind } from "./api-pump-app.gen.mjs";
-import { startSidecar, makeApiExec } from "stackmix/api";
-import { encodeGraph, decodeGraph } from "stackmix/graph";
+import { startSidecar, makeApiExec } from "tierless/api";
+import { encodeGraph, decodeGraph } from "tierless/graph";
 
 const wire = (stack) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([stack]))))[0];   // serialize the continuation at each hop (proves migration)
 

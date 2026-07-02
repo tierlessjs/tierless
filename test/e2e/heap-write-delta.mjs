@@ -6,8 +6,8 @@
 // operation). Granularity is per-FIELD/element: a changed array ships a splice patch (the touched
 // indices + length), a Map/Set ship their added/removed entries, an object ships its changed keys — so
 // even a changed container's UNCHANGED slots stay home, not just every unchanged object.
-import { openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot } from "stackmix/delta";
-import { encodeGraph, decodeGraph } from "stackmix/graph";
+import { openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot } from "tierless/delta";
+import { encodeGraph, decodeGraph } from "tierless/graph";
 
 const fetchCopy = (v) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([v]))))[0];   // a detached snapshot, as Channel.fetch makes one
 const fmt = (n) => (n < 1024 ? n + " B" : (n / 1024).toFixed(1) + " KB");

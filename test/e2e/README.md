@@ -1,4 +1,4 @@
-# Stackmix — the live two-tier walkthrough
+# Tierless — the live two-tier walkthrough
 
 This is the framework end to end: a single codebase, written as if it ran in one place,
 that **runs fluidly across a browser tier and a server tier**, using a serialized
@@ -177,8 +177,8 @@ hooks. `api.*` and `commit()` look like ordinary calls.
 | `transform.cjs` | the allow-list + state-machine compiler (App.src.js → bundle.gen.mjs) |
 | `app/bundle.gen.mjs` | **generated** continuation bundle (committed; demo runs without Babel) |
 | `runtime.mjs` | `makePump(bundle)` — the tier-agnostic continuation driver, generic over any compiled bundle |
-| `host.mjs`, `server.mjs`, `browser.mjs` | the assembled hosts: the shared session core (start/answer/call), `attachStackmix`/`serveApp` (node), `connect`/`bindActions` (browser) |
-| `vite.mjs`, `react.mjs` | mix into an existing app: the Vite plugin ("use mix" → actions) and the `useAction` hook |
+| `host.mjs`, `server.mjs`, `browser.mjs` | the assembled hosts: the shared session core (start/answer/call), `attachTierless`/`serveApp` (node), `connect`/`bindActions` (browser) |
+| `vite.mjs`, `react.mjs` | mix into an existing app: the Vite plugin ("use tierless" → actions) and the `useAction` hook |
 | `dom.mjs` | vdom → real HTML with `data-ev` event tokens (used by `demo.mjs`) |
 | `demo.mjs` | scripted two-tier run: `ws` server tier ↔ Node+Playwright Chromium tier |
 | `server-live.mjs` | the live page server: http static + `ws`, drives the continuation |
@@ -221,10 +221,10 @@ Regenerating the bundles needs the Babel toolchain (not a runtime dependency):
 
 ```sh
 npm i -D @babel/parser@8 @babel/traverse@8 @babel/generator@8 @babel/types@8
-node packages/stackmix/src/transform.cjs test/e2e/app/App.src.js test/e2e/app/bundle.gen.mjs
-node packages/stackmix/src/transform.cjs test/e2e/cf-fixtures.src.js test/e2e/cf-fixtures.gen.mjs --bare
-node packages/stackmix/src/transform.cjs test/e2e/policy-app.src.js test/e2e/policy-app.gen.mjs --bare
-node packages/stackmix/src/transform.cjs test/e2e/heap-write.src.js test/e2e/heap-write.gen.mjs --bare --auto-deref --auto-writeback
+node packages/tierless/src/transform.cjs test/e2e/app/App.src.js test/e2e/app/bundle.gen.mjs
+node packages/tierless/src/transform.cjs test/e2e/cf-fixtures.src.js test/e2e/cf-fixtures.gen.mjs --bare
+node packages/tierless/src/transform.cjs test/e2e/policy-app.src.js test/e2e/policy-app.gen.mjs --bare
+node packages/tierless/src/transform.cjs test/e2e/heap-write.src.js test/e2e/heap-write.gen.mjs --bare --auto-deref --auto-writeback
 ```
 
 ## Caveats / not-yet

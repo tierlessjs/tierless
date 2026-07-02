@@ -2,7 +2,7 @@
 // hooks against the real machinery with only Vite's surface faked (an httpServer + an
 // ssrLoadModule that imports the transformed file):
 //
-//   transform   a "use mix" module compiles; exported suspendable fns become bound
+//   transform   a "use tierless" module compiles; exported suspendable fns become bound
 //               actions, pure exports pass through, non-mix files are untouched;
 //   configureServer + the emitted module, END TO END: the page-side action call crosses
 //               a real socket to the endpoint on the (fake) Vite server, the SAME
@@ -14,11 +14,11 @@ import { writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import stackmix from "stackmix/vite";
-import { configureStackmix } from "stackmix/browser";
-import { WS_PATH } from "stackmix/server";
+import tierless from "tierless/vite";
+import { configureTierless } from "tierless/browser";
+import { WS_PATH } from "tierless/server";
 
-const SRC_DIR = fileURLToPath(new URL("../../packages/stackmix/src/", import.meta.url));
+const SRC_DIR = fileURLToPath(new URL("../../packages/tierless/src/", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "vite-"));
 let pass = 0, fail = 0;
 const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : `  (got ${JSON.stringify(got)})`}`); } };
@@ -35,8 +35,8 @@ export const def = defineApi((api) => ({
 sidecarMain(def);
 `);
 
-// ---- fixture: the app's "use mix" actions module ---------------------------------------
-const ACTIONS = `"use mix";
+// ---- fixture: the app's "use tierless" actions module ---------------------------------------
+const ACTIONS = `"use tierless";
 export function rebalance(syms) {
   const orders = [];
   for (const s of syms) {
@@ -49,7 +49,7 @@ export function fmt(x) { return "[" + x + "]"; }
 `;
 const actionsId = join(dir, "actions.mjs");
 
-const makePlugin = (opts) => stackmix({
+const makePlugin = (opts) => tierless({
   api: "api.server.mjs",
   runtime: pathToFileURL(join(SRC_DIR, "browser.mjs")).href,      // resolvable without node_modules
   ...opts,
@@ -76,7 +76,7 @@ writeFileSync(actionsId, out.code);
 // ---- end to end: page-side call -> vite endpoint -> ssr module -> sidecar --------------
 {
   const { httpServer, port } = await fakeVite(plugin);
-  configureStackmix({ url: `ws://localhost:${port}${WS_PATH}` });
+  configureTierless({ url: `ws://localhost:${port}${WS_PATH}` });
   const mod = await import(pathToFileURL(actionsId).href);
   check("the emitted module's pure export runs in place", mod.fmt("x") === "[x]");
   check("__bundle exposes the machine for the server side", !!(mod.__bundle && mod.__bundle.PROGRAMS.rebalance));
@@ -92,7 +92,7 @@ writeFileSync(actionsId, out.code);
 {
   const anon = makePlugin({});                                     // no login: anonymous socket
   const { httpServer, port } = await fakeVite(anon);
-  configureStackmix({ url: `ws://localhost:${port}${WS_PATH}` });
+  configureTierless({ url: `ws://localhost:${port}${WS_PATH}` });
   const mod = await import(pathToFileURL(actionsId).href + "?anon");   // fresh module instance, same file
   const err = await mod.rebalance(["abc"]).then(() => null, (e) => String((e && e.message) || e));
   check("an anonymous action's write is denied at the monitor and rejects the call", err === "denied", err);
@@ -101,6 +101,6 @@ writeFileSync(actionsId, out.code);
 
 const ok = fail === 0;
 console.log(ok
-  ? `\nOK — the Vite plugin turns a "use mix" module into monitor-backed actions: transform + dev-server endpoint + ssr-loaded machine + sidecar authorization, end to end (${pass} checks)`
+  ? `\nOK — the Vite plugin turns a "use tierless" module into monitor-backed actions: transform + dev-server endpoint + ssr-loaded machine + sidecar authorization, end to end (${pass} checks)`
   : `\nFAILED (${pass} passed, ${fail} failed)`);
 process.exit(ok ? 0 : 1);

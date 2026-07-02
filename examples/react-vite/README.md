@@ -1,11 +1,11 @@
-# Stackmix ⨯ React + Vite
+# Tierless ⨯ React + Vite
 
-An ordinary React app with Stackmix **mixed in** — three files carry the whole integration:
+An ordinary React app with Tierless **mixed in** — three files carry the whole integration:
 
 | file | what |
 | --- | --- |
-| `vite.config.mjs` | `stackmix({ api: "./src/api.server.mjs" })` next to `react()` — that's the setup |
-| `src/actions.mjs` | starts with `"use mix"`: its exported functions become **actions** — plain calls from React that run as migratable continuations, the api-heavy stretch executing on the server in one round trip |
+| `vite.config.mjs` | `tierless({ api: "./src/api.server.mjs" })` next to `react()` — that's the setup |
+| `src/actions.mjs` | starts with `"use tierless"`: its exported functions become **actions** — plain calls from React that run as migratable continuations, the api-heavy stretch executing on the server in one round trip |
 | `src/api.server.mjs` | the **trusted service** (`defineApi` + `sidecarMain`): the plugin forks it as a reference-monitor sidecar in its own process; every `api.*` call is authorized there against the session's verified principal |
 
 The React side is one hook:
@@ -33,5 +33,5 @@ What to notice:
   Delete the `login:` line in `vite.config.mjs` and the buy/sell click shows a live denial:
   reads still work (they're `PUBLIC`), the order placement is refused by the monitor.
 - Production shape: build the actions module with the same plugin, then mount
-  `attachStackmix(yourHttpServer, { bundle, session })` from `stackmix/server` — the dev
+  `attachTierless(yourHttpServer, { bundle, session })` from `tierless/server` — the dev
   endpoint the plugin hosts is exactly that call.

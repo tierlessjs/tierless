@@ -42,14 +42,14 @@ F.total = digest(F.rows); // server-side: touches the big data
         F.pc = 9; break;
       case 11:
         F.pc = 10; return { op: "resource", tier: "server", name: "api.getRows", args: [] };
-      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in Report");
+      default: throw new RangeError("tierless: invalid pc " + F.pc + " in Report");
     }
   }
 };
 
 // A §5 handle — a big local that stayed on its owning tier (see ../heap.mjs). With
 // --auto-deref the machine guards reads of remotable locals with this check.
-export const isHandle = (x) => x !== null && typeof x === "object" && x.__stackmix_handle__ === true;
+export const isHandle = (x) => x !== null && typeof x === "object" && x.__tierless_handle__ === true;
 // Exception dispatch over the serializable handler stack F.__h. Returns the pc of the
 // catch/finally to enter, or null if the throw escapes this frame. Called from the
 // machine (for `throw`) and from the runtime (when a migrated resource throws).

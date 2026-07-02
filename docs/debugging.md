@@ -1,4 +1,4 @@
-# Debugging a Stackmix app
+# Debugging a Tierless app
 
 Your code compiles into `while (true) switch (F.pc)` machines, so a raw stack trace
 points into generated code. These are the tools that map everything back to *your* source.
@@ -6,8 +6,8 @@ points into generated code. These are the tools that map everything back to *you
 ## "Which of my functions became machines, and why?"
 
 ```bash
-npx stackmix explain src/actions.mjs           # human report
-npx stackmix explain src/actions.mjs --json    # machine-readable (for tooling/agents)
+npx tierless explain src/actions.mjs           # human report
+npx tierless explain src/actions.mjs --json    # machine-readable (for tooling/agents)
 ```
 
 Per function: compiled or pure, *why* (direct resource touches vs. calls into suspendable

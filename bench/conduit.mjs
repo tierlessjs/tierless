@@ -1,15 +1,15 @@
-// RealWorld / Conduit, combined into one Stackmix program — measured against the stock
+// RealWorld / Conduit, combined into one Tierless program — measured against the stock
 // REST split it replaces. Only the orchestration (bench/conduit.src.js) changed; the backend
 // service functions and the rendered fields are RealWorld's.
 //
 // Honest latency model: independent requests PARALLELIZE (a real client fires them at once,
 // ~1 round-trip wave per CONC connections); a DEPENDENT chain cannot (one round trip per
-// step). That distinction is the whole story — Stackmix's robust latency win is the round
+// step). That distinction is the whole story — Tierless's robust latency win is the round
 // trips you can't parallelize away.
 //
 //   node bench/conduit.mjs
 import { PROGRAMS } from "./conduit.gen.mjs";
-import { encodeWire, decodeWire, wireHandles, makeTier } from "stackmix/heap";
+import { encodeWire, decodeWire, wireHandles, makeTier } from "tierless/heap";
 
 const fmt = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(2) + " MB");
 const jsonBytes = (o) => Buffer.byteLength(JSON.stringify(o));
@@ -65,7 +65,7 @@ const apiExec = (req) => {
 };
 
 // --- the server-tier pump: runs api.* inline, stops (migrates) at commit -----------------
-function runStackmix(fn, args) {
+function runTierless(fn, args) {
   const stack = [{ fn, pc: 0, args }];
   for (;;) {
     const top = stack[stack.length - 1];
@@ -93,7 +93,7 @@ function serdeUs(res) {
 const RTT_MS = 50, BW_BPS = 12e6, CONC = 6;                             // 50 ms RTT, 12 Mbps, 6 concurrent connections
 const wall = (rt, bytes, dependent) => (dependent ? rt : Math.ceil(rt / CONC)) * RTT_MS + (bytes * 8 / BW_BPS) * 1000;
 
-console.log("RealWorld / Conduit — one combined Stackmix program vs the stock REST split");
+console.log("RealWorld / Conduit — one combined Tierless program vs the stock REST split");
 console.log(`(${ARTICLES.length} articles w/ full bodies; RTT ${RTT_MS} ms, ${BW_BPS / 1e6} Mbps, ${CONC} parallel connections; uncompressed)`);
 
 function row(label, rt, bytes, wall_) {
@@ -103,49 +103,49 @@ function row(label, rt, bytes, wall_) {
 // === A: home feed — over-fetch (REST's 2 requests are independent -> parallel) ===
 {
   const rb = jsonBytes({ tags: TAGS }) + jsonBytes({ articles: getArticles({ limit: 10 }), articlesCount: ARTICLES.length });
-  const res = runStackmix("homeFeed", [10]); const sb = deliveredBytes(res);
+  const res = runTierless("homeFeed", [10]); const sb = deliveredBytes(res);
   console.log("\nA) home feed — render 10 previews; stock GET /articles drags all 10 FULL bodies");
   console.log(row("REST (2 parallel)", 2, rb, wall(2, rb, false)));
-  console.log(row("Stackmix (1 migrate)", 1, sb, wall(1, sb, false)));
+  console.log(row("Tierless (1 migrate)", 1, sb, wall(1, sb, false)));
   console.log(`   => ${(rb / sb).toFixed(1)}x less data, ${(wall(2, rb, false) / wall(1, sb, false)).toFixed(1)}x faster — a BYTES win; bodies stay home (${bodiesHome(res)} §5 handle), +${serdeUs(res).toFixed(0)} µs serialize`);
 }
 
 // === B: favorited-by-followed — independent fan-out (parallelizable) ===
 {
   let rb = 0, rt = 0; for (const u of FOLLOWING) { rb += jsonBytes({ articles: getArticles({ favorited: u }), articlesCount: 0 }); rt++; }
-  const res = runStackmix("favoritedByFollowed", [ME]); const sb = deliveredBytes(res);
+  const res = runTierless("favoritedByFollowed", [ME]); const sb = deliveredBytes(res);
   console.log("\nB) articles favorited by the 10 people I follow — REST fans out 1 request/user (independent -> parallel)");
   console.log(row(`REST (${rt} parallel)`, rt, rb, wall(rt, rb, false)));
-  console.log(row("Stackmix (1 migrate)", 1, sb, wall(1, sb, false)));
+  console.log(row("Tierless (1 migrate)", 1, sb, wall(1, sb, false)));
   console.log(`   => ${(rb / sb).toFixed(1)}x less data, ${rt}->1 requests, ${(wall(rt, rb, false) / wall(1, sb, false)).toFixed(1)}x faster — bytes + request-count win`);
 }
 
 // === C: dependent drill-down — CANNOT parallelize; the win scales with depth ===
 console.log("\nC) a DEPENDENT chain — each step needs the previous article's link, so REST pays one");
-console.log("   round trip PER STEP (no parallelism possible). This is Stackmix's robust latency win.");
-console.log("        depth      REST              Stackmix          speedup");
+console.log("   round trip PER STEP (no parallelism possible). This is Tierless's robust latency win.");
+console.log("        depth      REST              Tierless          speedup");
 for (const depth of [2, 5, 10, 20]) {
   let rb = 0; let slug = "article-0";
   for (let i = 0; i < depth; i++) { rb += jsonBytes({ article: BY_SLUG.get(slug) }); slug = BY_SLUG.get(slug).relatedSlug; }
-  const res = runStackmix("drilldown", [depth]); const sb = deliveredBytes(res);
+  const res = runTierless("drilldown", [depth]); const sb = deliveredBytes(res);
   const rW = wall(depth, rb, true), sW = wall(1, sb, false);
   console.log(`   ${String(depth).padStart(8)}   ${(String(depth) + " rt / " + rW.toFixed(0) + " ms").padEnd(16)}  ${("1 rt / " + sW.toFixed(0) + " ms").padEnd(16)}  ${(rW / sW).toFixed(1)}x faster`);
 }
 
-// === D: a single article page — nothing to project; Stackmix's codec overhead makes it a wash/loss ===
+// === D: a single article page — nothing to project; Tierless's codec overhead makes it a wash/loss ===
 {
   const slug = "article-7";
   const rb = jsonBytes({ article: BY_SLUG.get(slug) }) + jsonBytes({ comments: COMMENTS.get(slug) });
-  const res = runStackmix("articlePage", [slug]); const sb = deliveredBytes(res);
+  const res = runTierless("articlePage", [slug]); const sb = deliveredBytes(res);
   console.log("\nD) a single article page — the body IS rendered and comments are independent: the stock");
   console.log("   API already serves it in ~1 parallel round trip, with nothing to project away.");
   console.log(row("REST (2 parallel)", 2, rb, wall(2, rb, false)));
-  console.log(row("Stackmix (1 migrate)", 1, sb, wall(1, sb, false)));
+  console.log(row("Tierless (1 migrate)", 1, sb, wall(1, sb, false)));
   const faster = wall(2, rb, false) / wall(1, sb, false);
-  console.log(`   => ${faster >= 1 ? faster.toFixed(2) + "x faster" : (1 / faster).toFixed(2) + "x SLOWER"}; nothing to save here — Stackmix just pays its verbose-codec overhead (+${serdeUs(res).toFixed(0)} µs).`);
+  console.log(`   => ${faster >= 1 ? faster.toFixed(2) + "x faster" : (1 / faster).toFixed(2) + "x SLOWER"}; nothing to save here — Tierless just pays its verbose-codec overhead (+${serdeUs(res).toFixed(0)} µs).`);
 }
 
-console.log("\nThe lesson: Stackmix wins (1) BYTES, by not over-fetching (A, B), and (2) LATENCY only for");
+console.log("\nThe lesson: Tierless wins (1) BYTES, by not over-fetching (A, B), and (2) LATENCY only for");
 console.log("round trips you can't parallelize away — DEPENDENT chains (C), where the win grows with depth.");
 console.log("For well-composed, fully-used responses (D) it's a wash or slight loss (codec overhead). The");
 console.log("overhead it adds is always tens of µs. Use it where the API over-fetches or forces waterfalls.");

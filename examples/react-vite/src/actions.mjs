@@ -1,6 +1,6 @@
-"use mix";
+"use tierless";
 // The tier-fluid part of the app. Ordinary JavaScript — no async, no fetch, no RPC
-// plumbing — but because this module says "use mix", Stackmix compiles each exported
+// plumbing — but because this module says "use tierless", Tierless compiles each exported
 // function into a migratable continuation: it STARTS as a call from the page, and the
 // moment it touches api.* it is running on the server, next to the service — the whole
 // multi-call workflow in ONE round trip instead of one per api call. Loop state (prices,

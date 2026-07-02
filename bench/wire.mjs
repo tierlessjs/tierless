@@ -1,11 +1,11 @@
-// Binary wire vs JSON wire — bytes and CPU on representative Stackmix continuations.
+// Binary wire vs JSON wire — bytes and CPU on representative Tierless continuations.
 // The shape table + string interning are the levers: an N-record feed pays its keys once,
 // not N times. Honest counterweight: it's a JS codec vs the engine's native JSON, so we
 // report encode+decode time too — the win is bytes-on-the-wire, not CPU.
 //
 //   node bench/wire.mjs
-import { encodeWire, decodeWire } from "stackmix/heap";
-import { encodeWireBinary, decodeWireBinary } from "stackmix/wire";
+import { encodeWire, decodeWire } from "tierless/heap";
+import { encodeWireBinary, decodeWireBinary } from "tierless/wire";
 
 const te = new TextEncoder();
 const fmt = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(2) + " MB");
@@ -36,11 +36,11 @@ const comments = Array.from({ length: 5 }, (_, i) => ({ id: "c" + i, body: "Grea
 const pageStack = [{ fn: "Page", pc: 1, payload: { article, comments }, args: [] }];
 show("article page: 1 article + 5 comments", pageStack);
 
-// The Conduit scenario-D question: does binary bring Stackmix's wire under REST's PLAIN JSON?
+// The Conduit scenario-D question: does binary bring Tierless's wire under REST's PLAIN JSON?
 const restPlain = te.encode(JSON.stringify({ article })).length + te.encode(JSON.stringify({ comments })).length;
 const sxBinary = encodeWireBinary(pageStack, REQ, {}).length;
 console.log(`\n   Scenario-D check — article page vs REST's plain JSON responses:`);
-console.log(`     REST plain JSON ${fmt(restPlain)}   vs   Stackmix binary wire ${fmt(sxBinary)}  =>  ${sxBinary <= restPlain ? "binary is now <= REST (D flips to a wash/win)" : "still " + (sxBinary / restPlain).toFixed(2) + "x of REST"}`);
+console.log(`     REST plain JSON ${fmt(restPlain)}   vs   Tierless binary wire ${fmt(sxBinary)}  =>  ${sxBinary <= restPlain ? "binary is now <= REST (D flips to a wash/win)" : "still " + (sxBinary / restPlain).toFixed(2) + "x of REST"}`);
 
 console.log("\nThe shape table pays each record's keys once; interning de-dupes repeated strings. Bytes");
 console.log("drop several-fold on record-heavy payloads. CPU is higher than native JSON (a JS codec),");

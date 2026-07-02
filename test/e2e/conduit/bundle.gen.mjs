@@ -20,7 +20,7 @@ export const PROGRAMS = {
         F.pc = 4; break;
       case 6:
         F.pc = 5; return { op: "resource", tier: "server", name: "api.getTags", args: [] };
-      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in loadHome");
+      default: throw new RangeError("tierless: invalid pc " + F.pc + " in loadHome");
     }
   },
   loadArticle(F) {
@@ -41,7 +41,7 @@ export const PROGRAMS = {
         F.pc = 4; break;
       case 6:
         F.pc = 5; return { op: "resource", tier: "server", name: "api.getArticle", args: [F.args[0]] };
-      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in loadArticle");
+      default: throw new RangeError("tierless: invalid pc " + F.pc + " in loadArticle");
     }
   },
   App(F) {
@@ -187,14 +187,14 @@ F.draft = { title: F.ev.title, body: F.ev.body, tags: F.ev.tags };
       case 54:
         F.route = "home";
         F.pc = 53; break;
-      default: throw new RangeError("stackmix: invalid pc " + F.pc + " in App");
+      default: throw new RangeError("tierless: invalid pc " + F.pc + " in App");
     }
   }
 };
 
 // A §5 handle — a big local that stayed on its owning tier (see ../heap.mjs). With
 // --auto-deref the machine guards reads of remotable locals with this check.
-export const isHandle = (x) => x !== null && typeof x === "object" && x.__stackmix_handle__ === true;
+export const isHandle = (x) => x !== null && typeof x === "object" && x.__tierless_handle__ === true;
 // Exception dispatch over the serializable handler stack F.__h. Returns the pc of the
 // catch/finally to enter, or null if the throw escapes this frame. Called from the
 // machine (for `throw`) and from the runtime (when a migrated resource throws).

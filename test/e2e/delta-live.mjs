@@ -10,15 +10,15 @@
 //
 // Run:  node src/delta-live.mjs
 import { createRequire } from "node:module";
-import { wsPort, makePeer } from "stackmix/transport";
-import { initialStack } from "stackmix/runtime";
-import { encodeWireBinary, decodeWireBinary } from "stackmix/wire";
-import { encodeGraph, decodeGraph, isHandle } from "stackmix/graph";
-import { makeTier } from "stackmix/heap";
-import { makeTrackedSession, planDelta, applyDeltaTracked, adoptBaseline, exciseForCapture, subForFullWire, touch } from "stackmix/delta";
+import { wsPort, makePeer } from "tierless/transport";
+import { initialStack } from "tierless/runtime";
+import { encodeWireBinary, decodeWireBinary } from "tierless/wire";
+import { encodeGraph, decodeGraph, isHandle } from "tierless/graph";
+import { makeTier } from "tierless/heap";
+import { makeTrackedSession, planDelta, applyDeltaTracked, adoptBaseline, exciseForCapture, subForFullWire, touch } from "tierless/delta";
 import { PROGRAMS, __setDirtySink } from "./delta-app.gen.mjs";
 
-const { WebSocketServer, WebSocket } = createRequire("/home/user/stackmix/")("ws");
+const { WebSocketServer, WebSocket } = createRequire(import.meta.url)("ws");
 const fmt = (n) => (n < 1024 ? n + " B" : (n / 1024).toFixed(1) + " KB");
 const THRESH = 8192;
 let pass = true;

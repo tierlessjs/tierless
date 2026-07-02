@@ -60,7 +60,7 @@ function drilldown(depth) {
 
 // Scenario D — a single article page. The body IS rendered and the comments are independent
 // of the article, so the stock API serves it in ~one parallel round trip with nothing to
-// project away. Stackmix has no over-fetch to remove here — it just pays its codec overhead.
+// project away. Tierless has no over-fetch to remove here — it just pays its codec overhead.
 function articlePage(slug) {
   const article = api.getArticle(slug);
   const comments = api.getComments(slug);

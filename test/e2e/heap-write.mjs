@@ -6,7 +6,7 @@
 // prove a browser-side WRITE lands on the owner, coherently. (The same coherence layer rides
 // the live ws socket in heap-live.mjs; here we isolate the compiler's auto-writeback.)
 import { PROGRAMS } from "./heap-write.gen.mjs";
-import { makeTier, encodeWire, decodeWire, wireHandles, Channel, makeCoherentHost } from "stackmix/heap";
+import { makeTier, encodeWire, decodeWire, wireHandles, Channel, makeCoherentHost } from "tierless/heap";
 
 const body = "markdown body. ".repeat(40);
 const ROWS = Array.from({ length: 1500 }, (_, i) => ({ id: i, title: "Article " + i, score: i % 100, body }));

@@ -1,10 +1,10 @@
-# Stackmix
+# Tierless
 
-[![CI](https://github.com/bfulton/stackmix/actions/workflows/ci.yml/badge.svg)](https://github.com/bfulton/stackmix/actions/workflows/ci.yml)
+[![CI](https://github.com/tierlessjs/tierless/actions/workflows/ci.yml/badge.svg)](https://github.com/tierlessjs/tierless/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](./package.json)
 
-**Your page makes 8 API calls to render one view. Stackmix runs that whole
+**Your page makes 8 API calls to render one view. Tierless runs that whole
 workflow server-side in ONE round trip — without you writing the endpoint.**
 
 You write the workflow as one plain JavaScript function: loops, `try/catch`, ordinary
@@ -30,15 +30,15 @@ executable proof in `npm test`):
 
 **When NOT to use it (yet):** you need production hardening today (this is a
 research-stage 0.1 — see the status note); your workflows are single-call CRUD (a plain
-fetch is already one round trip; Stackmix buys you nothing); your hot loops must run
+fetch is already one round trip; Tierless buys you nothing); your hot loops must run
 inside suspendable functions (factor them into pure helpers or keep them out); you need
-TypeScript *sources* for mix modules (the public API is fully typed, but `"use mix"`
+TypeScript *sources* for mix modules (the public API is fully typed, but `"use tierless"`
 files are plain JS for now); or you need websocket reconnection/resume across dropped
 connections (not built yet — see [`docs/production.md`](./docs/production.md)).
 
 > **Status: research-stage.** The mechanism is proven end to end — a React-style app
 > renders on the server, migrates into real headless Chromium to commit the DOM,
-> takes a real click, and migrates back — but the API is pre-1.0 and Stackmix is not
+> takes a real click, and migrates back — but the API is pre-1.0 and Tierless is not
 > yet meant to run untrusted code across a trust boundary in production. Every headline
 > claim is an executable assertion: clone and `npm test` (33 proofs). See
 > [`ROADMAP.md`](./ROADMAP.md), [`CHANGELOG.md`](./CHANGELOG.md),
@@ -77,8 +77,8 @@ connections (not built yet — see [`docs/production.md`](./docs/production.md))
 ## Quick start
 
 > **Not yet published to npm.** Until the first release lands on the registry, install
-> from git: `npm i github:bfulton/stackmix#path:packages/stackmix` — or clone and use
-> `"stackmix": "file:../stackmix/packages/stackmix"`. The commands below show the
+> from git: `npm i github:tierlessjs/tierless#path:packages/tierless` — or clone and use
+> `"tierless": "file:../tierless/packages/tierless"`. The commands below show the
 > post-publish shape.
 
 **Mix into an existing app** (Vite/React shown; the plugin is framework-agnostic — see
@@ -86,15 +86,15 @@ connections (not built yet — see [`docs/production.md`](./docs/production.md))
 
 ```js
 // vite.config.mjs
-import stackmix from "stackmix/vite";
-export default { plugins: [react(), stackmix({ api: "./src/api.server.mjs" })] };
+import tierless from "tierless/vite";
+export default { plugins: [react(), tierless({ api: "./src/api.server.mjs" })] };
 ```
 
 ```js
-// src/actions.mjs — "use mix" makes exported functions ACTIONS: plain calls from the
+// src/actions.mjs — "use tierless" makes exported functions ACTIONS: plain calls from the
 // page that run as migratable continuations, the api-heavy stretch executing on the
 // server in ONE round trip, every call authorized by the reference monitor.
-"use mix";
+"use tierless";
 export function rebalance(holdings) {
   const orders = [];
   for (const h of holdings) {
@@ -106,31 +106,31 @@ export function rebalance(holdings) {
 ```
 
 ```jsx
-const plan = useAction(rebalance);               // stackmix/react
+const plan = useAction(rebalance);               // tierless/react
 <button onClick={() => plan.run(holdings)} disabled={plan.running}>Rebalance</button>
 ```
 
 **Start fresh** — a running two-tier app in under a minute:
 
 ```bash
-npm create stackmix@latest my-app
+npm create tierless@latest my-app
 cd my-app && npm install && npm run dev
 ```
 
 **Prove the claims** (this repo):
 
 ```bash
-git clone https://github.com/bfulton/stackmix
-cd stackmix
+git clone https://github.com/tierlessjs/tierless
+cd tierless
 npm install
 npm test          # runs every demo + probe headless and asserts the headline claims
 npm run live      # the human-clickable two-tier page — open the printed URL and click
 ```
 
-`npx stackmix explain src/actions.mjs` prints the compiler's analysis — which functions
-become migratable machines and why, with every suspension point; `npx stackmix api
+`npx tierless explain src/actions.mjs` prints the compiler's analysis — which functions
+become migratable machines and why, with every suspension point; `npx tierless api
 api.server.mjs` pre-ship-checks a service (an endpoint without `authorize` fails at load
-time); `npx stackmix types api.server.mjs` emits the `declare const api` surface.
+time); `npx tierless types api.server.mjs` emits the `declare const api` surface.
 
 ## The developer's code
 
@@ -182,9 +182,9 @@ and finishes in the browser the instant the vdom touches the real DOM.
 | `test/e2e/delta-live.mjs` | over a real socket a continuation that bounces server↔browser each hop ships `min(delta, full)` — a compiler-tracked delta on warm hops, a full binary frame on the cold hop — reconstructing exactly and computing the right result |
 | `test/probes/host.mjs` | the assembled host (`serveApp`/`connect`): client-started **actions** run out on the server in one hop, bounce back mid-flight at a browser resource, and interleave concurrently on one socket (the host is stateless — all state rides in the continuation); the server-started full-tierless mode completes over the same endpoint |
 | `test/probes/compiler-api.mjs` | the compiler as an importable library: configurable resource namespaces (`db.*` → server, from opts or `--resource`), module-shaped input (`export function` → a named PROGRAM, imports/state preserved), and the `analyze()` suspendability report |
-| `test/probes/define-api.mjs`, `test/probes/cli.mjs` | `defineApi` keeps the monitor's load-time mandate (no authorize → fails at create), and the `stackmix` CLI works end to end: `build`, `explain` (the analysis made visible), `api` (pre-ship check), `types` |
-| `test/probes/vite-plugin.mjs` | the Vite plugin, headless: a `"use mix"` module becomes monitor-backed actions — transform + dev-server endpoint + ssr-loaded machine + sidecar authorization, with a loginless write denied. Verified for real too: `npm install` + `vite build` succeed in `examples/react-vite`, and a live `vite dev` + Chromium run clicks Rebalance and renders monitor-authorized orders |
-| `test/probes/create-app.mjs` | `create-stackmix` scaffolds a WORKING app: built with the real bin, booted (api sidecar forked), and driven live — seeded render, authorized write with the principal attached, a blank write denied at the monitor and caught by the app's `try/catch` across the tier |
+| `test/probes/define-api.mjs`, `test/probes/cli.mjs` | `defineApi` keeps the monitor's load-time mandate (no authorize → fails at create), and the `tierless` CLI works end to end: `build`, `explain` (the analysis made visible), `api` (pre-ship check), `types` |
+| `test/probes/vite-plugin.mjs` | the Vite plugin, headless: a `"use tierless"` module becomes monitor-backed actions — transform + dev-server endpoint + ssr-loaded machine + sidecar authorization, with a loginless write denied. Verified for real too: `npm install` + `vite build` succeed in `examples/react-vite`, and a live `vite dev` + Chromium run clicks Rebalance and renders monitor-authorized orders |
+| `test/probes/create-app.mjs` | `create-tierless` scaffolds a WORKING app: built with the real bin, booted (api sidecar forked), and driven live — seeded render, authorized write with the principal attached, a blank write denied at the monitor and caught by the app's `try/catch` across the tier |
 
 `test/e2e/demo.mjs` and `test/e2e/server-live.mjs` additionally run the whole thing across a real
 WebSocket into **real headless Chromium** (Playwright) with real clicks; they need a
@@ -194,19 +194,19 @@ browser and so run on demand rather than in `npm test`.
 
 ```
 packages/
-  stackmix/       the npm package `stackmix` — everything `npm i stackmix` delivers
+  tierless/       the npm package `tierless` — everything `npm i tierless` delivers
     src/          compiler (transform.cjs), runtime/host/server/browser, wire + graph +
                   delta + content codecs, §5 heap, transport, the api reference monitor,
                   the Vite plugin, the react hook
-    bin/          the stackmix CLI: build / explain / api / types
-  create-stackmix/  the npm package behind `npm create stackmix` (scaffolder + template)
+    bin/          the tierless CLI: build / explain / api / types
+  create-tierless/  the npm package behind `npm create tierless` (scaffolder + template)
 test/
   run.mjs         the regression runner (npm test)
   probes/         focused single-mechanism proofs
   e2e/            app-shaped end-to-end proofs + the demo apps they drive (Tasks, conduit,
                   the live pages, heap/policy/delta demos, the sample trusted services) —
                   all importing the REAL package through its exports map
-examples/         popular frameworks with Stackmix mixed in (react-vite)
+examples/         popular frameworks with Tierless mixed in (react-vite)
 docs/             architecture, design spec
 ```
 

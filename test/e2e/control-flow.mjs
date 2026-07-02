@@ -5,7 +5,7 @@
 // (F.__h/__c/__err) survive the wire, and that a resource failing "on another tier" is
 // caught by a try/catch in the migrated code. No browser, no socket, no Babel.
 import { PROGRAMS, __unwind } from "./cf-fixtures.gen.mjs";
-import { encodeGraph, decodeGraph } from "stackmix/graph";
+import { encodeGraph, decodeGraph } from "tierless/graph";
 
 const wire = (stack) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([stack]))))[0];
 const exec = (req) => {                       // dbl/get echo arg; inc adds 1; lt3 is i<3; fail throws

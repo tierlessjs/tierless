@@ -1,4 +1,4 @@
-// Stackmix — regression runner. Executes every demo and probe and asserts the headline
+// Tierless — regression runner. Executes every demo and probe and asserts the headline
 // claims actually hold (not just exit 0). Paths resolve against the repo root, so it runs
 // the same from any working directory.
 //
@@ -33,9 +33,9 @@ const cases = [
   { file: "test/probes/lang-coverage.mjs", needs: ["desugar and migrate correctly; un-migratable tier calls are rejected with a clear error"] },
   { file: "test/probes/compiler-api.mjs", needs: ["the compiler is an importable library: configurable resources, module-shaped input (exports/imports/state preserved), and an analyze() report"] },
   { file: "test/probes/types.mjs", needs: ["the public surface is typed end to end: every exports-map entry resolves a hand-written declaration under strict nodenext, and misuse is rejected"] },
-  { file: "test/probes/cli.mjs", needs: ["the stackmix CLI works end to end: build (custom resources), explain (the analysis made visible), api (load-time pre-ship check), types (the api surface as a declaration)"] },
-  { file: "test/probes/vite-plugin.mjs", needs: ["the Vite plugin turns a \"use mix\" module into monitor-backed actions: transform + dev-server endpoint + ssr-loaded machine + sidecar authorization, end to end"] },
-  { file: "test/probes/create-app.mjs", needs: ["create-stackmix scaffolds a WORKING two-tier app: build, boot (api sidecar forked), seeded render, authorized write, monitor denial caught across the tier, clean end"] },
+  { file: "test/probes/cli.mjs", needs: ["the tierless CLI works end to end: build (custom resources), explain (the analysis made visible), api (load-time pre-ship check), types (the api surface as a declaration)"] },
+  { file: "test/probes/vite-plugin.mjs", needs: ["the Vite plugin turns a \"use tierless\" module into monitor-backed actions: transform + dev-server endpoint + ssr-loaded machine + sidecar authorization, end to end"] },
+  { file: "test/probes/create-app.mjs", needs: ["create-tierless scaffolds a WORKING two-tier app: build, boot (api sidecar forked), seeded render, authorized write, monitor denial caught across the tier, clean end"] },
   { file: "test/e2e/heap-probe.mjs",     needs: ["big locals stay home, fetched on deref, single-writer coherent"] },
   { file: "test/e2e/heap-live.mjs",      needs: ["the dataset stayed on the server, crossing only when the browser derefed it"] },
   { file: "test/e2e/heap-auto.mjs",      needs: ["transparent deref: ordinary member access on a handle auto-fetches"] },

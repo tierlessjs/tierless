@@ -1,6 +1,6 @@
 // Headless proof for the trust boundary (design §7), the right way round this time.
 //
-// Stackmix's "client" — the browser client AND the relocated backend client (the "server" tier) — is
+// Tierless's "client" — the browser client AND the relocated backend client (the "server" tier) — is
 // untrusted: it is just a fat web app that sometimes runs in Node. So authority cannot live in it. It
 // lives in the API: a small, stateless REFERENCE MONITOR in its own OS process, reached over a local
 // pipe (sidecar). This proof drives that monitor two ways:
@@ -13,8 +13,8 @@
 //      a hostile client calling the endpoint directly — which is exactly why moving authority here, and
 //      never trusting the control flow that arrived, is the correct axis.
 
-import { Api, JwtApi, PUBLIC, DENY } from "stackmix/api";
-import { startSidecar } from "stackmix/api";
+import { Api, JwtApi, PUBLIC, DENY } from "tierless/api";
+import { startSidecar } from "tierless/api";
 
 let pass = 0, fail = 0;
 const check = (label, cond) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}`); } };

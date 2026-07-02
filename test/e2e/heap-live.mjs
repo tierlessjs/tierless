@@ -7,14 +7,14 @@
 //
 // Run:  node src/heap-live.mjs
 import { createRequire } from "node:module";
-import { wsPort, makePeer } from "stackmix/transport";
-import { encodeGraph, decodeGraph } from "stackmix/graph";
-import { initialStack } from "stackmix/runtime";
-import { makeTier } from "stackmix/heap";
-import { encodeWireBinary, decodeWireBinary } from "stackmix/wire";   // the binary continuation wire crosses the socket
+import { wsPort, makePeer } from "tierless/transport";
+import { encodeGraph, decodeGraph } from "tierless/graph";
+import { initialStack } from "tierless/runtime";
+import { makeTier } from "tierless/heap";
+import { encodeWireBinary, decodeWireBinary } from "tierless/wire";   // the binary continuation wire crosses the socket
 import { PROGRAMS } from "./heap-app.gen.mjs";
 
-const { WebSocketServer, WebSocket } = createRequire("/home/user/stackmix/")("ws");
+const { WebSocketServer, WebSocket } = createRequire(import.meta.url)("ws");
 const fmt = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB");
 const THRESH = 8192;
 let pass = true;

@@ -1,5 +1,5 @@
-// Probe: create-stackmix — scaffold a fresh app into a temp dir and RUN it end to end:
-// build via the stackmix bin, boot its server (which forks the api sidecar), connect as
+// Probe: create-tierless — scaffold a fresh app into a temp dir and RUN it end to end:
+// build via the tierless bin, boot its server (which forks the api sidecar), connect as
 // the browser tier, drive a real session — seeded render, an authorized add, a
 // monitor-DENIED empty add landing in the app's try/catch across the tier, and a clean
 // session end. The scaffold isn't just files; it's a working two-tier app.
@@ -8,8 +8,8 @@ import { existsSync, mkdtempSync, mkdirSync, symlinkSync, readFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { connect } from "stackmix/browser";
-import { WS_PATH } from "stackmix/server";
+import { connect } from "tierless/browser";
+import { WS_PATH } from "tierless/server";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "create-"));
@@ -17,10 +17,10 @@ const APP = join(dir, "my-notes");
 let pass = 0, fail = 0;
 const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : `  (got ${JSON.stringify(got)})`}`); } };
 
-console.log("Probe: create-stackmix — scaffold, build, boot, and drive a real session\n");
+console.log("Probe: create-tierless — scaffold, build, boot, and drive a real session\n");
 
 // ---- scaffold --------------------------------------------------------------------------
-const c = spawnSync(process.execPath, [join(ROOT, "packages/create-stackmix/index.mjs"), APP], { encoding: "utf8" });
+const c = spawnSync(process.execPath, [join(ROOT, "packages/create-tierless/index.mjs"), APP], { encoding: "utf8" });
 check("the scaffolder runs and prints next steps", c.status === 0 && c.stdout.includes("npm run dev"), c.stderr);
 check("the scaffold has the four app files + gitignore",
   ["app.src.js", "api.server.mjs", "server.mjs", "client.mjs", ".gitignore", "package.json"].every((f) => existsSync(join(APP, f))));
@@ -28,9 +28,9 @@ check("the app name is stamped", JSON.parse(readFileSync(join(APP, "package.json
 
 // ---- "npm install" (a symlink stands in for the registry) + build ----------------------
 mkdirSync(join(APP, "node_modules"), { recursive: true });
-symlinkSync(join(ROOT, "packages/stackmix"), join(APP, "node_modules", "stackmix"), "dir");
-const b = spawnSync(process.execPath, [join(ROOT, "packages/stackmix/bin/stackmix.mjs"), "build", "app.src.js", "app.gen.mjs", "--bare"], { cwd: APP, encoding: "utf8" });
-check("the template app builds with the stackmix bin", b.status === 0 && existsSync(join(APP, "app.gen.mjs")), b.stderr);
+symlinkSync(join(ROOT, "packages/tierless"), join(APP, "node_modules", "tierless"), "dir");
+const b = spawnSync(process.execPath, [join(ROOT, "packages/tierless/bin/tierless.mjs"), "build", "app.src.js", "app.gen.mjs", "--bare"], { cwd: APP, encoding: "utf8" });
+check("the template app builds with the tierless bin", b.status === 0 && existsSync(join(APP, "app.gen.mjs")), b.stderr);
 
 // ---- boot the scaffolded server (it forks the api sidecar) ------------------------------
 const server = spawn(process.execPath, ["server.mjs"], { cwd: APP, env: { ...process.env, PORT: "0" }, stdio: ["ignore", "pipe", "pipe"] });
@@ -67,6 +67,6 @@ try {
 
 const ok = fail === 0;
 console.log(ok
-  ? `\nOK — create-stackmix scaffolds a WORKING two-tier app: build, boot (api sidecar forked), seeded render, authorized write, monitor denial caught across the tier, clean end (${pass} checks)`
+  ? `\nOK — create-tierless scaffolds a WORKING two-tier app: build, boot (api sidecar forked), seeded render, authorized write, monitor denial caught across the tier, clean end (${pass} checks)`
   : `\nFAILED (${pass} passed, ${fail} failed)`);
 process.exit(ok ? 0 : 1);
