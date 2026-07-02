@@ -17,12 +17,12 @@ import { encodeGraph, decodeGraph, isHandle } from "tierless/graph";
 import { makeTier } from "tierless/heap";
 import { makeTrackedSession, planDelta, applyDeltaTracked, adoptBaseline, exciseForCapture, subForFullWire, touch } from "tierless/delta";
 import { PROGRAMS, __setDirtySink } from "./delta-app.gen.mjs";
+import { makeCheck } from "../lib/check.mjs";
 
 const { WebSocketServer, WebSocket } = createRequire(import.meta.url)("ws");
 const fmt = (n) => (n < 1024 ? n + " B" : (n / 1024).toFixed(1) + " KB");
 const THRESH = 8192;
-let pass = true;
-const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };
+const { check, ok } = makeCheck();
 
 async function pumpLocal(stack, ownsHere, execHere, incoming = null) {
   if (incoming) stack[stack.length - 1].ret = await execHere(incoming);
@@ -142,7 +142,7 @@ check(`the session ran to completion with the right result (${POLLS.length} chan
 
 console.log(`\nWire: ${fmt(net.wire)} continuation (${deltas} delta + ${fulls} full) + ${fmt(net.fetchBytes)} one deref, ` +
   `vs ${fmt(inlineCatalog)} if the catalog rode every hop. The big data stayed home; only UI deltas crossed.`);
-console.log(pass
+console.log(ok()
   ? "PASS — over a real socket: bounce + min(delta,full) + §5 excision + deref all compose, end to end"
   : "FAIL");
-process.exit(pass ? 0 : 1);
+process.exit(ok() ? 0 : 1);

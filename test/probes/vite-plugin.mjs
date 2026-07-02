@@ -17,11 +17,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import tierless from "tierless/vite";
 import { configureTierless } from "tierless/browser";
 import { WS_PATH } from "tierless/server";
+import { makeCounter } from "../lib/check.mjs";
 
 const SRC_DIR = fileURLToPath(new URL("../../packages/tierless/src/", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "vite-"));
-let pass = 0, fail = 0;
-const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : `  (got ${JSON.stringify(got)})`}`); } };
+const { check, counts } = makeCounter();
 
 // ---- fixture: the trusted service (forked as a sidecar by the plugin) -----------------
 writeFileSync(join(dir, "api.server.mjs"), `
@@ -99,6 +99,7 @@ writeFileSync(actionsId, out.code);
   httpServer.close();
 }
 
+const { pass, fail } = counts();
 const ok = fail === 0;
 console.log(ok
   ? `\nOK — the Vite plugin turns a "use tierless" module into monitor-backed actions: transform + dev-server endpoint + ssr-loaded machine + sidecar authorization, end to end (${pass} checks)`

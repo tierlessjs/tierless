@@ -18,11 +18,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { serveApp } from "tierless/server";
 import { connect } from "tierless/browser";
 import { WS_PATH } from "tierless/server";
+import { makeCounter } from "../lib/check.mjs";
 
 const TX = fileURLToPath(new URL("../../packages/tierless/src/transform.cjs", import.meta.url));
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
-let pass = 0, fail = 0;
-const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : `  (got ${JSON.stringify(got)})`}`); } };
+const { check, counts } = makeCounter();
 
 // Compile a tiny app: `sum` is a pure server action (api.* only); `flow` bounces to the
 // browser mid-action (commit); `appMain` is a server-started session that parks on commit.
@@ -84,6 +84,7 @@ console.log("Probe: the assembled host — serveApp/connect, both session direct
 
 check("every api.* was serviced on the server tier, none leaked to the client", served.every((n) => n === "api.dbl"));
 
+const { pass, fail } = counts();
 const ok = fail === 0;
 console.log(ok
   ? `\nOK — serveApp/connect assemble the full host: client-started actions (with mid-flight bounces and concurrency) and server-started sessions both run over one socket (${pass} checks)`

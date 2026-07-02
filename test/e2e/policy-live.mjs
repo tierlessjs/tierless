@@ -16,11 +16,11 @@ import { createRequire } from "node:module";
 import { wsPort, makePeer } from "tierless/transport";
 import { encodeWireBinary, decodeWireBinary } from "tierless/wire";   // the §6 decision prices the real (binary) wire
 import { PROGRAMS } from "./policy-app.gen.mjs";
+import { makeCheck } from "../lib/check.mjs";
 
 const { WebSocketServer, WebSocket } = createRequire(import.meta.url)("ws");
 const fmt = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB");
-let pass = true;
-const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };
+const { check, ok } = makeCheck();
 
 // One pump, both tiers: run owned resources inline, push sub-frames on a call, stop at a
 // resource this tier doesn't own (the §6 boundary). Same logic as runtime.mjs / heap-live.
@@ -161,7 +161,7 @@ ws.close(); wss.close();
 
 console.log(`\nProfiling cost ${fmt(sampleBytes)} once (locked in). Then: regime 1 shipped the ${fmt(r1.crossed)} continuation;`);
 console.log(`regime 2 fetched ${fmt(r2.crossed)} and stayed put — a ${(r2.report.contBytes / r2.crossed).toFixed(0)}x saving the cold rule would have missed.`);
-console.log(pass
+console.log(ok()
   ? "PASS — §6 live: the driver priced migrate vs fetch from real bytes and steered the socket accordingly"
   : "FAIL");
-process.exit(pass ? 0 : 1);
+process.exit(ok() ? 0 : 1);

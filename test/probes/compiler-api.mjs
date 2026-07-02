@@ -9,14 +9,14 @@ import { writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { makeCounter } from "../lib/check.mjs";
 
 const require = createRequire(import.meta.url);
 const { compile, analyze, DEFAULT_RESOURCES } = require("../../packages/tierless/src/transform.cjs");
 const TX = fileURLToPath(new URL("../../packages/tierless/src/transform.cjs", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "capi-"));
 
-let pass = 0, fail = 0;
-const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : `  (got ${JSON.stringify(got)})`}`); } };
+const { check, counts } = makeCounter();
 
 const drive = (mod, entry, args, exec) => {
   const stack = [{ fn: entry, pc: 0, args }];
@@ -75,6 +75,7 @@ const cli = await import(pathToFileURL(join(dir, "cli.gen.mjs")));
 const cv = drive(cli, "go", [4], (r) => r.args[0] + 1);
 check("--resource=db:server pins a custom namespace from the CLI", cv === 5, cv);
 
+const { pass, fail } = counts();
 const ok = fail === 0;
 console.log(ok
   ? `\nOK — the compiler is an importable library: configurable resources, module-shaped input (exports/imports/state preserved), and an analyze() report (${pass} checks)`

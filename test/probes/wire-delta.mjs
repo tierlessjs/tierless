@@ -20,9 +20,9 @@ import { makeDeltaSession, encodeDelta, applyDelta,
   makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "tierless/delta";
 import { encodeWireBinary } from "tierless/wire";
 import { makeTier } from "tierless/heap";
+import { makeCheck } from "../lib/check.mjs";
 
-let pass = true;
-const check = (name, cond) => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}`); pass = pass && cond; };
+const { check, ok } = makeCheck();
 
 // structural deep-equality that tolerates cycles, bigint, undefined, and §5 handles
 function deepEq(a, b, seen = new Set()) {
@@ -303,5 +303,5 @@ console.log("Probe: the delta wire codec — fidelity, locality, bidirectional b
     exRecv[0].list.length === 2 && exRecv[0].list[0].id === 1 && exRecv[0].list[1].id === 2);
 }
 
-console.log(`\n  delta wire: ${pass ? "fidelity, locality, bounce, floor, write-tracked≡rescan, Map/Set, and orphan-correctness all hold" : "FAILURES above"}`);
-process.exit(pass ? 0 : 1);
+console.log(`\n  delta wire: ${ok() ? "fidelity, locality, bounce, floor, write-tracked≡rescan, Map/Set, and orphan-correctness all hold" : "FAILURES above"}`);
+process.exit(ok() ? 0 : 1);

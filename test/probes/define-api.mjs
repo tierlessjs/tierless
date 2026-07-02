@@ -3,9 +3,9 @@
 // create(), before a single call could be served. The build-function form hands the api
 // instance to runs that need it (login minting via api.issue), and opts flow through.
 import { defineApi, PUBLIC } from "tierless/api";
+import { makeCounter } from "../lib/check.mjs";
 
-let pass = 0, fail = 0;
-const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : `  (got ${JSON.stringify(got)})`}`); } };
+const { check, counts } = makeCounter();
 
 console.log("Probe: defineApi — the sugar keeps the monitor's load-time guarantees\n");
 
@@ -30,6 +30,7 @@ check("default-deny still holds through the sugar", anon.ok === false && anon.er
 const big = await api.handle({ name: "login", args: ["x".repeat(200)], token: null });
 check("opts (args budget) flow through defineApi", big.ok === false, big);
 
+const { pass, fail } = counts();
 const ok = fail === 0;
 console.log(ok
   ? `\nOK — defineApi is sugar, not a bypass: mandatory authorize at create, default-deny, budgets all hold (${pass} checks)`

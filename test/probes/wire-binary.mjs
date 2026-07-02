@@ -5,10 +5,10 @@
 import { encodeWireBinary, decodeWireBinary } from "tierless/wire";
 import { encodeWire, makeTier } from "tierless/heap";
 import { isHandle } from "tierless/graph";
+import { makeCheck } from "../lib/check.mjs";
 
 const te = new TextEncoder();
-let pass = true;
-const check = (name, cond) => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}`); pass = pass && cond; };
+const { check, ok } = makeCheck();
 console.log("Probe: binary wire codec — identical decode (identity/cycles/exotics), smaller than JSON\n");
 
 // --- a continuation exercising identity, cycles, and every exotic value the codec carries ---
@@ -67,5 +67,5 @@ const idStack = [{ fn: "T", pc: 0, ids, args: [] }];
 const idJson = te.encode(encodeWire(idStack, null, {})).length, idBin = encodeWireBinary(idStack, null, {}).length;
 check(`a 1000-int column packs tightly (${idBin} B binary vs ${idJson} B JSON = ${(idJson / idBin).toFixed(1)}x)`, idBin * 4 < idJson);
 
-console.log(`\n${pass ? "PASS" : "FAIL"} — binary wire: identical decode (identity/cycles/exotics/handles/typed-arrays) at ${(jsonBytes / binBytes).toFixed(1)}x smaller than JSON on a record feed`);
-process.exit(pass ? 0 : 1);
+console.log(`\n${ok() ? "PASS" : "FAIL"} — binary wire: identical decode (identity/cycles/exotics/handles/typed-arrays) at ${(jsonBytes / binBytes).toFixed(1)}x smaller than JSON on a record feed`);
+process.exit(ok() ? 0 : 1);

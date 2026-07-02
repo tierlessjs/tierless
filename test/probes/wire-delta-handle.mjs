@@ -7,9 +7,9 @@
 import { makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "tierless/delta";
 import { isHandle } from "tierless/graph";
 import { makeTier } from "tierless/heap";
+import { makeCheck } from "../lib/check.mjs";
 
-let pass = true;
-const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };
+const { check, ok } = makeCheck();
 const fmt = (n) => (n < 1024 ? n + " B" : (n / 1024).toFixed(1) + " KB");
 console.log("Probe: §5 handle excision composed with the delta wire — big data stays home, UI ships as deltas\n");
 
@@ -68,4 +68,4 @@ check("bounce: the dataset never left the server heap — deref on the way back 
 check("bounce: the browser's UI edit arrived on the server (filter = active)", onA[0].ui.filter === "active");
 
 console.log(`\n  delta + §5 handle: the dataset stayed home as a handle while only UI deltas crossed — the two wire optimizations compose`);
-process.exit(pass ? 0 : 1);
+process.exit(ok() ? 0 : 1);

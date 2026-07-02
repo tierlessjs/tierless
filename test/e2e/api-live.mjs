@@ -18,11 +18,11 @@ import { startSidecar, makeApiExec } from "tierless/api";
 import { encodeWireBinary, decodeWireBinary } from "tierless/wire";
 import { textOf } from "./app/render.mjs";
 import * as bundle from "./app/bundle.gen.mjs";
+import { makeCounter } from "../lib/check.mjs";
 
 const pump = makePump(bundle);
 
-let pass = 0, fail = 0;
-const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : `  (got ${JSON.stringify(got)})`}`); } };
+const { check, counts } = makeCounter();
 
 const ownsServer = (tier) => tier === "server";
 
@@ -90,6 +90,7 @@ try {
   apiService.close();
 }
 
+const { pass, fail } = counts();
 const ok = fail === 0;
 console.log(ok
   ? `\nPASS — the default api.* path IS the reference monitor: the runtime pump serviced every api call over the pipe, PUBLIC reads stood anonymously, and an unauthenticated or forged write was denied in the monitor's process and thrown across the tier (${pass} checks)`

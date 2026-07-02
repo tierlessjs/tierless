@@ -8,12 +8,12 @@
 // even a changed container's UNCHANGED slots stay home, not just every unchanged object.
 import { openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot } from "tierless/delta";
 import { encodeGraph, decodeGraph } from "tierless/graph";
+import { makeCheck } from "../lib/check.mjs";
 
 const fetchCopy = (v) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([v]))))[0];   // a detached snapshot, as Channel.fetch makes one
 const fmt = (n) => (n < 1024 ? n + " B" : (n / 1024).toFixed(1) + " KB");
 
-let pass = true;
-const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };
+const { check, ok } = makeCheck();
 console.log("Probe: §5 write-back as a delta — only the changed objects cross, collections included\n");
 
 const body = "markdown body. ".repeat(40);
@@ -73,7 +73,7 @@ const wholeOf = (v) => wholeSnapshot("browser", v).length;
   check("the near-total change still applies correctly", tinyMaster.a === 9 && tinyMaster.b === 8 && tinyMaster.c === 7);
 }
 
-console.log(pass
+console.log(ok()
   ? "PASS — a §5 write-back ships only the changed objects (member edits and collection mutations alike), far smaller than the whole snapshot, and min(delta, whole) is never larger"
   : "FAIL");
-process.exit(pass ? 0 : 1);
+process.exit(ok() ? 0 : 1);

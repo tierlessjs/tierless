@@ -6,10 +6,10 @@
 // fetches the dataset only if it derefs the handle, coherently (single-writer + version-
 // invalidated cache). Reuses the project's Heap/Channel/makeHost and graph codec.
 import { makeTier, encodeWire, decodeWire, wireHandles, Channel, makeHost } from "tierless/heap";
+import { makeCheck } from "../lib/check.mjs";
 
 const fmt = (n) => (n < 1024 ? n + " B" : n < 1024 * 1024 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB");
-let pass = true;
-const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };
+const { check, ok } = makeCheck();
 
 console.log("Probe: §5 handle heap on a CPS continuation — big locals stay home, fetched on deref\n");
 
@@ -63,7 +63,7 @@ const d3 = ownerHost.deref(handle);
 check("back on the server the handle is local — master used, zero fetches", d3.count === 9999 && ownerHost.stats.fetches === 0 && ownerHost.stats.localUses === 1);
 
 console.log(`\nWire: dataset ${fmt(inlineWire.length)} inline -> ${fmt(handleWire.length)} with a handle (${channel.fetches} fetches, ${fmt(channel.bytes)} moved only when derefed).`);
-console.log(pass
+console.log(ok()
   ? "PASS — §5 handle heap on a CPS continuation: big locals stay home, fetched on deref, single-writer coherent"
   : "FAIL");
-process.exit(pass ? 0 : 1);
+process.exit(ok() ? 0 : 1);

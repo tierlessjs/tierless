@@ -6,12 +6,12 @@ import { spawnSync } from "node:child_process";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { makeCounter } from "../lib/check.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const dir = join(ROOT, "test", ".types-fixture");
 mkdirSync(dir, { recursive: true });
-let pass = 0, fail = 0;
-const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : `  (got ${JSON.stringify(got)})`}`); } };
+const { check, counts } = makeCounter();
 const tsc = (files) => spawnSync(process.execPath, [join(ROOT, "node_modules/typescript/bin/tsc"),
   "--noEmit", "--strict", "--module", "nodenext", "--moduleResolution", "nodenext", "--target", "es2022",
   "--types", "node", ...files], { cwd: ROOT, encoding: "utf8" });
@@ -67,6 +67,7 @@ defineApi({ leak: { authorize: PUBLIC, run: () => 1, extra: true } });
 const bad = tsc([join("test", ".types-fixture", "bad.ts")]);
 check("deliberate misuse FAILS to type-check (the types are load-bearing)", bad.status !== 0 && (bad.stdout || "").includes("error TS"), bad.status);
 
+const { pass, fail } = counts();
 const okAll = fail === 0;
 console.log(okAll
   ? `\nOK — the public surface is typed end to end: every exports-map entry resolves a hand-written declaration under strict nodenext, and misuse is rejected (${pass} checks)`

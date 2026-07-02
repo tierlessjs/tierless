@@ -10,9 +10,9 @@
 import { makeDeltaSession, encodeDelta, applyDelta, makeTrackedSession, encodeDeltaTracked, applyDeltaTracked } from "tierless/delta";
 import { isHandle } from "tierless/graph";
 import { makeTier } from "tierless/heap";
+import { makeCheck } from "../lib/check.mjs";
 
-let pass = true;
-const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };
+const { check, ok } = makeCheck();
 const rng = (seed) => { let s = (seed >>> 0) || 1; return () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; };
 console.log("Probe: delta wire codec — property round-trips, differential, boundaries, robustness\n");
 
@@ -189,5 +189,5 @@ const validPatch = encodeDelta(pA, pStack, null).bytes;
 let pTrunc = 0; for (let len = 0; len <= validPatch.length; len++) if (tryApply(validPatch.subarray(0, len))) pTrunc++;
 check("every truncation of a patch-bearing delta terminates cleanly", pTrunc === validPatch.length + 1);
 
-console.log(`\n${pass ? "PASS" : "FAIL"} — delta wire codec: property round-trips, differential, boundaries, and decode robustness all hold`);
-process.exit(pass ? 0 : 1);
+console.log(`\n${ok() ? "PASS" : "FAIL"} — delta wire codec: property round-trips, differential, boundaries, and decode robustness all hold`);
+process.exit(ok() ? 0 : 1);

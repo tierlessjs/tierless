@@ -12,9 +12,9 @@ import { PROGRAMS, __setDirtySink } from "../../test/e2e/track-app.gen.mjs";
 import { makeDeltaSession, encodeDelta, applyDelta,
   makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "tierless/delta";
 import { encodeWireBinary } from "tierless/wire";
+import { makeCheck } from "../lib/check.mjs";
 
-let pass = true;
-const check = (name, cond) => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}`); pass = pass && cond; };
+const { check, ok } = makeCheck();
 function deepEq(a, b, seen = new Set()) {
   if (a === b) return true;
   if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return Object.is(a, b);
@@ -124,4 +124,4 @@ check("warm hops ship only the few mutated objects, not the whole model (the obj
 }
 
 console.log(`\n  compiler write-barrier: --track-writes drives write-tracked delta on plain source, matching the rescan oracle`);
-process.exit(pass ? 0 : 1);
+process.exit(ok() ? 0 : 1);

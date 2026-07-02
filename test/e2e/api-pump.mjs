@@ -10,6 +10,7 @@
 import { PROGRAMS, __unwind } from "./api-pump-app.gen.mjs";
 import { startSidecar, makeApiExec } from "tierless/api";
 import { encodeGraph, decodeGraph } from "tierless/graph";
+import { makeCounter } from "../lib/check.mjs";
 
 const wire = (stack) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([stack]))))[0];   // serialize the continuation at each hop (proves migration)
 
@@ -53,8 +54,7 @@ async function runFlow(api, token) {
   return { value: res.value, committed: sink.committed };
 }
 
-let pass = 0, fail = 0;
-const check = (label, cond) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}`); } };
+const { check, counts } = makeCounter();
 
 console.log("Proof: the live pump services api.* through the trusted monitor (sidecar)\n");
 
@@ -92,6 +92,7 @@ try {
   api.close();
 }
 
+const { pass, fail } = counts();
 const ok = fail === 0;
 console.log(ok
   ? `\nPASS — the live pump services api.* through the trusted monitor: a migrating continuation is authorized per principal in a separate process on every call, and a denial is caught across the tier (${pass} checks)`

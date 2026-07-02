@@ -13,12 +13,12 @@ import { initialStack } from "tierless/runtime";
 import { makeTier } from "tierless/heap";
 import { encodeWireBinary, decodeWireBinary } from "tierless/wire";   // the binary continuation wire crosses the socket
 import { PROGRAMS } from "./heap-app.gen.mjs";
+import { makeCheck } from "../lib/check.mjs";
 
 const { WebSocketServer, WebSocket } = createRequire(import.meta.url)("ws");
 const fmt = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB");
 const THRESH = 8192;
-let pass = true;
-const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };
+const { check, ok } = makeCheck();
 
 // a local pump variant: heap-live frames the wire itself (§5 excision + deref-over-socket),
 // so drive it with the identical pump logic (push sub-frames, run owned resources, stop at
@@ -128,7 +128,7 @@ check(`the fetched dataset gave the right detail (got ${JSON.stringify(value)})`
 
 console.log(`\nWire: commit ${fmt(net.resumeBytes)} (handle) + deref ${fmt(net.fetchBytes)} (fetched once) ` +
   `vs ${fmt(inlineBytes)} if the dataset always travelled.`);
-console.log(pass
+console.log(ok()
   ? "PASS — over a real socket: the dataset stayed on the server, crossing only when the browser derefed it"
   : "FAIL");
-process.exit(pass ? 0 : 1);
+process.exit(ok() ? 0 : 1);

@@ -8,9 +8,9 @@
 // re-apply, and retry. No lost updates — the CAS guarantee applied to a fetched §5
 // snapshot. Reuses the project's Heap/Channel and the identity/cycle-safe graph codec.
 import { makeTier, Channel, writeBack, commitWrite } from "tierless/heap";
+import { makeCheck } from "../lib/check.mjs";
 
-let pass = true;
-const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };
+const { check, ok } = makeCheck();
 console.log("Probe: §5 write-back — a reader's mutation propagates back to the master under optimistic CAS\n");
 
 const server = makeTier("server"), browser = makeTier("browser");
@@ -67,7 +67,7 @@ check("it took exactly two tries (one conflict, one win)", result.tries === 2, `
 check("both the competitor's and our change survived (no lost update)", counterMaster.a === true && counterMaster.b === true);
 
 console.log(`\nWrite-back: the master is the sole serialization point; a lost race costs a refetch + retry (${channel.fetches} fetches total), never a silent lost update.`);
-console.log(pass
+console.log(ok()
   ? "PASS — §5 write-back coherence: optimistic CAS, conflicts detected and retried, no lost updates"
   : "FAIL");
-process.exit(pass ? 0 : 1);
+process.exit(ok() ? 0 : 1);

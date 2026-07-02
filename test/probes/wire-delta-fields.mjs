@@ -7,6 +7,7 @@
 // other delta probe stays green), and the message-level min(delta, full) still backstops "never larger".
 import { makeTrackedSession, adoptBaseline, encodeDeltaTracked, applyDeltaTracked, touch } from "tierless/delta";
 import { encodeGraph, decodeGraph } from "tierless/graph";
+import { makeCheck } from "../lib/check.mjs";
 
 const fresh = (v) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([v]))))[0];   // a structurally-identical detached copy
 const frame = (m) => [{ fn: "_", pc: 0, m }];
@@ -17,8 +18,7 @@ const makeModel = () => ({
   index: new Map(Array.from({ length: 50 }, (_, i) => ["k" + i, i])),                  // a Map
 });
 
-let pass = true;
-const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };
+const { check, ok } = makeCheck();
 console.log("Probe: per-field/element delta granularity — ship the changed slots, not the whole container\n");
 
 // fields ON (patch) vs OFF (whole container), the SAME single-slot mutation, to show the win per kind.
@@ -71,7 +71,7 @@ check("bounce: B's object patch reached A", mA.profile.f2 === 222);
 check("bounce: B's array pop reached A (length back to 800)", mA.rows.length === 800);
 check("bounce: A's earlier edits are intact after the round trip", mA.profile.f1 === 11 && mA.index.get("k49") === 44 && mA.tags.has("hot"));
 
-console.log(pass
+console.log(ok()
   ? "PASS — per-field/element granularity: object/array/Map/Set ship only the slots that changed, both directions of an oscillation, and it is opt-in (off = byte-identical)"
   : "FAIL");
-process.exit(pass ? 0 : 1);
+process.exit(ok() ? 0 : 1);

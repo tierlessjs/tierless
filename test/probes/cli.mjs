@@ -9,12 +9,12 @@ import { writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { makeCounter } from "../lib/check.mjs";
 
 const BIN = fileURLToPath(new URL("../../packages/tierless/bin/tierless.mjs", import.meta.url));
 const SRC = fileURLToPath(new URL("../../packages/tierless/src/", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "cli-"));
-let pass = 0, fail = 0;
-const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : `  (got ${JSON.stringify(got)})`}`); } };
+const { check, counts } = makeCounter();
 const run = (args) => spawnSync(process.execPath, [BIN, ...args], { encoding: "utf8" });
 
 console.log("Probe: the tierless CLI — build / explain / api / types\n");
@@ -65,6 +65,7 @@ check("types writes a file when given a target", tyOut.status === 0 && tyOut.std
 const u = run([]);
 check("bare invocation prints usage and exits 0", u.status === 0 && (u.stdout + u.stderr).includes("tierless build"), u.status);
 
+const { pass, fail } = counts();
 const ok = fail === 0;
 console.log(ok
   ? `\nOK — the tierless CLI works end to end: build (custom resources), explain (the analysis made visible), api (load-time pre-ship check), types (the api surface as a declaration) (${pass} checks)`

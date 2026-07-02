@@ -17,12 +17,13 @@ import { writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { makeCounter } from "../lib/check.mjs";
 
 const TX = fileURLToPath(new URL("../../packages/tierless/src/transform.cjs", import.meta.url));
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "langcov-"));
-let n = 0, pass = 0, fail = 0;
-const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : `  (got ${JSON.stringify(got)})`}`); } };
+let n = 0;
+const { check, counts } = makeCounter();
 
 function compile(src, flags = ["--bare"]) {
   const inF = join(dir, `s${n}.src.js`), outF = join(dir, `s${n++}.gen.mjs`);
@@ -155,6 +156,7 @@ declined("tier call inside a .map callback", "function A(){ const out = [1,2,3].
 declined("tier call inside a sort comparator", "function A(){ const a = [3,1,2]; a.sort((x, y) => api.cmp(x, y)); return a[0]; }", "nested function");
 declined("tier call inside an object method", "const obj = { m(){ const v = api.get(5); return v; } }; function A(){ return obj.m(); }", "object/class method");
 
+const { pass, fail } = counts();
 console.log(`\n${fail === 0 ? "OK" : "FAILED"} — ${pass}/${pass + fail} checks passed`);
 console.log(fail === 0
   ? "language coverage: for-of/for-in, destructuring, and non-simple params desugar and migrate correctly; un-migratable tier calls are rejected with a clear error"

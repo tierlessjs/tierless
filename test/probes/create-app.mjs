@@ -10,12 +10,12 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { connect } from "tierless/browser";
 import { WS_PATH } from "tierless/server";
+import { makeCounter } from "../lib/check.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "create-"));
 const APP = join(dir, "my-notes");
-let pass = 0, fail = 0;
-const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : `  (got ${JSON.stringify(got)})`}`); } };
+const { check, counts } = makeCounter();
 
 console.log("Probe: create-tierless — scaffold, build, boot, and drive a real session\n");
 
@@ -65,6 +65,7 @@ try {
   server.kill("SIGTERM");
 }
 
+const { pass, fail } = counts();
 const ok = fail === 0;
 console.log(ok
   ? `\nOK — create-tierless scaffolds a WORKING two-tier app: build, boot (api sidecar forked), seeded render, authorized write, monitor denial caught across the tier, clean end (${pass} checks)`

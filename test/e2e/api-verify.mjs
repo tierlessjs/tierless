@@ -15,9 +15,9 @@
 
 import { Api, JwtApi, PUBLIC, DENY } from "tierless/api";
 import { startSidecar } from "tierless/api";
+import { makeCounter } from "../lib/check.mjs";
 
-let pass = 0, fail = 0;
-const check = (label, cond) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}`); } };
+const { check, counts } = makeCounter();
 const threw = (fn, re) => { try { fn(); return false; } catch (e) { return re ? re.test(e.message) : true; } };
 
 console.log("Proof: the api is an external reference monitor — authority outside the untrusted client\n");
@@ -144,6 +144,7 @@ try {
   api.close();
 }
 
+const { pass, fail } = counts();
 const ok = fail === 0;
 console.log(ok
   ? `\nPASS — the api is an external reference monitor: authority is verified and enforced in a separate process on every call, so neither a forged continuation nor a forged token can escalate, and an endpoint with no authorize cannot ship (${pass} checks)`

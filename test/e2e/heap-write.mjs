@@ -7,6 +7,7 @@
 // the live ws socket in heap-live.mjs; here we isolate the compiler's auto-writeback.)
 import { PROGRAMS } from "./heap-write.gen.mjs";
 import { makeTier, encodeWire, decodeWire, wireHandles, Channel, makeCoherentHost } from "tierless/heap";
+import { makeCheck } from "../lib/check.mjs";
 
 const body = "markdown body. ".repeat(40);
 const ROWS = Array.from({ length: 1500 }, (_, i) => ({ id: i, title: "Article " + i, score: i % 100, body }));
@@ -33,8 +34,7 @@ function pumpTier(stack, ownsHere, execHere, host, incoming = null) {
   }
 }
 
-let pass = true;
-const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };
+const { check, ok } = makeCheck();
 console.log("Probe: TRANSPARENT write-back — ordinary `rows[i].x = v`, the compiler fetches then propagates the edit\n");
 
 // 1) server runs Edit to the commit boundary (rows is the local master: guards & write-back are no-ops here)
@@ -64,7 +64,7 @@ check("the rest of the dataset survived the write-back intact (unrelated rows + 
   master.length === 1500 && master[1].score === 1 && master[3].score === 3 && master[3].body === body);
 
 console.log(`\nNo deref()/writeBack() in the source — the compiler inserted them; a browser edit fetched the dataset, mutated it, and the ${(wire.length < 1000 ? "tiny" : "")} write-back made the server master coherent.`);
-console.log(pass
+console.log(ok()
   ? "PASS — transparent write-back: an ordinary member assignment propagated to the owning master under §5 CAS"
   : "FAIL");
-process.exit(pass ? 0 : 1);
+process.exit(ok() ? 0 : 1);

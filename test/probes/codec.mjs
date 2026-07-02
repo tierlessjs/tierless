@@ -7,6 +7,7 @@
 // supplies the tier whose heap a big subgraph excises into as a handle.
 import { encodeGraph, decodeGraph, isHandle } from "tierless/graph";
 import { makeTier } from "tierless/heap";
+import { makeCheck } from "../lib/check.mjs";
 
 const roundtrip = (values, opts) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph(values, opts))));
 function tree(n, b = 4) {
@@ -15,8 +16,7 @@ function tree(n, b = 4) {
   return nodes[0];
 }
 
-let pass = true;
-const check = (name, cond) => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}`); pass = pass && cond; };
+const { check, ok } = makeCheck();
 console.log("Probe: the continuation wire codec — identity, cycles, §5 excision, exotic values\n");
 
 // 1) aliasing / object identity
@@ -48,5 +48,5 @@ check("undefined local survives the round trip", roundtrip([undefined])[0] === u
 const [bi] = roundtrip([{ n: 9007199254740993n, arr: [1n, 2n] }]);
 check("BigInt survives exactly (> MAX_SAFE_INTEGER)", bi.n === 9007199254740993n && bi.arr[1] === 2n);
 
-console.log(`\n${pass ? "PASS" : "FAIL"} — wire codec: identity, cycles, big-vs-small excision, exotic values all handled`);
-process.exit(pass ? 0 : 1);
+console.log(`\n${ok() ? "PASS" : "FAIL"} — wire codec: identity, cycles, big-vs-small excision, exotic values all handled`);
+process.exit(ok() ? 0 : 1);

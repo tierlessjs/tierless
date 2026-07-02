@@ -5,6 +5,7 @@
 // loop is exercised by heap-live.mjs; here we isolate the compiler's auto-deref.)
 import { PROGRAMS } from "./heap-auto.gen.mjs";
 import { makeTier, encodeWire, decodeWire, wireHandles, Channel, makeHost } from "tierless/heap";
+import { makeCheck } from "../lib/check.mjs";
 
 const body = "markdown body. ".repeat(40);
 const ROWS = Array.from({ length: 1500 }, (_, i) => ({ id: i, title: "Article " + i, score: i % 100, body }));
@@ -30,8 +31,7 @@ function pumpTier(stack, ownsHere, execHere, host, incoming = null) {
   }
 }
 
-let pass = true;
-const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };
+const { check, ok } = makeCheck();
 console.log("Probe: TRANSPARENT deref — ordinary source, the compiler auto-fetches handles on touch\n");
 
 // 1) server runs Report to the commit boundary (the rows guards here are no-ops: rows is local)
@@ -50,5 +50,5 @@ check(`ordinary rows[2].title auto-fetched the dataset and returned the detail (
 check("the touch cost exactly one fetch (then materialized in place)", browserHost.stats.fetches === 1);
 
 console.log(`\nNo deref() in the source — the compiler inserted ${wire.length < 1000 ? "the guards" : "guards"}; the dataset crossed only when rows was actually read on the browser.`);
-console.log(pass ? "PASS — transparent deref: ordinary member access on a handle auto-fetches over the §5 heap" : "FAIL");
-process.exit(pass ? 0 : 1);
+console.log(ok() ? "PASS — transparent deref: ordinary member access on a handle auto-fetches over the §5 heap" : "FAIL");
+process.exit(ok() ? 0 : 1);

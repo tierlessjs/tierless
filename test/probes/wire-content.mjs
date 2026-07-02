@@ -16,12 +16,12 @@ import { encodeWireBinary, decodeWireBinary } from "tierless/wire";
 import { makeTrackedSession, subForFullWire, exciseForCapture, adoptBaseline } from "tierless/delta";
 import { makeTier } from "tierless/heap";
 import { ContentStore, newPeerView, hashOf } from "tierless/content";
+import { makeCounter } from "../lib/check.mjs";
 
 const deepFreeze = (o) => { if (o && typeof o === "object" && !Object.isFrozen(o)) { Object.freeze(o); for (const k of Object.keys(o)) deepFreeze(o[k]); } return o; };
 const size = (enc) => JSON.stringify(enc).length;
 
-let pass = 0, fail = 0;
-const check = (label, cond) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}`); } };
+const { check, counts } = makeCounter();
 
 console.log("Probe: content-addressed immutable subgraphs (ship once, then by hash)\n");
 
@@ -106,6 +106,7 @@ const dc2 = decodeWireBinary(full2, { content: { store: crecv } });
 check(`compose re-frame: CONFIG ships by hash (not re-inlined), DATASET still a handle (${full1.length} B -> ${full2.length} B)`,
   full2.length * 5 < full1.length && dc2.stack[0].config === crecv.get(chash) && isHandle(dc2.stack[0].data));
 
+const { pass, fail } = counts();
 const ok = fail === 0;
 console.log(ok
   ? `\nPASS — content-addressed immutable subgraphs ship once then by hash, resolving to the held copy (identity by content); the win is real and the codec is otherwise untouched (${pass} checks)`
