@@ -461,7 +461,7 @@ function abruptExit(ctx, targetDepth, completion) {
 function compileFn(node) {
   const fnName = node.id.name;
   blocks = [];
-  if (SOURCE_MAP) curLine = (node.loc && node.loc.start.line) || 0;
+  if (SOURCE_MAP) curLine = node.loc.start.line;
   const END = nb(); blocks[END].term = { kind: "ret", value: '"(end)"' };
   const entry = compileStmts(node.body.body, { next: END, brk: END, brkDepth: 0, cont: END, contDepth: 0, tryDepth: 0, tryStack: [], labels: {}, label: undefined });
   const boot = nb(); blocks[boot].term = { kind: "jump", to: entry };  // pc 0 -> entry
@@ -487,7 +487,7 @@ function compileFn(node) {
     throw new Error("bad terminator " + tm.kind);
   };
   const cases = ids.map((id) => { const blk = blocks[id]; const lines = blk.lines.slice(); lines.push(emitTerm(blk.term)); return `      case ${R(id)}:\n        ${lines.join("\n        ")}`; }).join("\n");
-  if (SOURCE_MAP) { const sites = {}; for (const id of ids) { const ln = blocks[id].line; if (ln) sites[R(id)] = ln; } fnSites[fnName] = sites; }  // pc -> source line
+  if (SOURCE_MAP) { const sites = {}; for (const id of ids) sites[R(id)] = blocks[id].line; fnSites[fnName] = sites; }  // pc -> source line
   // default: every reachable pc has a case, so landing here means a corrupt frame — a transform bug, or
   // a continuation mangled in transit. Hard-error at once instead of letting `while (true)` spin forever:
   // fail fast and loud rather than hang. (No valid run reaches it; this is a safety net, not control flow.)
@@ -514,7 +514,7 @@ function remotableLocals(p) {
 
 function insertDerefGuards(p) {
   const remotable = remotableLocals(p);
-  if (!remotable.size) return;
+  if (!remotable.size) return remotable;
 
   // Collect, per statement, the remotable locals READ at that statement's own level. getStatementParent
   // attaches a read to its nearest enclosing statement, so a read in an if-test lands on the IfStatement
@@ -563,6 +563,7 @@ function insertDerefGuards(p) {
         t.yieldExpression(t.callExpression(t.identifier("R"), [t.stringLiteral("@deref"), t.stringLiteral("deref"), t.identifier(L)]))))])));
     path.insertBefore(g);
   }
+  return remotable;
 }
 
 // --auto-writeback: transparent write-back, the symmetric partner of --auto-deref. A member
@@ -577,8 +578,7 @@ function rootOfMember(node) {                                     // the base id
   while (t.isMemberExpression(o)) o = o.object;
   return t.isIdentifier(o) ? o.name : null;
 }
-function insertWriteBacks(p) {
-  const remotable = remotableLocals(p);
+function insertWriteBacks(p, remotable) {
   if (!remotable.size) return;
   const backs = new Map();                                        // statement node -> { path, locals } to write back after it
   const note = (target, ip) => {                                  // target is the assignment/update LHS
@@ -800,8 +800,11 @@ function desugarBindings(fnPath) {
 
 function lower(p) {
   desugarBindings(p);                                             // for-of/for-in, destructuring, non-simple params -> simple forms
-  if (AUTO_DEREF) insertDerefGuards(p);                           // before normalize: the guard's `L = deref(L)` is a suspension to hoist
-  if (AUTO_WRITEBACK) insertWriteBacks(p);                        // after the guards (so the write-back yield isn't itself deref-guarded)
+  // AUTO_WRITEBACK forces AUTO_DEREF (a write through a handle must first materialize it), so whenever
+  // insertWriteBacks runs, insertDerefGuards just ran on the same p — reuse its remotable-locals scan
+  // instead of re-traversing the function a second time for an identical result.
+  const remotable = AUTO_DEREF ? insertDerefGuards(p) : null;      // before normalize: the guard's `L = deref(L)` is a suspension to hoist
+  if (AUTO_WRITEBACK) insertWriteBacks(p, remotable);              // after the guards (so the write-back yield isn't itself deref-guarded)
   if (TRACK_WRITES) insertDirtyBarriers(p);                       // after writeback/deref — their analyses need the unwrapped mutation target
   normalize(p);                                                   // hoist suspensions out of expression positions first
   const node = p.node;
@@ -945,9 +948,9 @@ function analyze(src, opts = {}) {
     p.traverse({ YieldExpression(y) {
       if (!isResYield(y.node)) return;
       const a = y.node.argument.arguments;
-      suspensions.push({ name: a[1].value, tier: a[0].value, line: y.node.loc ? y.node.loc.start.line : null });
+      suspensions.push({ name: a[1].value, tier: a[0].value, line: y.node.loc.start.line });
     } });
-    const via = [...(calls.get(name) || [])].filter((c) => susp.has(c));
+    const via = [...calls.get(name)].filter((c) => susp.has(c));
     functions.push({ name, exported, suspendable: susp.has(name), direct: directly.has(name), suspensions, callsSuspendable: via });
   }
   return { functions, resources: { ...TIER_OF } };
