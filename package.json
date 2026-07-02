@@ -25,12 +25,31 @@
   "author": "Bright Fulton",
   "files": [
     "src",
+    "bin",
     "README.md",
     "LICENSE",
     "NOTICE"
   ],
+  "exports": {
+    ".": "./src/host.mjs",
+    "./api": "./src/api/index.mjs",
+    "./server": "./src/server.mjs",
+    "./browser": "./src/browser.mjs",
+    "./react": "./src/react.mjs",
+    "./vite": "./src/vite.mjs",
+    "./compiler": "./src/transform.cjs",
+    "./runtime": "./src/runtime.mjs",
+    "./wire": "./src/wire-binary.mjs",
+    "./transport": "./src/transport.mjs"
+  },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true }
   },
   "scripts": {
     "test": "node test/run.mjs",
@@ -43,6 +62,10 @@
     "bench:delta": "node bench/delta.mjs"
   },
   "dependencies": {
+    "@babel/generator": "^8.0.0",
+    "@babel/parser": "^8.0.0",
+    "@babel/traverse": "^8.0.0",
+    "@babel/types": "^8.0.0",
     "ws": "^8.21.0"
   },
   "devDependencies": {
