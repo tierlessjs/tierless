@@ -92,14 +92,14 @@ function rootsOf(stack, request) {
   const rootVals = [];
   const frames = stack.map((f) => { const keys = Object.keys(f).filter((k) => k !== "fn" && k !== "pc"); const b0 = rootVals.length; for (const k of keys) rootVals.push(f[k]); return { fn: f.fn, pc: f.pc, keys, b0 }; });
   let req = null;
-  if (request) { const a0 = rootVals.length; for (const a of request.args || []) rootVals.push(a); req = { op: request.op, tier: request.tier, name: request.name, a0, argc: (request.args || []).length }; }
+  if (request) { const a0 = rootVals.length; for (const a of request.args || []) rootVals.push(a); req = { op: request.op, tier: request.tier, name: request.name, a0, argc: rootVals.length - a0 }; }
   return { rootVals, frames, req };
 }
 
 const sidOfFn = (session) => (v) => { let id = session.idOf.get(v); if (id === undefined) { id = session.tier + "#" + (session.next++); session.idOf.set(v, id); session.store.set(id, v); } return id; };
 // Substitute an excised object with its §5 handle, so every graph walk (reach, version, ship, emit)
 // sees the small handle leaf the wire carries, never the big subgraph that stayed home.
-const subFn = (session) => { const h = session.handleOf; return h ? (v) => (isObj(v) && h.has(v) ? h.get(v) : v) : (v) => v; };
+const subFn = (session) => { const h = session.handleOf; return (v) => (isObj(v) && h.has(v) ? h.get(v) : v); };
 
 // §5 excision for the delta path: a big NEW subgraph stays tier-local as a handle. Walk the roots; the
 // first time an object's subgraph exceeds `threshold`, put it in `tier.heap` and remember a stable

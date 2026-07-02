@@ -26,8 +26,6 @@ export function isHandle(x) {
 export const GLOBALS = { Math, JSON, Object, Array, Number, String, Boolean, parseInt, parseFloat, isNaN, isFinite, console, Date, Symbol };
 const GLOBAL_NAME = new Map(Object.entries(GLOBALS).map(([k, v]) => [v, k]));
 const WELLKNOWN = new Map(Object.getOwnPropertyNames(Symbol).filter((k) => typeof Symbol[k] === "symbol").map((k) => [Symbol[k], k])); // Symbol.iterator, .asyncIterator, ...
-// Host constructors reachable via `new` (Map/Set serialize through the codec below).
-export const CTORS = { Map, Set, WeakMap, WeakSet, Date, Error, TypeError, RangeError, SyntaxError, ReferenceError, EvalError, URIError, RegExp };
 
 // Cycle-safe, early-exiting size estimate (never JSON.stringify a cyclic graph).
 export function approxExceeds(root, limit) {
