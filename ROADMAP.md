@@ -34,6 +34,20 @@ secured and `npm i tierless` / `npm create tierless@latest` work. Still open:
   human click; a page with several independent event sources needs the next
   event routed to the right resumable point. Application-level today.
 
+## Code quality
+
+- **Unify the low-level wire I/O.** `wire-binary.mjs`, `wire-delta.mjs`, and
+  `heap.mjs` each hand-roll the same growable-buffer writer/bounds-checked
+  LEB128 reader, the magic-header + string-table read/write, and the
+  frame/request root-flatten-and-rebuild logic — three independent copies of
+  code that's fuzz-tested and security-relevant (§7's wire hardening). The
+  copies have already drifted slightly (`wire-binary`'s bounds check has an
+  extra `k < 0 ||` case `wire-delta` lacks), so unifying them means
+  reconciling that divergence correctly, not a pure copy-paste. Worth doing
+  as its own careful pass — extract to a shared module, then run the fuzz
+  probes (`wire-fuzz.mjs`, `wire-delta-fuzz.mjs`, `wire-content.mjs`) hard —
+  not folded into a larger batch of unrelated changes.
+
 ## From the literature (Stip.js, Fission — see design.md §9)
 
 - **Per-tier dead-code shake.** Stip.js's slicer ships each tier only the code it can
