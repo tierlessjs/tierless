@@ -6,7 +6,7 @@
 // so it is run on demand (not part of `npm test`); the Chromium-free verify.mjs and
 // control-flow.mjs guard the logic in CI.
 //
-// Run:  node test/demos/verify-live.mjs
+// Run:  node test/e2e/verify-live.mjs
 import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";

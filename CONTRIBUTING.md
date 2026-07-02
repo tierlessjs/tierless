@@ -15,7 +15,7 @@ npm test        # runs every demo + probe headless and asserts the headline clai
 
 Read [`docs/architecture.md`](./docs/architecture.md) first — it explains the
 repository layout, the compiler, the pump, the wire, and the heap. For the live
-two-tier walkthrough, see [`test/demos/README.md`](./test/demos/README.md).
+two-tier walkthrough, see [`test/e2e/README.md`](./test/e2e/README.md).
 
 ## The checks that must pass
 
@@ -40,8 +40,8 @@ dependency):
 
 ```bash
 npm i -D @babel/parser@8 @babel/traverse@8 @babel/generator@8 @babel/types@8
-npx stackmix build test/demos/app/App.src.js test/demos/app/bundle.gen.mjs
-npx stackmix build test/demos/heap-write.src.js test/demos/heap-write.gen.mjs --bare --auto-deref --auto-writeback
+npx stackmix build test/e2e/app/App.src.js test/e2e/app/bundle.gen.mjs
+npx stackmix build test/e2e/heap-write.src.js test/e2e/heap-write.gen.mjs --bare --auto-deref --auto-writeback
 ```
 
 If you change a `*.src.js` input or the compiler, regenerate and commit the matching
@@ -66,9 +66,9 @@ If you change a `*.src.js` input or the compiler, regenerate and commit the matc
 | the graph/wire codec | `packages/stackmix/src/graph.mjs` |
 | the §5 heap, write-back, §6 policy | `packages/stackmix/src/heap.mjs`, `packages/stackmix/src/fetch.mjs` |
 | the WebSocket transport | `packages/stackmix/src/transport.mjs` |
-| the demo app | `test/demos/app/` |
-| the browser tier | `test/demos/public/` |
-| a proof / regression case | `test/demos/*.mjs` + `test/run.mjs` |
+| the demo app | `test/e2e/app/` |
+| the browser tier | `test/e2e/public/` |
+| a proof / regression case | `test/e2e/*.mjs` + `test/run.mjs` |
 
 ## Commits & pull requests
 

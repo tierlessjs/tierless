@@ -2,14 +2,14 @@
   "name": "stackmix-repo",
   "private": true,
   "type": "module",
-  "description": "Workspace root for Stackmix. The publishable packages live under packages/ (stackmix, create-stackmix); test/demos/ and test/ prove the claims by importing the real package through its exports map.",
+  "description": "Workspace root for Stackmix. The publishable packages live under packages/ (stackmix, create-stackmix); test/e2e/ and test/ prove the claims by importing the real package through its exports map.",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
     "test": "node test/run.mjs",
     "lint": "eslint .",
-    "live": "node test/demos/server-live.mjs",
+    "live": "node test/e2e/server-live.mjs",
     "bench": "node bench/overhead.mjs && node bench/conduit.mjs && node bench/wire.mjs && node bench/delta.mjs",
     "bench:overhead": "node bench/overhead.mjs",
     "bench:conduit": "node bench/conduit.mjs",

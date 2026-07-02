@@ -203,11 +203,11 @@ hooks. `api.*` and `commit()` look like ordinary calls.
 ## Running
 
 ```sh
-node test/demos/verify.mjs        # headless: drives the compiled bundle, asserts the session
-node test/demos/control-flow.mjs  # headless: loops/continue/try-catch-finally survive migration
-node test/demos/demo.mjs          # scripted two-tier run: real websocket + real Chromium
-node test/demos/server-live.mjs   # LIVE page — open the printed URL and click the dashboard
-node test/demos/verify-live.mjs   # headless drive of the live page with real Chromium clicks
+node test/e2e/verify.mjs        # headless: drives the compiled bundle, asserts the session
+node test/e2e/control-flow.mjs  # headless: loops/continue/try-catch-finally survive migration
+node test/e2e/demo.mjs          # scripted two-tier run: real websocket + real Chromium
+node test/e2e/server-live.mjs   # LIVE page — open the printed URL and click the dashboard
+node test/e2e/verify-live.mjs   # headless drive of the live page with real Chromium clicks
 ```
 
 The headless regressions — `verify.mjs`, `control-flow.mjs`, and the heap/policy probes
@@ -221,10 +221,10 @@ Regenerating the bundles needs the Babel toolchain (not a runtime dependency):
 
 ```sh
 npm i -D @babel/parser@8 @babel/traverse@8 @babel/generator@8 @babel/types@8
-node packages/stackmix/src/transform.cjs test/demos/app/App.src.js test/demos/app/bundle.gen.mjs
-node packages/stackmix/src/transform.cjs test/demos/cf-fixtures.src.js test/demos/cf-fixtures.gen.mjs --bare
-node packages/stackmix/src/transform.cjs test/demos/policy-app.src.js test/demos/policy-app.gen.mjs --bare
-node packages/stackmix/src/transform.cjs test/demos/heap-write.src.js test/demos/heap-write.gen.mjs --bare --auto-deref --auto-writeback
+node packages/stackmix/src/transform.cjs test/e2e/app/App.src.js test/e2e/app/bundle.gen.mjs
+node packages/stackmix/src/transform.cjs test/e2e/cf-fixtures.src.js test/e2e/cf-fixtures.gen.mjs --bare
+node packages/stackmix/src/transform.cjs test/e2e/policy-app.src.js test/e2e/policy-app.gen.mjs --bare
+node packages/stackmix/src/transform.cjs test/e2e/heap-write.src.js test/e2e/heap-write.gen.mjs --bare --auto-deref --auto-writeback
 ```
 
 ## Caveats / not-yet

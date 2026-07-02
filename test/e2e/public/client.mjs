@@ -9,7 +9,7 @@
 //
 // Imports resolve over HTTP because the server serves the repo root as the web root.
 import { connect } from "/packages/stackmix/src/browser.mjs";
-import * as bundle from "/test/demos/app/bundle.gen.mjs";
+import * as bundle from "/test/e2e/app/bundle.gen.mjs";
 
 const root = document.getElementById("root");
 const statusEl = document.getElementById("status");

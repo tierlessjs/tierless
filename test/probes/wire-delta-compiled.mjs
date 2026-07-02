@@ -8,7 +8,7 @@
 // the compiler-tracked delta matches the RESCAN oracle every hop (same ship count, identical
 // reconstruction) and reconstructs the live continuation exactly. That is the end-to-end claim:
 // write-tracked delta works on unannotated source because the compiler emits the version bump.
-import { PROGRAMS, __setDirtySink } from "../../test/demos/track-app.gen.mjs";
+import { PROGRAMS, __setDirtySink } from "../../test/e2e/track-app.gen.mjs";
 import { makeDeltaSession, encodeDelta, applyDelta,
   makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "stackmix/delta";
 import { encodeWireBinary } from "stackmix/wire";
