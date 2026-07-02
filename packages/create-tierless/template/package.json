@@ -1,0 +1,14 @@
+{
+  "name": "tierless-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tierless build app.src.js app.gen.mjs --bare",
+    "dev": "npm run build && node server.mjs",
+    "explain": "tierless explain app.src.js",
+    "check:api": "tierless api api.server.mjs"
+  },
+  "dependencies": {
+    "tierless": "^0.1.0"
+  }
+}

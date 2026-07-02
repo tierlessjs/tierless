@@ -1,135 +1,151 @@
-// Stackmix — RealWorld/Conduit benchmark: over-fetch vs server-side assembly.
+// RealWorld / Conduit, combined into one Tierless program — measured against the stock
+// REST split it replaces. Only the orchestration (bench/conduit.src.js) changed; the backend
+// service functions and the rendered fields are RealWorld's.
 //
-//   node bench/conduit.mjs        (modeled latency, instant)
-//   node bench/conduit.mjs --real (inject real RTT sleeps -> genuine wall-clock)
+// Honest latency model: independent requests PARALLELIZE (a real client fires them at once,
+// ~1 round-trip wave per CONC connections); a DEPENDENT chain cannot (one round trip per
+// step). That distinction is the whole story — Tierless's robust latency win is the round
+// trips you can't parallelize away.
 //
-// A different shape than the HN waterfall. Conduit's home feed is assembled from
-// several sources, and the realistic ask is a filter the public API doesn't
-// support (e.g. "score >= X"). With REST you either pre-build a bespoke endpoint
-// for every filter, or fetch ALL the articles to the client and filter there —
-// dragging every article body across the wire to render a small projected feed,
-// plus an N+1 round trip per article to join its author.
-//
-// We run the SAME assembly function under the runtime in two placements:
-//   REST  : db.articles ships every body to the client; the filter/join/project
-//           run on the client; each author is a round trip. Over-fetch + N+1.
-//   Stackmix  : the function migrates once, filters/joins/projects on the server
-//           where the data lives, and ships back ONLY the assembled feed.
-//
-// HN proved the latency/round-trip win (bytes were equal). Conduit proves the
-// bandwidth/over-fetch win: the big article bodies never leave the server.
+//   node bench/conduit.mjs
+import { PROGRAMS } from "./conduit.gen.mjs";
+import { encodeWire, decodeWire, wireHandles, makeTier } from "tierless/heap";
 
-import { Tier, fmt } from "#stackmix";
-import { rt, execute, DEFAULT_RTT, DEFAULT_API } from "./core.mjs";
+const fmt = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(2) + " MB");
+const jsonBytes = (o) => Buffer.byteLength(JSON.stringify(o));
 
-function asm(lines) {
-  const labels = {}, code = [];
-  for (const l of lines) (typeof l === "string") ? (labels[l] = code.length) : code.push(l.slice());
-  for (const ins of code)
-    if ((ins[0] === "JMP" || ins[0] === "JMPF") && typeof ins[1] === "string") ins[1] = labels[ins[1]];
-  return code;
+// --- a deterministic, realistic RealWorld dataset (article shape per the spec) -----------
+let s = 12345; const rnd = () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+const USERS = Array.from({ length: 60 }, (_, i) => "user" + i);
+const TAGS = ["dragons", "training", "react", "node", "wasm", "javascript", "ai", "databases", "webdev", "performance"];
+const PARA = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore. ";
+const ARTICLES = Array.from({ length: 500 }, (_, i) => {
+  const author = USERS[(i * 7) % USERS.length];
+  const paras = 4 + Math.floor(rnd() * 16);                              // ~0.5–2 KB of Markdown body
+  return {
+    slug: "article-" + i, title: "Article number " + i,
+    description: "A short one-line description of article " + i + ", shown in the preview.",
+    body: "## " + author + "'s post\n\n" + (PARA.repeat(paras)),         // FULL body — the over-fetch
+    relatedSlug: "article-" + ((i * 7 + 1) % 500),                       // a "related article" link (for the dependent chain)
+    tagList: [TAGS[i % TAGS.length], TAGS[(i * 3) % TAGS.length]],
+    createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-02T00:00:00.000Z",
+    author: { username: author, bio: "", image: "https://example.com/u/" + author + ".png", following: false },
+    favorited: false, favoritesCount: Math.floor(rnd() * 60),
+  };
+});
+const BY_SLUG = new Map(ARTICLES.map((a) => [a.slug, a]));
+const FAVS = new Map(USERS.map((u) => [u, []]));
+for (const a of ARTICLES) for (const u of USERS) if (rnd() < 0.04) FAVS.get(u).push(a.slug);
+const COMMENTS = new Map(ARTICLES.map((a) => {
+  const n = Math.floor(rnd() * 8);
+  return [a.slug, Array.from({ length: n }, (_, k) => ({
+    id: a.slug + "-c" + k, body: "Great post — comment " + k + ". " + PARA.slice(0, 70),
+    author: { username: USERS[(k * 11) % USERS.length], image: "https://example.com/u/x.png" }, createdAt: "2026-01-03T00:00:00.000Z",
+  }))];
+}));
+const ME = "user0";
+const FOLLOWING = USERS.filter((_, i) => i % 5 === 1).slice(0, 10);
+
+// --- the backend's real service functions (the server tier's api.* resources) -----------
+function getArticles({ limit, tag, author, favorited } = {}) {
+  let r = ARTICLES;
+  if (tag) r = r.filter((a) => a.tagList.includes(tag));
+  if (author) r = r.filter((a) => a.author.username === author);
+  if (favorited) { const set = new Set(FAVS.get(favorited)); r = r.filter((a) => set.has(a.slug)); }
+  return (limit != null ? r.slice(0, limit) : r);
 }
-
-// loadFeed(minScore): assemble the home feed.
-//   function loadFeed(minScore) {
-//     const articles = db.articles();           // large: every article incl. body
-//     const feed = [];
-//     for (let i = 0; i < articles.length; i++) {
-//       const a = articles[i];
-//       if (a.score >= minScore) {               // a filter the API doesn't support
-//         const author = db.user(a.authorId);    // N+1 join
-//         feed.push({ title: a.title, author: author.name, score: a.score });
-//       }
-//     }
-//     const tags = db.popularTags();
-//     return { feed, tags };                     // small projection
-//   }
-// locals: 0 minScore,1 articles,2 feed,3 i,4 a,5 author,6 item,7 tags,8 result
-rt.program.loadFeed = {
-  nlocals: 9,
-  code: asm([
-    ["RES", "db.articles", 0], ["STORE", 1],
-    ["NEWARR"], ["STORE", 2],
-    ["PUSH", 0], ["STORE", 3],
-    "loop",
-    ["LOAD", 3], ["LOAD", 1], ["GETPROP", "length"], ["BIN", "<"], ["JMPF", "end"],
-    ["LOAD", 1], ["LOAD", 3], ["INDEX"], ["STORE", 4],          // a = articles[i]
-    ["LOAD", 4], ["GETPROP", "score"], ["LOAD", 0], ["BIN", ">="], ["JMPF", "cont"],
-    ["LOAD", 4], ["GETPROP", "authorId"], ["RES", "db.user", 1], ["STORE", 5], // author = db.user(a.authorId)
-    ["NEWOBJ"],
-    ["LOAD", 4], ["GETPROP", "title"], ["SETPROP", "title"],
-    ["LOAD", 5], ["GETPROP", "name"], ["SETPROP", "author"],
-    ["LOAD", 4], ["GETPROP", "score"], ["SETPROP", "score"],
-    ["STORE", 6],
-    ["LOAD", 2], ["LOAD", 6], ["ARRPUSH"],                      // feed.push(item)
-    "cont",
-    ["LOAD", 3], ["PUSH", 1], ["BIN", "+"], ["STORE", 3], ["JMP", "loop"],
-    "end",
-    ["RES", "db.popularTags", 0], ["STORE", 7],
-    ["NEWOBJ"],
-    ["LOAD", 2], ["SETPROP", "feed"],
-    ["LOAD", 7], ["SETPROP", "tags"],
-    ["STORE", 8],
-    ["LOAD", 8], ["RET"],
-  ]),
+const apiExec = (req) => {
+  const a = req.args[0];
+  if (req.name === "api.getTags") return TAGS;
+  if (req.name === "api.getArticles") return getArticles(a);
+  if (req.name === "api.getArticle") return BY_SLUG.get(a);
+  if (req.name === "api.getComments") return COMMENTS.get(a) || [];
+  if (req.name === "api.getFollowing") return FOLLOWING;
+  throw new Error("no resource " + req.name);
 };
 
-// --- synthetic Conduit data -------------------------------------------------
-function genData(nArticles, nUsers) {
-  const users = new Map();
-  for (let id = 0; id < nUsers; id++) users.set(id, { id, name: "user_" + id, bio: "x".repeat(40) });
-  const body = "markdown body. ".repeat(130); // ~2 KB per article — the over-fetch payload
-  const articles = [];
-  for (let id = 0; id < nArticles; id++)
-    articles.push({ id, title: "Article " + id, authorId: id % nUsers, score: id % 100, tags: ["t" + (id % 7)], body });
-  const popularTags = Array.from({ length: 10 }, (_, k) => "tag_" + k);
-  return { users, articles, popularTags };
+// --- the server-tier pump: runs api.* inline, stops (migrates) at commit -----------------
+function runTierless(fn, args) {
+  const stack = [{ fn, pc: 0, args }];
+  for (;;) {
+    const top = stack[stack.length - 1];
+    const r = PROGRAMS[top.fn](top);
+    if (r.op === "return") { stack.pop(); if (!stack.length) return { done: true, value: r.value }; stack[stack.length - 1].ret = r.value; }
+    else if (r.op === "call") { stack.push({ fn: r.fn, pc: 0, args: r.args }); }
+    else if (r.tier === "server") { stack[stack.length - 1].ret = apiExec(r); }
+    else return { request: r, stack };
+  }
+}
+const deliveredBytes = (res) =>                                          // codec bytes the browser receives to render (no excision)
+  encodeWire([{ fn: "_", pc: 0, args: [] }], { op: "resource", tier: "browser", name: "dom.commit", args: [res.request.args[0]] }, {}).length;
+const bodiesHome = (res) => wireHandles(encodeWire(res.stack, res.request, { tier: makeTier("server"), threshold: 8192 })).length;
+function serdeUs(res) {
+  let best = Infinity;
+  for (let b = 0; b < 8; b++) {
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < 1000; i++) decodeWire(encodeWire(res.stack, res.request, { tier: makeTier("server"), threshold: 8192 }));
+    best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1000);
+  }
+  return best / 1000;
 }
 
-const REAL = process.argv.includes("--real");
-const N_ARTICLES = 2000, N_USERS = 50, MIN_SCORE = 90;
-const data = genData(N_ARTICLES, N_USERS);
+// --- latency model: parallel waves (independent) or sequential (dependent) ---------------
+const RTT_MS = 50, BW_BPS = 12e6, CONC = 6;                             // 50 ms RTT, 12 Mbps, 6 concurrent connections
+const wall = (rt, bytes, dependent) => (dependent ? rt : Math.ceil(rt / CONC)) * RTT_MS + (bytes * 8 / BW_BPS) * 1000;
 
-async function runStrategy(policy) {
-  const net = { hops: 0, bytes: 0, calls: 0 };
-  const server = new Tier("server", {
-    "db.articles":    ()     => { net.calls++; return data.articles; },
-    "db.user":        ([id]) => { net.calls++; return data.users.get(id); },
-    "db.popularTags": ()     => { net.calls++; return data.popularTags; },
-  });
-  const client = new Tier("client", {});
-  const value = await execute("loadFeed", [MIN_SCORE], {
-    startTier: client, tiers: [server, client], policy, net, rtt: DEFAULT_RTT, real: REAL,
-  });
-  return { value, hops: net.hops, bytes: net.bytes, calls: net.calls, latency: net.hops * DEFAULT_RTT + net.calls * DEFAULT_API };
+console.log("RealWorld / Conduit — one combined Tierless program vs the stock REST split");
+console.log(`(${ARTICLES.length} articles w/ full bodies; RTT ${RTT_MS} ms, ${BW_BPS / 1e6} Mbps, ${CONC} parallel connections; uncompressed)`);
+
+function row(label, rt, bytes, wall_) {
+  return `   ${label.padEnd(22)} ${String(rt).padStart(3)} rt   ${fmt(bytes).padStart(11)}   ${wall_.toFixed(0).padStart(6)} ms`;
 }
 
-const rest = await runStrategy("fetch");
-const stackmix = await runStrategy("migrate");
+// === A: home feed — over-fetch (REST's 2 requests are independent -> parallel) ===
+{
+  const rb = jsonBytes({ tags: TAGS }) + jsonBytes({ articles: getArticles({ limit: 10 }), articlesCount: ARTICLES.length });
+  const res = runTierless("homeFeed", [10]); const sb = deliveredBytes(res);
+  console.log("\nA) home feed — render 10 previews; stock GET /articles drags all 10 FULL bodies");
+  console.log(row("REST (2 parallel)", 2, rb, wall(2, rb, false)));
+  console.log(row("Tierless (1 migrate)", 1, sb, wall(1, sb, false)));
+  console.log(`   => ${(rb / sb).toFixed(1)}x less data, ${(wall(2, rb, false) / wall(1, sb, false)).toFixed(1)}x faster — a BYTES win; bodies stay home (${bodiesHome(res)} §5 handle), +${serdeUs(res).toFixed(0)} µs serialize`);
+}
 
-const datasetBytes = Buffer.byteLength(JSON.stringify(data.articles));
-const matched = stackmix.value.feed.length;
-const ok = JSON.stringify(rest.value) === JSON.stringify(stackmix.value) && matched > 0;
+// === B: favorited-by-followed — independent fan-out (parallelizable) ===
+{
+  let rb = 0, rt = 0; for (const u of FOLLOWING) { rb += jsonBytes({ articles: getArticles({ favorited: u }), articlesCount: 0 }); rt++; }
+  const res = runTierless("favoritedByFollowed", [ME]); const sb = deliveredBytes(res);
+  console.log("\nB) articles favorited by the 10 people I follow — REST fans out 1 request/user (independent -> parallel)");
+  console.log(row(`REST (${rt} parallel)`, rt, rb, wall(rt, rb, false)));
+  console.log(row("Tierless (1 migrate)", 1, sb, wall(1, sb, false)));
+  console.log(`   => ${(rb / sb).toFixed(1)}x less data, ${rt}->1 requests, ${(wall(rt, rb, false) / wall(1, sb, false)).toFixed(1)}x faster — bytes + request-count win`);
+}
 
-console.log("Stackmix — Conduit feed load: REST over-fetch vs server-side assembly\n");
-console.log(`Data: ${N_ARTICLES} articles (~${fmt(datasetBytes / N_ARTICLES)}/body, ${fmt(datasetBytes)} total), ${N_USERS} users`);
-console.log(`Query: home feed where score >= ${MIN_SCORE}  ->  ${matched} articles, each joined to its author`);
-console.log(`Network model: ${DEFAULT_RTT}ms client<->server RTT, ${DEFAULT_API}ms server<->API${REAL ? "  [REAL sleeps]" : "  [modeled]"}\n`);
+// === C: dependent drill-down — CANNOT parallelize; the win scales with depth ===
+console.log("\nC) a DEPENDENT chain — each step needs the previous article's link, so REST pays one");
+console.log("   round trip PER STEP (no parallelism possible). This is Tierless's robust latency win.");
+console.log("        depth      REST              Tierless          speedup");
+for (const depth of [2, 5, 10, 20]) {
+  let rb = 0; let slug = "article-0";
+  for (let i = 0; i < depth; i++) { rb += jsonBytes({ article: BY_SLUG.get(slug) }); slug = BY_SLUG.get(slug).relatedSlug; }
+  const res = runTierless("drilldown", [depth]); const sb = deliveredBytes(res);
+  const rW = wall(depth, rb, true), sW = wall(1, sb, false);
+  console.log(`   ${String(depth).padStart(8)}   ${(String(depth) + " rt / " + rW.toFixed(0) + " ms").padEnd(16)}  ${("1 rt / " + sW.toFixed(0) + " ms").padEnd(16)}  ${(rW / sW).toFixed(1)}x faster`);
+}
 
-const row = (name, s) => `  ${name.padEnd(22)} ${String(s.hops).padStart(4)} rt   ${fmt(s.bytes).padStart(9)}   ${(s.latency + "ms").padStart(8)}`;
-console.log("  strategy               round trips    bytes      latency");
-console.log(row("REST (over-fetch)", rest));
-console.log(row("Stackmix (migrate)", stackmix));
-console.log("");
+// === D: a single article page — nothing to project; Tierless's codec overhead makes it a wash/loss ===
+{
+  const slug = "article-7";
+  const rb = jsonBytes({ article: BY_SLUG.get(slug) }) + jsonBytes({ comments: COMMENTS.get(slug) });
+  const res = runTierless("articlePage", [slug]); const sb = deliveredBytes(res);
+  console.log("\nD) a single article page — the body IS rendered and comments are independent: the stock");
+  console.log("   API already serves it in ~1 parallel round trip, with nothing to project away.");
+  console.log(row("REST (2 parallel)", 2, rb, wall(2, rb, false)));
+  console.log(row("Tierless (1 migrate)", 1, sb, wall(1, sb, false)));
+  const faster = wall(2, rb, false) / wall(1, sb, false);
+  console.log(`   => ${faster >= 1 ? faster.toFixed(2) + "x faster" : (1 / faster).toFixed(2) + "x SLOWER"}; nothing to save here — Tierless just pays its verbose-codec overhead (+${serdeUs(res).toFixed(0)} µs).`);
+}
 
-console.log(`Bandwidth: REST drags every article body to the client to filter & join locally;`);
-console.log(`Stackmix filters/joins/projects on the server and ships only the assembled feed.`);
-console.log(`  bytes crossed : ${fmt(rest.bytes)} -> ${fmt(stackmix.bytes)}   =  ${(rest.bytes / stackmix.bytes).toFixed(0)}x less data`);
-console.log(`Round trips: REST ${rest.hops} (db.articles + ${matched} author joins + tags) -> Stackmix ${stackmix.hops}`);
-console.log(`             =  ${(rest.latency / stackmix.latency).toFixed(0)}x faster (${rest.latency}ms -> ${stackmix.latency}ms)`);
-console.log("");
-console.log(`A bespoke server endpoint could also avoid the over-fetch — but that's new`);
-console.log(`boilerplate for every filter you didn't anticipate (the §2 argument). Stackmix runs`);
-console.log(`the filter inline because it's already on the server where the data is.`);
-console.log(`Correctness: REST and Stackmix produced identical feeds? ${ok ? "YES" : "NO"}`);
-if (!ok) process.exitCode = 1;
+console.log("\nThe lesson: Tierless wins (1) BYTES, by not over-fetching (A, B), and (2) LATENCY only for");
+console.log("round trips you can't parallelize away — DEPENDENT chains (C), where the win grows with depth.");
+console.log("For well-composed, fully-used responses (D) it's a wash or slight loss (codec overhead). The");
+console.log("overhead it adds is always tens of µs. Use it where the API over-fetches or forces waterfalls.");

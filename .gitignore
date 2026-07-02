@@ -1,8 +1,13 @@
 node_modules/
 
-# build artifact (compiled from src/wasm/interpreter.wat)
-src/wasm/interpreter.wasm
+# demo runtime DB (rewritten by the tasks service's seed() on each start)
+src/api/tasks-db.json
 
-# bench output
-bench-sweep.csv
-*.tsbuildinfo
+# example apps: installed deps + build output
+examples/*/node_modules/
+examples/*/dist/
+examples/*/package-lock.json
+
+# tsc fixture written by test/probes/types.mjs
+test/.types-fixture/
+examples/*/actions.server.gen.mjs

@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [20, 22]
+        node: [22, 24]
     steps:
       - uses: actions/checkout@v4
 
@@ -35,8 +35,5 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Test (every demo + the conformance & differential suites)
+      - name: Test (every demo + probe, headless)
         run: npm test

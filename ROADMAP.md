@@ -1,63 +1,66 @@
 # Roadmap
 
-Stackmix is a research-stage framework. The load-bearing claim — small,
-serializable, migratable continuations with placement inferred from resources —
-is proven (see the [README](./README.md) and the test suites). What follows is
-where it goes next. Items are grouped, not strictly ordered; see
-[`docs/design.md`](./docs/design.md) `§10` for the original open questions.
+What's genuinely open. Everything that has landed — with its measurements and
+proofs — moved to [`CHANGELOG.md`](./CHANGELOG.md); the mechanism itself is
+proven (33 executable proofs, `npm test`).
 
-## Language & frontend
+## Toward a first npm release
 
-- **Remaining ES-module surface.** Named imports/exports of functions, classes,
-  and consts work today. Still to wire in: `export default`, `export *` /
-  re-exports (`export { x } from ...`), and namespace imports (`import * as M`).
-  The import resolver is checker-based, so these are mostly wiring in
-  `compileProgram`'s declaration resolution and import emission.
-- **Source maps** (design `§10.6`). Every IR instruction already carries its TS
-  position; the unfinished part is emitting that as portable file/line metadata
-  that survives into a standard source map. Design it into the transform, don't
-  bolt it on afterward.
-- **Resolve the documented frontend caveats** where they prove to matter (TDZ
-  enforcement, dynamic accessors; see [`docs/architecture.md`](./docs/architecture.md#known-limitations-and-intentional-caveats)).
+- **Publish `tierless` + `create-tierless`** at 0.1.0 (the packages are shaped
+  and `npm pack`-verified; the README quick start assumes the registry).
+- **TypeScript sources for mix modules.** The public API is fully typed
+  (hand-written `.d.ts`, tsc-verified in `npm test`), but `"use tierless"` files are
+  plain JS: the transform needs @babel/parser's TS plugin + type stripping.
+  Richer generated types than `(...args: any[]) => any` from `tierless types`.
+- **Production build story for the Vite plugin.** Dev is first-class (the
+  plugin hosts the endpoint on Vite's own server); prod works today by mounting
+  `attachTierless` with a CLI-built machine (see `docs/production.md` and
+  `examples/react-vite/server.prod.mjs`) but should become a build-time output.
 
-## Runtime & transport
+## Runtime hardening
 
-- **Cross-process handle fetch — wire the transport.** The invariant is honored
-  (a deref-miss suspends and re-runs correctly; verified in
-  `test/probes/deref.mjs`), and the cost model exists (`examples/policy`). The
-  remaining piece is the live transport that fetches a §5 handle across a channel
-  on demand.
-- **Binary wire format.** The continuation wire is JSON today. Espresso's
-  Kryo-vs-Java result (~half the size) motivates moving to a compact binary
-  encoding; keep the `heap`/`fetch` seam so serialization stays swappable.
-- **Incremental snapshotting.** Golem's delta-based capture is the reference for
-  making repeated captures cheap rather than re-serializing the whole state.
-- **Content-addressed code identity.** Resume-by-instruction-offset breaks under
-  version skew between tiers. Unison's content-addressing is the known fix;
-  revisit when tiers may run different builds.
+- **Reconnect/resume.** A dropped websocket loses the session today. The
+  continuation is durable data, so parking it (server-side or client-side) and
+  resuming on reconnect is a natural extension — not built yet.
+- **Horizontal scaling.** The session protocol is stateless per message, but §5
+  heap contents and delta baselines are per-process; multi-instance deployments
+  need sticky sessions today. Documented in `docs/production.md`.
+- **Event-dispatch model.** The live page parks the whole continuation on one
+  human click; a page with several independent event sources needs the next
+  event routed to the right resumable point. Application-level today.
 
-## Platform
+## From the literature (Stip.js, Fission — see design.md §9)
 
-- **Browser target.** No browser host yet; the JS path is Node-only today.
-- **Full-language WASM path** is explicitly *not* planned — the JS path covers the
-  language; the wasm path exists only to prove the linear-memory capture
-  mechanism.
+- **Per-tier dead-code shake.** Stip.js's slicer ships each tier only the code it can
+  run; Tierless ships every machine to both tiers. The suspendability analysis already
+  knows which functions can only execute server-side in practice — a bundle shake using
+  it would cut the browser payload with no semantic change.
+- **Label-driven excision (Fission-grade confidentiality from existing parts).** Mark an
+  api result `confidential` and compose two things Tierless already has: the value is
+  FORCED to cross as a §5 handle (never inlined into a continuation headed client-ward),
+  and every deref of it is a monitored, per-principal call. Data-flow confidentiality for
+  tier-crossing values without whole-program interposition.
+- **Whole-program placement optimization.** §6 prices one hop at a time (greedy);
+  Stip.js's search-based tier assignment optimized placement globally (total
+  communication, offline availability). A PDG-style global view over the suspension
+  graph could pre-place or replicate pure helpers better than local decisions.
 
-## Framework shape
+## Bigger swings
 
-- **A multi-file, framework-shaped sample app** (Nest/Angular-shaped: a DI graph,
-  decorated controllers/providers, a request that migrates mid-handler) to shake
-  out what real framework code hits now that imports + decorators + DI work.
-  Likely surfaces: lifecycle hooks, async providers, guard/interceptor chains,
-  request scoping.
-- **Package extraction.** If independently versioned packages earn their keep,
-  split `src/runtime`, `src/compiler`, and `src/wasm` into `@stackmix/*` packages
-  along the existing module seams. Deferred until needed.
+- **Durable continuations.** Persist a parked continuation and resume it after
+  a process restart or on another machine — leaning hardest on "the
+  continuation is data you own."
+- **Auto-rewrite of Array HOF callbacks.** `items.map(x => api.f(x))` is a
+  clear compile error today (a callback runs inside native code that can't
+  suspend); the known Array cases could be loop-rewritten automatically.
 
 ## Not on the roadmap (by design)
 
-- **Native WASM stack capture** — not serializable, not in browsers; capture stays
-  at the interpreter level (design `§8`).
-- **Replay/journaling as the migration mechanism** — replay reconstructs state by
-  re-running history, which can't move a *live* mid-call computation across a
-  trust boundary. It's a complementary durability story, not a substitute.
+- **Per-component continuation identity / render-splitting.** The framework is
+  general-purpose and React runs *inside* it as ordinary code; finer granularity
+  adds tier crossings and buys no parallelism. The coarse unit — migrate the
+  whole continuation, cross only when forced — is the right one.
+- **Native engine stack capture** (async/generator or WASM stack-switching
+  state) — suspend-but-not-serialize cannot move a live computation across a
+  process (design §8). The transportable continuation stays the compiler's own
+  data structure.

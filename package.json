@@ -1,82 +1,29 @@
 {
-  "name": "stackmix",
-  "version": "0.1.0",
+  "name": "tierless-repo",
   "private": true,
   "type": "module",
-  "description": "Tierless continuation migration — one program that runs across client and server, with the runtime moving live execution between tiers.",
-  "keywords": [
-    "continuation",
-    "migration",
-    "tierless",
-    "isomorphic",
-    "client-server",
-    "serialization",
-    "interpreter",
-    "typescript",
-    "webassembly",
-    "distributed"
-  ],
-  "homepage": "https://github.com/bfulton/stackmix#readme",
-  "bugs": {
-    "url": "https://github.com/bfulton/stackmix/issues"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/bfulton/stackmix.git"
-  },
-  "license": "Apache-2.0",
-  "author": "Bright Fulton",
-  "main": "./src/index.mjs",
-  "types": "./types/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./types/index.d.ts",
-      "default": "./src/index.mjs"
-    },
-    "./package.json": "./package.json"
-  },
-  "imports": {
-    "#stackmix": "./src/index.mjs",
-    "#stackmix/*": "./src/*"
-  },
-  "bin": {
-    "stackmix": "./bin/stackmix.mjs"
-  },
-  "files": [
-    "src",
-    "types",
-    "bin",
-    "README.md",
-    "LICENSE",
-    "NOTICE"
+  "description": "Workspace root for Tierless. The publishable packages live under packages/ (tierless, create-tierless); test/e2e/ and test/ prove the claims by importing the real package through its exports map.",
+  "workspaces": [
+    "packages/*"
   ],
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.18.0"
   },
   "scripts": {
     "test": "node test/run.mjs",
-    "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint .",
-    "build:wasm": "node src/wasm/build.mjs",
-    "spike": "node examples/spike/index.mjs",
-    "2p": "node examples/two-process/client.mjs",
-    "wasm": "node src/wasm/build.mjs && node examples/wasm/index.mjs",
-    "wasm:2p": "node src/wasm/build.mjs && node examples/wasm-two-process/client.mjs",
-    "policy": "node src/wasm/build.mjs && node examples/policy/index.mjs",
-    "bench:hn": "node bench/hn.mjs",
-    "bench:sweep": "node bench/sweep.mjs",
+    "live": "node test/e2e/server-live.mjs",
+    "bench": "node bench/overhead.mjs && node bench/conduit.mjs && node bench/wire.mjs && node bench/delta.mjs",
+    "bench:overhead": "node bench/overhead.mjs",
     "bench:conduit": "node bench/conduit.mjs",
-    "fetch:2p": "node examples/handle-fetch/client.mjs",
-    "app:2p": "node examples/hn-thread/client.mjs"
-  },
-  "dependencies": {
-    "typescript": "^5.9.3",
-    "wabt": "^1.0.39"
+    "bench:wire": "node bench/wire.mjs",
+    "bench:delta": "node bench/delta.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",
-    "@types/node": "^22.7.0",
+    "@types/node": "^26.1.0",
     "eslint": "^9.13.0",
-    "globals": "^15.11.0"
+    "globals": "^15.11.0",
+    "typescript": "^6.0.3"
   }
 }
