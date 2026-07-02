@@ -1,0 +1,68 @@
+{
+  "name": "stackmix",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Tierless continuation migration — one program that runs across browser and server, with the runtime moving live execution between tiers as serializable continuations.",
+  "keywords": [
+    "continuation",
+    "migration",
+    "tierless",
+    "isomorphic",
+    "client-server",
+    "serialization",
+    "distributed"
+  ],
+  "homepage": "https://github.com/bfulton/stackmix#readme",
+  "bugs": {
+    "url": "https://github.com/bfulton/stackmix/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bfulton/stackmix.git",
+    "directory": "packages/stackmix"
+  },
+  "license": "Apache-2.0",
+  "author": "Bright Fulton",
+  "files": [
+    "src",
+    "bin"
+  ],
+  "exports": {
+    ".": "./src/host.mjs",
+    "./api": "./src/api/index.mjs",
+    "./server": "./src/server.mjs",
+    "./browser": "./src/browser.mjs",
+    "./react": "./src/react.mjs",
+    "./vite": "./src/vite.mjs",
+    "./compiler": "./src/transform.cjs",
+    "./runtime": "./src/runtime.mjs",
+    "./wire": "./src/wire-binary.mjs",
+    "./delta": "./src/wire-delta.mjs",
+    "./graph": "./src/graph.mjs",
+    "./heap": "./src/heap.mjs",
+    "./fetch": "./src/fetch.mjs",
+    "./content": "./src/content.mjs",
+    "./transport": "./src/transport.mjs"
+  },
+  "bin": {
+    "stackmix": "bin/stackmix.mjs"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@babel/generator": "^8.0.0",
+    "@babel/parser": "^8.0.0",
+    "@babel/traverse": "^8.0.0",
+    "@babel/types": "^8.0.0",
+    "ws": "^8.21.0"
+  }
+}

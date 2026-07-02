@@ -5,8 +5,8 @@
 // on cycles; this asserts the graph codec handles all of it, plus the exotic value types
 // (undefined, BigInt) that aren't JSON-native. The §5 layer (src/heap.mjs makeTier)
 // supplies the tier whose heap a big subgraph excises into as a handle.
-import { encodeGraph, decodeGraph, isHandle } from "../../src/graph.mjs";
-import { makeTier } from "../../src/heap.mjs";
+import { encodeGraph, decodeGraph, isHandle } from "stackmix/graph";
+import { makeTier } from "stackmix/heap";
 
 const roundtrip = (values, opts) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph(values, opts))));
 function tree(n, b = 4) {

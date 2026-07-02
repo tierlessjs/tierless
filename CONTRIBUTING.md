@@ -15,7 +15,7 @@ npm test        # runs every demo + probe headless and asserts the headline clai
 
 Read [`docs/architecture.md`](./docs/architecture.md) first — it explains the
 repository layout, the compiler, the pump, the wire, and the heap. For the live
-two-tier walkthrough, see [`src/README.md`](./src/README.md).
+two-tier walkthrough, see [`demos/README.md`](./demos/README.md).
 
 ## The checks that must pass
 
@@ -33,15 +33,15 @@ behavior, add a proof and wire it into `test/run.mjs`.
 
 ## Working with the compiler
 
-The compiler (`src/transform.cjs`) lowers a plain `*.src.js` function into a generated
+The compiler (`packages/stackmix/src/transform.cjs`) lowers a plain `*.src.js` function into a generated
 `*.gen.mjs` state machine. The generated bundles are **committed** so `npm test` runs
 without a build step. Regenerating them needs the Babel toolchain (not a runtime
 dependency):
 
 ```bash
 npm i -D @babel/parser@8 @babel/traverse@8 @babel/generator@8 @babel/types@8
-node src/transform.cjs src/app/App.src.js src/app/bundle.gen.mjs
-node src/transform.cjs src/heap-write.src.js src/heap-write.gen.mjs --bare --auto-deref --auto-writeback
+npx stackmix build demos/app/App.src.js demos/app/bundle.gen.mjs
+npx stackmix build demos/heap-write.src.js demos/heap-write.gen.mjs --bare --auto-deref --auto-writeback
 ```
 
 If you change a `*.src.js` input or the compiler, regenerate and commit the matching
@@ -61,14 +61,14 @@ If you change a `*.src.js` input or the compiler, regenerate and commit the matc
 
 | You want to change... | Edit... |
 |---|---|
-| the compiler (plain JS → state machine) | `src/transform.cjs` |
-| the pump / wire envelope | `src/runtime.mjs` |
-| the graph/wire codec | `src/graph.mjs` |
-| the §5 heap, write-back, §6 policy | `src/heap.mjs`, `src/fetch.mjs` |
-| the WebSocket transport | `src/transport.mjs` |
-| the demo app | `src/app/` |
-| the browser tier | `src/public/` |
-| a proof / regression case | `src/*.mjs` + `test/run.mjs` |
+| the compiler (plain JS → state machine) | `packages/stackmix/src/transform.cjs` |
+| the pump / wire envelope | `packages/stackmix/src/runtime.mjs` |
+| the graph/wire codec | `packages/stackmix/src/graph.mjs` |
+| the §5 heap, write-back, §6 policy | `packages/stackmix/src/heap.mjs`, `packages/stackmix/src/fetch.mjs` |
+| the WebSocket transport | `packages/stackmix/src/transport.mjs` |
+| the demo app | `demos/app/` |
+| the browser tier | `demos/public/` |
+| a proof / regression case | `demos/*.mjs` + `test/run.mjs` |
 
 ## Commits & pull requests
 

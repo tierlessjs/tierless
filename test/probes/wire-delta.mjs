@@ -17,9 +17,9 @@
 //      object dirty when mutated) ships the SAME set and reconstructs IDENTICALLY to the O(reachable)
 //      rescan encoder, which is the oracle. Same wire, same store, lower cost.
 import { makeDeltaSession, encodeDelta, applyDelta,
-  makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "../../src/wire-delta.mjs";
-import { encodeWireBinary } from "../../src/wire-binary.mjs";
-import { makeTier } from "../../src/heap.mjs";
+  makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "stackmix/delta";
+import { encodeWireBinary } from "stackmix/wire";
+import { makeTier } from "stackmix/heap";
 
 let pass = true;
 const check = (name, cond) => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}`); pass = pass && cond; };

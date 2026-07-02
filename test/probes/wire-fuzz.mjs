@@ -8,10 +8,10 @@
 //      unicode; plus NaN/±Inf/-0 which binary preserves and JSON cannot;
 //   4. decode robustness — truncated, corrupted, and hostile bytes must fail CLEANLY (no
 //      hang, no OOB read, no prototype pollution).
-import { encodeWireBinary, decodeWireBinary } from "../../src/wire-binary.mjs";
-import { encodeWire, decodeWire, makeTier } from "../../src/heap.mjs";
-import { isHandle, decodeGraph } from "../../src/graph.mjs";
-import { ContentStore, newPeerView } from "../../src/content.mjs";
+import { encodeWireBinary, decodeWireBinary } from "stackmix/wire";
+import { encodeWire, decodeWire, makeTier } from "stackmix/heap";
+import { isHandle, decodeGraph } from "stackmix/graph";
+import { ContentStore, newPeerView } from "stackmix/content";
 
 let pass = true;
 const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };

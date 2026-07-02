@@ -7,9 +7,9 @@
 //   4. decode robustness — truncated / garbage / corrupted / bad-magic bytes fail CLEANLY (no hang,
 //      no OOB read, no pollution), applied against a fresh session;
 //   5. prototype-pollution — encode strips a __proto__ key; the decoder skips a hostile one.
-import { makeDeltaSession, encodeDelta, applyDelta, makeTrackedSession, encodeDeltaTracked, applyDeltaTracked } from "../../src/wire-delta.mjs";
-import { isHandle } from "../../src/graph.mjs";
-import { makeTier } from "../../src/heap.mjs";
+import { makeDeltaSession, encodeDelta, applyDelta, makeTrackedSession, encodeDeltaTracked, applyDeltaTracked } from "stackmix/delta";
+import { isHandle } from "stackmix/graph";
+import { makeTier } from "stackmix/heap";
 
 let pass = true;
 const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };

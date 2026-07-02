@@ -11,8 +11,8 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
-const { compile, analyze, DEFAULT_RESOURCES } = require("../../src/transform.cjs");
-const TX = fileURLToPath(new URL("../../src/transform.cjs", import.meta.url));
+const { compile, analyze, DEFAULT_RESOURCES } = require("../../packages/stackmix/src/transform.cjs");
+const TX = fileURLToPath(new URL("../../packages/stackmix/src/transform.cjs", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "capi-"));
 
 let pass = 0, fail = 0;

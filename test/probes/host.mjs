@@ -15,11 +15,11 @@ import { writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { serveApp } from "../../src/server.mjs";
-import { connect } from "../../src/browser.mjs";
-import { WS_PATH } from "../../src/ws-path.mjs";
+import { serveApp } from "stackmix/server";
+import { connect } from "stackmix/browser";
+import { WS_PATH } from "stackmix/server";
 
-const TX = fileURLToPath(new URL("../../src/transform.cjs", import.meta.url));
+const TX = fileURLToPath(new URL("../../packages/stackmix/src/transform.cjs", import.meta.url));
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 let pass = 0, fail = 0;
 const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : `  (got ${JSON.stringify(got)})`}`); } };

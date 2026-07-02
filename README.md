@@ -104,7 +104,7 @@ time); `npx stackmix types api.server.mjs` emits the `declare const api` surface
 
 ## The developer's code
 
-The whole app is straight-line logic — [`src/app/App.src.js`](./src/app/App.src.js):
+The whole app is straight-line logic — [`demos/app/App.src.js`](./demos/app/App.src.js):
 
 ```js
 function App() {
@@ -135,62 +135,52 @@ and finishes in the browser the instant the vdom touches the real DOM.
 | proof | what it shows |
 | --- | --- |
 | `test/probes/codec.mjs` | the wire codec preserves identity, survives cycles, excises big subgraphs to §5 handles, and round-trips exotic values (undefined, BigInt) |
-| `src/verify.mjs` | the auto-compiled tier-split continuation reproduces the correct session across migrations |
-| `src/conduit-verify.mjs` | a larger, framework-shaped app — a RealWorld/Conduit reader with routing across three views (feed ↔ article ↔ editor), favorites, comments, a new-article form, and a server-side validation `throw` caught across the tier boundary — runs correctly as one compiled continuation |
-| `src/api-verify.mjs` | the trust boundary done right: the api is an external **reference monitor** in its own process (a local-pipe sidecar), `authorize` is mandatory at load time, and the principal is a signed token it verifies — so across a real forked process neither a forged continuation nor a forged token can escalate (authority is re-checked at every call, never inferred from control flow) |
-| `src/api-pump.mjs` | the monitor wired into the pump: a real compiled continuation migrates across tiers with every `api.*` serviced by the sidecar over the pipe — authorized per principal, a denial caught by the app's `try`/`catch` across the tier (same continuation, admin allowed / user denied) |
-| `src/api-live.mjs` | the monitor as the **default `api.*` path**: the Tasks app's DB lives in its own trusted service (`src/api/tasks-fns.mjs`) which the demos fork as a sidecar — the pump host holds only a pipe and a per-session token. The real compiled App runs the full journey on the runtime's own `pump` through it; anonymous `PUBLIC` reads still render while an unauthenticated or forged write is **denied in the monitor's process** and thrown across the tier, and an oversize call is rejected by the args budget |
-| `src/control-flow.mjs` | loops, `break`/`continue`, labeled loops, `switch`, and `try`/`catch`/`finally` (including `return`/`break` across a `finally`) all survive migration |
+| `demos/verify.mjs` | the auto-compiled tier-split continuation reproduces the correct session across migrations |
+| `demos/conduit-verify.mjs` | a larger, framework-shaped app — a RealWorld/Conduit reader with routing across three views (feed ↔ article ↔ editor), favorites, comments, a new-article form, and a server-side validation `throw` caught across the tier boundary — runs correctly as one compiled continuation |
+| `demos/api-verify.mjs` | the trust boundary done right: the api is an external **reference monitor** in its own process (a local-pipe sidecar), `authorize` is mandatory at load time, and the principal is a signed token it verifies — so across a real forked process neither a forged continuation nor a forged token can escalate (authority is re-checked at every call, never inferred from control flow) |
+| `demos/api-pump.mjs` | the monitor wired into the pump: a real compiled continuation migrates across tiers with every `api.*` serviced by the sidecar over the pipe — authorized per principal, a denial caught by the app's `try`/`catch` across the tier (same continuation, admin allowed / user denied) |
+| `demos/api-live.mjs` | the monitor as the **default `api.*` path**: the Tasks app's DB lives in its own trusted service (`demos/api/tasks-fns.mjs`) which the demos fork as a sidecar — the pump host holds only a pipe and a per-session token. The real compiled App runs the full journey on the runtime's own `pump` through it; anonymous `PUBLIC` reads still render while an unauthenticated or forged write is **denied in the monitor's process** and thrown across the tier, and an oversize call is rejected by the args budget |
+| `demos/control-flow.mjs` | loops, `break`/`continue`, labeled loops, `switch`, and `try`/`catch`/`finally` (including `return`/`break` across a `finally`) all survive migration |
 | `test/probes/lang-coverage.mjs` | ordinary binding forms compile and migrate: `for`/`of`/`in`, destructuring (object/array/nested/default/rest, non-array iterables via an `Array.from` guard), default/destructured/rest parameters, and a suspension inside an **optional chain** (`obj?.[api.x()]` / `obj.m?.(api.x())` — short-circuit skips the tier call, `this` preserved, checked against a native-JS oracle) — each driven across a JSON round-trip of the continuation at every suspension. The one form that genuinely can't migrate — a tier call inside a callback/comparator/method, run synchronously by native code that can't suspend — is rejected with a clear compile error, not silently miscompiled |
-| `src/heap-probe.mjs`, `src/heap-live.mjs` | a 1.1 MB dataset crosses a commit migration as a ~450-byte §5 handle and is fetched back over a real socket only when the browser derefs it |
-| `src/heap-auto.mjs`, `src/heap-write.mjs` | transparent deref (reads auto-fetch on touch) and transparent write-back (a browser edit propagates to the server master under §5 CAS), with no `deref()`/`writeBack()` in the source |
-| `src/heap-writeback.mjs` | optimistic version-checked CAS: conflicts detected, refetch + retry, no lost updates |
-| `src/heap-write-delta.mjs`, `test/probes/wire-delta-fields.mjs` | a write-back IS a delta to the master, and the codec ships **per-field/element** patches — an object's changed keys, an array's touched indices, a Map/Set's set/deleted entries — applied in place under CAS, `min(delta, whole)` so it's never larger. A 6-way edit (incl. push/`Map.set`/`Set.add`) in a 1500-row dataset crosses ~94× smaller; the same patches sharpen the oscillation delta both directions |
-| `src/policy-live.mjs` | at a data boundary the driver prices migrate-vs-fetch from real bytes and steers what crosses (§6) — flipping to fetch a 23 B fact rather than ship a 97 KB continuation |
+| `demos/heap-probe.mjs`, `demos/heap-live.mjs` | a 1.1 MB dataset crosses a commit migration as a ~450-byte §5 handle and is fetched back over a real socket only when the browser derefs it |
+| `demos/heap-auto.mjs`, `demos/heap-write.mjs` | transparent deref (reads auto-fetch on touch) and transparent write-back (a browser edit propagates to the server master under §5 CAS), with no `deref()`/`writeBack()` in the source |
+| `demos/heap-writeback.mjs` | optimistic version-checked CAS: conflicts detected, refetch + retry, no lost updates |
+| `demos/heap-write-delta.mjs`, `test/probes/wire-delta-fields.mjs` | a write-back IS a delta to the master, and the codec ships **per-field/element** patches — an object's changed keys, an array's touched indices, a Map/Set's set/deleted entries — applied in place under CAS, `min(delta, whole)` so it's never larger. A 6-way edit (incl. push/`Map.set`/`Set.add`) in a 1500-row dataset crosses ~94× smaller; the same patches sharpen the oscillation delta both directions |
+| `demos/policy-live.mjs` | at a data boundary the driver prices migrate-vs-fetch from real bytes and steers what crosses (§6) — flipping to fetch a 23 B fact rather than ship a 97 KB continuation |
 | `test/probes/wire-delta.mjs`, `test/probes/wire-delta-compiled.mjs` | the delta wire ships a capture as a patch over what the peer holds; `--track-writes` makes the compiler bump a version on every in-place mutation, so plain source ships only what changed — proven identical to a full re-scan, with Map/Set first-class |
 | `test/probes/wire-content.mjs` | content-addressed immutable subgraphs: a registered config ships inline once then as a tiny hash reference (36 KB → 319 B), resolving to the copy the peer cached — identity by content. Carried through the **binary wire** (the socket frame) and composed with §5 excision + `min(delta, full)`, so a re-frame ships immutable code by hash, not re-inlined |
-| `src/delta-live.mjs` | over a real socket a continuation that bounces server↔browser each hop ships `min(delta, full)` — a compiler-tracked delta on warm hops, a full binary frame on the cold hop — reconstructing exactly and computing the right result |
+| `demos/delta-live.mjs` | over a real socket a continuation that bounces server↔browser each hop ships `min(delta, full)` — a compiler-tracked delta on warm hops, a full binary frame on the cold hop — reconstructing exactly and computing the right result |
 | `test/probes/host.mjs` | the assembled host (`serveApp`/`connect`): client-started **actions** run out on the server in one hop, bounce back mid-flight at a browser resource, and interleave concurrently on one socket (the host is stateless — all state rides in the continuation); the server-started full-tierless mode completes over the same endpoint |
 | `test/probes/compiler-api.mjs` | the compiler as an importable library: configurable resource namespaces (`db.*` → server, from opts or `--resource`), module-shaped input (`export function` → a named PROGRAM, imports/state preserved), and the `analyze()` suspendability report |
 | `test/probes/define-api.mjs`, `test/probes/cli.mjs` | `defineApi` keeps the monitor's load-time mandate (no authorize → fails at create), and the `stackmix` CLI works end to end: `build`, `explain` (the analysis made visible), `api` (pre-ship check), `types` |
 | `test/probes/vite-plugin.mjs` | the Vite plugin, headless: a `"use mix"` module becomes monitor-backed actions — transform + dev-server endpoint + ssr-loaded machine + sidecar authorization, with a loginless write denied. Verified for real too: `npm install` + `vite build` succeed in `examples/react-vite`, and a live `vite dev` + Chromium run clicks Rebalance and renders monitor-authorized orders |
 | `test/probes/create-app.mjs` | `create-stackmix` scaffolds a WORKING app: built with the real bin, booted (api sidecar forked), and driven live — seeded render, authorized write with the principal attached, a blank write denied at the monitor and caught by the app's `try/catch` across the tier |
 
-`src/demo.mjs` and `src/server-live.mjs` additionally run the whole thing across a real
+`demos/demo.mjs` and `demos/server-live.mjs` additionally run the whole thing across a real
 WebSocket into **real headless Chromium** (Playwright) with real clicks; they need a
 browser and so run on demand rather than in `npm test`.
 
 ## Repository layout
 
 ```
-src/              the framework
-  transform.cjs   the compiler: plain JS -> serializable state machine (Babel; importable + CLI)
-  runtime.mjs     makePump — one tier-agnostic continuation driver, generic over any bundle
-  host.mjs        the session host both tiers share (start/answer/call over the peer protocol)
-  server.mjs      attachStackmix (mount on ANY http server) + serveApp (static + page + endpoint)
-  browser.mjs     connect (one socket: answer migrations, call actions) + bindActions
-  vite.mjs        the Vite plugin: "use mix" modules -> monitor-backed actions
-  react.mjs       useAction — run-state for calling actions from components
-  graph.mjs       identity/cycle-safe graph codec for the wire
-  wire-binary.mjs the compact binary wire (type tags + varints + string/shape tables)
-  heap.mjs        §5 distributed handle heap: encodeWire, makeTier, write-back CAS
-  fetch.mjs       Heap / Channel / makeHost — fetch-on-deref with coherence
-  transport.mjs   WebSocket framing + RPC peer (browser-safe)
-  api/            the trust boundary — the reference monitor, its sidecar transport, and the
-                  trusted services behind it (the api implementations; the default api.* path)
-  app/            the demo app (plain components -> serializable vdom)
-  public/         the browser tier (runs in a real tab)
-  *.mjs           the demos and headless proofs (also the test suite)
-bin/              the stackmix CLI: build / explain / api / types
+packages/
+  stackmix/       the npm package `stackmix` — everything `npm i stackmix` delivers
+    src/          compiler (transform.cjs), runtime/host/server/browser, wire + graph +
+                  delta + content codecs, §5 heap, transport, the api reference monitor,
+                  the Vite plugin, the react hook
+    bin/          the stackmix CLI: build / explain / api / types
+  create-stackmix/  the npm package behind `npm create stackmix` (scaffolder + template)
+demos/            the demos and headless proofs — they import the REAL package through
+                  its exports map (the Tasks app, conduit, the live pages, heap/policy/
+                  delta demos, the sample trusted services)
 examples/         popular frameworks with Stackmix mixed in (react-vite)
-create-stackmix/  npm create stackmix — scaffold a running two-tier app
-test/             the regression runner + the wire-codec probe
+test/             the regression runner + probes (also import "stackmix")
 docs/             architecture, design spec
 ```
 
 ## Documentation
 
-- [`src/README.md`](./src/README.md) — the framework walkthrough (the live demo, what each piece does)
+- [`demos/README.md`](./demos/README.md) — the framework walkthrough (the live demo, what each piece does)
 - [Architecture](./docs/architecture.md) — layout, the pump, the wire, the heap
 - [Design](./docs/design.md) — the original vision and open questions
 - [Roadmap](./ROADMAP.md) · [Contributing](./CONTRIBUTING.md)

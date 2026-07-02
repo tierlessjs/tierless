@@ -1,80 +1,24 @@
 {
-  "name": "stackmix",
-  "version": "0.1.0",
+  "name": "stackmix-repo",
+  "private": true,
   "type": "module",
-  "description": "Tierless continuation migration — one program that runs across browser and server, with the runtime moving live execution between tiers as serializable continuations.",
-  "keywords": [
-    "continuation",
-    "migration",
-    "tierless",
-    "isomorphic",
-    "client-server",
-    "serialization",
-    "distributed"
+  "description": "Workspace root for Stackmix. The publishable packages live under packages/ (stackmix, create-stackmix); demos/ and test/ prove the claims by importing the real package through its exports map.",
+  "workspaces": [
+    "packages/*"
   ],
-  "homepage": "https://github.com/bfulton/stackmix#readme",
-  "bugs": {
-    "url": "https://github.com/bfulton/stackmix/issues"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/bfulton/stackmix.git"
-  },
-  "license": "Apache-2.0",
-  "author": "Bright Fulton",
-  "files": [
-    "src",
-    "bin",
-    "README.md",
-    "LICENSE",
-    "NOTICE"
-  ],
-  "exports": {
-    ".": "./src/host.mjs",
-    "./api": "./src/api/index.mjs",
-    "./server": "./src/server.mjs",
-    "./browser": "./src/browser.mjs",
-    "./react": "./src/react.mjs",
-    "./vite": "./src/vite.mjs",
-    "./compiler": "./src/transform.cjs",
-    "./runtime": "./src/runtime.mjs",
-    "./wire": "./src/wire-binary.mjs",
-    "./transport": "./src/transport.mjs"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "peerDependencies": {
-    "react": ">=18"
-  },
-  "peerDependenciesMeta": {
-    "react": {
-      "optional": true
-    }
-  },
   "scripts": {
     "test": "node test/run.mjs",
     "lint": "eslint .",
-    "live": "node src/server-live.mjs",
+    "live": "node demos/server-live.mjs",
     "bench": "node bench/overhead.mjs && node bench/conduit.mjs && node bench/wire.mjs && node bench/delta.mjs",
     "bench:overhead": "node bench/overhead.mjs",
     "bench:conduit": "node bench/conduit.mjs",
     "bench:wire": "node bench/wire.mjs",
     "bench:delta": "node bench/delta.mjs"
   },
-  "dependencies": {
-    "@babel/generator": "^8.0.0",
-    "@babel/parser": "^8.0.0",
-    "@babel/traverse": "^8.0.0",
-    "@babel/types": "^8.0.0",
-    "ws": "^8.21.0"
-  },
   "devDependencies": {
     "@eslint/js": "^9.13.0",
     "eslint": "^9.13.0",
     "globals": "^15.11.0"
-  },
-  "bin": {
-    "stackmix": "bin/stackmix.mjs"
   }
 }

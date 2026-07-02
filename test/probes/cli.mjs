@@ -10,8 +10,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const BIN = fileURLToPath(new URL("../../bin/stackmix.mjs", import.meta.url));
-const SRC = fileURLToPath(new URL("../../src/", import.meta.url));
+const BIN = fileURLToPath(new URL("../../packages/stackmix/bin/stackmix.mjs", import.meta.url));
+const SRC = fileURLToPath(new URL("../../packages/stackmix/src/", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "cli-"));
 let pass = 0, fail = 0;
 const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : `  (got ${JSON.stringify(got)})`}`); } };

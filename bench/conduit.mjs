@@ -9,7 +9,7 @@
 //
 //   node bench/conduit.mjs
 import { PROGRAMS } from "./conduit.gen.mjs";
-import { encodeWire, decodeWire, wireHandles, makeTier } from "../src/heap.mjs";
+import { encodeWire, decodeWire, wireHandles, makeTier } from "stackmix/heap";
 
 const fmt = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(2) + " MB");
 const jsonBytes = (o) => Buffer.byteLength(JSON.stringify(o));

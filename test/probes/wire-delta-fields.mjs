@@ -5,8 +5,8 @@
 // Set's added/removed members. It lives in the shared codec, so BOTH write-back (heap-write-delta) and
 // the oscillation delta benefit. It is opt-in: with it off the wire is byte-for-byte unchanged (every
 // other delta probe stays green), and the message-level min(delta, full) still backstops "never larger".
-import { makeTrackedSession, adoptBaseline, encodeDeltaTracked, applyDeltaTracked, touch } from "../../src/wire-delta.mjs";
-import { encodeGraph, decodeGraph } from "../../src/graph.mjs";
+import { makeTrackedSession, adoptBaseline, encodeDeltaTracked, applyDeltaTracked, touch } from "stackmix/delta";
+import { encodeGraph, decodeGraph } from "stackmix/graph";
 
 const fresh = (v) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([v]))))[0];   // a structurally-identical detached copy
 const frame = (m) => [{ fn: "_", pc: 0, m }];

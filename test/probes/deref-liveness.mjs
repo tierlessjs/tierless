@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const TX = fileURLToPath(new URL("../../src/transform.cjs", import.meta.url));
+const TX = fileURLToPath(new URL("../../packages/stackmix/src/transform.cjs", import.meta.url));
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "deref-liveness-"));
 let n = 0;

@@ -2,7 +2,7 @@
 // The load-time mandate survives the sugar: an endpoint with no authorize throws at
 // create(), before a single call could be served. The build-function form hands the api
 // instance to runs that need it (login minting via api.issue), and opts flow through.
-import { defineApi, PUBLIC } from "../../src/api/api.mjs";
+import { defineApi, PUBLIC } from "stackmix/api";
 
 let pass = 0, fail = 0;
 const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : `  (got ${JSON.stringify(got)})`}`); } };

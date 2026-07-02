@@ -8,8 +8,8 @@ import { existsSync, mkdtempSync, mkdirSync, symlinkSync, readFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { connect } from "../../src/browser.mjs";
-import { WS_PATH } from "../../src/ws-path.mjs";
+import { connect } from "stackmix/browser";
+import { WS_PATH } from "stackmix/server";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "create-"));
@@ -20,7 +20,7 @@ const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  $
 console.log("Probe: create-stackmix — scaffold, build, boot, and drive a real session\n");
 
 // ---- scaffold --------------------------------------------------------------------------
-const c = spawnSync(process.execPath, [join(ROOT, "create-stackmix/index.mjs"), APP], { encoding: "utf8" });
+const c = spawnSync(process.execPath, [join(ROOT, "packages/create-stackmix/index.mjs"), APP], { encoding: "utf8" });
 check("the scaffolder runs and prints next steps", c.status === 0 && c.stdout.includes("npm run dev"), c.stderr);
 check("the scaffold has the four app files + gitignore",
   ["app.src.js", "api.server.mjs", "server.mjs", "client.mjs", ".gitignore", "package.json"].every((f) => existsSync(join(APP, f))));
@@ -28,8 +28,8 @@ check("the app name is stamped", JSON.parse(readFileSync(join(APP, "package.json
 
 // ---- "npm install" (a symlink stands in for the registry) + build ----------------------
 mkdirSync(join(APP, "node_modules"), { recursive: true });
-symlinkSync(ROOT, join(APP, "node_modules", "stackmix"), "dir");
-const b = spawnSync(process.execPath, [join(ROOT, "bin/stackmix.mjs"), "build", "app.src.js", "app.gen.mjs", "--bare"], { cwd: APP, encoding: "utf8" });
+symlinkSync(join(ROOT, "packages/stackmix"), join(APP, "node_modules", "stackmix"), "dir");
+const b = spawnSync(process.execPath, [join(ROOT, "packages/stackmix/bin/stackmix.mjs"), "build", "app.src.js", "app.gen.mjs", "--bare"], { cwd: APP, encoding: "utf8" });
 check("the template app builds with the stackmix bin", b.status === 0 && existsSync(join(APP, "app.gen.mjs")), b.stderr);
 
 // ---- boot the scaffolded server (it forks the api sidecar) ------------------------------

@@ -4,8 +4,8 @@
 // report encode+decode time too — the win is bytes-on-the-wire, not CPU.
 //
 //   node bench/wire.mjs
-import { encodeWire, decodeWire } from "../src/heap.mjs";
-import { encodeWireBinary, decodeWireBinary } from "../src/wire-binary.mjs";
+import { encodeWire, decodeWire } from "stackmix/heap";
+import { encodeWireBinary, decodeWireBinary } from "stackmix/wire";
 
 const te = new TextEncoder();
 const fmt = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(2) + " MB");
