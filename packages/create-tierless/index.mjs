@@ -8,7 +8,9 @@ import { fileURLToPath } from "node:url";
 const target = process.argv[2];
 if (!target) { console.error("usage: npm create tierless@latest <app-name>"); process.exit(2); }
 const dest = path.resolve(target);
-if (existsSync(dest) && readdirSync(dest).length) { console.error(`create-tierless: ${target} exists and is not empty`); process.exit(2); }
+let occupied = false;
+if (existsSync(dest)) { try { occupied = readdirSync(dest).length > 0; } catch { occupied = true; } }  // exists but not a readable dir (e.g. a file) → treat as occupied, don't crash
+if (occupied) { console.error(`create-tierless: ${target} exists and is not empty`); process.exit(2); }
 
 const template = fileURLToPath(new URL("./template", import.meta.url));
 cpSync(template, dest, { recursive: true });

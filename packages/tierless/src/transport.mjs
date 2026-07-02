@@ -41,7 +41,15 @@ export function wsPort(ws) {
   const on = (event, fn) => (typeof ws.on === "function" ? ws.on(event, fn) : ws.addEventListener(event, fn));
   return {
     send(obj, bin) { ws.send(encodeMessage(obj, bin)); },
-    onMessage(cb) { on("message", (ev) => { const data = ev && ev.data !== undefined ? ev.data : ev; const { obj, bin } = decodeMessage(data); cb(obj, bin); }); },
+    onMessage(cb) {
+      on("message", (ev) => {
+        const data = ev && ev.data !== undefined ? ev.data : ev;
+        let msg;
+        try { msg = decodeMessage(data); }                              // a truncated/garbage frame throws in the decoder…
+        catch { try { ws.close(1003, "malformed frame"); } catch { /* already gone */ } return; }  // …drop the peer, never the host
+        cb(msg.obj, msg.bin);
+      });
+    },
     onClose(cb) { on("close", () => cb()); },
     close() { ws.close(); },
   };
@@ -54,6 +62,7 @@ export function makePeer(port) {
   const pending = new Map();   // id -> resolve({ obj, bin })
   const handlers = new Map();  // type -> (payload, bin) => { obj, bin? } | Promise<...>
   port.onMessage((m, bin) => {
+    if (!m || typeof m !== "object") return;                        // well-framed but non-object payload: ignore, don't throw
     if (m.kind === "reply") { const r = pending.get(m.id); if (r) { pending.delete(m.id); r({ obj: m.payload, bin }); } return; }
     const h = handlers.get(m.payload && m.payload.type);
     Promise.resolve(h ? h(m.payload, bin) : { obj: { type: "error", message: "no handler for " + (m.payload && m.payload.type) } })

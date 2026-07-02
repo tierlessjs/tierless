@@ -43,6 +43,7 @@ export class Api {
     this._maxArgsBytes = opts.maxArgsBytes || 0;
     this._rate = opts.rate || null;
     this._calls = new Map();                               // principal -> { start, count } sliding window
+    this._lastSweep = 0;                                   // last time expired windows were evicted (bounds the map)
   }
 
   // Register a server-only function. authorize is MANDATORY: exposing an endpoint and stating who may
@@ -105,8 +106,16 @@ export class Api {
 
   _allowRate(key) {
     const now = Date.now();
+    const win = this._rate.windowMs;
+    // Evict fully-elapsed windows at most once per window: a principal that called once and left
+    // would otherwise linger forever. O(n) but amortized to once per window — bounds the map to
+    // ~principals active within one window, with no timer to leak or unref.
+    if (now - this._lastSweep >= win) {
+      for (const [k, v] of this._calls) if (now - v.start >= win) this._calls.delete(k);
+      this._lastSweep = now;
+    }
     let s = this._calls.get(key);
-    if (!s || now - s.start >= this._rate.windowMs) { s = { start: now, count: 0 }; this._calls.set(key, s); }
+    if (!s || now - s.start >= win) { s = { start: now, count: 0 }; this._calls.set(key, s); }
     s.count++;
     return s.count <= this._rate.max;
   }

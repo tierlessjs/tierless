@@ -19,6 +19,7 @@ import { randomBytes } from "node:crypto";
 // each reply is { id, res }.
 export function serve(api) {
   if (!process.send) throw new Error("serve(): not running as a forked sidecar (no IPC channel)");
+  process.on("disconnect", () => process.exit(0));               // parent gone → don't linger as an orphan holding the store/secret
   process.on("message", async (msg) => {
     if (!msg || typeof msg.id !== "number") return;
     let res;
@@ -34,7 +35,9 @@ export function serve(api) {
 // trusted channel the client is not part of — here the child mints its own (server-fns.mjs), so the
 // parent never sees it.
 export function startSidecar(entryUrl, env = {}) {
-  const child = fork(fileURLToPath(entryUrl), [], {
+  const entryPath = entryUrl instanceof URL || (typeof entryUrl === "string" && entryUrl.startsWith("file:"))
+    ? fileURLToPath(entryUrl) : entryUrl;                        // accept a URL, a file: string, OR a plain path — don't crash on the last
+  const child = fork(entryPath, [], {
     stdio: ["inherit", "inherit", "inherit", "ipc"],
     env: { ...process.env, TIERLESS_SIDECAR: "1", ...env },
   });

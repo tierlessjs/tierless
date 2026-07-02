@@ -104,7 +104,7 @@ export function makeCoherentHost(localTier, channel) {
   const sessions = new Map();   // id -> a delta session baselined at fetch, so a write-back ships only the change
   const stats = { fetches: 0, hits: 0, localUses: 0, writeBacks: 0, conflicts: 0, wire: 0, whole: 0 };
   const tag = (obj, owner, id, version) => {
-    if (obj && typeof obj === "object") Object.defineProperty(obj, PROV, { value: { owner, id, version }, enumerable: false, writable: true, configurable: true });
+    if (obj && typeof obj === "object" && Object.isExtensible(obj)) Object.defineProperty(obj, PROV, { value: { owner, id, version }, enumerable: false, writable: true, configurable: true });  // a frozen/sealed user object can't be tagged — skip, don't throw (it can't be written back anyway)
     return obj;
   };
   return {

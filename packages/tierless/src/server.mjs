@@ -43,6 +43,7 @@ export function attachTierless(httpServer, { bundle, tier = "server", session, p
   httpServer.on("upgrade", onUpgrade);
 
   wss.on("connection", async (ws, req) => {
+    ws.on("error", () => {});                                    // a client socket error (reset, etc.) must not throw out of the emitter and crash the host
     try {
       const { exec, entry, args = [], onDone } = await session(req);
       const peer = makePeer(wsPort(ws));
