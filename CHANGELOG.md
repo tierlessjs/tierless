@@ -1,8 +1,6 @@
 # Changelog
 
-Notable changes to Tierless, by release. Tierless is pre-1.0 — a `0.x` minor may
-break the API. Every claim below is backed by an executable proof: `npm test`
-runs them, and `docs/architecture.md` explains how each piece works.
+Notable changes by release. Tierless is pre-1.0 — a `0.x` minor may break the API.
 
 ## 0.1.0 — 2026-07-02
 
@@ -38,7 +36,3 @@ What's in this release:
 - **Tooling.** A CLI (`tierless build` / `explain` / `api` / `types`), a Vite
   plugin with React bindings, and `create-tierless` for a running two-tier app
   in under a minute.
-
-See [`README.md`](./README.md) for the full pitch and measured numbers,
-[`docs/design.md`](./docs/design.md) for the reasoning, and
-[`docs/architecture.md`](./docs/architecture.md) for how it's built.
