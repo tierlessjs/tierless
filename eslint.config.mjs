@@ -68,4 +68,11 @@ export default [
     files: ["src/public/**/*.mjs", "src/browser.mjs", "src/react.mjs", "examples/**/*.mjs", "examples/**/*.jsx"],
     languageOptions: { globals: { ...globals.browser } },
   },
+  {
+    // Example app JSX (espree parses JSX with the flag; the react plugin isn't needed for correctness
+    // rules — PascalCase vars are components used by JSX, which core no-unused-vars can't see).
+    files: ["examples/**/*.jsx"],
+    languageOptions: { parserOptions: { ecmaFeatures: { jsx: true } } },
+    rules: { "no-unused-vars": ["warn", { args: "none", varsIgnorePattern: "^[A-Z_]" }] },
+  },
 ];
