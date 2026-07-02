@@ -2,12 +2,9 @@
 
 **One line:** Write one program that runs across client and server as a single stateful application; the runtime moves execution between tiers as needed instead of making you split it by hand.
 
-> **Orientation.** This is the original vision and the open research questions — kept as
-> the "why," not a description of the current code. The prototype realizes this goal as a
-> Babel **state-machine transform on V8** (see [`architecture.md`](./architecture.md)); a
-> few sections below explore an IR/WASM continuation representation the prototype does not
-> use. The load-bearing ideas it *does* implement — resource boundaries, the §5 handle
-> heap, the §6 migrate-vs-fetch policy, the §7 trust boundary — are live and proven.
+> **Orientation.** This is the design rationale — the "why" behind the choices in
+> [`architecture.md`](./architecture.md), which describes what actually shipped. What's
+> still open is tracked in [`../ROADMAP.md`](../ROADMAP.md), not here.
 
 ---
 
@@ -21,6 +18,12 @@ This is *tierless programming* (cf. Eliom, Links, Ur/Web) but with two distincti
 
 1. **Placement is inferred from resource dependencies, not declared.** You don't annotate `"use server"`. Touching `db.query` implies server; touching `document` implies client. The resource you reference determines the tier.
 2. **Execution migrates as a live continuation.** When you cross a tier boundary mid-computation, the runtime serializes the (small) execution state and resumes on the other side — rather than forcing you to restructure the crossing as an RPC call.
+
+Existing frameworks aren't replaced by this — they run *inside* it, unmodified. React already
+serializes its work down to DOM operations and doesn't know or care what tier it's on; when it
+hits a DOM call it doesn't have, that's an ordinary resource boundary and the continuation
+migrates. You take an existing app, draw a boundary around a portion that's safe to run on
+either side, and let that portion become tier-fluid — the rest stays as-is.
 
 ---
 
@@ -40,7 +43,7 @@ The need is **narrower than it would have been a decade ago.** Fat clients + man
 
 ## 3. Design principles
 
-1. **Author writes ordinary TypeScript.** No tier annotations, no thinking about where code runs by default. It should read like Node + browser code combined into one program.
+1. **Author writes ordinary source.** No tier annotations, no thinking about where code runs by default. It should read like Node + browser code combined into one program. (JavaScript today; TypeScript *sources* for tier-fluid modules are a roadmap item — the public API is already fully typed.)
 2. **Resources are the tier model.** Every resource is an imported function. The set of imports available on a tier *is* that tier's capability set. Hit a function you don't have locally → migrate.
 3. **Lazy placement.** Crossing the boundary is the expensive operation, so stay on whichever side you're already on until a resource forces you to move. This yields few, large migrations instead of chatty back-and-forth — and falls out of the cost model without a clever optimizer.
 4. **Small continuations by default.** Only checkpoint at resource boundaries; serialize only the live locals in scope plus a resume token, not the whole stack or heap.
@@ -49,56 +52,9 @@ The need is **narrower than it would have been a decade ago.** Fat clients + man
 
 ---
 
-## 4. Architecture
-
-### 4.1 Pipeline
-```
-TypeScript  ──►  Tierless IR  ──►  WASM (per tier)
-                  │
-                  └─► carries: continuation/checkpoint metadata,
-                      resource-boundary markers, type info for
-                      serializing locals, source maps
-```
-
-- **Authoring language:** TypeScript first. The framework is **not** TS-only by construction — the IR is the real interface, and TS is the reference frontend. Other languages can be added later by writing a frontend that lowers to the Tierless IR. (Note: languages that bring their own runtime — Python, Go — are the *hard* ones to add, because you'd be at the mercy of their runtime's ability to checkpoint itself; a language you lower yourself is easier. Multi-language is a latent capability, not a v1 goal.)
-  - **Roadmap targets beyond TS — Rust and Dart.** Both have communities already invested in this substrate (Rust: **Yew**, Leptos; Dart: **Flutter** targeting wasm via dart2wasm), a real signal that the multi-substrate door is worth walking through. The load-bearing subtlety: their value to Tierless is a *frontend that lowers to the Tierless IR* — interpreter-level, serializable capture (§4.2.2) — **not** their native wasm output, whose call stack is exactly the thing §8 (and the prototype's honest limits) says you cannot snapshot in a browser. So "Rust support" means a Rust→IR frontend running on Tierless's own interpreter, the same shape as the TS frontend; compiling Rust to stock wasm gets you wasm *execution* but not migratable *continuations*. On the easy/hard axis above, both sit on the easy side of the Python/Go line (you lower them yourself), but they are large languages and the frontends are real work: Rust brings the least runtime to model (no GC) but a big type/trait surface, while Dart brings more (a rich async/isolate model and GC semantics) that the lowering has to express in IR continuation terms. The migration property is the prize either way — a Rust or Dart continuation frozen to bytes and thawed on another tier — and nothing about the IR is TS-shaped, so it stays reachable.
-- **IR level:** Closer to WASM than to TypeScript. It's essentially WASM-shaped (linear memory, explicit locals, typed) plus the metadata WASM doesn't carry: where the resource boundaries are, what's live at each, and how to serialize it. Lowering IR→WASM is then a thin pass.
-- **Execution target:** WASM on both client and server. Same module both sides; tiers differ only in which imports are wired up.
-
-### 4.2 Why WASM (and what's essential vs. incidental)
-In the browser the only execution targets are JS or WASM. WASM is the better fit, for three concrete, load-bearing reasons:
-1. **Capability boundary by construction.** A WASM module reaches the outside world only through declared imports. That import table *is* the tier model. JS has ambient access to globals, so you'd have to impose a boundary WASM gives you for free.
-2. **Serializable-ish execution state.** WASM's linear memory + explicit locals is a more uniform thing to snapshot than JS's engine-internal stack (which you can't introspect without CPS-compiling or running your own interpreter).
-3. **Uniform semantics both sides.** Identical bytecode runs identically on client and server, which is what makes resuming a migrated continuation coherent.
-
-WASM is a **hard dependency of this (browser-targeting) design** — not decorative. The narrower claim is that the *concept* (resource-as-continuation, inferred placement) isn't *defined by* WASM — the JVM PoC proved that — which is exactly what keeps the multi-language/multi-substrate door open. But for what's being built here, in a browser, today: WASM, committed.
-
-### 4.3 Resources as imports → migration points
-Every resource access (`DOM.createElement`, `db.query`, `fetch`, secret access, file I/O) compiles to an imported function call. At compile time you therefore know **every** site where a migration *could* happen — they're exactly the resource-import call sites. You do **not** know statically which side the *caller* will be on (a function may be reached from either tier), so the decision is a runtime one:
-
-> At a resource-import call site: do I have this resource locally? If yes, call it and continue. If no, capture the continuation and migrate to the side that does.
-
-Compile-time visibility of boundaries; runtime decision at them. This is the minimal check, and it falls straight out of the imports-as-capabilities model.
-
-### 4.4 What a continuation ships
-Both tiers run the **same module**, so continuations reference shared code by position (instruction offset), not by shipping code. No content-addressing needed (unlike Unison, which needs it for dynamic/independent deployment). A migrated continuation carries:
-- the resume point (instruction offset into the shared module),
-- the live locals in scope (values, or references for large/heap objects — see §5),
-- enough call-stack frame info to resume,
-- nothing else: not the code, not the heap.
-
-This is what keeps it small — and "small" is the central empirical claim the prototype must validate (§8).
-
-### 4.5 React (and existing frameworks) sit on top, unmodified
-Tierless does not replace React. React runs *inside* the unified program. React already serializes its work down to DOM operations; it doesn't know or care what tier it's on. When React (running on the server) hits a DOM API it doesn't have there, that's a resource boundary — the continuation migrates to the client and React keeps going with the real DOM. Same component code throughout. The tier migration is invisible to React.
-
-This makes Tierless **additive, not a rewrite.** You take an existing Node + browser app, draw a boundary around a portion that's safe to run on either side, and let that portion become tier-fluid. The rest stays as-is.
-
----
-
 ## 5. Heap and shared state
 
-The hard part. A migrated continuation references locals; some of those are pointers into a heap that stays on the originating tier. A raw pointer is meaningless in the other tier's separate linear memory. Goals: keep author code natural, keep common cases cheap, don't silently corrupt.
+The hard part. A migrated continuation references locals; some of those are pointers into a heap that stays on the originating tier. A raw pointer is meaningless in another tier's separate memory. Goals: keep author code natural, keep common cases cheap, don't silently corrupt.
 
 ### Model
 - **Default: heaps are tier-local.** Most objects live and stay on one side. Cheap, no sync.
@@ -116,8 +72,6 @@ Keeping both linear memories in full sync was considered and rejected: global/si
 
 ### Handling sloppy code
 The system should still be *correct* for code that carelessly traverses `parent.child.grandchild` across a boundary — it just fetches transitively on demand and runs slow. The relief valve is visibility: profiling shows you the chatty path, and you refactor (batch-fetch, move the loop, restructure). Same philosophy as lazy placement — correctness by default, performance by discipline, badness made measurable.
-
-> **Open tension:** the author asked for sloppy code to "just work even if slow." Transparent on-demand fetch of arbitrary object graphs delivers that but risks unpredictable performance cliffs. The size-threshold + handle model is the current best answer; whether it's clean enough, or whether some cases need author-visible structure, is unresolved and is a prototype question.
 
 ---
 
@@ -143,29 +97,27 @@ The client/server line is not just performance — it's a security boundary, and
 
 ---
 
-## 8. The WASM stack-switching proposal — relevance and reality
+## 8. Why not native engine continuations
 
-There is an in-flight WASM proposal (WebAssembly/stack-switching, "typed continuations" / WasmFX, effect-handler based) that adds first-class continuations: `cont.new`, `suspend`, `resume`, `switch`. It is directly adjacent and worth tracking, but it does **not** unblock Tierless, for two reasons that must be understood precisely:
+Modern JS has `async`/`await` and generators, and there's an in-flight WASM proposal for
+first-class continuations (stack-switching / WasmFX: `cont.new`, `suspend`, `resume`,
+`switch`). Neither unblocks Tierless, for the same reason: both are
+**suspend-but-not-serialize**. A paused generator's state, and a WASM continuation (a
+`(ref $ct)`), are both live pointers into the *engine's own* stack memory — you can
+resume or switch them, but there is no instruction to read one out as bytes, ship it
+elsewhere, and rematerialize it on another host. Cross-host transport, which is what
+Tierless actually needs, is out of scope for both mechanisms.
 
-### 8.1 It's in-process by construction
-A continuation in that proposal is a `(ref $ct)` — an address into the *engine's* store (a live pointer into VM stack memory). You can `resume`/`switch`/`cont.bind`/abort it, all of which consume it **on the same machine**. There is **no instruction, and none on the roadmap, to serialize it to bytes, ship it, and rematerialize it on another host.** The proposal is about switching between stacks *within one instance*. Cross-host transport — Tierless's actual need — is explicitly out of scope, and the blessed opaque-reference model arguably makes introspection *harder*, not easier.
+The stack-switching proposal is also not enabled in any shipping browser engine as of
+early 2026 (V8, SpiderMonkey, JavaScriptCore) — the browser's closest shipping primitive
+is JSPI, a narrower JS-level async-suspension bridge — and its continuations are
+one-shot: resume/switch destructively consumes them, foreclosing speculative placement
+(try a fetch, and on failure resume the same capture as a migrate instead).
 
-So the scorecard:
-- *"WASM has no native continuation capture"* → becoming **false for in-process** capture/resume (good: removes the CPS-compilation burden for the same-machine half).
-- *Serializable, transportable continuations* → **still entirely Tierless's to build.** This was always the hard part, and the proposal doesn't touch it.
-
-### 8.2 It's not in browsers yet, and it's one-shot
-As of early 2026 the typed stack-switching proposal is experimental and **not enabled in any shipping browser engine** (V8, SpiderMonkey, JavaScriptCore) or in Wasmer/Wasmi. Server-side runtimes are ahead: Wasmtime has a prototype (WasmFX, on its fibers API); Wasmer 7.0 shipped a WASIX `wasix_context_*` switching API. The browser's closest shipping primitive is **JSPI** (Chrome, 2024) — a JS-API-level async-suspension bridge, narrower than the instruction-level proposal.
-
-Also: the proposal's continuations are **one-shot/linear** — resume/switch/bind destructively consume them; a second use traps. (There's an open request, issue #110, for optional multi-shot, but it's not in.) For Tierless, one-shot is fine for a plain migration (capture once, resume once on the other side), but it forecloses *speculative* placement — you can't "try fetch, and on failure re-resume the same captured point to migrate instead." One resume per capture.
-
-### 8.3 What to actually take from it
-1. **Don't architect around waiting for it.** Capture must be done in Tierless's own IR, where the continuation is *Tierless's* data structure (readable, serializable), not the engine's opaque ref — substrate-independent.
-2. **Borrow the interface, build the transport.** The effect-handler shape (tag + handler) is the right model for resource boundaries: hit a resource → `suspend` with a tag → host handler decides migrate-vs-fetch. This is the same structure Unison uses for its `Remote` ability. Model resource access as typed effects/tags; implement the cross-host mechanism yourself.
-3. **Hybrid is viable and matches the architecture.** Use the engine's `suspend` (where available) purely as a clean unwind-to-host-handler trigger, while Tierless maintains the serializable *shadow* state (the live locals at the boundary). Because Tierless only checkpoints at resource boundaries — not arbitrary points — that shadow state is bounded and known, not a whole-stack blob.
-4. **Engine introspection helps only on the side you own.** On the server you *can* fork Wasmtime/read its fibers, so engine-level capture might populate Tierless's serializable representation more cheaply there. But the browser end exposes only the opaque ref, so a portable self-owned representation is mandatory regardless. Engine-reading is an optional server-side optimization, never the mechanism for the client.
-
-> **Concrete next research task (definite answer, changes server design):** read Wasmtime's fibers/WasmFX code and determine whether a captured continuation can be reconstructed into *instruction-offset + typed-locals*, or only an opaque stack pointer. That decides whether server-side engine introspection meaningfully helps or whether the shadow-state representation must be hand-rolled everywhere.
+So the transportable continuation is Tierless's own data structure — a plain frame
+object the compiler produces, readable and serializable — never the engine's opaque
+internal state. See [`architecture.md`](./architecture.md) ("Why the transportable
+continuation is ours to build").
 
 ---
 
@@ -179,32 +131,12 @@ Grouped by *who decides placement* and *what crosses the wire*:
 - **Runtime split, SECURITY-driven placement (dynamic IFC):** Fission (Guha, Jeannin, et al., SNAPL 2017), descending from Swift/Jif (Chong et al., SOSP 2007 — static security-partitioning of Java). One JS program with *security labels* instead of placement annotations; the runtime executes with faceted values (Austin–Flanagan) and interposes on every operation, RPCing implicitly whenever a label pins a value to the other tier. Placement is per value, per operation — the finest split of any system here — and buys end-to-end **confidentiality** (a secret provably never flows client-ward, even through your own logic) and **integrity** (tainted client data can't corrupt server-trusted computation). The costs: program-wide interposition overhead, and chattiness that's hard to reason about (an RPC can hide behind any operation). Tierless's answer to the same threat model is the reference monitor (§7): accept that the migrating program is forgeable and gate its *effects* per call, rather than making the program itself safe to distribute — coarser, far cheaper, no interposition; Fission catches a class of leaks the monitor cannot. Complementary, and the best stealable idea in the paper is label-driven excision (ROADMAP). Lineage note: Fission's group went on to build **Stopify** (PLDI 2018), the JS-to-JS first-class-continuation compiler — the same transform family as Tierless's `transform.cjs`. Tierless is, in effect, Stopify-style compilation applied to Fission's problem, with the security moved from IFC to a monitor.
 - **Runtime live migration, content-addressed code:** Unison (`Remote.transfer`; definitions identified by content hash; ship bytecode, sync missing hashes on the fly; placement via effect-handler `Remote` ability). The cleanest realization of "ship the continuation, sync deps." Not JS, not web-tiered, placement explicit. Ancestors: Cloud Haskell, Erlang, mobile-agent literature.
 
-**Tierless's unoccupied cell:** Unison-style live migration, driven by RSC-style resource-dependency *inference*, in the JS/TS+WASM ecosystem, with lazy placement. Each half exists separately and in production-adjacent form; nobody has combined them. The objections each camp cites (chattiness, trust) are precisely the items §5–§7 must answer.
+**Tierless's unoccupied cell:** Unison-style live migration, driven by RSC-style resource-dependency *inference*, in the JS ecosystem, with lazy placement. Each half exists separately and in production-adjacent form; nobody has combined them. The objections each camp cites (chattiness, trust) are precisely the items §5–§7 must answer.
 
 Qwik's `$`-optimizer (making closures individually addressable/movable in real JS) and Unison's effect-handler placement are the two most worth studying closely; Stip.js's whole-program placement search and Fission's label-driven splits are the two academic mechanisms worth folding in (both have concrete ROADMAP entries).
 
 ---
 
-## 10. Open questions / risks
-
-1. **Does the continuation actually stay small on real code?** The central empirical bet. Closures capture more than you'd think; the execution context may be fatter than hoped. *Answerable today on Node, in Tierless's own IR, with no dependency on the WASM proposal — this is the first prototype.*
-2. **Heap model cleanliness (§5).** Size-threshold + handles + explicit `shared.*` is the current answer; whether it handles genuinely sloppy code acceptably, or needs author-visible structure in some cases, is unresolved.
-3. **IR design.** "WASM-shaped + continuation metadata" is the working assumption; the right abstraction layer may only become clear once capture/serialize is actually implemented.
-4. **Migrate-vs-fetch profiling (§6).** Cold-start-naive + sampled-history-locked-profile is the plan; needs validation that locked profiles generalize and that sampling overhead is acceptable in dev/E2E.
-5. **Browser substrate timing.** Native stack-switching isn't in browsers; near-term you're on your-own-IR capture (+ possibly JSPI). Budget accordingly; treat native stack-switching as a later optimization, not a foundation.
-6. **Tooling/DX.** Source maps from TS through IR through WASM (so serialized continuations and debugging show TS line numbers and variable names, not instruction offsets) is necessary, standard, but real work.
-7. **Scope of value.** Honest market is narrower than a decade ago (§2). Worth confirming the target app class (interactive, real server logic, API-shape-uncertain) is big enough to matter to you before heavy investment.
-
----
-
-## 11. First prototype (smallest thing that proves the core)
-
-**Goal:** show that a continuation can be captured at a resource boundary and serialized *small*.
-
-- Run on Node, both "tiers" as two processes (or two WASM instances), no browser yet.
-- One client-only resource (`DOM.*` stub) and one server-only resource (`db.query` stub).
-- Author a single TS function that: queries the DB (server resource), filters results with an inline predicate, then writes each to the DOM (client resource) — i.e. it *must* cross at least once each way.
-- Implement capture-at-boundary in your own IR; serialize live locals + resume offset; resume on the other process.
-- **Measure the serialized continuation size** against the alternative (shipping the full result set). The cursor/filter case should show kilobytes-of-stack vs. megabytes-of-data.
-
-If that size claim holds, the idea has legs and you move to the heap model and the browser substrate. If the continuation is fat, you learn the limits immediately and cheaply.
+What's still open, and what's already shipped with its measurements and proofs, is
+tracked in [`../ROADMAP.md`](../ROADMAP.md) and [`../CHANGELOG.md`](../CHANGELOG.md) —
+not here.

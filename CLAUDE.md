@@ -10,7 +10,7 @@
 
 ## Code
 
-- Unnecessary complexity: always reduce. Commit to the change you're making. Don't preserve dead branches or add unnencessary fallbacks.
+- Unnecessary complexity: always reduce. Commit to the change you're making. Don't preserve dead branches or add unnecessary fallbacks.
 
 - Test everything, at both unit and end-to-end levels.
 

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/tierlessjs/tierless/actions/workflows/ci.yml/badge.svg)](https://github.com/tierlessjs/tierless/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](./package.json)
+[![Node](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen.svg)](./package.json)
 
 **Your page makes 8 API calls to render one view. Tierless runs that whole
 workflow server-side in ONE round trip — without you writing the endpoint.**
@@ -75,11 +75,6 @@ connections (not built yet — see [`docs/production.md`](./docs/production.md))
   with the user's own browser as the guard.
 
 ## Quick start
-
-> **Not yet published to npm.** Until the first release lands on the registry, install
-> from git: `npm i github:tierlessjs/tierless#path:packages/tierless` — or clone and use
-> `"tierless": "file:../tierless/packages/tierless"`. The commands below show the
-> post-publish shape.
 
 **Mix into an existing app** (Vite/React shown; the plugin is framework-agnostic — see
 [`examples/react-vite`](./examples/react-vite)):

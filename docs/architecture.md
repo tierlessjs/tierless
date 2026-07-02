@@ -267,5 +267,4 @@ These are deliberate trade-offs in the compiler, not accidental gaps:
 
 Broader open questions — broader language coverage and content-addressed code identity
 (the binary wire, delta capture, and the trust-boundary reference monitor are done) — are
-tracked in [`../ROADMAP.md`](../ROADMAP.md) and line up with the design doc's own open
-questions (`§10`).
+tracked in [`../ROADMAP.md`](../ROADMAP.md).
