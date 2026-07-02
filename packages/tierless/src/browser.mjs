@@ -13,7 +13,7 @@
 // first call. `exec` services browser-pinned resources (dom.commit in the full-tierless
 // mode, ui.* if you pin some); actions that never touch one simply run out on the server.
 import { makeHost, answerWith } from "./host.mjs";
-import { makePeer, wsPort } from "./transport.mjs";
+import { makePeer, wsPort, onEvent } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
 
 const defaultUrl = () => {
@@ -25,9 +25,8 @@ export function connect({ url, exec, bundle, tier = "browser" } = {}) {
   const ws = new WebSocket(url || defaultUrl());
   const peer = makePeer(wsPort(ws));
   const ready = new Promise((res, rej) => {
-    const on = (ev, fn) => (typeof ws.on === "function" ? ws.on(ev, fn) : ws.addEventListener(ev, fn));
-    on("open", () => res());
-    on("error", (e) => rej(new Error("tierless: websocket error" + (e && e.message ? ": " + e.message : ""))));
+    onEvent(ws, "open", () => res());
+    onEvent(ws, "error", (e) => rej(new Error("tierless: websocket error" + (e && e.message ? ": " + e.message : ""))));
   });
 
   const hosts = new Map();                                       // moduleId -> host

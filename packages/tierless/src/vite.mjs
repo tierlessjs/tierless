@@ -68,7 +68,7 @@ export default function tierless(opts = {}) {
         const entry = pathToFileURL(path.resolve(server.config?.root || process.cwd(), api));
         sidecar = startSidecar(entry);
         await sidecar.ready();
-        server.httpServer?.on("close", () => sidecar && sidecar.close());
+        server.httpServer.on("close", () => sidecar.close());
       }
       attachTierless(server.httpServer, {
         path: wsPath,

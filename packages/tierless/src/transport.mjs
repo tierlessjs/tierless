@@ -34,11 +34,18 @@ export function decodeMessage(data) {
   return { obj, bin };
 }
 
+// Normalize the two WebSocket event APIs (Node `ws`'s .on vs the browser's addEventListener) —
+// shared by wsPort below and by callers (e.g. browser.mjs's connect()) that need an event the
+// port interface doesn't expose, like "open"/"error" on the raw socket.
+export function onEvent(ws, event, fn) {
+  return typeof ws.on === "function" ? ws.on(event, fn) : ws.addEventListener(event, fn);
+}
+
 // Adapt a WebSocket-like object (a browser WebSocket or a `ws` socket) to a small duplex
-// port, normalizing the two event APIs (.on vs addEventListener) and binary payload types.
+// port, normalizing the two event APIs and binary payload types.
 export function wsPort(ws) {
   ws.binaryType = "arraybuffer";
-  const on = (event, fn) => (typeof ws.on === "function" ? ws.on(event, fn) : ws.addEventListener(event, fn));
+  const on = (event, fn) => onEvent(ws, event, fn);
   return {
     send(obj, bin) { ws.send(encodeMessage(obj, bin)); },
     onMessage(cb) {
