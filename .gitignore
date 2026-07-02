@@ -7,3 +7,7 @@ src/api/tasks-db.json
 examples/*/node_modules/
 examples/*/dist/
 examples/*/package-lock.json
+
+# tsc fixture written by test/probes/types.mjs
+test/.types-fixture/
+examples/*/actions.server.gen.mjs

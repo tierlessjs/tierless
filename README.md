@@ -4,20 +4,45 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](./package.json)
 
-**One program that runs across browser and server, with the runtime moving live
-execution between tiers as needed — instead of you splitting it by hand.**
+**Your page makes 8 API calls to render one view. Stackmix runs that whole
+workflow server-side in ONE round trip — without you writing the endpoint.**
 
-You write ordinary JavaScript with no tier annotations. A build step compiles each
-function that touches a tier resource into a *serializable state machine*. When
-execution reaches a resource the current tier doesn't own, the live continuation is
-captured as plain JSON, shipped over a WebSocket to the other tier, and resumed
-there. The big data stays where it lives; only the small continuation moves.
+You write the workflow as one plain JavaScript function: loops, `try/catch`, ordinary
+calls to `api.*`. A build step compiles it into a *serializable state machine*; at run
+time the live continuation — locals, loop state, call stack, as plain data — migrates to
+whichever side owns the resource it just touched, and comes back when done. The chatty
+N×RTT waterfall becomes one hop; the bespoke endpoint, the fetch glue, and the types
+drift between them simply don't exist.
+
+**The numbers** (measured, `npm run bench` — every claim in this README is backed by an
+executable proof in `npm test`):
+
+- an N-call workflow costs **1 round trip** instead of N — for 8 calls at 50 ms RTT,
+  ~400 ms of waterfall becomes ~50 ms, structurally;
+- a migration hop carries **~140 bytes** and costs **~2.5 µs** to encode+decode; a 1.2 MB
+  dataset the code doesn't touch crosses as a **399-byte handle** (3064× smaller);
+- the compiled state machine costs **~1.0×** native for well-factored code (pure helpers
+  are emitted verbatim); worst case — a hot loop trapped inside a suspendable function —
+  is a **3–3.7×** constant factor on CPU that real workflows spend waiting on I/O anyway;
+- warm re-crossings ship deltas: **77–91 %** fewer session bytes; a 6-field edit in a
+  1500-row dataset writes back **~94× smaller**;
+- the browser runtime adds **7.1 kB** gzipped (23.1 kB minified) to your bundle.
+
+**When NOT to use it (yet):** you need production hardening today (this is a
+research-stage 0.1 — see the status note); your workflows are single-call CRUD (a plain
+fetch is already one round trip; Stackmix buys you nothing); your hot loops must run
+inside suspendable functions (factor them into pure helpers or keep them out); you need
+TypeScript *sources* for mix modules (the public API is fully typed, but `"use mix"`
+files are plain JS for now); or you need websocket reconnection/resume across dropped
+connections (not built yet — see [`docs/production.md`](./docs/production.md)).
 
 > **Status: research-stage.** The mechanism is proven end to end — a React-style app
 > renders on the server, migrates into real headless Chromium to commit the DOM,
 > takes a real click, and migrates back — but the API is pre-1.0 and Stackmix is not
-> yet meant to run untrusted code across a trust boundary in production. See
-> [`ROADMAP.md`](./ROADMAP.md).
+> yet meant to run untrusted code across a trust boundary in production. Every headline
+> claim is an executable assertion: clone and `npm test` (33 proofs). See
+> [`ROADMAP.md`](./ROADMAP.md), [`CHANGELOG.md`](./CHANGELOG.md),
+> [`SECURITY.md`](./SECURITY.md).
 
 ## How it works
 
@@ -33,14 +58,14 @@ there. The big data stays where it lives; only the small continuation moves.
 - **The continuation is data you own.** It's the live frame stack encoded through an
   identity-preserving, cycle-safe graph codec and shipped as one **compact binary frame**
   (type tags + varints + string/shape tables). A subgraph larger than a threshold
-  becomes an opaque §5 *handle* into the owning tier's heap instead of being copied —
+  becomes an opaque *handle* (design §5) into the owning tier's heap instead of being copied —
   the big dataset stays put and is fetched only if actually touched. Reads auto-fetch
   on touch (`--auto-deref`); writes auto-propagate back to the owner under optimistic
   CAS (`--auto-writeback`).
 - **The runtime is one tier-agnostic pump.** The same `pump()` drives both tiers: it
   runs resources this tier owns inline and stops at the first foreign resource, handing
   the continuation across the socket. When the continuation is large and the data
-  small, it can fetch the data instead of migrating — priced from real bytes (§6).
+  small, it can fetch the data instead of migrating — priced from real bytes (design §6).
 - **The program is untrusted client code — all of it, on every tier.** A migrating
   continuation can be forged, so authority never lives in the program: every `api.*` is
   serviced by a **reference monitor** in its own process (a local-pipe sidecar) that
@@ -50,6 +75,11 @@ there. The big data stays where it lives; only the small continuation moves.
   with the user's own browser as the guard.
 
 ## Quick start
+
+> **Not yet published to npm.** Until the first release lands on the registry, install
+> from git: `npm i github:bfulton/stackmix#path:packages/stackmix` — or clone and use
+> `"stackmix": "file:../stackmix/packages/stackmix"`. The commands below show the
+> post-publish shape.
 
 **Mix into an existing app** (Vite/React shown; the plugin is framework-agnostic — see
 [`examples/react-vite`](./examples/react-vite)):
@@ -184,6 +214,8 @@ docs/             architecture, design spec
 
 - [`test/e2e/README.md`](./test/e2e/README.md) — the framework walkthrough (the live demo, what each piece does)
 - [Architecture](./docs/architecture.md) — layout, the pump, the wire, the heap
+- [Debugging](./docs/debugging.md) — explain/--json, denials, source maps, the one rule, perf triage
+- [Production notes](./docs/production.md) — what is and isn't solved for deployment
 - [Design](./docs/design.md) — the original vision and open questions
 - [Roadmap](./ROADMAP.md) · [Contributing](./CONTRIBUTING.md)
 

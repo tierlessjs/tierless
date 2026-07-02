@@ -35,6 +35,10 @@ check("explain marks compiled fns with their resource touches", e.status === 0 &
 check("explain shows real line numbers", /line 2: api\.get/.test(e.stdout), (e.stdout.match(/line \d+/) || [])[0]);
 check("explain shows the transitive path and the pure fn", e.stdout.includes("calls suspendable helper") && e.stdout.includes("pure (exported) — pure"), undefined);
 check("explain totals", e.stdout.includes("3 compiled, 1 pure."), undefined);
+const ej = run(["explain", join(dir, "acts.js"), "--json"]);
+const rep = ej.status === 0 ? JSON.parse(ej.stdout) : null;
+check("explain --json emits the machine-readable report (for agents/tooling)",
+  rep !== null && rep.functions.some((f) => f.name === "fetchAll" && f.suspendable && f.suspensions[0].name === "api.get"), rep && rep.functions.length);
 
 // ---- api (pre-ship check) ---------------------------------------------------------------
 writeFileSync(join(dir, "svc.mjs"), `

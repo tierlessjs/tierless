@@ -5,7 +5,7 @@
 //                  [--auto-writeback] [--track-writes] [--source-map] [--resource=ns:tier]
 //       Compile a module to a serializable-state-machine bundle (the transform CLI).
 //
-//   stackmix explain <file.js> [--resource=ns:tier ...]
+//   stackmix explain <file.js> [--json] [--resource=ns:tier ...]
 //       The suspendability report: which functions compile into migratable machines and
 //       WHY (direct resource touches, or calls into suspendable functions), with every
 //       suspension point — the compiler's analysis, made visible.
@@ -31,7 +31,7 @@ const [cmd, ...rest] = process.argv.slice(2);
 const die = (msg, code = 2) => { console.error(msg); process.exit(code); };
 const usage = `usage:
   stackmix build   <in.js> <out.mjs> [--bare] [--head=<file>] [--auto-deref] [--auto-writeback] [--track-writes] [--source-map] [--resource=ns:tier]
-  stackmix explain <file.js> [--resource=ns:tier ...]
+  stackmix explain <file.js> [--json] [--resource=ns:tier ...]
   stackmix api     <service.mjs>
   stackmix types   <service.mjs> [out.d.ts]`;
 
@@ -60,6 +60,7 @@ if (cmd === "build") {
   if (!file) die(usage);
   const { analyze } = require("../src/transform.cjs");
   const rep = analyze(readFileSync(file, "utf8"), { resources: parseResources(rest), filename: file });
+  if (rest.includes("--json")) { process.stdout.write(JSON.stringify({ file, ...rep }, null, 2) + "\n"); process.exit(0); }
   console.log(`${file} — resources: ${Object.entries(rep.resources).map(([ns, tier]) => `${ns}→${tier}`).join(", ")}\n`);
   for (const f of rep.functions) {
     if (!f.suspendable) { console.log(`  ·  ${f.name}${f.exported ? " (exported)" : ""} — pure: runs wherever the continuation stands`); continue; }
