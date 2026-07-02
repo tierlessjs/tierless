@@ -8,6 +8,10 @@ proven (33 executable proofs, `npm test`).
 
 - **Publish `tierless` + `create-tierless`** at 0.1.0 (the packages are shaped
   and `npm pack`-verified; the README quick start assumes the registry).
+- **Verified-provenance badge.** Publish from CI (GitHub Actions + npm OIDC via
+  `npm publish --provenance`) so npm shows the green ✓ tying each release to its
+  exact source commit and build. Needs a public repo and a CI publish workflow;
+  the first name-securing release is published by hand and predates it.
 - **TypeScript sources for mix modules.** The public API is fully typed
   (hand-written `.d.ts`, tsc-verified in `npm test`), but `"use tierless"` files are
   plain JS: the transform needs @babel/parser's TS plugin + type stripping.

@@ -3,7 +3,12 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Scaffold a new Tierless app: one tierless program, a trusted api service, a two-tier host — running in under a minute.",
-  "bin": { "create-tierless": "./index.mjs" },
-  "files": ["index.mjs", "template"],
+  "bin": {
+    "create-tierless": "index.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "template"
+  ],
   "license": "Apache-2.0"
 }
