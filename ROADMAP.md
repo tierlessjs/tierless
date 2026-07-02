@@ -162,6 +162,25 @@ it goes next. Items are grouped, not strictly ordered; see
   `test/probes/source-maps.mjs` drives a continuation to each suspension and asserts the parked frame
   maps to the suspending statement's line (and that the off path is byte-identical).
 
+## Ergonomics
+
+- **Mix-in DX — landed.** The framework is an npm package with a real surface (`stackmix`,
+  `/api`, `/server`, `/browser`, `/react`, `/vite`, `/compiler`; the Babel toolchain is a real
+  dependency; `bin: stackmix`). The copy-pasted pump/wire/peer loops collapsed into a session
+  host (`makeHost`, `attachStackmix` — mountable on any http server — `serveApp`, `connect`),
+  which is also what enables **actions**: a `"use mix"` module's exported functions become
+  plain calls from an existing app that run as migratable continuations — the api-heavy
+  stretch executing on the server in one round trip through the reference monitor
+  (`stackmix/vite` + `useAction`; `examples/react-vite` is the proof, validated with a real
+  `vite build` and a Chromium-clicked `vite dev` run). The allow-list is configurable
+  (`--resource=ns:tier` / opts.resources), a service is one `defineApi` literal +
+  `sidecarMain` tail call, `npm create stackmix` scaffolds a working two-tier app (proven by
+  a probe that builds, boots, and drives it), and `stackmix explain` makes the compiler's
+  suspendability analysis inspectable. Remaining ergonomics threads: a production build story
+  for the Vite plugin (today: dev-first; mount `attachStackmix` yourself with the built
+  module), TypeScript sources for mix modules, and richer generated types than
+  `(...args: any[]) => any`.
+
 ## Runtime & framework shape
 
 - **Event-dispatch model.** The live page parks the whole continuation on one human

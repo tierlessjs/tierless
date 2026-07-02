@@ -51,18 +51,56 @@ there. The big data stays where it lives; only the small continuation moves.
 
 ## Quick start
 
+**Mix into an existing app** (Vite/React shown; the plugin is framework-agnostic — see
+[`examples/react-vite`](./examples/react-vite)):
+
+```js
+// vite.config.mjs
+import stackmix from "stackmix/vite";
+export default { plugins: [react(), stackmix({ api: "./src/api.server.mjs" })] };
+```
+
+```js
+// src/actions.mjs — "use mix" makes exported functions ACTIONS: plain calls from the
+// page that run as migratable continuations, the api-heavy stretch executing on the
+// server in ONE round trip, every call authorized by the reference monitor.
+"use mix";
+export function rebalance(holdings) {
+  const orders = [];
+  for (const h of holdings) {
+    const px = api.getQuote(h.sym);              // server resource
+    if (px > h.limit) orders.push(api.placeOrder({ sym: h.sym, qty: h.qty }));
+  }
+  return orders;
+}
+```
+
+```jsx
+const plan = useAction(rebalance);               // stackmix/react
+<button onClick={() => plan.run(holdings)} disabled={plan.running}>Rebalance</button>
+```
+
+**Start fresh** — a running two-tier app in under a minute:
+
+```bash
+npm create stackmix@latest my-app
+cd my-app && npm install && npm run dev
+```
+
+**Prove the claims** (this repo):
+
 ```bash
 git clone https://github.com/bfulton/stackmix
 cd stackmix
 npm install
 npm test          # runs every demo + probe headless and asserts the headline claims
+npm run live      # the human-clickable two-tier page — open the printed URL and click
 ```
 
-Open the live two-tier page (a real browser tab, real clicks):
-
-```bash
-npm run live      # then open the printed URL and click the dashboard
-```
+`npx stackmix explain src/actions.mjs` prints the compiler's analysis — which functions
+become migratable machines and why, with every suspension point; `npx stackmix api
+api.server.mjs` pre-ship-checks a service (an endpoint without `authorize` fails at load
+time); `npx stackmix types api.server.mjs` emits the `declare const api` surface.
 
 ## The developer's code
 
@@ -112,6 +150,11 @@ and finishes in the browser the instant the vdom touches the real DOM.
 | `test/probes/wire-delta.mjs`, `test/probes/wire-delta-compiled.mjs` | the delta wire ships a capture as a patch over what the peer holds; `--track-writes` makes the compiler bump a version on every in-place mutation, so plain source ships only what changed — proven identical to a full re-scan, with Map/Set first-class |
 | `test/probes/wire-content.mjs` | content-addressed immutable subgraphs: a registered config ships inline once then as a tiny hash reference (36 KB → 319 B), resolving to the copy the peer cached — identity by content. Carried through the **binary wire** (the socket frame) and composed with §5 excision + `min(delta, full)`, so a re-frame ships immutable code by hash, not re-inlined |
 | `src/delta-live.mjs` | over a real socket a continuation that bounces server↔browser each hop ships `min(delta, full)` — a compiler-tracked delta on warm hops, a full binary frame on the cold hop — reconstructing exactly and computing the right result |
+| `test/probes/host.mjs` | the assembled host (`serveApp`/`connect`): client-started **actions** run out on the server in one hop, bounce back mid-flight at a browser resource, and interleave concurrently on one socket (the host is stateless — all state rides in the continuation); the server-started full-tierless mode completes over the same endpoint |
+| `test/probes/compiler-api.mjs` | the compiler as an importable library: configurable resource namespaces (`db.*` → server, from opts or `--resource`), module-shaped input (`export function` → a named PROGRAM, imports/state preserved), and the `analyze()` suspendability report |
+| `test/probes/define-api.mjs`, `test/probes/cli.mjs` | `defineApi` keeps the monitor's load-time mandate (no authorize → fails at create), and the `stackmix` CLI works end to end: `build`, `explain` (the analysis made visible), `api` (pre-ship check), `types` |
+| `test/probes/vite-plugin.mjs` | the Vite plugin, headless: a `"use mix"` module becomes monitor-backed actions — transform + dev-server endpoint + ssr-loaded machine + sidecar authorization, with a loginless write denied. Verified for real too: `npm install` + `vite build` succeed in `examples/react-vite`, and a live `vite dev` + Chromium run clicks Rebalance and renders monitor-authorized orders |
+| `test/probes/create-app.mjs` | `create-stackmix` scaffolds a WORKING app: built with the real bin, booted (api sidecar forked), and driven live — seeded render, authorized write with the principal attached, a blank write denied at the monitor and caught by the app's `try/catch` across the tier |
 
 `src/demo.mjs` and `src/server-live.mjs` additionally run the whole thing across a real
 WebSocket into **real headless Chromium** (Playwright) with real clicks; they need a
@@ -121,8 +164,13 @@ browser and so run on demand rather than in `npm test`.
 
 ```
 src/              the framework
-  transform.cjs   the compiler: plain JS -> serializable state machine (Babel)
-  runtime.mjs     the pump — one tier-agnostic continuation driver + the wire envelope
+  transform.cjs   the compiler: plain JS -> serializable state machine (Babel; importable + CLI)
+  runtime.mjs     makePump — one tier-agnostic continuation driver, generic over any bundle
+  host.mjs        the session host both tiers share (start/answer/call over the peer protocol)
+  server.mjs      attachStackmix (mount on ANY http server) + serveApp (static + page + endpoint)
+  browser.mjs     connect (one socket: answer migrations, call actions) + bindActions
+  vite.mjs        the Vite plugin: "use mix" modules -> monitor-backed actions
+  react.mjs       useAction — run-state for calling actions from components
   graph.mjs       identity/cycle-safe graph codec for the wire
   wire-binary.mjs the compact binary wire (type tags + varints + string/shape tables)
   heap.mjs        §5 distributed handle heap: encodeWire, makeTier, write-back CAS
@@ -133,6 +181,9 @@ src/              the framework
   app/            the demo app (plain components -> serializable vdom)
   public/         the browser tier (runs in a real tab)
   *.mjs           the demos and headless proofs (also the test suite)
+bin/              the stackmix CLI: build / explain / api / types
+examples/         popular frameworks with Stackmix mixed in (react-vite)
+create-stackmix/  npm create stackmix — scaffold a running two-tier app
 test/             the regression runner + the wire-codec probe
 docs/             architecture, design spec
 ```

@@ -176,7 +176,9 @@ hooks. `api.*` and `commit()` look like ordinary calls.
 | `api/api.mjs`, `api/sidecar.mjs` | the reference monitor + the pipe transport + `makeApiExec` (the default `api.*` adapter for the pump) |
 | `transform.cjs` | the allow-list + state-machine compiler (App.src.js → bundle.gen.mjs) |
 | `app/bundle.gen.mjs` | **generated** continuation bundle (committed; demo runs without Babel) |
-| `runtime.mjs` | `pump` — the one tier-agnostic continuation driver + the wire codec + resource-error routing into `catch` |
+| `runtime.mjs` | `makePump(bundle)` — the tier-agnostic continuation driver, generic over any compiled bundle |
+| `host.mjs`, `server.mjs`, `browser.mjs` | the assembled hosts: the shared session core (start/answer/call), `attachStackmix`/`serveApp` (node), `connect`/`bindActions` (browser) |
+| `vite.mjs`, `react.mjs` | mix into an existing app: the Vite plugin ("use mix" → actions) and the `useAction` hook |
 | `dom.mjs` | vdom → real HTML with `data-ev` event tokens (used by `demo.mjs`) |
 | `demo.mjs` | scripted two-tier run: `ws` server tier ↔ Node+Playwright Chromium tier |
 | `server-live.mjs` | the live page server: http static + `ws`, drives the continuation |
