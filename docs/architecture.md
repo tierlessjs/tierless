@@ -32,11 +32,11 @@ packages/stackmix/  the npm package — what `npm i stackmix` delivers
     react.mjs       useAction
   bin/              the stackmix CLI
 packages/create-stackmix/  the scaffolder behind `npm create stackmix`
-demos/              the demos + headless proofs, importing the real package (the Tasks
-                    app, conduit, the live pages, heap/policy/delta demos, the sample
-                    trusted services server-fns/tasks-fns)
+test/               the regression runner + all proofs, importing the real package
+  probes/           focused single-mechanism proofs
+  demos/            app-shaped end-to-end proofs + the demo apps they drive (Tasks, conduit,
+                    the live pages, heap/policy/delta demos, the sample services)
 examples/           react-vite — Stackmix mixed into an ordinary React app
-test/               the regression runner + probes
 docs/               this document, the design spec
 ```
 
@@ -130,7 +130,7 @@ mark is emitted by the **compiler** (`transform.cjs --track-writes`, the symmetr
 so write-tracking works on **plain unannotated source** — no `touch()` in the developer's code.
 Both modes reconstruct identically; the probes cross-check write-tracked against rescan as the
 oracle, including end-to-end on compiled plain source (`test/probes/wire-delta{,-compiled}.mjs`).
-This runs **live over a real socket** (`demos/delta-live.mjs`): a continuation that bounces
+This runs **live over a real socket** (`test/demos/delta-live.mjs`): a continuation that bounces
 server↔browser each hop ships `min(delta, full)` — the compact full binary frame on the cold hop
 (both tiers then `adoptBaseline` to a shared, DFS-deterministic baseline so ids agree), a
 write-tracked delta on every warm hop, and a fall back to full + re-adopt if a near-total change
@@ -160,7 +160,7 @@ The §5 distributed heap is how the big data stays put.
   continuation to the data (migrate) or pull the data back and stay put (fetch),
   priced from real measured bytes — cheaper side wins, cold defaults to migrate.
 
-## The trust boundary (`demos/api/`)
+## The trust boundary (`test/demos/api/`)
 
 Stackmix is a fat web-app *client* that grew too fat for the browser, so it sometimes runs in Node
 too. "The client" is therefore two halves — the **browser client** and the **backend client** (what
@@ -203,11 +203,11 @@ standard HMAC regime (Cognito/OIDC is the same shape with an RS256-over-JWKS `ve
 own is just an `Api` subclass overriding `verify`. The base `Api` is a safe floor — it trusts no token,
 so without a regime only `PUBLIC` calls pass.
 
-`demos/api-verify.mjs` proves all of this headless (in `npm test`): the load-time mandate, default-deny,
+`test/demos/api-verify.mjs` proves all of this headless (in `npm test`): the load-time mandate, default-deny,
 `PUBLIC`/`DENY`, the JWT regime (sign/verify/tamper/expiry), fail-closed authorizers, and roll-your-own
 — then, **across a real forked process and pipe**, that neither a forged continuation (reaching an
 admin-only call as a non-admin) nor a forged token (a client-flipped `role` claim that breaks the
-signature) can escalate. `demos/api-pump.mjs` then runs a **real compiled continuation across two tiers** with every
+signature) can escalate. `test/demos/api-pump.mjs` then runs a **real compiled continuation across two tiers** with every
 `api.*` serviced by the monitor over the pipe — authorized per principal, the denial caught by the app's
 `try`/`catch` across the tier (same continuation, admin allowed / user denied) — so the *integration* is
 proven, not just the component. The monitor also enforces per-call resource budgets (`maxArgsBytes` and
@@ -221,9 +221,9 @@ mandatory `authorize`, default-deny, a denial thrown *into* the continuation so 
 catches it across tiers (`makeApiExec` in `sidecar.mjs` is that adapter) — and agnostic about the
 **transport**: the pipe sidecar is the reference implementation; the same contract over HTTPS to a
 separately-deployed monitor is a small adapter. Concretely: the Tasks app's DB and endpoints live in
-`demos/api/tasks-fns.mjs`, a separate trusted service the demos fork as a sidecar — the pump host holds
+`test/demos/api/tasks-fns.mjs`, a separate trusted service the demos fork as a sidecar — the pump host holds
 only a pipe client and a per-session token (reads `PUBLIC`, writes re-authorized per call), and the
-in-process shortcut is no longer expressible on the live path. `demos/api-live.mjs` proves the default
+in-process shortcut is no longer expressible on the live path. `test/demos/api-live.mjs` proves the default
 path in `npm test`: the real compiled App on the runtime's own `pump`, every `api.*` over the pipe,
 anonymous `PUBLIC` reads standing while an unauthenticated or forged write is denied in the monitor's
 process and thrown across the tier, and the args budget rejecting an oversize call. An in-process

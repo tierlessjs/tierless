@@ -71,7 +71,7 @@ it goes next. Items are grouped, not strictly ordered; see
   for no benefit — so pruned O(changed) is the tuned default; `encodeDeltaTracked(…, { exact: true })` is
   the knob for an adversarial workload (~85 B/hop of strays traded for the walk). Both the stray-correctness
   and the exact knob are proven in `test/probes/wire-delta.mjs`.
-- **Live pump — done (`demos/delta-live.mjs`).** The whole pipeline now runs over a real websocket: the
+- **Live pump — done (`test/demos/delta-live.mjs`).** The whole pipeline now runs over a real websocket: the
   compiler's `__dirty` barriers feed a per-tier delta session through an installed sink, and a continuation
   that bounces server↔browser every hop (`api.poll` + `commit`) ships **`min(delta, full)`** on each crossing
   — the compact full binary wire on the cold first hop (then both tiers `adoptBaseline` to a shared, DFS-
@@ -90,7 +90,7 @@ it goes next. Items are grouped, not strictly ordered; see
   over an oscillation (the handle is never re-shipped), and survives a bounce with the data still home. Excision
   also composes with the `min(delta, full)` **full-binary path**: `exciseForCapture` runs first so both paths excise
   the same objects to the same handles, `subForFullWire` rebuilds the small spine with handle leaves for the full
-  frame, and `adoptBaseline` substitutes too, so ids stay consistent across a full↔delta switch. `demos/delta-live.mjs`
+  frame, and `adoptBaseline` substitutes too, so ids stay consistent across a full↔delta switch. `test/demos/delta-live.mjs`
   now runs the **whole composition over a real socket** — a continuation bounces server↔browser carrying a 124 KB
   catalog that excises to a §5 handle (4.9 KB total wire vs 124 KB inline), ships `min(delta, full)` each crossing,
   and the browser derefs the catalog over the same socket — all on plain `--track-writes` source, in `npm test`.
@@ -143,7 +143,7 @@ it goes next. Items are grouped, not strictly ordered; see
   content-based — it diffs the *result*, not the operation — **collections fall out for free**: a member
   edit, an array push, a `Map.set`, a `Set.add` are all handled, only the changed containers crossing.
   The host ships `min(delta, whole)`, so it is **never larger** than the old whole-object write-back.
-  `demos/heap-write-delta.mjs` measures it: member edits in a 1500-row dataset cross at **96×** smaller and
+  `test/demos/heap-write-delta.mjs` measures it: member edits in a 1500-row dataset cross at **96×** smaller and
   collection mutations at **94×** (per the finer mode below), and the near-total case falls back to whole.
 - **Per-field/element granularity — done (`session.fields`).** The delta now ships a changed container's
   changed *slots*, not the whole thing: an object's changed keys (+ deletes), an array's touched indices
@@ -189,11 +189,11 @@ it goes next. Items are grouped, not strictly ordered; see
   routed to the right resumable point. This is an application-level concern (React
   already answers it without continuations); the framework's job is only to let a
   continuation suspend at a boundary, which it does.
-- **A larger, framework-shaped sample app — done (`demos/conduit/`).** A RealWorld/Conduit reader
+- **A larger, framework-shaped sample app — done (`test/demos/conduit/`).** A RealWorld/Conduit reader
   written as ONE tier-fluid program: a routing loop across three views (home feed ↔ article page ↔
   editor) with tag filtering, favorites, comments, a new-article form, and a publish that validates
   on the server and is caught by a `try`/`catch` in the app across the tier boundary. It runs as one
-  compiled continuation — `demos/conduit-verify.mjs` drives an eleven-step user journey headlessly and
+  compiled continuation — `test/demos/conduit-verify.mjs` drives an eleven-step user journey headlessly and
   asserts the rendered state at each `commit` (in `npm test`). Writing it shook out a real compiler
   bug exactly as intended: a suspendable call on an assignment RHS in an UNBRACED `if`-branch
   (`if (route === "home") vdom = loadHome(tag);`) had its hoisted temp land *before* the `if`, so it
@@ -204,7 +204,7 @@ it goes next. Items are grouped, not strictly ordered; see
 
 ## Security & the trust boundary
 
-- **The api as an external reference monitor — landed (`demos/api/`).** The right axis: Stackmix's
+- **The api as an external reference monitor — landed (`test/demos/api/`).** The right axis: Stackmix's
   client is a fat web app that sometimes runs in Node, so BOTH halves — the browser client and the
   backend client (the "server" tier) — are untrusted. Authority therefore lives outside them, in the
   **api**: a small, stateless reference monitor in its own OS process, reached over a local pipe
@@ -214,18 +214,18 @@ it goes next. Items are grouped, not strictly ordered; see
   run })` with **authorize mandatory at load time** (exposure and authorization are one act; `PUBLIC`
   and `DENY` are the explicit sentinels), and the principal is a **signed bearer token the monitor
   verifies** (`JwtApi` for the standard HMAC regime; any `Api` subclass for your own). Default-deny is
-  the floor. `demos/api-verify.mjs` proves it end to end (in `npm test`), including — across a real
+  the floor. `test/demos/api-verify.mjs` proves it end to end (in `npm test`), including — across a real
   forked process and pipe — that neither a forged continuation (an admin-only call reached as a
   non-admin) nor a forged token (a client-flipped `role` claim that breaks the signature) can escalate
   (design `§7`). This corrects an earlier false start that validated the incoming continuation *inside*
   the untrusted server — the wrong side of the boundary.
-- **Pump integration — landed (`demos/api-pump.mjs`), with per-call budgets.** A real compiled
+- **Pump integration — landed (`test/demos/api-pump.mjs`), with per-call budgets.** A real compiled
   continuation migrates across two tiers with every `api.*` serviced by the monitor over the pipe,
   authorized per principal, and the denial caught by the app's `try`/`catch` across the tier — the
   integration, not just the component. Same continuation, admin allowed / user denied / anonymous can't
   start. The monitor now also enforces per-call resource budgets (`maxArgsBytes`) and a per-principal
   rate window.
-- **The monitor as the DEFAULT `api.*` path — landed (`demos/api-live.mjs`, `demos/api/tasks-fns.mjs`).**
+- **The monitor as the DEFAULT `api.*` path — landed (`test/demos/api-live.mjs`, `test/demos/api/tasks-fns.mjs`).**
   The model, stated plainly: a Stackmix program is untrusted client code — all of it, on every tier —
   and `api.*`/`dom.*` are edges to resources owned by other principals. The framework is opinionated
   about the *contract* at the api edge (`{ name, args, token }`, verified principal, mandatory

@@ -20,7 +20,7 @@ import { serveApp } from "stackmix/server";
 import { startSidecar, makeApiExec } from "stackmix/api";
 import * as bundle from "./app/bundle.gen.mjs";
 
-const ROOT = fileURLToPath(new URL("../", import.meta.url));
+const ROOT = fileURLToPath(new URL("../../", import.meta.url));   // repo root (the web root: /packages/..., /test/demos/...)
 const PORT = Number(process.env.PORT) || 8123;
 
 const PAGE = `<!doctype html>
@@ -62,7 +62,7 @@ const PAGE = `<!doctype html>
   No client/server split was hand-written; this is one compiled continuation.</p>
   <div id="status">connecting…</div>
   <div id="root"></div>
-  <script type="module" src="/demos/public/client.mjs"></script>
+  <script type="module" src="/test/demos/public/client.mjs"></script>
 </body>
 </html>`;
 

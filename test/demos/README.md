@@ -203,11 +203,11 @@ hooks. `api.*` and `commit()` look like ordinary calls.
 ## Running
 
 ```sh
-node demos/verify.mjs        # headless: drives the compiled bundle, asserts the session
-node demos/control-flow.mjs  # headless: loops/continue/try-catch-finally survive migration
-node demos/demo.mjs          # scripted two-tier run: real websocket + real Chromium
-node demos/server-live.mjs   # LIVE page — open the printed URL and click the dashboard
-node demos/verify-live.mjs   # headless drive of the live page with real Chromium clicks
+node test/demos/verify.mjs        # headless: drives the compiled bundle, asserts the session
+node test/demos/control-flow.mjs  # headless: loops/continue/try-catch-finally survive migration
+node test/demos/demo.mjs          # scripted two-tier run: real websocket + real Chromium
+node test/demos/server-live.mjs   # LIVE page — open the printed URL and click the dashboard
+node test/demos/verify-live.mjs   # headless drive of the live page with real Chromium clicks
 ```
 
 The headless regressions — `verify.mjs`, `control-flow.mjs`, and the heap/policy probes
@@ -221,10 +221,10 @@ Regenerating the bundles needs the Babel toolchain (not a runtime dependency):
 
 ```sh
 npm i -D @babel/parser@8 @babel/traverse@8 @babel/generator@8 @babel/types@8
-node packages/stackmix/src/transform.cjs demos/app/App.src.js demos/app/bundle.gen.mjs
-node packages/stackmix/src/transform.cjs demos/cf-fixtures.src.js demos/cf-fixtures.gen.mjs --bare
-node packages/stackmix/src/transform.cjs demos/policy-app.src.js demos/policy-app.gen.mjs --bare
-node packages/stackmix/src/transform.cjs demos/heap-write.src.js demos/heap-write.gen.mjs --bare --auto-deref --auto-writeback
+node packages/stackmix/src/transform.cjs test/demos/app/App.src.js test/demos/app/bundle.gen.mjs
+node packages/stackmix/src/transform.cjs test/demos/cf-fixtures.src.js test/demos/cf-fixtures.gen.mjs --bare
+node packages/stackmix/src/transform.cjs test/demos/policy-app.src.js test/demos/policy-app.gen.mjs --bare
+node packages/stackmix/src/transform.cjs test/demos/heap-write.src.js test/demos/heap-write.gen.mjs --bare --auto-deref --auto-writeback
 ```
 
 ## Caveats / not-yet

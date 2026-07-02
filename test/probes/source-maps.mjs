@@ -46,8 +46,8 @@ check("stackSites maps every frame of a stack to a file:line", Array.isArray(who
 // Gating: the SAME input without --source-map reproduces the committed bundle byte-for-byte (zero cost
 // when off). cf-fixtures is a --bare bundle; rebuild it (relative path, so the header matches) and compare.
 const cfOut = join(dir, "cf.gen.mjs");
-execFileSync(process.execPath, [TX, "demos/cf-fixtures.src.js", cfOut, "--bare"], { cwd: ROOT });
-check("without --source-map the bundle is byte-for-byte unchanged", readFileSync(cfOut, "utf8") === readFileSync(join(ROOT, "demos/cf-fixtures.gen.mjs"), "utf8"));
+execFileSync(process.execPath, [TX, "test/demos/cf-fixtures.src.js", cfOut, "--bare"], { cwd: ROOT });
+check("without --source-map the bundle is byte-for-byte unchanged", readFileSync(cfOut, "utf8") === readFileSync(join(ROOT, "test/demos/cf-fixtures.gen.mjs"), "utf8"));
 
 const ok = fail === 0;
 console.log(ok
