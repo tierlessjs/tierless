@@ -61,3 +61,18 @@ export function startSidecar(entryUrl, env = {}) {
     close: () => child.kill(),
   };
 }
+
+// The pump-side adapter — the DEFAULT way the backend client services the "server" tier.
+// Wraps a sidecar client (or anything with the same { call } contract — the transport is
+// pluggable; an HTTPS monitor is the same adapter) as an `execHere` for pump(): forward
+// { name, args, token }, return the value, and surface a monitor denial as a THROW so it
+// unwinds into the continuation and a try/catch in the app catches it across the tier.
+// The token is the session's verified-principal bearer; the client holds nothing more.
+export function makeApiExec(client, token = null) {
+  return async (req) => {
+    if (!req.name.startsWith("api.")) throw new Error("backend client can't service " + req.name);
+    const res = await client.call(req.name.slice(4), req.args, token);   // "api.getTasks" → monitor fn "getTasks"
+    if (!res.ok) throw new Error(res.error);                             // denial/error → catchable throw across the tier
+    return res.value;
+  };
+}

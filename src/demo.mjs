@@ -21,21 +21,25 @@ import { wsPort, makePeer } from "./transport.mjs";
 import { pump, initialStack } from "./runtime.mjs";
 import { encodeWireBinary, decodeWireBinary } from "./wire-binary.mjs";
 import { vdomToHtml, shell } from "./dom.mjs";
-import * as api from "./app/api.mjs";
+import { startSidecar, makeApiExec } from "./api/sidecar.mjs";
 
 const { chromium } = createRequire(process.env.PLAYWRIGHT_REQUIRE || "/opt/node22/lib/node_modules/")("playwright");
 const { WebSocketServer, WebSocket } = createRequire(import.meta.url)("ws");
 const trace = [];
 
 // ---------------------------------------------------------------- server tier ----
-const API = {
-  "api.getTasks": (a) => api.getTasks(a), "api.getStats": () => api.getStats(),
-  "api.addTask": (a) => api.addTask(a), "api.setStatus": (id, s) => api.setStatus(id, s), "api.deleteTask": (id) => api.deleteTask(id),
-};
+// The DEFAULT api.* path: the task DB lives in the tasks service, a reference-monitor
+// sidecar in its own process (it seeds on start). This tier is just the untrusted backend
+// client — it logs in once, holds the session token, and every api.* call is re-authorized
+// by the monitor over the pipe.
+const apiService = startSidecar(new URL("./api/tasks-fns.mjs", import.meta.url));
+await apiService.ready();
+const loginRes = await apiService.call("login", [{ user: "demo", pass: "demo" }]);
+if (!loginRes.ok) throw new Error("login failed: " + loginRes.error);
+const exec = makeApiExec(apiService, loginRes.value);
 const ownsServer = (tier) => tier === "server";
-const apiExec = (req) => { trace.push(`  server  ${req.name}(${JSON.stringify(req.args).slice(1, -1)})`); return API[req.name](...req.args); };
+const apiExec = (req) => { trace.push(`  server  ${req.name}(${JSON.stringify(req.args).slice(1, -1)}) → monitor`); return exec(req); };
 
-api.seed();
 const wss = new WebSocketServer({ port: 0 });
 await new Promise((r) => wss.on("listening", r));
 const PORT = wss.address().port;
@@ -132,6 +136,7 @@ await new Promise((r, j) => { ws.on("open", r); ws.on("error", j); });
 const value = await serverDone;
 await browser.close();
 wss.close();
+apiService.close();
 
 console.log("migration trace (one continuation, two tiers, real socket + real Chromium):\n");
 console.log(trace.join("\n"));

@@ -1,4 +1,4 @@
 node_modules/
 
-# browser-tier demo runtime DB (rewritten by api.seed() on each run)
-src/app/tasks-db.json
+# demo runtime DB (rewritten by the tasks service's seed() on each start)
+src/api/tasks-db.json

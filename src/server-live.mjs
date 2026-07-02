@@ -2,10 +2,12 @@
 //
 // Same continuation model as demo.mjs, but instead of Playwright scripting clicks
 // into a headless page, this serves a real page to a real browser. A human opens
-// the URL, the server starts the render (it owns api.*), the continuation
-// serializes across a real websocket into the browser tab, finishes the render
-// there, paints the real DOM, and PARKS on a real click. The human clicks; the
-// continuation resumes and migrates back to the server at the next api.* call.
+// the URL, the backend client starts the render, the continuation serializes across
+// a real websocket into the browser tab, finishes the render there, paints the real
+// DOM, and PARKS on a real click. The human clicks; the continuation resumes and
+// migrates back at the next api.* call — which is serviced by the TASKS SERVICE, a
+// reference-monitor sidecar in its own process (the default api.* path): this Node
+// process is just the untrusted backend client, holding a pipe and a session token.
 //
 // This Node process:
 //   - serves static files with the REPO ROOT as the web root, so absolute imports
@@ -26,7 +28,7 @@ import { createRequire } from "node:module";
 import { wsPort, makePeer } from "./transport.mjs";
 import { pump, initialStack } from "./runtime.mjs";
 import { encodeWireBinary, decodeWireBinary } from "./wire-binary.mjs";
-import * as api from "./app/api.mjs";
+import { startSidecar, makeApiExec } from "./api/sidecar.mjs";
 
 const { WebSocketServer } = createRequire(import.meta.url)("ws");
 
@@ -78,9 +80,10 @@ const PAGE = `<!doctype html>
 </head>
 <body>
   <h1>Stackmix — live two-tier React</h1>
-  <p class="lead">Render starts on the <strong>server</strong> (it owns <code>api.*</code>),
-  the continuation crosses a real websocket into <strong>this browser</strong> to commit the
-  DOM, and your click resumes it — then it migrates back to the server for the next data call.
+  <p class="lead">Render starts on the <strong>backend client</strong>, the continuation
+  crosses a real websocket into <strong>this browser</strong> to commit the DOM, and your
+  click resumes it — then it migrates back for the next data call, which a
+  <strong>reference-monitor sidecar</strong> in its own process authorizes per call.
   No client/server split was hand-written; this is one compiled continuation.</p>
   <div id="status">connecting…</div>
   <div id="root"></div>
@@ -110,21 +113,27 @@ function serveStatic(req, res) {
 const server = http.createServer(serveStatic);
 
 // ------------------------------------------------------------------ ws tier ------
-const API = {
-  "api.getTasks": (a) => api.getTasks(a), "api.getStats": () => api.getStats(),
-  "api.addTask": (a) => api.addTask(a), "api.setStatus": (id, s) => api.setStatus(id, s),
-  "api.deleteTask": (id) => api.deleteTask(id),
-};
+// The DEFAULT api.* path: this Node process is the untrusted backend client. The task DB
+// and every endpoint live in the tasks service, forked as a reference-monitor sidecar in
+// its OWN process (it seeds the DB on start); this process holds only a pipe client and a
+// per-session token. Reads are PUBLIC; writes are re-authorized against the verified demo
+// principal on every call — a call this process can't present a valid token for is denied
+// AT THE MONITOR, no matter what the (untrusted, migrating) continuation claims.
+const apiService = startSidecar(new URL("./api/tasks-fns.mjs", import.meta.url));
+await apiService.ready();
 const ownsServer = (tier) => tier === "server";
-const apiExec = (req) => { console.log(`  server  ${req.name}(${JSON.stringify(req.args).slice(1, -1)})`); return API[req.name](...req.args); };
-
-api.seed();   // reset the file-backed DB to the canonical 5 tasks for each server start
 
 const wss = new WebSocketServer({ server });
 wss.on("connection", async (ws) => {
   console.log("\n— browser connected; starting render on the server tier —");
   const peer = makePeer(wsPort(ws));
   try {
+    // One login per browser session: the monitor mints the session token in its own
+    // process; every api.* this connection forwards carries it and is re-verified there.
+    const login = await apiService.call("login", [{ user: "demo", pass: "demo" }]);
+    if (!login.ok) throw new Error("login failed: " + login.error);
+    const exec = makeApiExec(apiService, login.value);
+    const apiExec = (req) => { console.log(`  server  ${req.name}(${JSON.stringify(req.args).slice(1, -1)}) → monitor`); return exec(req); };
     let res = await pump(initialStack("App"), ownsServer, apiExec);   // render starts here, runs to first dom.*
     while (!res.done) {
       console.log(`  ── migrate → browser (${res.request.name})`);
@@ -148,5 +157,10 @@ wss.on("connection", async (ws) => {
 server.listen(PORT, () => {
   console.log(`Stackmix live two-tier demo`);
   console.log(`  open  http://localhost:${PORT}  in a browser and click the dashboard.`);
-  console.log(`  (the server owns api.*; your clicks drive the continuation across the socket)`);
+  console.log(`  (api.* is serviced by the reference-monitor sidecar in its own process;`);
+  console.log(`   your clicks drive the continuation across the socket)`);
 });
+
+const shutdown = () => { apiService.close(); server.close(); process.exit(0); };
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);

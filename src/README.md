@@ -172,7 +172,8 @@ hooks. `api.*` and `commit()` look like ordinary calls.
 | --- | --- |
 | `app/App.src.js` | the developer's code: plain functions (`App` calls the suspendable `loadView`), no tier split |
 | `app/components.mjs`, `app/h.mjs`, `app/render.mjs` | presentational components → serializable vdom (no React dep) |
-| `app/api.mjs` | the "server module": a file-backed task DB (`getTasks`/`getStats`/`addTask`/…) |
+| `api/tasks-fns.mjs` | the Tasks app's **trusted service**: the file-backed task DB behind the reference monitor (reads `PUBLIC`, writes per-principal), forked as a sidecar by the demos |
+| `api/api.mjs`, `api/sidecar.mjs` | the reference monitor + the pipe transport + `makeApiExec` (the default `api.*` adapter for the pump) |
 | `transform.cjs` | the allow-list + state-machine compiler (App.src.js → bundle.gen.mjs) |
 | `app/bundle.gen.mjs` | **generated** continuation bundle (committed; demo runs without Babel) |
 | `runtime.mjs` | `pump` — the one tier-agnostic continuation driver + the wire codec + resource-error routing into `catch` |
@@ -181,7 +182,8 @@ hooks. `api.*` and `commit()` look like ordinary calls.
 | `server-live.mjs` | the live page server: http static + `ws`, drives the continuation |
 | `public/client.mjs` | the live **browser** tier — runs in the tab, real DOM + real `onclick` |
 | `public/transport.mjs` | browser-safe transport (the 4 transport fns, same as `transport.mjs`) |
-| `verify.mjs` | headless regression (no browser/socket); asserts the compiled session — in `npm test` |
+| `verify.mjs` | headless regression (no browser/socket, in-process resource host — the labeled degenerate mode); asserts the compiled session — in `npm test` |
+| `api-live.mjs` | headless proof of the **default `api.*` path**: the same app on the runtime pump with every api call authorized by the tasks sidecar; anonymous reads stand, unauthenticated/forged writes denied across the tier — in `npm test` |
 | `cf-fixtures.src.js` → `cf-fixtures.gen.mjs` | control-flow test functions and their compiled bundle |
 | `control-flow.mjs` | headless regression for loops/continue/try-catch-finally across migration — in `npm test` |
 | `heap.mjs` | §5 distributed handle heap: frame-flattening tier-aware wire + `Heap`/`Channel`/`makeHost` reuse |

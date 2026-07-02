@@ -1,11 +1,14 @@
 // Headless regression for the AUTO-GENERATED continuation (app/bundle.gen.mjs, emitted
 // by transform.cjs from the hand-written-free app/App.src.js). No browser, no socket —
-// it drives the compiled state machine in one process, servicing api.* against the real
-// server module and feeding scripted events at each dom.commit, and asserts the app's
-// behavior. This guards the compiler output; demo.mjs proves the same continuation also
+// it drives the compiled state machine in one process, servicing api.* against the tasks
+// functions IN-PROCESS and feeding scripted events at each dom.commit, and asserts the
+// app's behavior. In-process resource hosting is the labeled DEGENERATE mode — right for
+// a single-process mechanics proof (fast, deterministic), never the default path: the
+// default path services api.* through the reference monitor in its own process, which
+// api-live.mjs proves on this same app. demo.mjs proves the same continuation also
 // migrates across a real websocket into real Chromium.
 import { run, start } from "./app/bundle.gen.mjs";
-import * as api from "./app/api.mjs";
+import * as api from "./api/tasks-fns.mjs";
 import { textOf } from "./app/render.mjs";
 
 api.seed();

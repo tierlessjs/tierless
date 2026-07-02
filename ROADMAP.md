@@ -23,9 +23,6 @@ it goes next. Items are grouped, not strictly ordered; see
   frame, and the §6 policy prices the real binary bytes; `encodeWire` (JSON) is kept only as
   a readable debug serialization. The remaining wire-adjacent work is below: delta capture
   and content-addressing.
-- **Typed-array fast path.** A homogeneous numeric array currently spends ~12 bytes
-  per element on `{"k":"p","v":n}`; pack it as a base64 `Float64Array` (or varint
-  deltas).
 - **Incremental / delta capture — done (`src/wire-delta.mjs`).** The oscillation case
   (a session that crosses many times) re-ships a near-identical continuation each hop.
   Each tier keeps a replicated, stably-identified object store; a capture ships only the
@@ -208,9 +205,22 @@ it goes next. Items are grouped, not strictly ordered; see
   authorized per principal, and the denial caught by the app's `try`/`catch` across the tier — the
   integration, not just the component. Same continuation, admin allowed / user denied / anonymous can't
   start. The monitor now also enforces per-call resource budgets (`maxArgsBytes`) and a per-principal
-  rate window. **Still open:** make the sidecar the *default* in the other live demos and the runtime
-  pump (they still wire in-process `api.*` handlers), and size/rate limits tuned for production past the
-  wire decoder's existing guards.
+  rate window.
+- **The monitor as the DEFAULT `api.*` path — landed (`src/api-live.mjs`, `src/api/tasks-fns.mjs`).**
+  The model, stated plainly: a Stackmix program is untrusted client code — all of it, on every tier —
+  and `api.*`/`dom.*` are edges to resources owned by other principals. The framework is opinionated
+  about the *contract* at the api edge (`{ name, args, token }`, verified principal, mandatory
+  `authorize`, default-deny, a denial thrown into the continuation and catchable across tiers —
+  `makeApiExec` in `sidecar.mjs`) and agnostic about the *transport* (the pipe sidecar is the reference;
+  the same contract over a network is a small adapter). Concretely, the Tasks app's DB moved out of the
+  client's directory into its own trusted service (`tasks-fns.mjs`: reads `PUBLIC`, writes
+  per-principal with args validated, budgets on) which `server-live.mjs` and `demo.mjs` now fork as a
+  sidecar — the pump host holds only a pipe client and a per-session token, so the in-process shortcut
+  is no longer expressible on the live path. `api-live.mjs` proves it in `npm test` on the runtime's own
+  `pump`: the full journey through the monitor, anonymous `PUBLIC` reads standing, an unauthenticated or
+  forged write denied in the monitor's process and thrown across the tier, an oversize call rejected by
+  the args budget. In-process hosting remains the labeled degenerate mode for mechanics proofs
+  (`verify.mjs`) and trusted single-tenant tools.
 
 ## Not on the roadmap (by design)
 

@@ -41,6 +41,13 @@ there. The big data stays where it lives; only the small continuation moves.
   runs resources this tier owns inline and stops at the first foreign resource, handing
   the continuation across the socket. When the continuation is large and the data
   small, it can fetch the data instead of migrating — priced from real bytes (§6).
+- **The program is untrusted client code — all of it, on every tier.** A migrating
+  continuation can be forged, so authority never lives in the program: every `api.*` is
+  serviced by a **reference monitor** in its own process (a local-pipe sidecar) that
+  re-authorizes each call against a verified principal — the framework owns that contract
+  (mandatory `authorize`, default-deny, a denial thrown back *into* the continuation,
+  catchable across tiers); the transport is pluggable. The `dom.*` edge is the same shape
+  with the user's own browser as the guard.
 
 ## Quick start
 
@@ -94,6 +101,7 @@ and finishes in the browser the instant the vdom touches the real DOM.
 | `src/conduit-verify.mjs` | a larger, framework-shaped app — a RealWorld/Conduit reader with routing across three views (feed ↔ article ↔ editor), favorites, comments, a new-article form, and a server-side validation `throw` caught across the tier boundary — runs correctly as one compiled continuation |
 | `src/api-verify.mjs` | the trust boundary done right: the api is an external **reference monitor** in its own process (a local-pipe sidecar), `authorize` is mandatory at load time, and the principal is a signed token it verifies — so across a real forked process neither a forged continuation nor a forged token can escalate (authority is re-checked at every call, never inferred from control flow) |
 | `src/api-pump.mjs` | the monitor wired into the pump: a real compiled continuation migrates across tiers with every `api.*` serviced by the sidecar over the pipe — authorized per principal, a denial caught by the app's `try`/`catch` across the tier (same continuation, admin allowed / user denied) |
+| `src/api-live.mjs` | the monitor as the **default `api.*` path**: the Tasks app's DB lives in its own trusted service (`src/api/tasks-fns.mjs`) which the demos fork as a sidecar — the pump host holds only a pipe and a per-session token. The real compiled App runs the full journey on the runtime's own `pump` through it; anonymous `PUBLIC` reads still render while an unauthenticated or forged write is **denied in the monitor's process** and thrown across the tier, and an oversize call is rejected by the args budget |
 | `src/control-flow.mjs` | loops, `break`/`continue`, labeled loops, `switch`, and `try`/`catch`/`finally` (including `return`/`break` across a `finally`) all survive migration |
 | `test/probes/lang-coverage.mjs` | ordinary binding forms compile and migrate: `for`/`of`/`in`, destructuring (object/array/nested/default/rest, non-array iterables via an `Array.from` guard), default/destructured/rest parameters, and a suspension inside an **optional chain** (`obj?.[api.x()]` / `obj.m?.(api.x())` — short-circuit skips the tier call, `this` preserved, checked against a native-JS oracle) — each driven across a JSON round-trip of the continuation at every suspension. The one form that genuinely can't migrate — a tier call inside a callback/comparator/method, run synchronously by native code that can't suspend — is rejected with a clear compile error, not silently miscompiled |
 | `src/heap-probe.mjs`, `src/heap-live.mjs` | a 1.1 MB dataset crosses a commit migration as a ~450-byte §5 handle and is fetched back over a real socket only when the browser derefs it |
@@ -120,7 +128,8 @@ src/              the framework
   heap.mjs        §5 distributed handle heap: encodeWire, makeTier, write-back CAS
   fetch.mjs       Heap / Channel / makeHost — fetch-on-deref with coherence
   transport.mjs   WebSocket framing + RPC peer (browser-safe)
-  api/            the trust boundary — a reference-monitor sidecar (mediates every resource call)
+  api/            the trust boundary — the reference monitor, its sidecar transport, and the
+                  trusted services behind it (the api implementations; the default api.* path)
   app/            the demo app (plain components -> serializable vdom)
   public/         the browser tier (runs in a real tab)
   *.mjs           the demos and headless proofs (also the test suite)

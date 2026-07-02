@@ -8,7 +8,7 @@
 // tier. Same continuation, three principals — authority is enforced at the boundary, never inferred from
 // how control flow arrived.
 import { PROGRAMS, __unwind } from "./api-pump-app.gen.mjs";
-import { startSidecar } from "./api/sidecar.mjs";
+import { startSidecar, makeApiExec } from "./api/sidecar.mjs";
 import { encodeGraph, decodeGraph } from "./graph.mjs";
 
 const wire = (stack) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([stack]))))[0];   // serialize the continuation at each hop (proves migration)
@@ -33,16 +33,9 @@ async function pumpLocal(stack, ownsHere, execHere, incoming) {
 const ownsServer = (tier) => tier === "server";
 const ownsBrowser = (tier) => tier === "browser";
 
-// The backend client services api.* by calling the monitor over the pipe with the session token; a
-// denial ({ ok:false }) becomes a catchable throw in the continuation. The browser services commit.
-function serverExec(api, token) {
-  return async (req) => {
-    if (!req.name.startsWith("api.")) throw new Error("backend client can't service " + req.name);
-    const res = await api.call(req.name.slice(4), req.args, token);  // "api.whoami" → monitor fn "whoami" (strip the tier namespace)
-    if (!res.ok) throw new Error(res.error);            // monitor denial/error → throw across the tier
-    return res.value;
-  };
-}
+// The backend client services api.* with makeApiExec — the same default adapter the live
+// demos use: monitor over the pipe with the session token, a denial becoming a catchable
+// throw in the continuation. The browser services commit.
 function browserExec(sink) {
   return (req) => { if (req.name === "dom.commit") { sink.committed = req.args[0]; return "shown"; } throw new Error("browser can't service " + req.name); };
 }
@@ -50,7 +43,7 @@ function browserExec(sink) {
 // Drive one continuation across the two tiers under a given session token, serializing at every hop.
 async function runFlow(api, token) {
   const sink = {};
-  const sExec = serverExec(api, token), bExec = browserExec(sink);
+  const sExec = makeApiExec(api, token), bExec = browserExec(sink);
   let res = await pumpLocal([{ fn: "Flow", pc: 0, args: [] }], ownsServer, sExec, null);
   let onServer = true;
   while (!res.done) {

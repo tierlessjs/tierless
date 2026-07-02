@@ -25,7 +25,8 @@ src/                the framework
   fetch.mjs         Heap / Channel / makeHost — fetch-on-deref with coherence
   wire-delta.mjs    delta wire: ship a continuation as a patch over what the peer holds
   transport.mjs     WebSocket framing + RPC peer (browser-safe)
-  api/              the trust boundary — reference-monitor sidecar (api.mjs, sidecar.mjs, server-fns.mjs)
+  api/              the trust boundary — reference-monitor sidecar + the trusted services behind it
+                    (api.mjs, sidecar.mjs; server-fns.mjs, tasks-fns.mjs — the api implementations)
   app/              the Tasks demo app (plain components -> serializable vdom)
   conduit/          the larger RealWorld/Conduit sample app (routing across three views)
   public/           the browser tier (runs in a real tab)
@@ -205,8 +206,24 @@ signature) can escalate. `src/api-pump.mjs` then runs a **real compiled continua
 `api.*` serviced by the monitor over the pipe — authorized per principal, the denial caught by the app's
 `try`/`catch` across the tier (same continuation, admin allowed / user denied) — so the *integration* is
 proven, not just the component. The monitor also enforces per-call resource budgets (`maxArgsBytes` and
-a per-principal rate window). What remains is making the sidecar the **default** in the other live demos
-and the runtime's own pump, which still wire in-process `api.*` handlers.
+a per-principal rate window).
+
+**The monitor is the DEFAULT `api.*` path.** A Stackmix program is untrusted client code — all of it,
+on every tier; `api.*` and `dom.*` are edges to resources owned by *other principals* (the api by the
+business, guarded by the monitor; the dom by the user, guarded by their browser). The framework is
+opinionated about the **contract** at that edge — `{ name, args, token }` in, verified principal,
+mandatory `authorize`, default-deny, a denial thrown *into* the continuation so a `try`/`catch`
+catches it across tiers (`makeApiExec` in `sidecar.mjs` is that adapter) — and agnostic about the
+**transport**: the pipe sidecar is the reference implementation; the same contract over HTTPS to a
+separately-deployed monitor is a small adapter. Concretely: the Tasks app's DB and endpoints live in
+`src/api/tasks-fns.mjs`, a separate trusted service the demos fork as a sidecar — the pump host holds
+only a pipe client and a per-session token (reads `PUBLIC`, writes re-authorized per call), and the
+in-process shortcut is no longer expressible on the live path. `src/api-live.mjs` proves the default
+path in `npm test`: the real compiled App on the runtime's own `pump`, every `api.*` over the pipe,
+anonymous `PUBLIC` reads standing while an unauthenticated or forged write is denied in the monitor's
+process and thrown across the tier, and the args budget rejecting an oversize call. An in-process
+resource host remains available as the labeled **degenerate mode** for single-process mechanics proofs
+(`verify.mjs`) and trusted single-tenant deployments — an explicit opt-out, never the default.
 
 ## Why the transportable continuation is ours to build
 

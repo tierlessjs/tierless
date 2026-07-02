@@ -19,6 +19,15 @@
 // *inside* the untrusted process is the wrong axis: you cannot validate your way out of an untrusted
 // process; you move authority into a trusted one. The api never even sees a continuation — it sees a
 // call — which is precisely what makes it robust to a forged one.)
+//
+// This is the DEFAULT api.* path, and the framework's opinion is scoped deliberately: it owns the
+// CONTRACT at the edge — { name, args, token } in, verified principal, mandatory authorize,
+// default-deny, { ok, value|error } out, a denial thrown back into the continuation (makeApiExec) so
+// a try/catch catches it across tiers — and is agnostic about the TRANSPORT (the pipe sidecar is the
+// reference implementation; the same contract over HTTPS to a separately-deployed monitor is a small
+// adapter) and silent beyond the edge (your business logic, store, and identity provider — verify()
+// is the override point). An in-process resource host remains the labeled degenerate mode for
+// single-process mechanics tests and trusted single-tenant tools; it is an opt-out, not the default.
 
 export const PUBLIC = Symbol("stackmix.api.PUBLIC");   // deliberately no authorization (a public endpoint)
 export const DENY   = Symbol("stackmix.api.DENY");     // deliberately always reject (disabled / placeholder)
