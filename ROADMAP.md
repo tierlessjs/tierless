@@ -4,10 +4,11 @@ What's genuinely open. Everything that has landed — with its measurements and
 proofs — moved to [`CHANGELOG.md`](./CHANGELOG.md); the mechanism itself is
 proven (33 executable proofs, `npm test`).
 
-## Toward a first npm release
+## Packaging & release
 
-- **Publish `tierless` + `create-tierless`** at 0.1.0 (the packages are shaped
-  and `npm pack`-verified; the README quick start assumes the registry).
+`tierless@0.1.0` and `create-tierless@0.1.0` are published — the names are
+secured and `npm i tierless` / `npm create tierless@latest` work. Still open:
+
 - **Verified-provenance badge.** Publish from CI (GitHub Actions + npm OIDC via
   `npm publish --provenance`) so npm shows the green ✓ tying each release to its
   exact source commit and build. Needs a public repo and a CI publish workflow;

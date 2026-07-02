@@ -1,5 +1,10 @@
 # Changelog
 
+- **Published to npm — `tierless@0.1.0`, `create-tierless@0.1.0` (2026-07-02).**
+  First public release; the names are secured. `npm i tierless`,
+  `npm create tierless@latest <app>`. Published by hand under 2FA/OTP; a clean
+  install from the registry imports and runs (CLI + exports verified).
+  CI-based provenance (the green ✓) is a roadmap item.
 - **Renamed: Stackmix → Tierless** (pre-first-publish, so nothing external breaks).
   Package `tierless`, scaffolder `create-tierless`, CLI `tierless`, directive
   `"use tierless"` (`"use mix"` remains accepted as an alias), endpoint
