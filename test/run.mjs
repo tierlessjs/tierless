@@ -34,6 +34,7 @@ const cases = [
   { file: "test/probes/compiler-api.mjs", needs: ["the compiler is an importable library: configurable resources, module-shaped input (exports/imports/state preserved), and an analyze() report"] },
   { file: "test/probes/cli.mjs", needs: ["the stackmix CLI works end to end: build (custom resources), explain (the analysis made visible), api (load-time pre-ship check), types (the api surface as a declaration)"] },
   { file: "test/probes/vite-plugin.mjs", needs: ["the Vite plugin turns a \"use mix\" module into monitor-backed actions: transform + dev-server endpoint + ssr-loaded machine + sidecar authorization, end to end"] },
+  { file: "test/probes/create-app.mjs", needs: ["create-stackmix scaffolds a WORKING two-tier app: build, boot (api sidecar forked), seeded render, authorized write, monitor denial caught across the tier, clean end"] },
   { file: "src/heap-probe.mjs",     needs: ["big locals stay home, fetched on deref, single-writer coherent"] },
   { file: "src/heap-live.mjs",      needs: ["the dataset stayed on the server, crossing only when the browser derefed it"] },
   { file: "src/heap-auto.mjs",      needs: ["transparent deref: ordinary member access on a handle auto-fetches"] },

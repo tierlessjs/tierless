@@ -4,7 +4,7 @@
 //   api      pre-ship check: lists the authorized surface; an endpoint with NO authorize
 //            fails at load time with the monitor's own message
 //   types    emits a declare-const-api surface from the service's registered endpoints
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
