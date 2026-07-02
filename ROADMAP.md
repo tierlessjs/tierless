@@ -29,6 +29,22 @@ proven (33 executable proofs, `npm test`).
   human click; a page with several independent event sources needs the next
   event routed to the right resumable point. Application-level today.
 
+## From the literature (Stip.js, Fission — see design.md §9)
+
+- **Per-tier dead-code shake.** Stip.js's slicer ships each tier only the code it can
+  run; Stackmix ships every machine to both tiers. The suspendability analysis already
+  knows which functions can only execute server-side in practice — a bundle shake using
+  it would cut the browser payload with no semantic change.
+- **Label-driven excision (Fission-grade confidentiality from existing parts).** Mark an
+  api result `confidential` and compose two things Stackmix already has: the value is
+  FORCED to cross as a §5 handle (never inlined into a continuation headed client-ward),
+  and every deref of it is a monitored, per-principal call. Data-flow confidentiality for
+  tier-crossing values without whole-program interposition.
+- **Whole-program placement optimization.** §6 prices one hop at a time (greedy);
+  Stip.js's search-based tier assignment optimized placement globally (total
+  communication, offline availability). A PDG-style global view over the suspension
+  graph could pre-place or replicate pure helpers better than local decisions.
+
 ## Bigger swings
 
 - **Durable continuations.** Persist a parked continuation and resume it after
