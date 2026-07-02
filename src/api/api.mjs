@@ -111,6 +111,14 @@ export class Api {
     return s.count <= this._rate.max;
   }
 
+  // The registered surface, for tooling (stackmix api / stackmix types): names + the KIND of
+  // authorization only — never the authorizer itself, never the secret.
+  fns() {
+    return [...this._fns.entries()].map(([name, { authorize }]) => ({
+      name, authorize: authorize === PUBLIC ? "PUBLIC" : authorize === DENY ? "DENY" : "per-call",
+    }));
+  }
+
   _deny(name, principal, reason) { this._log(name, principal, "deny:" + reason); return { ok: false, error: "denied" }; }
   _log(name, principal, outcome) { this._audit.push({ name, who: (principal && principal.sub) || null, outcome }); }
   audit() { return this._audit.slice(); }                 // the audit trail lives in the trusted process, not the client

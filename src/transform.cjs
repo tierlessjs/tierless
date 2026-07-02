@@ -72,8 +72,10 @@ function allowlist(ast) {
       tier = "@deref"; name = "deref";                                                  // deref(handle): fetch from the handle's owner
     }
     if (!tier) return;
-    p.replaceWith(t.yieldExpression(t.callExpression(t.identifier("R"),
-      [t.stringLiteral(tier), t.stringLiteral(name), ...args])));
+    const y = t.yieldExpression(t.callExpression(t.identifier("R"),
+      [t.stringLiteral(tier), t.stringLiteral(name), ...args]));
+    y.loc = p.node.loc;                                            // keep the call site for analyze()/--source-map reporting
+    p.replaceWith(y);
     // no p.skip(): keep traversing so nested tier calls in the args (e.g. api.f(api.g())) get rewritten too
   } });
 }
