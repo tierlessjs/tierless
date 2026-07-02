@@ -54,7 +54,11 @@ const fs = require("fs");
 const gen = (n) => generate(n, { concise: true }).code;
 
 // ---- PASS 1: allow-list rewrite. Calls to tier-pinned namespaces become yields. ----
-const TIER_OF = { api: "server", commit: "browser" }; // allow-list: which calls are tier-pinned
+// The allow-list: which call namespaces are tier-pinned. `api.*` -> server and `commit()` ->
+// browser are the defaults; a deployment adds its own via opts.resources / --resource=ns:tier
+// (a member namespace like `db.*`, or a bare call like `commit` which compiles as "dom.<name>").
+const DEFAULT_RESOURCES = { api: "server", commit: "browser" };
+let TIER_OF = { ...DEFAULT_RESOURCES };
 function allowlist(ast) {
   traverse(ast, { CallExpression(p) {
     const c = p.node.callee;
@@ -497,10 +501,11 @@ function compileFn(node) {
 // as a §5 handle, so reads of them get a deref guard and writes through them get a write-back.
 function remotableLocals(p) {
   const remotable = new Set();
-  p.traverse({ VariableDeclarator(v) {                            // const L = yield R(tier, "api.*")
+  const isDataResource = (name) => { const ns = String(name).split(".")[0]; return TIER_OF[ns] === "server"; };  // any server-pinned namespace (api.*, db.*, …)
+  p.traverse({ VariableDeclarator(v) {                            // const L = yield R(tier, "<server-ns>.*")
     const init = v.node.init;
     if (t.isYieldExpression(init) && t.isCallExpression(init.argument) && t.isIdentifier(init.argument.callee, { name: "R" })
-      && t.isStringLiteral(init.argument.arguments[1]) && init.argument.arguments[1].value.startsWith("api.") && t.isIdentifier(v.node.id)) remotable.add(v.node.id.name);
+      && t.isStringLiteral(init.argument.arguments[1]) && isDataResource(init.argument.arguments[1].value) && t.isIdentifier(v.node.id)) remotable.add(v.node.id.name);
   } });
   return remotable;
 }
@@ -840,7 +845,8 @@ function checkNestedSuspensions(ast) {
   traverse(ast, { YieldExpression(p) {
     if (!isResYield(p.node)) return;
     const fn = p.getFunctionParent();
-    if (fn && t.isFunctionDeclaration(fn.node) && t.isProgram(fn.parentPath.node)) return;
+    if (fn && t.isFunctionDeclaration(fn.node) && (t.isProgram(fn.parentPath.node)
+      || (fn.parentPath.isExportNamedDeclaration() && t.isProgram(fn.parentPath.parentPath.node)))) return;
     const nameArg = p.node.argument.arguments[1];
     const name = t.isStringLiteral(nameArg) ? nameArg.value : "resource";
     const where = !fn ? "top-level module code"
@@ -850,37 +856,99 @@ function checkNestedSuspensions(ast) {
   } });
 }
 
+// Collect the compilable top-level functions: plain FunctionDeclarations and NAMED exported
+// ones (`export function f() {}`). Every other top-level statement (imports, consts, classes)
+// is kept verbatim ahead of the output, so a "use mix" module keeps its module scope. A file
+// directive ("use mix"/"use strict") is dropped — it addressed the build, not the runtime.
+function collectProgram(ast) {
+  const fnPaths = new Map();                                      // name -> { p, exported }
+  const rest = [];
+  for (const node of ast.program.body) {
+    if (t.isFunctionDeclaration(node) && node.id) { fnPaths.set(node.id.name, { exported: false }); continue; }
+    if (t.isExportNamedDeclaration(node) && t.isFunctionDeclaration(node.declaration) && node.declaration.id) { fnPaths.set(node.declaration.id.name, { exported: true }); continue; }
+    if (t.isExpressionStatement(node) && t.isStringLiteral(node.expression) && node.expression.value.startsWith("use ")) continue;
+    rest.push(node);
+  }
+  traverse(ast, { FunctionDeclaration(p) {                        // attach paths (traverse for correct scope info)
+    const name = p.node.id && p.node.id.name;
+    const par = p.parentPath;
+    if (!name || !fnPaths.has(name)) return;
+    if (t.isProgram(p.parent) || (par.isExportNamedDeclaration() && t.isProgram(par.parent))) fnPaths.get(name).p = p;
+  } });
+  // suspendability: directly contains a yield (tier resource), or transitively calls one that does
+  const calls = new Map(); const directly = new Set();
+  for (const [name, { p }] of fnPaths) {
+    let y = false; const cs = new Set();
+    p.traverse({ YieldExpression() { y = true; }, CallExpression(cp) { const c = cp.node.callee; if (t.isIdentifier(c) && fnPaths.has(c.name)) cs.add(c.name); } });
+    if (y) directly.add(name); calls.set(name, cs);
+  }
+  const susp = new Set(directly);
+  for (let changed = true; changed;) { changed = false; for (const [name, cs] of calls) if (!susp.has(name) && [...cs].some((c) => susp.has(c))) { susp.add(name); changed = true; } }
+  return { fnPaths, rest, susp, directly, calls };
+}
+
 function compile(src, preamble) {
   const ast = parser.parse(src, { sourceType: "module" });
   allowlist(ast);
   checkNestedSuspensions(ast);
   USED_FORIN = false; USED_OBJREST = false;
   fnSites = {};
-  const fnPaths = new Map();
-  traverse(ast, { FunctionDeclaration(p) { if (t.isProgram(p.parent)) fnPaths.set(p.node.id.name, p); } });
-  // suspendability: directly contains a yield (tier resource), or transitively calls one that does
-  const calls = new Map(); const directly = new Set();
-  for (const [name, p] of fnPaths) {
-    let y = false; const cs = new Set();
-    p.traverse({ YieldExpression() { y = true; }, CallExpression(cp) { const c = cp.node.callee; if (t.isIdentifier(c) && fnPaths.has(c.name)) cs.add(c.name); } });
-    if (y) directly.add(name); calls.set(name, cs);
-  }
-  suspSet = new Set(directly);
-  for (let changed = true; changed;) { changed = false; for (const [name, cs] of calls) if (!suspSet.has(name) && [...cs].some((c) => suspSet.has(c))) { suspSet.add(name); changed = true; } }
+  const { fnPaths, rest, susp } = collectProgram(ast);
+  suspSet = susp;
 
-  const pure = [], progs = [];
-  for (const [name, p] of fnPaths) {                              // pure single-tier fns run wholesale (lower() handles suspendable ones)
-    if (suspSet.has(name)) { progs.push(lower(p)); }
-    else { if (TRACK_WRITES) insertDirtyBarriers(p); pure.push(gen(p.node)); }  // a pure helper can still mutate continuation state
+  const pure = [], progs = [], meta = { programs: [], exported: [], pure: [] };
+  for (const [name, { p, exported }] of fnPaths) {                // pure single-tier fns run wholesale (lower() handles suspendable ones)
+    if (suspSet.has(name)) { progs.push(lower(p)); meta.programs.push(name); if (exported) meta.exported.push(name); }
+    else { if (TRACK_WRITES) insertDirtyBarriers(p); pure.push((exported ? "export " : "") + gen(p.node)); meta.pure.push(name); }  // a pure helper can still mutate continuation state
   }
   const head = preamble + (TRACK_WRITES ? "\n" + TRACK_PREAMBLE : "");
+  const kept = rest.length ? rest.map(gen).join("\n") + "\n" : ""; // imports / top-level state the module declared
   // for-of/for-in and object-rest emit a tiny pure helper — but ONLY when a source actually uses
   // the construct, so a bundle that doesn't is byte-for-byte unchanged.
   const helpers = (USED_FORIN ? FORIN_HELPER + "\n" : "") + (USED_OBJREST ? OBJREST_HELPER + "\n" : "");
   // --source-map: a pc->line table per program + a frameSite helper, so a migrated frame reports a
   // portable file:line. Gated, so without the flag the bundle is byte-for-byte what it was before.
   const sm = SOURCE_MAP ? `\nexport const SOURCE_FILE = ${JSON.stringify(srcFile)};\nexport const SITES = ${JSON.stringify(fnSites)};\nexport const frameSite = (f) => { const m = SITES[f.fn], ln = m && m[f.pc]; return SOURCE_FILE + ":" + (ln || "?"); };\nexport const stackSites = (stack) => stack.map(frameSite);\n` : "";
-  return head + "\n" + helpers + (pure.length ? pure.join("\n") + "\n" : "") + "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};\n" + DRIVER + sm;
+  const code = head + "\n" + kept + helpers + (pure.length ? pure.join("\n") + "\n" : "") + "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};\n" + DRIVER + sm;
+  return { code, meta };
+}
+
+// ---- the module API (require("./transform.cjs")) — what the Vite plugin and CLI use ----
+function configure(opts = {}) {
+  AUTO_WRITEBACK = !!opts.autoWriteback;
+  AUTO_DEREF = !!opts.autoDeref || AUTO_WRITEBACK;                // a write through a handle must first materialize it
+  TRACK_WRITES = !!opts.trackWrites;
+  SOURCE_MAP = !!opts.sourceMap;
+  srcFile = opts.filename || "<stackmix>";
+  TIER_OF = { ...DEFAULT_RESOURCES, ...(opts.resources || {}) };
+}
+
+// compileModule(src, opts) -> { code, meta } where meta lists the compiled program names,
+// which of them the source `export`ed (the actions surface), and the pure passthroughs.
+function compileModule(src, opts = {}) {
+  configure(opts);
+  return compile(src, opts.preamble || "");
+}
+
+// analyze(src, opts) -> per-function suspendability report (what `stackmix explain` prints):
+// is it compiled, why (direct resource touches / transitive calls), and every suspension point.
+function analyze(src, opts = {}) {
+  configure(opts);
+  const ast = parser.parse(src, { sourceType: "module" });
+  allowlist(ast);
+  const { fnPaths, susp, directly, calls } = collectProgram(ast);
+  const functions = [];
+  for (const [name, { p, exported }] of fnPaths) {
+    const suspensions = [];
+    p.traverse({ YieldExpression(y) {
+      if (!isResYield(y.node)) return;
+      const a = y.node.argument.arguments;
+      suspensions.push({ name: a[1].value, tier: a[0].value, line: y.node.loc ? y.node.loc.start.line : null });
+    } });
+    const via = [...(calls.get(name) || [])].filter((c) => susp.has(c));
+    functions.push({ name, exported, suspendable: susp.has(name), direct: directly.has(name), suspensions, callsSuspendable: via });
+  }
+  return { functions, resources: { ...TIER_OF } };
 }
 
 const DRIVER = `
@@ -931,21 +999,31 @@ export function run(stack) {
 export const start = (fn, args = []) => run([{ fn, pc: 0, args }]);
 `;
 
-const args = process.argv.slice(2);
-const flags = args.filter((a) => a.startsWith("--"));
-const [inPath, outPath] = args.filter((a) => !a.startsWith("--"));
-if (!inPath || !outPath) { console.error("usage: node transform.cjs <in.js> <out.gen.mjs> [--bare] [--head=<file>] [--auto-deref] [--auto-writeback] [--track-writes] [--source-map]"); process.exit(2); }
-AUTO_WRITEBACK = flags.includes("--auto-writeback");
-AUTO_DEREF = flags.includes("--auto-deref") || AUTO_WRITEBACK;   // a write through a handle must first materialize it (deref)
-TRACK_WRITES = flags.includes("--track-writes");                 // emit __dirty(obj) write-barriers for the delta wire's tracked mode
-SOURCE_MAP = flags.includes("--source-map");                     // emit a pc->line table + frameSite, so a migrated frame reports file:line
-srcFile = inPath;
-// The pure helpers an app's suspendable functions call (h/render/components) live in their own
-// modules; the generated bundle imports them. --head=<file> supplies those import lines for a given
-// app (so a second app can name its own components); the default is the Tasks app's.
-const headFlag = flags.find((f) => f.startsWith("--head="));
-const preamble = flags.includes("--bare") ? ""
-  : headFlag ? fs.readFileSync(headFlag.slice("--head=".length), "utf8").trimEnd()
-    : 'import { h } from "./h.mjs";\nimport { Dashboard } from "./components.mjs";\nimport { render } from "./render.mjs";';
-fs.writeFileSync(outPath, "// GENERATED by transform.cjs from " + inPath + " — do not edit by hand.\n" + compile(fs.readFileSync(inPath, "utf8"), preamble));
-console.log("wrote " + outPath);
+module.exports = { compile: compileModule, analyze, DEFAULT_RESOURCES };
+
+// ---- CLI ----
+function cliMain() {
+  const args = process.argv.slice(2);
+  const flags = args.filter((a) => a.startsWith("--"));
+  const [inPath, outPath] = args.filter((a) => !a.startsWith("--"));
+  if (!inPath || !outPath) { console.error("usage: node transform.cjs <in.js> <out.gen.mjs> [--bare] [--head=<file>] [--auto-deref] [--auto-writeback] [--track-writes] [--source-map] [--resource=ns:tier ...]"); process.exit(2); }
+  const resources = {};                                            // --resource=db:server adds to the defaults
+  for (const f of flags) if (f.startsWith("--resource=")) { const [ns, tier] = f.slice("--resource=".length).split(":"); if (!ns || !tier) { console.error("bad --resource (want ns:tier): " + f); process.exit(2); } resources[ns] = tier; }
+  // The pure helpers an app's suspendable functions call (h/render/components) live in their own
+  // modules; the generated bundle imports them. --head=<file> supplies those import lines for a given
+  // app (so a second app can name its own components); the default is the Tasks app's.
+  const headFlag = flags.find((f) => f.startsWith("--head="));
+  const preamble = flags.includes("--bare") ? ""
+    : headFlag ? fs.readFileSync(headFlag.slice("--head=".length), "utf8").trimEnd()
+      : 'import { h } from "./h.mjs";\nimport { Dashboard } from "./components.mjs";\nimport { render } from "./render.mjs";';
+  const { code } = compileModule(fs.readFileSync(inPath, "utf8"), {
+    preamble, resources, filename: inPath,
+    autoWriteback: flags.includes("--auto-writeback"),
+    autoDeref: flags.includes("--auto-deref"),
+    trackWrites: flags.includes("--track-writes"),
+    sourceMap: flags.includes("--source-map"),
+  });
+  fs.writeFileSync(outPath, "// GENERATED by transform.cjs from " + inPath + " — do not edit by hand.\n" + code);
+  console.log("wrote " + outPath);
+}
+if (require.main === module) cliMain();
