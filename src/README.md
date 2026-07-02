@@ -181,7 +181,6 @@ hooks. `api.*` and `commit()` look like ordinary calls.
 | `demo.mjs` | scripted two-tier run: `ws` server tier ↔ Node+Playwright Chromium tier |
 | `server-live.mjs` | the live page server: http static + `ws`, drives the continuation |
 | `public/client.mjs` | the live **browser** tier — runs in the tab, real DOM + real `onclick` |
-| `public/transport.mjs` | browser-safe transport (the 4 transport fns, same as `transport.mjs`) |
 | `verify.mjs` | headless regression (no browser/socket, in-process resource host — the labeled degenerate mode); asserts the compiled session — in `npm test` |
 | `api-live.mjs` | headless proof of the **default `api.*` path**: the same app on the runtime pump with every api call authorized by the tasks sidecar; anonymous reads stand, unauthenticated/forged writes denied across the tier — in `npm test` |
 | `cf-fixtures.src.js` → `cf-fixtures.gen.mjs` | control-flow test functions and their compiled bundle |

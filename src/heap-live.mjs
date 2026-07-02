@@ -20,7 +20,7 @@ const THRESH = 8192;
 let pass = true;
 const check = (name, cond, extra = "") => { console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`); pass = pass && cond; };
 
-// runtime.mjs's pump imports PROGRAMS from the Tasks bundle; heap-app has its own PROGRAMS,
+// a local pump variant: heap-live frames the wire itself (§5 excision + deref-over-socket),
 // so drive it with the identical pump logic (push sub-frames, run owned resources, stop at
 // a foreign one). The wire/heap/transport are the real ones.
 async function pumpLocal(stack, ownsHere, execHere, incoming = null) {

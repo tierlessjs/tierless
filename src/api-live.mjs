@@ -13,10 +13,13 @@
 //     across the tier into the continuation,
 //   - a FORGED token (tampered claims break the signature) buys exactly nothing,
 //   - an oversize payload is rejected by the monitor's resource budget before running.
-import { pump, initialStack } from "./runtime.mjs";
+import { makePump, initialStack } from "./runtime.mjs";
 import { startSidecar, makeApiExec } from "./api/sidecar.mjs";
 import { encodeWireBinary, decodeWireBinary } from "./wire-binary.mjs";
 import { textOf } from "./app/render.mjs";
+import * as bundle from "./app/bundle.gen.mjs";
+
+const pump = makePump(bundle);
 
 let pass = 0, fail = 0;
 const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : `  (got ${JSON.stringify(got)})`}`); } };

@@ -1,52 +1,27 @@
 // LIVE two-tier demo — a REAL human-clickable browser tier.
 //
-// Same continuation model as demo.mjs, but instead of Playwright scripting clicks
-// into a headless page, this serves a real page to a real browser. A human opens
-// the URL, the backend client starts the render, the continuation serializes across
-// a real websocket into the browser tab, finishes the render there, paints the real
-// DOM, and PARKS on a real click. The human clicks; the continuation resumes and
-// migrates back at the next api.* call — which is serviced by the TASKS SERVICE, a
-// reference-monitor sidecar in its own process (the default api.* path): this Node
-// process is just the untrusted backend client, holding a pipe and a session token.
+// Same continuation model as demo.mjs, but instead of Playwright scripting clicks into a
+// headless page, this serves a real page to a real browser. A human opens the URL, the
+// backend client starts the render, the continuation serializes across a real websocket
+// into the browser tab, finishes the render there, paints the real DOM, and PARKS on a
+// real click. The click resumes it; it migrates back at the next api.* call — serviced by
+// the TASKS SERVICE, a reference-monitor sidecar in its own process (the default api.*
+// path): this Node process is just the untrusted backend client, holding a pipe client
+// and a per-session token.
 //
-// This Node process:
-//   - serves static files with the REPO ROOT as the web root, so absolute imports
-//     like /src/runtime.mjs and /src/app/bundle.gen.mjs (reached transitively from
-//     /src/public/client.mjs) resolve over HTTP,
-//   - serves the dashboard HTML shell at /,
-//   - runs a ws WebSocketServer on the SAME http server ({ server }); the client
-//     dials ws://<same-host>, so there is one port for everything,
-//   - drives the continuation exactly like demo.mjs's server tier.
+// The whole host is one serveApp() call — static files (repo root, so the page's module
+// imports resolve), the dashboard page, the session endpoint, and a per-connection
+// session hook that logs in and wires the monitor-backed exec.
 //
 // Run:  node src/server-live.mjs   (or: npm run live)
 //       then open the printed http://localhost:PORT in a browser and click.
-import http from "node:http";
-import fs from "node:fs";
-import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
-import { wsPort, makePeer } from "./transport.mjs";
-import { pump, initialStack } from "./runtime.mjs";
-import { encodeWireBinary, decodeWireBinary } from "./wire-binary.mjs";
+import { serveApp } from "./server.mjs";
 import { startSidecar, makeApiExec } from "./api/sidecar.mjs";
+import * as bundle from "./app/bundle.gen.mjs";
 
-const { WebSocketServer } = createRequire(import.meta.url)("ws");
-
-// Repo root = one level up from src/. Everything under it is servable; the client's
-// module graph (client.mjs -> transport.mjs + runtime.mjs -> bundle.gen.mjs + graph.mjs)
-// all lives within it.
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const PORT = Number(process.env.PORT) || 8123;
-
-// -------------------------------------------------------------- static server ----
-const MIME = {
-  ".mjs": "text/javascript; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".html": "text/html; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".map": "application/json; charset=utf-8",
-};
 
 const PAGE = `<!doctype html>
 <html lang="en">
@@ -91,76 +66,36 @@ const PAGE = `<!doctype html>
 </body>
 </html>`;
 
-function serveStatic(req, res) {
-  const url = new URL(req.url, "http://localhost");
-  if (url.pathname === "/" || url.pathname === "/index.html") {
-    res.writeHead(200, { "Content-Type": MIME[".html"] });
-    res.end(PAGE);
-    return;
-  }
-  // Resolve under ROOT and refuse traversal outside it.
-  const rel = decodeURIComponent(url.pathname).replace(/^\/+/, "");
-  const abs = path.join(ROOT, rel);
-  if (!abs.startsWith(ROOT)) { res.writeHead(403); res.end("forbidden"); return; }
-  fs.readFile(abs, (err, data) => {
-    if (err) { res.writeHead(404, { "Content-Type": "text/plain" }); res.end("not found: " + rel); return; }
-    const type = MIME[path.extname(abs)] || "application/octet-stream";
-    res.writeHead(200, { "Content-Type": type });
-    res.end(data);
-  });
-}
-
-const server = http.createServer(serveStatic);
-
-// ------------------------------------------------------------------ ws tier ------
-// The DEFAULT api.* path: this Node process is the untrusted backend client. The task DB
-// and every endpoint live in the tasks service, forked as a reference-monitor sidecar in
-// its OWN process (it seeds the DB on start); this process holds only a pipe client and a
-// per-session token. Reads are PUBLIC; writes are re-authorized against the verified demo
-// principal on every call — a call this process can't present a valid token for is denied
-// AT THE MONITOR, no matter what the (untrusted, migrating) continuation claims.
+// The trusted side: the tasks service in its own process (it seeds the DB on start).
 const apiService = startSidecar(new URL("./api/tasks-fns.mjs", import.meta.url));
 await apiService.ready();
-const ownsServer = (tier) => tier === "server";
 
-const wss = new WebSocketServer({ server });
-wss.on("connection", async (ws) => {
-  console.log("\n— browser connected; starting render on the server tier —");
-  const peer = makePeer(wsPort(ws));
-  try {
-    // One login per browser session: the monitor mints the session token in its own
-    // process; every api.* this connection forwards carries it and is re-verified there.
+const app = await serveApp({
+  port: PORT,
+  page: PAGE,
+  staticRoot: ROOT,
+  bundle,
+  // Per browser connection: one login (the monitor mints the session token in its own
+  // process), then every api.* this socket forwards carries it — and the server starts
+  // the App session immediately (the full-tierless mode).
+  session: async () => {
+    console.log("\n— browser connected; starting render on the server tier —");
     const login = await apiService.call("login", [{ user: "demo", pass: "demo" }]);
     if (!login.ok) throw new Error("login failed: " + login.error);
     const exec = makeApiExec(apiService, login.value);
-    const apiExec = (req) => { console.log(`  server  ${req.name}(${JSON.stringify(req.args).slice(1, -1)}) → monitor`); return exec(req); };
-    let res = await pump(initialStack("App"), ownsServer, apiExec);   // render starts here, runs to first dom.*
-    while (!res.done) {
-      console.log(`  ── migrate → browser (${res.request.name})`);
-      const { obj: reply, bin } = await peer.request({ type: "resume" }, encodeWireBinary(res.stack, res.request));
-      if (reply.type === "error") throw new Error("browser: " + reply.message);
-      if (reply.type === "done") { res = { done: true, value: reply.value }; break; }
-      const { stack, request } = decodeWireBinary(bin);               // browser migrated it back at a server resource
-      console.log(`  ── migrate ← browser (${request.name})`);
-      res = await pump(stack, ownsServer, apiExec, request);
-    }
-    console.log(`  => session value: ${JSON.stringify(res.value)}`);
-  } catch (e) {
-    if (String(e && e.message).includes("WebSocket is not open") || (ws.readyState !== 1)) {
-      console.log("  (browser tab closed mid-session)");
-    } else {
-      console.error("  server tier error:", (e && e.stack) || e);
-    }
-  }
+    return {
+      exec: (req) => { console.log(`  server  ${req.name}(${JSON.stringify(req.args).slice(1, -1)}) → monitor`); return exec(req); },
+      entry: "App",
+      onDone: (value) => console.log(`  => session value: ${JSON.stringify(value)}`),
+    };
+  },
 });
 
-server.listen(PORT, () => {
-  console.log(`Stackmix live two-tier demo`);
-  console.log(`  open  http://localhost:${PORT}  in a browser and click the dashboard.`);
-  console.log(`  (api.* is serviced by the reference-monitor sidecar in its own process;`);
-  console.log(`   your clicks drive the continuation across the socket)`);
-});
+console.log(`Stackmix live two-tier demo`);
+console.log(`  open  http://localhost:${app.port}  in a browser and click the dashboard.`);
+console.log(`  (api.* is serviced by the reference-monitor sidecar in its own process;`);
+console.log(`   your clicks drive the continuation across the socket)`);
 
-const shutdown = () => { apiService.close(); server.close(); process.exit(0); };
+const shutdown = () => { apiService.close(); app.close(); process.exit(0); };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

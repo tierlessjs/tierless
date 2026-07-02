@@ -3,64 +3,45 @@
 // no hand-written state machine) by transform.cjs, flows across two real tiers over a
 // real websocket:
 //
-//   server tier  — a `ws` host that owns api.* (the file-backed task DB). Render
-//                  starts here.
-//   browser tier — a real headless Chromium page (Playwright) that owns dom.*. It
-//                  paints the vdom into real DOM and dispatches REAL click events;
-//                  the resulting event token is the continuation's resume value.
-//
-// The continuation serializes to JSON (graph.mjs codec), crosses the socket via the
-// wsPort/makePeer transport (transport.mjs), runs until it hits a resource the local tier
-// doesn't own, and migrates to the owner. Render begins on the server and finishes in the
-// browser the instant the vdom needs the real DOM — then bounces back to the server for the
-// next api.* call. State lives in the continuation's frame locals, pinned to neither tier.
+//   server tier  — serveApp() hosting the session endpoint, with every api.* serviced by
+//                  the tasks service (a reference-monitor sidecar in its own process; the
+//                  default api.* path). Render starts here.
+//   browser tier — a real headless Chromium page (Playwright) that owns dom.*. It paints
+//                  the vdom into real DOM and dispatches REAL click events; the resulting
+//                  event token is the continuation's resume value. connect() answers the
+//                  migrations; this Node process just adapts dom.commit onto the page.
 //
 // Run:  node src/demo.mjs        (needs Playwright Chromium)
 import { createRequire } from "node:module";
-import { wsPort, makePeer } from "./transport.mjs";
-import { pump, initialStack } from "./runtime.mjs";
-import { encodeWireBinary, decodeWireBinary } from "./wire-binary.mjs";
-import { vdomToHtml, shell } from "./dom.mjs";
+import { serveApp } from "./server.mjs";
+import { connect } from "./browser.mjs";
 import { startSidecar, makeApiExec } from "./api/sidecar.mjs";
+import { vdomToHtml, shell } from "./dom.mjs";
+import * as bundle from "./app/bundle.gen.mjs";
+import { WS_PATH } from "./ws-path.mjs";
 
 const { chromium } = createRequire(process.env.PLAYWRIGHT_REQUIRE || "/opt/node22/lib/node_modules/")("playwright");
-const { WebSocketServer, WebSocket } = createRequire(import.meta.url)("ws");
 const trace = [];
 
 // ---------------------------------------------------------------- server tier ----
-// The DEFAULT api.* path: the task DB lives in the tasks service, a reference-monitor
-// sidecar in its own process (it seeds on start). This tier is just the untrusted backend
-// client — it logs in once, holds the session token, and every api.* call is re-authorized
-// by the monitor over the pipe.
 const apiService = startSidecar(new URL("./api/tasks-fns.mjs", import.meta.url));
 await apiService.ready();
-const loginRes = await apiService.call("login", [{ user: "demo", pass: "demo" }]);
-if (!loginRes.ok) throw new Error("login failed: " + loginRes.error);
-const exec = makeApiExec(apiService, loginRes.value);
-const ownsServer = (tier) => tier === "server";
-const apiExec = (req) => { trace.push(`  server  ${req.name}(${JSON.stringify(req.args).slice(1, -1)}) → monitor`); return exec(req); };
 
-const wss = new WebSocketServer({ port: 0 });
-await new Promise((r) => wss.on("listening", r));
-const PORT = wss.address().port;
-
-const serverDone = new Promise((resolve, reject) => {
-  wss.on("connection", async (ws) => {
-    const peer = makePeer(wsPort(ws));
-    try {
-      let res = await pump(initialStack("App"), ownsServer, apiExec);  // render starts here, runs to first dom.*
-      while (!res.done) {
-        trace.push(`  ── migrate → browser (${res.request.name})`);
-        const { obj: reply, bin } = await peer.request({ type: "resume" }, encodeWireBinary(res.stack, res.request));
-        if (reply.type === "error") throw new Error("browser: " + reply.message);
-        if (reply.type === "done") { res = { done: true, value: reply.value }; break; }
-        const { stack, request } = decodeWireBinary(bin);              // browser migrated it back at a server resource
-        trace.push(`  ── migrate ← browser (${request.name})`);
-        res = await pump(stack, ownsServer, apiExec, request);
-      }
-      resolve(res.value);
-    } catch (e) { reject(e); }
-  });
+let resolveSession;
+const sessionDone = new Promise((r) => { resolveSession = r; });
+const app = await serveApp({
+  port: 0,
+  bundle,
+  session: async () => {
+    const login = await apiService.call("login", [{ user: "demo", pass: "demo" }]);
+    if (!login.ok) throw new Error("login failed: " + login.error);
+    const exec = makeApiExec(apiService, login.value);
+    return {
+      exec: (req) => { trace.push(`  server  ${req.name}(${JSON.stringify(req.args).slice(1, -1)}) → monitor`); return exec(req); },
+      entry: "App",
+      onDone: resolveSession,
+    };
+  },
 });
 
 // --------------------------------------------------------------- browser tier ----
@@ -119,23 +100,14 @@ async function domCommit(req) {                                          // req 
   });
 }
 
-const ownsBrowser = (tier) => tier === "browser";
-const ws = new WebSocket(`ws://localhost:${PORT}`);
-const peer = makePeer(wsPort(ws));
-peer.on("resume", async (payload, bin) => {                              // server migrated the continuation here
-  try {
-    const { stack, request } = decodeWireBinary(bin);
-    const res = await pump(stack, ownsBrowser, domCommit, request);     // commit, read the click, run until a server resource
-    if (res.done) return { obj: { type: "done", value: res.value } };
-    return { obj: { type: "suspend" }, bin: encodeWireBinary(res.stack, res.request) };
-  } catch (e) { return { obj: { type: "error", message: String((e && e.message) || e) } }; }
-});
-await new Promise((r, j) => { ws.on("open", r); ws.on("error", j); });
+const conn = connect({ url: `ws://localhost:${app.port}${WS_PATH}`, bundle, exec: domCommit });
+await conn.ready;
 
 // ----------------------------------------------------------------------- run ----
-const value = await serverDone;
+const value = await sessionDone;
 await browser.close();
-wss.close();
+conn.close();
+app.close();
 apiService.close();
 
 console.log("migration trace (one continuation, two tiers, real socket + real Chromium):\n");

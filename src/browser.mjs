@@ -1,0 +1,77 @@
+// Stackmix — the browser host, assembled. Two shapes:
+//
+//   connect({ url?, exec?, bundle? })     one socket to the app's session endpoint.
+//     .register(module, bundle)           add a compiled mix-module to this connection
+//     .call(entry, args, module?)         start entry(...) on the SERVER; bounces welcome
+//     .ready / .close()
+//
+//   bindActions(bundle, { module, url? }) what compiled "use mix" modules call: returns
+//     { entryName: (...args) => Promise } for every PROGRAM, sharing ONE lazy connection
+//     per page no matter how many mix-modules the app imports.
+//
+// Browser-safe and import-safe under SSR: nothing touches WebSocket/location until the
+// first call. `exec` services browser-pinned resources (dom.commit in the full-tierless
+// mode, ui.* if you pin some); actions that never touch one simply run out on the server.
+import { makeHost, answerWith } from "./host.mjs";
+import { makePeer, wsPort } from "./transport.mjs";
+import { WS_PATH } from "./ws-path.mjs";
+
+const defaultUrl = () => {
+  if (typeof location === "undefined") throw new Error("stackmix: no location — pass { url } (or call actions from the browser)");
+  return (location.protocol === "https:" ? "wss://" : "ws://") + location.host + WS_PATH;
+};
+
+export function connect({ url, exec, bundle, tier = "browser" } = {}) {
+  const ws = new WebSocket(url || defaultUrl());
+  const peer = makePeer(wsPort(ws));
+  const ready = new Promise((res, rej) => {
+    const on = (ev, fn) => (typeof ws.on === "function" ? ws.on(ev, fn) : ws.addEventListener(ev, fn));
+    on("open", () => res());
+    on("error", (e) => rej(new Error("stackmix: websocket error" + (e && e.message ? ": " + e.message : ""))));
+  });
+
+  const hosts = new Map();                                       // moduleId -> host
+  const register = (module, b) => {
+    const id = module || "";
+    if (!hosts.has(id)) hosts.set(id, makeHost({ bundle: b, tier, exec, meta: id ? { module: id } : {} }));
+    return hosts.get(id);
+  };
+  if (bundle) register("", bundle);
+  answerWith(peer, (id) => {
+    const h = hosts.get(id || "");
+    if (!h) throw new Error("stackmix: no bundle registered for module " + JSON.stringify(id));
+    return h;
+  });
+
+  return {
+    ready,
+    register,
+    call: async (entry, args = [], module = "") => {
+      await ready;
+      const h = hosts.get(module || "");
+      if (!h) throw new Error("stackmix: no bundle registered" + (module ? " for " + module : ""));
+      return h.call(peer, entry, args);
+    },
+    close: () => ws.close(),
+  };
+}
+
+// ---- the actions surface (what the Vite plugin emits calls into) ----------------------
+let sharedOpts = {};
+let shared = null;
+// Optional page-level configuration (url, exec for browser-pinned resources). Call before
+// the first action fires; the first bindActions() call materializes the connection.
+export function configureStackmix(opts) { sharedOpts = opts || {}; shared = null; }
+const sharedConn = () => (shared || (shared = connect(sharedOpts)));
+
+export function bindActions(bundle, { module = "" } = {}) {
+  const out = {};
+  for (const name of Object.keys(bundle.PROGRAMS)) {
+    out[name] = (...args) => {
+      const conn = sharedConn();
+      conn.register(module, bundle);
+      return conn.call(name, args, module);
+    };
+  }
+  return out;
+}

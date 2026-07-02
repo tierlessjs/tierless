@@ -25,6 +25,7 @@ const cases = [
   { file: "src/api-verify.mjs",     needs: ["the api is an external reference monitor: authority is verified and enforced in a separate process on every call"] },
   { file: "src/api-pump.mjs",       needs: ["the live pump services api.* through the trusted monitor: a migrating continuation is authorized per principal in a separate process on every call"] },
   { file: "src/api-live.mjs",       needs: ["the default api.* path IS the reference monitor: the runtime pump serviced every api call over the pipe"] },
+  { file: "test/probes/host.mjs",   needs: ["serveApp/connect assemble the full host: client-started actions (with mid-flight bounces and concurrency) and server-started sessions both run over one socket"] },
   { file: "src/control-flow.mjs",   needs: ["extended control flow survives migration"] },
   { file: "test/probes/deref-liveness.mjs", needs: ["the --auto-deref liveness pass prunes redundant guards within a straight-line run and re-guards after any hop"] },
   { file: "test/probes/source-maps.mjs", needs: ["--source-map carries each frame's source position through the transform, so a migrated continuation reports a portable file:line"] },

@@ -1,32 +1,22 @@
-// BROWSER ENTRY for the LIVE React-tiers demo.
+// BROWSER ENTRY for the LIVE demo — the real browser tier, in a human's tab.
 //
-// This is the real browser tier — it runs IN a human's browser tab, not under
-// Playwright script control. It:
-//   1. opens a ws to the server (which owns api.* and starts the render),
-//   2. answers "resume" by running pump() with ownsBrowser, so the continuation
-//      finishes the render here and stops at dom.commit,
-//   3. domCommit() paints the vdom into the REAL DOM under #root and then BLOCKS
-//      on a real human click. A click resolves the commit promise with the node's
-//      onClick event token, which becomes the continuation's resume value; pump
-//      then migrates back to the server at the next api.* call.
+// The whole host is one connect() call: it dials the session endpoint, registers this
+// app's compiled bundle, and answers migrations. The server starts the render; the
+// continuation finishes it here, and our `exec` services dom.commit — paint the vdom
+// into the REAL DOM, then park until a real human click resolves the commit with its
+// event token. State (the filter, the task list) lives in the continuation's frame
+// locals, pinned to neither tier — it just rides the socket back and forth.
 //
-// State (the `filter`, the task list) lives in the continuation's frame locals,
-// pinned to neither tier — it just rides the socket back and forth.
-//
-// We import the browser transport copy (./transport.mjs) and pull runtime.mjs as-is from
-// the served repo root: its relative imports (./app/bundle.gen.mjs and ./graph.mjs) resolve
-// over HTTP because the server (server-live.mjs) serves the repo root as the web root.
-import { wsPort, makePeer } from "./transport.mjs";
-import { pump } from "/src/runtime.mjs";
-import { encodeWireBinary, decodeWireBinary } from "/src/wire-binary.mjs";
+// Imports resolve over HTTP because the server serves the repo root as the web root.
+import { connect } from "/src/browser.mjs";
+import * as bundle from "/src/app/bundle.gen.mjs";
 
-const ownsBrowser = (tier) => tier === "browser";
 const root = document.getElementById("root");
 const statusEl = document.getElementById("status");
 const setStatus = (s) => { if (statusEl) statusEl.textContent = s; };
 
-// The single in-flight commit's resolver. domCommit() parks here; a real click
-// (or the live event handlers we attach below) calls it with the event token.
+// The single in-flight commit's resolver. domCommit() parks here; a real click calls it
+// with the clicked node's event token, which becomes the continuation's resume value.
 let resolveClick = null;
 function fireClick(token) {
   if (!resolveClick) return;            // no commit is currently waiting
@@ -35,12 +25,10 @@ function fireClick(token) {
   r(token);
 }
 
-// Build a real DOM subtree from the serializable vdom: plain {type, props,
-// children} nodes and string text. We set only data props (className/id/
-// placeholder/value/type) and, for any node carrying an onClick event token,
-// wire a REAL el.onclick that resolves the current commit with that token. The
-// "add" button reads the live #add-title input value at click time and merges
-// it into the token, exactly like the developer's App.src.js expects (ev.title).
+// Build a real DOM subtree from the serializable vdom: plain {type, props, children}
+// nodes and string text. Any node carrying an onClick event token gets a REAL el.onclick
+// that resolves the current commit with that token. The "add" button reads the live
+// #add-title input value at click time, exactly like the developer's App.src.js expects.
 function build(node) {
   if (node == null || node === false || node === true) return null;
   if (typeof node === "string" || typeof node === "number") {
@@ -71,43 +59,15 @@ function build(node) {
   return el;
 }
 
-// dom.commit handler: paint, then WAIT for a real click. The returned promise is
-// the continuation's resume value (the event token), so pump() suspends here
-// until the human acts — that is the whole point of the live page.
+// dom.commit: paint, then WAIT for a real click — the continuation is parked here.
 function domCommit(req) {
-  const vdom = req.args[0];
-  const tree = build(vdom);
-  root.replaceChildren(tree || document.createTextNode(""));
+  root.replaceChildren(build(req.args[0]) || document.createTextNode(""));
   setStatus("waiting for your click → the continuation is parked in the browser tier");
   return new Promise((res) => { resolveClick = res; });
 }
 
-function connect() {
-  const ws = new WebSocket(`ws://${location.host}`);
-  const peer = makePeer(wsPort(ws));
-
-  // The server migrated the continuation here. Finish the render locally, commit
-  // to the real DOM, wait for the click, then either report done or hand the
-  // continuation back to the server (suspend) at the next api.* resource.
-  peer.on("resume", async (payload, bin) => {
-    try {
-      const { stack, request } = decodeWireBinary(bin);
-      const res = await pump(stack, ownsBrowser, domCommit, request);
-      if (res.done) {
-        setStatus("session ended: " + JSON.stringify(res.value));
-        return { obj: { type: "done", value: res.value } };
-      }
-      setStatus("migrating ← server (" + res.request.name + ")");
-      return { obj: { type: "suspend" }, bin: encodeWireBinary(res.stack, res.request) };
-    } catch (e) {
-      setStatus("client error: " + ((e && e.message) || e));
-      return { obj: { type: "error", message: String((e && e.message) || e) } };
-    }
-  });
-
-  ws.addEventListener("open", () => setStatus("connected — server is rendering…"));
-  ws.addEventListener("close", () => setStatus("disconnected"));
-  ws.addEventListener("error", () => setStatus("websocket error"));
-}
-
-connect();
+const conn = connect({ bundle, exec: domCommit });
+conn.ready.then(
+  () => setStatus("connected — server is rendering…"),
+  (e) => setStatus(String((e && e.message) || e)),
+);
