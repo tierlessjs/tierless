@@ -36,7 +36,7 @@ export function encodeWire(stack, request, { tier = null, threshold = 8192 } = {
   let req = null;
   if (request) {
     const a0 = roots.length; for (const a of request.args || []) roots.push(a);
-    req = { op: request.op, tier: request.tier, name: request.name, a0, argc: (request.args || []).length };
+    req = { op: request.op, tier: request.tier, name: request.name, a0, argc: roots.length - a0 };
   }
   return JSON.stringify({ frames, req, graph: encodeGraph(roots, { tier, threshold }) });
 }

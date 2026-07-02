@@ -1,7 +1,7 @@
 node_modules/
 
 # demo runtime DB (rewritten by the tasks service's seed() on each start)
-src/api/tasks-db.json
+test/e2e/api/tasks-db.json
 
 # example apps: installed deps + build output
 examples/*/node_modules/
