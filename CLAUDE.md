@@ -1,26 +1,27 @@
 # CLAUDE.md
 
-Guidance for Claude Code sessions working in this repo. This is a public-facing
-project under the user's name — hold shipped docs to that bar, not a prototype's.
+## Top 3
 
-## Docs (README, CHANGELOG, docs/*, package.json descriptions)
+1. Be brief and speak simply in replies, comments, docs. Wall of text is low signal.
 
-- No former-name or project-history narrative in shipped docs — no "formerly
-  called X," no rename footnotes, no mentions of abandoned approaches. If you
-  find residue from an old name or a dropped idea, delete it; don't just stop
-  adding to it. This applies to code comments and identifiers too (e.g. a
-  variable or directive named after something the project used to be).
-- CHANGELOG entries are release notes for someone with no project history: what
-  shipped and why it matters, in plain language. Not a chronological log of
-  internal implementation steps — `git log`, `docs/design.md`, and
-  `docs/architecture.md` are where that detail belongs.
-- Technical claims are fine and encouraged (this repo backs its claims with
-  measured numbers and executable proofs) — but cash out jargon with what it
-  actually does or a real number. Don't drop a subsystem name and assume the
-  reader already knows what it means or why they'd care.
+2. Don't lie or speculate; confirm so we're sure. Keep track of how often you're wrong to stay humble.
 
-## Chat replies
+3. Don't be lazy or make excuses. For example, test your changes end-to-end.
 
-- Don't use bracket/placeholder notation (e.g. `<intro: ...>`) to represent
-  real file content or summarize a document's structure — it reads as broken
-  or fake. Quote the real text or describe it in plain prose instead.
+## Code
+
+- Unnecessary complexity: always reduce. Commit to the change you're making. Don't preserve dead branches or add unnencessary fallbacks.
+
+- Test everything, at both unit and end-to-end levels.
+
+## Docs
+
+- Clarity first. Don't record a full history of every idea discussed, since that can be confusing and cause bad ideas to recur. Git history is usually clearer than historical docs.
+
+- Our style is grounded and factual. Avoid abstract or grand language. Prefer quantified claims.
+
+- CHANGELOG entries are release notes for users: what shipped and why it matters, in plain language. Don't write until we're releasing.
+
+## Misc
+
+- Don't use multiple choice replies. The UX has multiple drawbacks.
