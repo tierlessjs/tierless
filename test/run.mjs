@@ -22,6 +22,7 @@ const cases = [
   { file: "test/probes/wire-content.mjs", needs: ["content-addressed immutable subgraphs ship once then by hash, resolving to the held copy"] },
   { file: "src/verify.mjs",         needs: ["PASS — auto-compiled tier-split continuation produced the correct session"] },
   { file: "src/conduit-verify.mjs", needs: ["the multi-view Conduit app (routing, forms, favorite, try/catch over a resource) runs correctly as one compiled continuation"] },
+  { file: "test/probes/define-api.mjs", needs: ["defineApi is sugar, not a bypass: mandatory authorize at create, default-deny, budgets all hold"] },
   { file: "src/api-verify.mjs",     needs: ["the api is an external reference monitor: authority is verified and enforced in a separate process on every call"] },
   { file: "src/api-pump.mjs",       needs: ["the live pump services api.* through the trusted monitor: a migrating continuation is authorized per principal in a separate process on every call"] },
   { file: "src/api-live.mjs",       needs: ["the default api.* path IS the reference monitor: the runtime pump serviced every api call over the pipe"] },

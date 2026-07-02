@@ -116,6 +116,28 @@ export class Api {
   audit() { return this._audit.slice(); }                 // the audit trail lives in the trusted process, not the client
 }
 
+// ── defineApi: the one-call service definition ─────────────────────────────────────────────────────
+// The whole trusted service as one literal: names -> { authorize, run } (authorize stays MANDATORY —
+// fn() enforces it at create time, before a single call is served). Pass a function instead of an
+// object when a run needs the api instance itself (e.g. a PUBLIC login minting tokens via
+// api.issue). Returns { create(secret) }; hand it to sidecarMain (sidecar.mjs) to become a fork
+// entry, or create() it yourself for an in-process monitor in tests.
+//
+//   export default defineApi((api) => ({
+//     login:   { authorize: PUBLIC, run: ([creds]) => api.issue(checked(creds), 3600) },
+//     getRows: { authorize: PUBLIC, run: () => rows() },
+//     addRow:  { authorize: (p) => p != null, run: ([r], p) => addRow(r, p.sub) },
+//   }), { maxArgsBytes: 8 * 1024, rate: { max: 300, windowMs: 10_000 } });
+export function defineApi(build, opts = {}) {
+  const create = (secret) => {
+    const api = new JwtApi(secret, opts);
+    const fns = typeof build === "function" ? build(api) : build;
+    for (const [name, def] of Object.entries(fns)) api.fn(name, def);
+    return api;
+  };
+  return { create, opts };
+}
+
 // ── A standard, batteries-included regime ──────────────────────────────────────────────────────────
 // A compact HMAC-SHA256 bearer token, base64url(payload).base64url(sig). The api process holds the
 // secret; the client only ever carries the opaque token it was issued. (In this prototype the token is

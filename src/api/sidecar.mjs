@@ -12,6 +12,7 @@
 
 import { fork } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { randomBytes } from "node:crypto";
 
 // Child side. Drive an Api instance from calls arriving on the pipe; reply on the same pipe. Runs in
 // the forked process, where the Api and its secret live and never leave. Each message is { id, call };
@@ -60,6 +61,19 @@ export function startSidecar(entryUrl, env = {}) {
     }),
     close: () => child.kill(),
   };
+}
+
+// The fork entry, as one call. Put `sidecarMain(def, { init })` at the tail of a service
+// module: imported normally it does nothing (the pure fns stay importable for in-process
+// tests); forked by startSidecar it runs init (seed the store), mints the signing secret
+// HERE — so it exists only in this process and the untrusted parent never holds it — and
+// serves the pipe. Accepts a defineApi() result or a plain (secret) => Api factory.
+export function sidecarMain(apiDef, { init } = {}) {
+  if (process.env.STACKMIX_SIDECAR !== "1") return false;
+  if (init) init();
+  const create = typeof apiDef === "function" ? apiDef : apiDef.create;
+  serve(create(randomBytes(32)));
+  return true;
 }
 
 // The pump-side adapter — the DEFAULT way the backend client services the "server" tier.

@@ -15,9 +15,8 @@
 // tests and trusted single-tenant deployments, not the default path (api-live.mjs proves
 // the default path is the monitor).
 import fs from "node:fs";
-import { randomBytes } from "node:crypto";
-import { JwtApi, PUBLIC } from "./api.mjs";
-import { serve } from "./sidecar.mjs";
+import { defineApi, PUBLIC } from "./api.mjs";
+import { sidecarMain } from "./sidecar.mjs";
 
 // ---- the backing store (trusted state; lives with the service, not the client) ----------
 const FILE = new URL("./tasks-db.json", import.meta.url);
@@ -55,30 +54,26 @@ export function deleteTask(id) { const d = read(); d.tasks = d.tasks.filter((t) 
 const USERS = { demo: { pass: "demo", sub: "demo", role: "user" } };
 const STATUSES = new Set(["todo", "doing", "done"]);
 
-export function makeTasksApi(secret) {
-  const api = new JwtApi(secret, { maxArgsBytes: 8 * 1024, rate: { max: 300, windowMs: 10_000 } });
-
+export const tasksApi = defineApi((api) => ({
   // PUBLIC login mints the session token INSIDE the trusted process (the secret never
   // crosses the pipe); the demo server calls it once per connection and carries the token.
-  api.fn("login", { authorize: PUBLIC, run: ([creds]) => {
+  login: { authorize: PUBLIC, run: ([creds]) => {
     const u = creds && USERS[creds.user];
     if (!u || u.pass !== creds.pass) throw new Error("bad credentials");
     return api.issue({ sub: u.sub, role: u.role }, 3600);
-  } });
+  } },
 
   // Reads: an open dashboard — deliberately PUBLIC.
-  api.fn("getTasks", { authorize: PUBLIC, run: ([q]) => getTasks(q) });
-  api.fn("getStats", { authorize: PUBLIC, run: () => getStats() });
+  getTasks: { authorize: PUBLIC, run: ([q]) => getTasks(q) },
+  getStats: { authorize: PUBLIC, run: () => getStats() },
 
   // Writes: any authenticated principal, with the args validated per call — a forged
   // continuation (or a tokenless one) reaching these is denied HERE, whatever path it took.
-  api.fn("addTask", { authorize: (p) => p != null, run: ([t]) => addTask(t) });
-  api.fn("setStatus", { authorize: (p, [id, s]) => p != null && typeof id === "number" && STATUSES.has(s), run: ([id, s]) => setStatus(id, s) });
-  api.fn("deleteTask", { authorize: (p, [id]) => p != null && typeof id === "number", run: ([id]) => deleteTask(id) });
+  addTask: { authorize: (p) => p != null, run: ([t]) => addTask(t) },
+  setStatus: { authorize: (p, [id, s]) => p != null && typeof id === "number" && STATUSES.has(s), run: ([id, s]) => setStatus(id, s) },
+  deleteTask: { authorize: (p, [id]) => p != null && typeof id === "number", run: ([id]) => deleteTask(id) },
+}), { maxArgsBytes: 8 * 1024, rate: { max: 300, windowMs: 10_000 } });
 
-  return api;
-}
-
-// Sidecar entry: forked by startSidecar (STACKMIX_SIDECAR=1). The signing secret is minted
-// HERE, so it exists only in this process; the DB is seeded fresh per service start.
-if (process.env.STACKMIX_SIDECAR === "1") { seed(); serve(makeTasksApi(randomBytes(32))); }
+// Fork entry: does nothing on a normal import; forked by startSidecar it seeds the DB,
+// mints the signing secret in-process, and serves the pipe.
+sidecarMain(tasksApi, { init: seed });

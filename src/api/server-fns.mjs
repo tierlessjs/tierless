@@ -12,8 +12,7 @@
 // matter how the (untrusted, possibly forged) continuation arrived at the call.
 
 import { JwtApi, PUBLIC, DENY } from "./api.mjs";
-import { serve } from "./sidecar.mjs";
-import { randomBytes } from "node:crypto";
+import { sidecarMain } from "./sidecar.mjs";
 
 // Toy backing state — stands in for whatever real resource the trusted compute talks to. It lives in
 // the sidecar's memory; the client can only reach it through an authorized fn.
@@ -68,7 +67,6 @@ export function makeApi(secret) {
   return api;
 }
 
-// Sidecar entry: when forked by startSidecar (STACKMIX_SIDECAR=1) generate a fresh secret HERE — so it
-// exists only in this process and the parent (the untrusted backend client) never holds it — build the
-// api, and serve the pipe.
-if (process.env.STACKMIX_SIDECAR === "1") serve(makeApi(randomBytes(32)));
+// Fork entry: does nothing on a normal import; forked by startSidecar it mints a fresh secret
+// in-process (the untrusted parent never holds it) and serves the pipe.
+sidecarMain(makeApi);
