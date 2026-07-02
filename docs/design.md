@@ -1,7 +1,5 @@
 # Tierless — Design Document
 
-**Working title:** Tierless (WASM Stack Oscillator)
-**Status:** Early design / pre-prototype
 **One line:** Write one program that runs across client and server as a single stateful application; the runtime moves execution between tiers as needed instead of making you split it by hand.
 
 > **Orientation.** This is the original vision and the open research questions — kept as

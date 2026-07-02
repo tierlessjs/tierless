@@ -1,50 +1,44 @@
 # Changelog
 
-Notable changes, per release. Tierless is pre-1.0 — semver applies, but a `0.x`
-minor may break. This file is the release-level summary; the architecture and the
-measured benchmarks behind these features live in [`docs/design.md`](./docs/design.md)
-and `npm run bench`, and every feature ships with an executable proof in `npm test`.
+Notable changes to Tierless, by release. Tierless is pre-1.0 — a `0.x` minor may
+break the API. Every claim below is backed by an executable proof: `npm test`
+runs them, and `docs/architecture.md` explains how each piece works.
 
 ## 0.1.0 — 2026-07-02
 
-First public release: `npm i tierless` · `npm create tierless@latest <app>`.
+First public release.
 
-One plain-JavaScript codebase that runs across browser and server, with the
-runtime migrating live execution between tiers as serializable continuations —
-so a multi-call workflow crosses the network once, not once per call.
+```
+npm install tierless
+npm create tierless@latest my-app
+```
 
-**Compiler.** An AOT transform for `"use tierless"` modules lowers ordinary JS
-into serializable `while/switch` state machines: full control flow (loops,
-`try/catch/finally`, `for-of`/`for-in`), destructuring and non-simple parameters,
-and suspensions in expression and optional-chain positions. A tier call that
-can't migrate (inside a native callback or comparator) is a clear compile error,
-never a silent miscompile. Also importable as a library (`compile()` / `analyze()`)
-with a configurable resource allow-list, plus optional `--auto-deref`,
-`--auto-writeback`, `--track-writes`, and `--source-map` passes.
+Tierless compiles a plain JavaScript function into a state machine that can pause
+mid-function, cross the network, and resume on the other side — so a workflow
+that touches both a database and the DOM is one function, not a client and a
+server glued together with hand-written endpoints. An 8-call workflow that would
+normally cost 8 round trips runs in 1.
 
-**Runtime & migration.** A continuation-migration runtime — generic pump,
-symmetric session protocol, and a stateless-per-message host (`serveApp`,
-`attachTierless`, `connect`) — moves a live continuation across a real WebSocket,
-with a Chromium browser tier. A distributed handle heap keeps large locals on
-their owning tier, fetched on deref, single-writer coherent with optimistic-CAS
-write-back.
+What's in this release:
 
-**Wire.** A compact binary wire (type tags + varints, string/shape intern tables,
-a typed-array fast path), hardened and fuzz-tested against hostile input.
-Write-tracked delta capture ships `min(delta, full)` per hop, down to
-per-field/element granularity; immutable subgraphs are content-addressed — shipped
-once, then by hash.
+- **Compiler.** Lowers ordinary JavaScript — loops, `try`/`catch`/`finally`,
+  destructuring, default and rest parameters — into a migratable state machine,
+  not a restricted subset. Code that genuinely can't migrate (a tier call inside
+  an array callback, for instance) is a build-time error, not a runtime surprise.
+- **Wire protocol.** A migrating continuation is typically on the order of
+  100–200 bytes and takes low single-digit microseconds to encode; a large
+  in-memory value the code never touches crosses as a small handle instead of its
+  full contents (thousands of times smaller on a realistic dataset). On a
+  long-running session, repeat crossings ship only what changed since the last
+  one — commonly 75–90% fewer bytes than resending the full state each time.
+- **Trust boundary.** Server-only operations run through a small, separate
+  process that authorizes every call against a verified caller — not the
+  application code, so it can't be bypassed by tampering with the client. Every
+  endpoint must declare who's allowed to call it; there is no default-open path.
+- **Tooling.** A CLI (`tierless build` / `explain` / `api` / `types`), a Vite
+  plugin with React bindings, and `create-tierless` for a running two-tier app
+  in under a minute.
 
-**Trust boundary.** The reference monitor is the default `api.*` path:
-`defineApi()` with mandatory load-time `authorize`, default-deny, and signed-token
-principals, running in a forked sidecar process over a local pipe. A denial throws
-into the continuation and is catchable across tiers. Per-call argument-size and
-per-principal rate budgets are included.
-
-**Developer experience.** Shipped as an npm package with a hand-written typed
-surface (`.d.ts` for every entry), the `tierless` CLI (`build` / `explain` / `api`
-/ `types`), a Vite plugin with React `useAction`, the `create-tierless` scaffold,
-and an `examples/react-vite` reference app.
-
-The framework was renamed from Stackmix to Tierless before this first publish; the
-`"use mix"` directive remains accepted as an alias for `"use tierless"`.
+See [`README.md`](./README.md) for the full pitch and measured numbers,
+[`docs/design.md`](./docs/design.md) for the reasoning, and
+[`docs/architecture.md`](./docs/architecture.md) for how it's built.

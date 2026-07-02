@@ -1,11 +1,11 @@
-// Tierless ⨯ Vite — mix actions into an existing web app with one plugin.
+// Tierless ⨯ Vite — wire actions into an existing web app with one plugin.
 //
 //   // vite.config.mjs
 //   import react from "@vitejs/plugin-react";
 //   import tierless from "tierless/vite";
 //   export default { plugins: [react(), tierless({ api: "./src/api.server.mjs" })] };
 //
-// Any module whose first statement is the "use tierless" directive ("use mix" is a legacy alias) is compiled by the Tierless
+// Any module whose first statement is the "use tierless" directive is compiled by the Tierless
 // transform: its exported functions become ACTIONS — plain calls from the app's point of
 // view that run as migratable continuations, with every api.* serviced on the dev server
 // through the reference-monitor sidecar (forked from `api`), and any browser-pinned
@@ -25,7 +25,7 @@ import { pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
 
-const DIRECTIVE = /^(?:\s|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*["']use (?:tierless|mix)["']\s*;?/;
+const DIRECTIVE = /^(?:\s|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*["']use tierless["']\s*;?/;
 
 export default function tierless(opts = {}) {
   const {
@@ -37,7 +37,7 @@ export default function tierless(opts = {}) {
     compilerOptions = {},                  // passed through to the transform (trackWrites, sourceMap, …)
   } = opts;
 
-  const isMix = (code) => DIRECTIVE.test(code);
+  const isTierlessModule = (code) => DIRECTIVE.test(code);
   let sidecar = null;
 
   return {
@@ -45,7 +45,7 @@ export default function tierless(opts = {}) {
     enforce: "pre",
 
     transform(code, id) {
-      if (id.includes("node_modules") || !isMix(code)) return null;
+      if (id.includes("node_modules") || !isTierlessModule(code)) return null;
       const { compile } = require("./transform.cjs");
       const { code: compiled, meta } = compile(code, { ...compilerOptions, resources, filename: id, preamble: "" });
       if (!meta.exported.length) this?.warn?.(`tierless: ${id} has "use tierless" but exports no suspendable function`);
@@ -59,7 +59,7 @@ export default function tierless(opts = {}) {
     },
 
     // Dev server: fork the api sidecar and host the session endpoint on Vite's own http
-    // server. Each mix-module's continuations resolve their server copy via ssrLoadModule,
+    // server. Each module's continuations resolve their server copy via ssrLoadModule,
     // so the browser and the server always run the SAME transformed machine.
     async configureServer(server) {
       const { attachTierless } = await import("./server.mjs");
@@ -73,9 +73,9 @@ export default function tierless(opts = {}) {
       attachTierless(server.httpServer, {
         path: wsPath,
         bundle: async (moduleId) => {
-          if (!moduleId) throw new Error("tierless: session did not name its mix-module");
+          if (!moduleId) throw new Error("tierless: session did not name its module");
           const mod = await server.ssrLoadModule(moduleId);
-          if (!mod.__bundle) throw new Error("tierless: " + moduleId + " is not a mix module");
+          if (!mod.__bundle) throw new Error("tierless: " + moduleId + " is not a tierless module");
           return mod.__bundle;
         },
         session: async () => {

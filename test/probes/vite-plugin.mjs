@@ -3,7 +3,7 @@
 // ssrLoadModule that imports the transformed file):
 //
 //   transform   a "use tierless" module compiles; exported suspendable fns become bound
-//               actions, pure exports pass through, non-mix files are untouched;
+//               actions, pure exports pass through, non-tierless files are untouched;
 //   configureServer + the emitted module, END TO END: the page-side action call crosses
 //               a real socket to the endpoint on the (fake) Vite server, the SAME
 //               transformed module is ssr-loaded to drive the server copy, every api.*
@@ -61,13 +61,13 @@ const fakeVite = async (plugin) => {
   return { httpServer, port: httpServer.address().port };
 };
 
-console.log("Probe: the Vite plugin — \"use mix\" modules become monitor-backed actions, headless\n");
+console.log("Probe: the Vite plugin — \"use tierless\" modules become monitor-backed actions, headless\n");
 
 // ---- transform hook --------------------------------------------------------------------
 const plugin = makePlugin({ login: { user: "ana", pass: "demo" } });
-check("non-mix modules are untouched", plugin.transform("export const x = 1;", "/app/x.mjs") === null);
+check("non-tierless modules are untouched", plugin.transform("export const x = 1;", "/app/x.mjs") === null);
 const out = plugin.transform(ACTIONS, actionsId);
-check("a \"use mix\" module compiles to a machine + bound action exports",
+check("a \"use tierless\" module compiles to a machine + bound action exports",
   out !== null && out.code.includes("export const PROGRAMS") && out.code.includes("export const rebalance = __actions[\"rebalance\"]"), out && out.code.slice(0, 80));
 check("pure exports pass through still exported", out.code.includes("export function fmt"));
 check("the module id is stamped for server-side resolution", out.code.includes(JSON.stringify(actionsId)));
