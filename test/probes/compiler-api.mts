@@ -10,13 +10,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { makeCounter } from "../lib/check.mts";
-import type { compile as compileType, analyze as analyzeType, DEFAULT_RESOURCES as defaultResourcesType, FunctionReport } from "../../packages/tierless/types/compiler.js";
+import type Transform = require("../../packages/tierless/types/compiler.cjs");
+type FunctionReport = ReturnType<(typeof Transform)["analyze"]>["functions"][number];
 
 const require = createRequire(import.meta.url);
 // transform.cjs stays CommonJS (own conversion pass — see ROADMAP); require() through
 // createRequire is untyped at the call site, so pin it to the real declared signature.
 const { compile, analyze, DEFAULT_RESOURCES } = require("../../packages/tierless/src/transform.cjs") as
-  { compile: typeof compileType; analyze: typeof analyzeType; DEFAULT_RESOURCES: typeof defaultResourcesType };
+  { compile: (typeof Transform)["compile"]; analyze: (typeof Transform)["analyze"]; DEFAULT_RESOURCES: (typeof Transform)["DEFAULT_RESOURCES"] };
 const TX = fileURLToPath(new URL("../../packages/tierless/src/transform.cjs", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "capi-"));
 

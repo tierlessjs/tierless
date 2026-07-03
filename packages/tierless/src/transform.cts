@@ -1007,7 +1007,7 @@ function compile(src: string, preamble: string): { code: string; meta: CompileMe
   return { code, meta };
 }
 
-export interface CompileOptions {
+interface CompileOptions {
   /** Extra allow-list namespaces merged over { api: "server", commit: "browser" }. */
   resources?: Record<string, string>;
   filename?: string;
@@ -1017,13 +1017,13 @@ export interface CompileOptions {
   trackWrites?: boolean;
   sourceMap?: boolean;
 }
-export interface CompileMeta {
+interface CompileMeta {
   programs: string[];
   /** Exported suspendable functions — the module's actions surface. */
   exported: string[];
   pure: string[];
 }
-export interface FunctionReport {
+interface FunctionReport {
   name: string;
   exported: boolean;
   suspendable: boolean;
@@ -1118,7 +1118,7 @@ export function run(stack) {
 export const start = (fn, args = []) => run([{ fn, pc: 0, args }]);
 `;
 
-module.exports = { compile: compileModule, analyze, DEFAULT_RESOURCES };
+export = { compile: compileModule, analyze, DEFAULT_RESOURCES };
 
 // ---- CLI ----
 function cliMain() {

@@ -57,7 +57,7 @@
       "default": "./src/vite.mjs"
     },
     "./compiler": {
-      "types": "./types/compiler.d.ts",
+      "types": "./types/compiler.d.cts",
       "default": "./src/transform.cjs"
     },
     "./runtime": {

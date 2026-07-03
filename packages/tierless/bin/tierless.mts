@@ -23,13 +23,14 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
-import type { analyze as analyzeType, FunctionReport } from "../types/compiler.js";
+import type Transform = require("../types/compiler.cjs");
+type FunctionReport = ReturnType<(typeof Transform)["analyze"]>["functions"][number];
 
 const require = createRequire(import.meta.url);
 const TX = fileURLToPath(new URL("../src/transform.cjs", import.meta.url));
 // transform.cjs stays CommonJS (own conversion pass — see ROADMAP); require() through
 // createRequire is untyped at the call site, so pin it to the real declared signature.
-const analyze = require("../src/transform.cjs").analyze as typeof analyzeType;
+const analyze = require("../src/transform.cjs").analyze as (typeof Transform)["analyze"];
 const [cmd, ...rest] = process.argv.slice(2);
 
 const die = (msg: string, code = 2): never => { console.error(msg); process.exit(code); };

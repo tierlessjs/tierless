@@ -1,4 +1,4 @@
-export interface CompileOptions {
+interface CompileOptions {
     /** Extra allow-list namespaces merged over { api: "server", commit: "browser" }. */
     resources?: Record<string, string>;
     filename?: string;
@@ -8,13 +8,13 @@ export interface CompileOptions {
     trackWrites?: boolean;
     sourceMap?: boolean;
 }
-export interface CompileMeta {
+interface CompileMeta {
     programs: string[];
     /** Exported suspendable functions — the module's actions surface. */
     exported: string[];
     pure: string[];
 }
-export interface FunctionReport {
+interface FunctionReport {
     name: string;
     exported: boolean;
     suspendable: boolean;
@@ -26,3 +26,17 @@ export interface FunctionReport {
     }>;
     callsSuspendable: string[];
 }
+declare function compileModule(src: string, opts?: CompileOptions): {
+    code: string;
+    meta: CompileMeta;
+};
+declare function analyze(src: string, opts?: CompileOptions): {
+    functions: FunctionReport[];
+    resources: Record<string, string>;
+};
+declare const _default: {
+    compile: typeof compileModule;
+    analyze: typeof analyze;
+    DEFAULT_RESOURCES: Record<string, string>;
+};
+export = _default;

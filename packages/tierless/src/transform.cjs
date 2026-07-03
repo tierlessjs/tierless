@@ -1,5 +1,4 @@
 "use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
 // Tierless tier-splitting compiler (proof of concept).
 //
 // Input:  plain functions (e.g. app/App.src.js) written as if everything ran in one
@@ -1291,7 +1290,6 @@ export function run(stack) {
 }
 export const start = (fn, args = []) => run([{ fn, pc: 0, args }]);
 `;
-module.exports = { compile: compileModule, analyze, DEFAULT_RESOURCES };
 // ---- CLI ----
 function cliMain() {
     const args = process.argv.slice(2);
@@ -1330,3 +1328,4 @@ function cliMain() {
 }
 if (require.main === module)
     cliMain();
+module.exports = { compile: compileModule, analyze, DEFAULT_RESOURCES };
