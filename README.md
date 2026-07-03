@@ -159,28 +159,28 @@ and finishes in the browser the instant the vdom touches the real DOM.
 | proof | what it shows |
 | --- | --- |
 | `test/probes/codec.mts` | the wire codec preserves identity, survives cycles, excises big subgraphs to §5 handles, and round-trips exotic values (undefined, BigInt) |
-| `test/e2e/verify.mjs` | the auto-compiled tier-split continuation reproduces the correct session across migrations |
-| `test/e2e/conduit-verify.mjs` | a larger, framework-shaped app — a RealWorld/Conduit reader with routing across three views (feed ↔ article ↔ editor), favorites, comments, a new-article form, and a server-side validation `throw` caught across the tier boundary — runs correctly as one compiled continuation |
-| `test/e2e/api-verify.mjs` | the trust boundary done right: the api is an external **reference monitor** in its own process (a local-pipe sidecar), `authorize` is mandatory at load time, and the principal is a signed token it verifies — so across a real forked process neither a forged continuation nor a forged token can escalate (authority is re-checked at every call, never inferred from control flow) |
-| `test/e2e/api-pump.mjs` | the monitor wired into the pump: a real compiled continuation migrates across tiers with every `api.*` serviced by the sidecar over the pipe — authorized per principal, a denial caught by the app's `try`/`catch` across the tier (same continuation, admin allowed / user denied) |
-| `test/e2e/api-live.mjs` | the monitor as the **default `api.*` path**: the Tasks app's DB lives in its own trusted service (`test/e2e/api/tasks-fns.mjs`) which the demos fork as a sidecar — the pump host holds only a pipe and a per-session token. The real compiled App runs the full journey on the runtime's own `pump` through it; anonymous `PUBLIC` reads still render while an unauthenticated or forged write is **denied in the monitor's process** and thrown across the tier, and an oversize call is rejected by the args budget |
-| `test/e2e/control-flow.mjs` | loops, `break`/`continue`, labeled loops, `switch`, and `try`/`catch`/`finally` (including `return`/`break` across a `finally`) all survive migration |
+| `test/e2e/verify.mts` | the auto-compiled tier-split continuation reproduces the correct session across migrations |
+| `test/e2e/conduit-verify.mts` | a larger, framework-shaped app — a RealWorld/Conduit reader with routing across three views (feed ↔ article ↔ editor), favorites, comments, a new-article form, and a server-side validation `throw` caught across the tier boundary — runs correctly as one compiled continuation |
+| `test/e2e/api-verify.mts` | the trust boundary done right: the api is an external **reference monitor** in its own process (a local-pipe sidecar), `authorize` is mandatory at load time, and the principal is a signed token it verifies — so across a real forked process neither a forged continuation nor a forged token can escalate (authority is re-checked at every call, never inferred from control flow) |
+| `test/e2e/api-pump.mts` | the monitor wired into the pump: a real compiled continuation migrates across tiers with every `api.*` serviced by the sidecar over the pipe — authorized per principal, a denial caught by the app's `try`/`catch` across the tier (same continuation, admin allowed / user denied) |
+| `test/e2e/api-live.mts` | the monitor as the **default `api.*` path**: the Tasks app's DB lives in its own trusted service (`test/e2e/api/tasks-fns.mts`) which the demos fork as a sidecar — the pump host holds only a pipe and a per-session token. The real compiled App runs the full journey on the runtime's own `pump` through it; anonymous `PUBLIC` reads still render while an unauthenticated or forged write is **denied in the monitor's process** and thrown across the tier, and an oversize call is rejected by the args budget |
+| `test/e2e/control-flow.mts` | loops, `break`/`continue`, labeled loops, `switch`, and `try`/`catch`/`finally` (including `return`/`break` across a `finally`) all survive migration |
 | `test/probes/lang-coverage.mts` | ordinary binding forms compile and migrate: `for`/`of`/`in`, destructuring (object/array/nested/default/rest, non-array iterables via an `Array.from` guard), default/destructured/rest parameters, and a suspension inside an **optional chain** (`obj?.[api.x()]` / `obj.m?.(api.x())` — short-circuit skips the tier call, `this` preserved, checked against a native-JS oracle) — each driven across a JSON round-trip of the continuation at every suspension. The one form that genuinely can't migrate — a tier call inside a callback/comparator/method, run synchronously by native code that can't suspend — is rejected with a clear compile error, not silently miscompiled |
-| `test/e2e/heap-probe.mjs`, `test/e2e/heap-live.mjs` | a 1.1 MB dataset crosses a commit migration as a ~450-byte §5 handle and is fetched back over a real socket only when the browser derefs it |
-| `test/e2e/heap-auto.mjs`, `test/e2e/heap-write.mjs` | transparent deref (reads auto-fetch on touch) and transparent write-back (a browser edit propagates to the server master under §5 CAS), with no `deref()`/`writeBack()` in the source |
-| `test/e2e/heap-writeback.mjs` | optimistic version-checked CAS: conflicts detected, refetch + retry, no lost updates |
-| `test/e2e/heap-write-delta.mjs`, `test/probes/wire-delta-fields.mts` | a write-back IS a delta to the master, and the codec ships **per-field/element** patches — an object's changed keys, an array's touched indices, a Map/Set's set/deleted entries — applied in place under CAS, `min(delta, whole)` so it's never larger. A 6-way edit (incl. push/`Map.set`/`Set.add`) in a 1500-row dataset crosses ~94× smaller; the same patches sharpen the oscillation delta both directions |
-| `test/e2e/policy-live.mjs` | at a data boundary the driver prices migrate-vs-fetch from real bytes and steers what crosses (§6) — flipping to fetch a 23 B fact rather than ship a 97 KB continuation |
+| `test/e2e/heap-probe.mts`, `test/e2e/heap-live.mts` | a 1.1 MB dataset crosses a commit migration as a ~450-byte §5 handle and is fetched back over a real socket only when the browser derefs it |
+| `test/e2e/heap-auto.mts`, `test/e2e/heap-write.mts` | transparent deref (reads auto-fetch on touch) and transparent write-back (a browser edit propagates to the server master under §5 CAS), with no `deref()`/`writeBack()` in the source |
+| `test/e2e/heap-writeback.mts` | optimistic version-checked CAS: conflicts detected, refetch + retry, no lost updates |
+| `test/e2e/heap-write-delta.mts`, `test/probes/wire-delta-fields.mts` | a write-back IS a delta to the master, and the codec ships **per-field/element** patches — an object's changed keys, an array's touched indices, a Map/Set's set/deleted entries — applied in place under CAS, `min(delta, whole)` so it's never larger. A 6-way edit (incl. push/`Map.set`/`Set.add`) in a 1500-row dataset crosses ~94× smaller; the same patches sharpen the oscillation delta both directions |
+| `test/e2e/policy-live.mts` | at a data boundary the driver prices migrate-vs-fetch from real bytes and steers what crosses (§6) — flipping to fetch a 23 B fact rather than ship a 97 KB continuation |
 | `test/probes/wire-delta.mts`, `test/probes/wire-delta-compiled.mts` | the delta wire ships a capture as a patch over what the peer holds; `--track-writes` makes the compiler bump a version on every in-place mutation, so plain source ships only what changed — proven identical to a full re-scan, with Map/Set first-class |
 | `test/probes/wire-content.mts` | content-addressed immutable subgraphs: a registered config ships inline once then as a tiny hash reference (36 KB → 319 B), resolving to the copy the peer cached — identity by content. Carried through the **binary wire** (the socket frame) and composed with §5 excision + `min(delta, full)`, so a re-frame ships immutable code by hash, not re-inlined |
-| `test/e2e/delta-live.mjs` | over a real socket a continuation that bounces server↔browser each hop ships `min(delta, full)` — a compiler-tracked delta on warm hops, a full binary frame on the cold hop — reconstructing exactly and computing the right result |
+| `test/e2e/delta-live.mts` | over a real socket a continuation that bounces server↔browser each hop ships `min(delta, full)` — a compiler-tracked delta on warm hops, a full binary frame on the cold hop — reconstructing exactly and computing the right result |
 | `test/probes/host.mts` | the assembled host (`serveApp`/`connect`): client-started **actions** run out on the server in one hop, bounce back mid-flight at a browser resource, and interleave concurrently on one socket (the host is stateless — all state rides in the continuation); the server-started full-tierless mode completes over the same endpoint |
 | `test/probes/compiler-api.mts` | the compiler as an importable library: configurable resource namespaces (`db.*` → server, from opts or `--resource`), module-shaped input (`export function` → a named PROGRAM, imports/state preserved), and the `analyze()` suspendability report |
 | `test/probes/define-api.mts`, `test/probes/cli.mts` | `defineApi` keeps the monitor's load-time mandate (no authorize → fails at create), and the `tierless` CLI works end to end: `build`, `explain` (the analysis made visible), `api` (pre-ship check), `types` |
 | `test/probes/vite-plugin.mts` | the Vite plugin, headless: a `"use tierless"` module becomes monitor-backed actions — transform + dev-server endpoint + ssr-loaded machine + sidecar authorization, with a loginless write denied. Verified for real too: `npm install` + `vite build` succeed in `examples/react-vite`, and a live `vite dev` + Chromium run clicks Rebalance and renders monitor-authorized orders |
 | `test/probes/create-app.mts` | `create-tierless` scaffolds a WORKING app: built with the real bin, booted (api sidecar forked), and driven live — seeded render, authorized write with the principal attached, a blank write denied at the monitor and caught by the app's `try/catch` across the tier |
 
-`test/e2e/demo.mjs` and `test/e2e/server-live.mjs` additionally run the whole thing across a real
+`test/e2e/demo.mts` and `test/e2e/server-live.mts` additionally run the whole thing across a real
 WebSocket into **real headless Chromium** (Playwright) with real clicks; they need a
 browser and so run on demand rather than in `npm test`.
 
@@ -189,13 +189,13 @@ browser and so run on demand rather than in `npm test`.
 ```
 packages/
   tierless/       the npm package `tierless` — everything `npm i tierless` delivers
-    src/          compiler (transform.cjs), runtime/host/server/browser, wire + graph +
+    src/          compiler (transform.cts), runtime/host/server/browser, wire + graph +
                   delta + content codecs, §5 heap, transport, the api reference monitor,
                   the Vite plugin, the react hook
     bin/          the tierless CLI: build / explain / api / types
   create-tierless/  the npm package behind `npm create tierless` (scaffolder + template)
 test/
-  run.mjs         the regression runner (npm test)
+  run.mts         the regression runner (npm test)
   probes/         focused single-mechanism proofs
   e2e/            app-shaped end-to-end proofs + the demo apps they drive (Tasks, conduit,
                   the live pages, heap/policy/delta demos, the sample trusted services) —

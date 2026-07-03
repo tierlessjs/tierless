@@ -53,7 +53,7 @@ secured and `npm i tierless` / `npm create tierless@latest` work. Still open:
   extra `k < 0 ||` case `wire-delta` lacks), so unifying them means
   reconciling that divergence correctly, not a pure copy-paste. Worth doing
   as its own careful pass — extract to a shared module, then run the fuzz
-  probes (`wire-fuzz.mjs`, `wire-delta-fuzz.mjs`, `wire-content.mjs`) hard —
+  probes (`wire-fuzz.mts`, `wire-delta-fuzz.mts`, `wire-content.mts`) hard —
   not folded into a larger batch of unrelated changes.
 
 ## From the literature (Stip.js, Fission — see design.md §9)

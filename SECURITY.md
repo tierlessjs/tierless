@@ -13,7 +13,7 @@ itself (a signed bearer token). Default-deny; `authorize` is mandatory at load
 time; per-call args/rate budgets; the wire decoder is bounds-checked,
 count-guarded, `__proto__`-stripping, and fuzz-tested. The threat model and its
 executable proofs: `docs/architecture.md` ("The trust boundary"),
-`test/e2e/api-verify.mjs`, `test/e2e/api-live.mjs`, `test/probes/wire-fuzz.mts`.
+`test/e2e/api-verify.mts`, `test/e2e/api-live.mts`, `test/probes/wire-fuzz.mts`.
 
 ## Known limitations
 
