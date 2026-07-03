@@ -8,15 +8,17 @@
 import { makeTier, encodeWire, decodeWire, wireHandles, Channel, makeHost } from "tierless/heap";
 import { makeCheck } from "../lib/check.mts";
 
-const fmt = (n) => (n < 1024 ? n + " B" : n < 1024 * 1024 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB");
+const fmt = (n: number): string => (n < 1024 ? n + " B" : n < 1024 * 1024 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB");
 const { check, ok } = makeCheck();
 
 console.log("Probe: §5 handle heap on a CPS continuation — big locals stay home, fetched on deref\n");
 
 // --- a continuation: server-side frame holds a big dataset + a small projection ----
+interface Row { id: number; title: string; score: number; body: string }
+interface Dataset { rows: Row[]; count: number; self?: Dataset }
 const body = "markdown body. ".repeat(40);                          // ~600 B/row, the over-fetch payload
-const rows = Array.from({ length: 1500 }, (_, i) => ({ id: i, title: "Article " + i, score: i % 100, body }));
-const dataset = { rows, count: rows.length };
+const rows: Row[] = Array.from({ length: 1500 }, (_, i) => ({ id: i, title: "Article " + i, score: i % 100, body }));
+const dataset: Dataset = { rows, count: rows.length };
 dataset.self = dataset;                                              // a cycle, to prove the codec survives the fetch
 const summary = { count: dataset.count, top: rows[0].title };       // small: what the next tier actually renders
 const stack = [{ fn: "App", pc: 17, dataset, summary, filter: "all", args: [] }];
@@ -37,15 +39,17 @@ check(`the handle wire is far smaller than shipping the dataset inline`, handleW
 // --- the other tier decodes: handle stub for dataset, projection intact -------------
 const browser = makeTier("browser");
 const got = decodeWire(handleWire);
-check("decoded frame keeps fn/pc and the small locals", got.stack[0].fn === "App" && got.stack[0].pc === 17 && got.stack[0].filter === "all");
-check("decoded summary survived intact", got.stack[0].summary.count === 1500 && got.request.args[0].top === rows[0].title);
-const handle = got.stack[0].dataset;
+const F = got.stack[0] as any;      // ad hoc fixture — decodeWire's generic DeltaFrame return can't carry this shape
+const R = got.request as any;       // same — DeltaRequest's args is unknown[]
+check("decoded frame keeps fn/pc and the small locals", F.fn === "App" && F.pc === 17 && F.filter === "all");
+check("decoded summary survived intact", F.summary.count === 1500 && R.args[0].top === rows[0].title);
+const handle = F.dataset;
 check("dataset arrived as a §5 handle, not a copy", handle && handle.__tierless_handle__ === true && handle.owner === "server");
 
 // --- deref on the browser: fetch from the server, identity/cycle-safe ---------------
 const channel = new Channel({ server, browser });
 const host = makeHost(browser, channel);
-const d1 = host.deref(handle);
+const d1 = host.deref(handle) as any;   // deref returns unknown; this probe's fixture shape is checked structurally below
 check(`deref fetches the dataset from the server (count ${d1 && d1.count})`, d1.count === 1500 && d1.rows.length === 1500 && d1.rows[0].body === body);
 check("the dataset's cycle survived the fetch", d1.self === d1);
 check("it cost exactly one fetch across the channel", host.stats.fetches === 1);
@@ -53,13 +57,13 @@ host.deref(handle);
 check("a second deref is a coherent cache hit (no refetch)", host.stats.fetches === 1 && host.stats.hits === 1);
 
 // --- single-writer coherence: owner mutates -> reader refetches ---------------------
-server.heap.mutate(handle.id, (o) => { o.count = 9999; });          // the master bumps its version
-const d2 = host.deref(handle);
+server.heap.mutate(handle.id, (o: any) => { o.count = 9999; });    // the master bumps its version
+const d2 = host.deref(handle) as any;
 check(`after the owner mutates, the reader refetches the new value (count ${d2 && d2.count})`, d2.count === 9999 && host.stats.fetches === 2);
 
 // --- migrate back: on the owner the handle is local, no fetch -----------------------
 const ownerHost = makeHost(server, channel);
-const d3 = ownerHost.deref(handle);
+const d3 = ownerHost.deref(handle) as any;
 check("back on the server the handle is local — master used, zero fetches", d3.count === 9999 && ownerHost.stats.fetches === 0 && ownerHost.stats.localUses === 1);
 
 console.log(`\nWire: dataset ${fmt(inlineWire.length)} inline -> ${fmt(handleWire.length)} with a handle (${channel.fetches} fetches, ${fmt(channel.bytes)} moved only when derefed).`);

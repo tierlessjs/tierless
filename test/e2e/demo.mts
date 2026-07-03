@@ -13,31 +13,32 @@
 //
 // Run:  node src/demo.mjs        (needs Playwright Chromium)
 import { createRequire } from "node:module";
-import { serveApp } from "tierless/server";
+import { serveApp, type ResourceRequest } from "tierless/server";
 import { connect } from "tierless/browser";
 import { startSidecar, makeApiExec } from "tierless/api";
 import { vdomToHtml, shell } from "./dom.mts";
 import * as bundle from "./app/bundle.gen.mjs";
 import { WS_PATH } from "tierless/server";
 
+// playwright: loaded via createRequire (no @types/playwright wired into this tsconfig) — chromium, browser, page are all any
 const { chromium } = createRequire(process.env.PLAYWRIGHT_REQUIRE || "/opt/node22/lib/node_modules/")("playwright");
-const trace = [];
+const trace: string[] = [];
 
 // ---------------------------------------------------------------- server tier ----
 const apiService = startSidecar(new URL("./api/tasks-fns.mts", import.meta.url));
 await apiService.ready();
 
-let resolveSession;
-const sessionDone = new Promise((r) => { resolveSession = r; });
+let resolveSession: (value: unknown) => void;
+const sessionDone = new Promise<unknown>((r) => { resolveSession = r; });
 const app = await serveApp({
   port: 0,
   bundle,
   session: async () => {
     const login = await apiService.call("login", [{ user: "demo", pass: "demo" }]);
     if (!login.ok) throw new Error("login failed: " + login.error);
-    const exec = makeApiExec(apiService, login.value);
+    const exec = makeApiExec(apiService, login.value as string);   // login.value: the session token minted by the sidecar
     return {
-      exec: (req) => { trace.push(`  server  ${req.name}(${JSON.stringify(req.args).slice(1, -1)}) → monitor`); return exec(req); },
+      exec: (req: ResourceRequest) => { trace.push(`  server  ${req.name}(${JSON.stringify(req.args).slice(1, -1)}) → monitor`); return exec(req); },
       entry: "App",
       onDone: resolveSession,
     };
@@ -51,44 +52,49 @@ const page = await browser.newPage();
 // __smClick is the page->Node bridge for a real click; it persists across the
 // per-commit setContent navigations. The click delegation itself is (re)attached
 // after each setContent (addInitScript does NOT re-run on setContent).
-let pendingClick = null;
-await page.exposeBinding("__smClick", (_src, tok) => { const r = pendingClick; pendingClick = null; if (r) r(tok); });
+let pendingClick: ((tok: unknown) => void) | null = null;
+await page.exposeBinding("__smClick", (_src: unknown, tok: unknown) => { const r = pendingClick; pendingClick = null; if (r) r(tok); });
 const attachClickDelegation = () => page.evaluate(() => {
   document.addEventListener("click", (e) => {
-    const el = e.target.closest && e.target.closest("[data-ev]");
+    const target = e.target as Element | null;
+    const el = target && target.closest && target.closest("[data-ev]");
     if (!el) return;
-    let tok = JSON.parse(el.getAttribute("data-ev"));
-    if (tok.ev === "add") { const inp = document.getElementById("add-title"); tok = Object.assign({}, tok, { title: inp ? inp.value : "" }); }
-    window.__smClick(tok);
+    let tok = JSON.parse(el.getAttribute("data-ev")!);
+    if (tok.ev === "add") { const inp = document.getElementById("add-title") as HTMLInputElement | null; tok = Object.assign({}, tok, { title: inp ? inp.value : "" }); }
+    (window as any).__smClick(tok);
   });
 });
 
+// The event tokens this script feeds in: `ev` discriminates, the rest are optional and
+// duck-typed exactly as the click-matching/resume logic below reads them.
+type Ev = { ev: "filter" | "cycle" | "add" | "delete" | "stop"; value?: string; id?: number; title?: string };
+
 // The scripted "user". Each entry drives ONE real interaction in Chromium per commit.
-const SCRIPT = [
+const SCRIPT: Ev[] = [
   { ev: "filter", value: "done" }, { ev: "filter", value: "all" },
   { ev: "cycle", id: 2 }, { ev: "add", title: "Ship the demo" },
   { ev: "delete", id: 1 }, { ev: "stop" },
 ];
 let si = 0;
-const commits = [];
+const commits: string[] = [];
 
-async function domCommit(req) {                                          // req = { name:"dom.commit", args:[vdom] }
-  await page.setContent(shell(vdomToHtml(req.args[0])));                  // paint real DOM in Chromium
-  await attachClickDelegation();                                         // re-wire click->token bridge for this document
-  const text = await page.evaluate(() => document.getElementById("root").innerText.replace(/\s+/g, " ").trim());
+async function domCommit(req: ResourceRequest): Promise<unknown> {              // req = { name:"dom.commit", args:[vdom] }
+  await page.setContent(shell(vdomToHtml(req.args[0])));                        // paint real DOM in Chromium
+  await attachClickDelegation();                                                // re-wire click->token bridge for this document
+  const text = await page.evaluate(() => document.getElementById("root")!.innerText.replace(/\s+/g, " ").trim());
   commits.push(text);
   trace.push(`  browser dom.commit  «${text.slice(0, 60)}…»`);
   const action = SCRIPT[si++] || { ev: "stop" };
   if (action.ev === "stop") return { ev: "stop" };                       // user closes the tab
-  return await new Promise((resolve, reject) => {                        // wait for the REAL click token
+  return await new Promise<unknown>((resolve, reject) => {                // wait for the REAL click token
     pendingClick = resolve;
     (async () => {
       if (action.ev === "add") await page.fill("#add-title", action.title);
-      const matched = await page.evaluate((want) => {                   // tag the element matching the scripted intent
+      const matched = await page.evaluate((want: Ev) => {                 // tag the element matching the scripted intent
         document.querySelectorAll("[data-click-target]").forEach((e) => e.removeAttribute("data-click-target"));
         const all = [...document.querySelectorAll("[data-ev]")];
         const el = all.find((e) => {
-          const tk = JSON.parse(e.getAttribute("data-ev"));
+          const tk = JSON.parse(e.getAttribute("data-ev")!);
           return tk.ev === want.ev && (want.id == null || tk.id === want.id) && (want.value == null || tk.value === want.value);
         });
         if (el) { el.setAttribute("data-click-target", "1"); return true; }
