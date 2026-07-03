@@ -28,7 +28,7 @@ import tierlessPlugin from "tierless/vite";
 import { defineApi, PUBLIC, DENY, JwtApi, startSidecar, makeApiExec, sidecarMain } from "tierless/api";
 import { compile, analyze, DEFAULT_RESOURCES } from "tierless/compiler";
 import { encodeWireBinary, decodeWireBinary } from "tierless/wire";
-import { makePeer, wsPort } from "tierless/transport";
+import { makePeer, wsPort, onEvent, encodeMessage, decodeMessage } from "tierless/transport";
 import { encodeGraph, decodeGraph, isHandle, approxExceeds, GLOBALS } from "tierless/graph";
 import { hashOf, ContentStore, newPeerView } from "tierless/content";
 import { Heap, Channel } from "tierless/fetch";
@@ -67,7 +67,13 @@ const wbin = encodeWireBinary([{ fn: "F", pc: 0, x: 1 }], { op: "start", tier: "
 const wbout = decodeWireBinary(wbin);
 void wbout.stack;
 if (wbout.request && wbout.request.op === "start") void 0;   // only compiles if request.op is string, not pinned to the "resource" literal
-void makePeer; void wsPort;
+const msgBytes = encodeMessage({ hello: 1 }, new Uint8Array([1, 2]));
+void decodeMessage(msgBytes).obj;
+const port = wsPort({ binaryType: "", send() {}, close() {}, on() {} });
+void port.onMessage(() => {});
+const rpcPeer = makePeer(port);
+void rpcPeer.request({ a: 1 });
+onEvent({ on: () => {} }, "open", () => {});   // was entirely missing from the old hand-written .d.ts
 const g = encodeGraph([1, { a: 1 }]);
 const back = decodeGraph(g);
 void isHandle(back[0]); void approxExceeds(back, 1000);

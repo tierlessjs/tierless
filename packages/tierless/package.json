@@ -89,7 +89,7 @@
       "default": "./src/content.mjs"
     },
     "./transport": {
-      "types": "./types/transport.d.ts",
+      "types": "./types/transport.d.mts",
       "default": "./src/transport.mjs"
     }
   },
