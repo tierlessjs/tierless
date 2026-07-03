@@ -10,7 +10,7 @@
 import { makeDeltaSession, encodeDelta, applyDelta, makeTrackedSession, encodeDeltaTracked, applyDeltaTracked } from "tierless/delta";
 import { isHandle } from "tierless/graph";
 import { makeTier } from "tierless/heap";
-import { makeCheck } from "../lib/check.mjs";
+import { makeCheck } from "../lib/check.mts";
 
 const { check, ok } = makeCheck();
 const rng = (seed) => { let s = (seed >>> 0) || 1; return () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; };

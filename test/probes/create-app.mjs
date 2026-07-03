@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { connect } from "tierless/browser";
 import { WS_PATH } from "tierless/server";
-import { makeCounter } from "../lib/check.mjs";
+import { makeCounter } from "../lib/check.mts";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "create-"));

@@ -3,7 +3,7 @@
 // create(), before a single call could be served. The build-function form hands the api
 // instance to runs that need it (login minting via api.issue), and opts flow through.
 import { defineApi, PUBLIC } from "tierless/api";
-import { makeCounter } from "../lib/check.mjs";
+import { makeCounter } from "../lib/check.mts";
 
 const { check, counts } = makeCounter();
 
@@ -11,17 +11,17 @@ console.log("Probe: defineApi — the sugar keeps the monitor's load-time guaran
 
 // authorize is still mandatory — at create(), not first-call.
 let threw = null;
-try { defineApi({ leak: { run: () => 42 } }).create("s"); } catch (e) { threw = e.message; }
+try { defineApi({ leak: { run: () => 42 } } as any).create("s"); } catch (e: any) { threw = e.message; }  // missing authorize is the point of this test — bypass the static check to reach the runtime guard
 check("an endpoint with no authorize cannot ship (throws at create, names the fix)", threw !== null && threw.includes("authorize is required"), threw);
 
 // the build-function form: runs that need the instance (token minting) get it.
 const def = defineApi((api) => ({
   login: { authorize: PUBLIC, run: () => api.issue({ sub: "u" }, 60) },
-  whoami: { authorize: (p) => p != null, run: (_a, p) => p.sub },
+  whoami: { authorize: (p) => p != null, run: (_a, p) => p && p.sub },
 }), { maxArgsBytes: 64 });
 const api = def.create("secret");
 
-const tok = (await api.handle({ name: "login" })).value;
+const tok = ((await api.handle({ name: "login" })) as { ok: true; value: string }).value;  // login is PUBLIC and always succeeds — narrow past the ok/error union
 check("a build-function run mints a token via the created instance", typeof tok === "string" && tok.includes("."), tok);
 const who = await api.handle({ name: "whoami", token: tok });
 check("the minted token verifies and authorizes", who.ok === true && who.value === "u", who);

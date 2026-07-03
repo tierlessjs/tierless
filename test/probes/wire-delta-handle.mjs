@@ -7,7 +7,7 @@
 import { makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "tierless/delta";
 import { isHandle } from "tierless/graph";
 import { makeTier } from "tierless/heap";
-import { makeCheck } from "../lib/check.mjs";
+import { makeCheck } from "../lib/check.mts";
 
 const { check, ok } = makeCheck();
 const fmt = (n) => (n < 1024 ? n + " B" : (n / 1024).toFixed(1) + " KB");

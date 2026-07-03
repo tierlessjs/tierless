@@ -7,7 +7,7 @@
 // other delta probe stays green), and the message-level min(delta, full) still backstops "never larger".
 import { makeTrackedSession, adoptBaseline, encodeDeltaTracked, applyDeltaTracked, touch } from "tierless/delta";
 import { encodeGraph, decodeGraph } from "tierless/graph";
-import { makeCheck } from "../lib/check.mjs";
+import { makeCheck } from "../lib/check.mts";
 
 const fresh = (v) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([v]))))[0];   // a structurally-identical detached copy
 const frame = (m) => [{ fn: "_", pc: 0, m }];

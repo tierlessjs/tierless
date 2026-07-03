@@ -12,7 +12,7 @@ import { PROGRAMS, __setDirtySink } from "../../test/e2e/track-app.gen.mjs";
 import { makeDeltaSession, encodeDelta, applyDelta,
   makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "tierless/delta";
 import { encodeWireBinary } from "tierless/wire";
-import { makeCheck } from "../lib/check.mjs";
+import { makeCheck } from "../lib/check.mts";
 
 const { check, ok } = makeCheck();
 function deepEq(a, b, seen = new Set()) {

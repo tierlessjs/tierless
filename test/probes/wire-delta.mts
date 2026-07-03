@@ -20,20 +20,21 @@ import { makeDeltaSession, encodeDelta, applyDelta,
   makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "tierless/delta";
 import { encodeWireBinary } from "tierless/wire";
 import { makeTier } from "tierless/heap";
-import { makeCheck } from "../lib/check.mjs";
+import { makeCheck } from "../lib/check.mts";
+import type { DeltaFrame } from "tierless/delta";
 
 const { check, ok } = makeCheck();
 
 // structural deep-equality that tolerates cycles, bigint, undefined, and §5 handles
-function deepEq(a, b, seen = new Set()) {
+function deepEq(a: unknown, b: unknown, seen: Set<unknown> = new Set()): boolean {
   if (a === b) return true;
   if (typeof a !== typeof b) return false;
   if (a === null || b === null || typeof a !== "object") return Object.is(a, b);
   const tag = a; if (seen.has(tag)) return true; seen.add(tag);            // cycle guard (structural)
   if (Array.isArray(a) !== Array.isArray(b)) return false;
-  const ka = Object.keys(a), kb = Object.keys(b);
+  const ka = Object.keys(a), kb = Object.keys(b as object);  // b's objectness follows a's (typeof-equal, checked above); TS can't see that
   if (ka.length !== kb.length) return false;
-  return ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && deepEq(a[k], b[k], seen));
+  return ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && deepEq((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], seen));
 }
 
 console.log("Probe: the delta wire codec — fidelity, locality, bidirectional bounce, floor\n");
@@ -44,17 +45,19 @@ console.log("Probe: the delta wire codec — fidelity, locality, bidirectional b
 {
   const A = makeDeltaSession("server"), B = makeDeltaSession("browser");
   const shared = { tag: "shared", n: 1 };
-  const cyc = { name: "node" }; cyc.self = cyc;                           // the most ordinary cycle
+  const cyc: { name: string; self?: unknown } = { name: "node" }; cyc.self = cyc;   // the most ordinary cycle
   const stack = [{ fn: "App", pc: 3, a: shared, b: shared, c: cyc, list: [1, 2, 3], flag: true, none: null, u: undefined, big: 10n }];
   const req = { op: "resource", tier: "server", name: "api.getTasks", args: [{ status: "all" }, 42] };
   const { stack: s, request: r } = applyDelta(B, encodeDelta(A, stack, req).bytes);
+  const F = s[0] as any;   // ad hoc one-off test fixture — applyDelta's generic DeltaFrame return can't carry this shape
 
-  check("fidelity: a shared object stays ONE object on the peer (identity, a === b)", s[0].a === s[0].b);
-  check("fidelity: a cycle is restored (c.self === c)", s[0].c.self === s[0].c);
+  check("fidelity: a shared object stays ONE object on the peer (identity, a === b)", F.a === F.b);
+  check("fidelity: a cycle is restored (c.self === c)", F.c.self === F.c);
   check("fidelity: array / bool / null / undefined / bigint all round-trip",
-    deepEq(s[0].list, [1, 2, 3]) && s[0].flag === true && s[0].none === null && s[0].u === undefined && s[0].big === 10n);
+    deepEq(F.list, [1, 2, 3]) && F.flag === true && F.none === null && F.u === undefined && F.big === 10n);
   check("fidelity: the suspended request (name + already-evaluated args) round-trips",
-    r.name === "api.getTasks" && r.args[1] === 42 && r.args[0].status === "all");
+    // the request always round-trips non-null here — this probe's own fixture, not a general guarantee
+    r!.name === "api.getTasks" && r!.args![1] === 42 && (r!.args![0] as { status: string }).status === "all");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -73,10 +76,11 @@ console.log("Probe: the delta wire codec — fidelity, locality, bidirectional b
   cursor.page = 1;                                                        // mutate ONE small object
   const c2 = encodeDelta(A, stack, null);
   const { stack: s2 } = applyDelta(B, c2.bytes);
+  const F2 = s2[0] as any;   // ad hoc fixture — see note above
   check("second capture ships ONLY the changed object (1 of " + c2.reachable + ")", c2.shipped === 1);
   check("the delta is far smaller than the full capture (" + c2.bytes.length + " B vs " + c1.bytes.length + " B)", c2.bytes.length * 10 < c1.bytes.length);
-  check("the delta applied on the peer: cursor.page is now 1", s2[0].cursor.page === 1);
-  check("the unchanged 200-row graph is intact on the peer (never re-shipped)", s2[0].big.rows.length === 200 && s2[0].big.rows[199].title === "row 199");
+  check("the delta applied on the peer: cursor.page is now 1", F2.cursor.page === 1);
+  check("the unchanged 200-row graph is intact on the peer (never re-shipped)", F2.big.rows.length === 200 && F2.big.rows[199].title === "row 199");
 }
 {
   // shallow versioning: a leaf edit 3 deep ships exactly 1 object, not the spine to the root.
@@ -87,9 +91,10 @@ console.log("Probe: the delta wire codec — fidelity, locality, bidirectional b
   leaf.v = 99;
   const c = encodeDelta(A, stack, null);
   const { stack: s } = applyDelta(B, c.bytes);
+  const F = s[0] as any;   // ad hoc fixture — see note above
   check("locality: a 3-deep leaf edit ships exactly 1 object — no ancestor bubble", c.shipped === 1);
-  check("locality: the deep change is visible THROUGH the unchanged ancestors on the peer", s[0].root.mid.leaf.v === 99);
-  check("locality: the ancestors were not re-shipped but still resolve (root.label intact)", s[0].root.label === "r");
+  check("locality: the deep change is visible THROUGH the unchanged ancestors on the peer", F.root.mid.leaf.v === 99);
+  check("locality: the ancestors were not re-shipped but still resolve (root.label intact)", F.root.label === "r");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -101,8 +106,9 @@ console.log("Probe: the delta wire codec — fidelity, locality, bidirectional b
   const handle = { __tierless_handle__: true, owner: tier.id, id: tier.heapPut({ huge: "x".repeat(5000) }), kind: "object" };
   const stack = [{ fn: "App", pc: 2, view: { title: "page" }, data: handle }];
   const { stack: s } = applyDelta(B, encodeDelta(A, stack, null).bytes);
+  const F = s[0] as any;   // ad hoc fixture — see note above
   check("§5 handle travels as a leaf (stays an opaque handle on the peer, not dereferenced/copied)",
-    s[0].data.__tierless_handle__ === true && s[0].data.owner === tier.id && s[0].data.id === handle.id && s[0].data.kind === "object");
+    F.data.__tierless_handle__ === true && F.data.owner === tier.id && F.data.id === handle.id && F.data.kind === "object");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -111,24 +117,31 @@ console.log("Probe: the delta wire codec — fidelity, locality, bidirectional b
 //    that after the first (full) hop every hop ships only the change — far under a full re-ship.
 // ---------------------------------------------------------------------------------------------
 {
+  // the fixed continuation shape this oscillation drives — the wire functions are generic over
+  // DeltaFrame, so their returns are cast back to this below (the round trip preserves the shape).
+  interface OscFrame extends DeltaFrame {
+    model: { feed: { id: number; title: string; author: string; score: number }[]; total: number };
+    ui: { filter: string; page: number; tick: number };
+  }
   const server = makeDeltaSession("server"), browser = makeDeltaSession("browser");
   // a realistic continuation: a fixed-size feed model + a small mutable UI cursor
   const feed = Array.from({ length: 120 }, (_, i) => ({ id: i, title: "Article " + i, author: "user" + (i % 20), score: i % 100 }));
-  let live = [{ fn: "App", pc: 4, model: { feed, total: feed.length }, ui: { filter: "all", page: 0, tick: 0 } }];
+  let live: OscFrame[] = [{ fn: "App", pc: 4, model: { feed, total: feed.length }, ui: { filter: "all", page: 0, tick: 0 } }];
 
   const K = 12;
   let here = server, there = browser;
-  const deltaBytes = [], fullBytes = [];
+  const deltaBytes: number[] = [], fullBytes: number[] = [];
   let allExact = true, maxShippedAfterFirst = 0;
 
   for (let hop = 0; hop < K; hop++) {
     const enc = encodeDelta(here, live, null);
     const { stack: recv } = applyDelta(there, enc.bytes);
+    const r = recv as OscFrame[];
 
     // the reconstruction must equal what we sent, every hop
     const exact = deepEq(recv, live)
-      && recv[0].model.feed[119].title === "Article 119"               // big graph survived
-      && recv[0].ui.tick === live[0].ui.tick;                          // the mutating field survived
+      && r[0].model.feed[119].title === "Article 119"               // big graph survived
+      && r[0].ui.tick === live[0].ui.tick;                          // the mutating field survived
     allExact = allExact && exact;
 
     deltaBytes.push(enc.bytes.length);
@@ -136,9 +149,9 @@ console.log("Probe: the delta wire codec — fidelity, locality, bidirectional b
     if (hop > 0) maxShippedAfterFirst = Math.max(maxShippedAfterFirst, enc.shipped);
 
     // the receiver now holds it: mutate a couple of small locals, then bounce back (roles swap)
-    recv[0].ui.page = hop;
-    recv[0].ui.tick = hop + 1;
-    live = recv;
+    r[0].ui.page = hop;
+    r[0].ui.tick = hop + 1;
+    live = r;
     [here, there] = [there, here];
   }
 
@@ -180,7 +193,11 @@ console.log("Probe: the delta wire codec — fidelity, locality, bidirectional b
 //    reconstruction every hop, plus correct detection of a NEW object created mid-oscillation.
 // ---------------------------------------------------------------------------------------------
 {
-  const mk = () => [{ fn: "App", pc: 4,
+  interface WtFrame extends DeltaFrame {
+    model: { feed: { id: number; title: string; done: boolean }[]; total: number };
+    ui: { filter: string; page: number; tick: number };
+  }
+  const mk = (): WtFrame[] => [{ fn: "App", pc: 4,
     model: { feed: Array.from({ length: 60 }, (_, i) => ({ id: i, title: "A" + i, done: false })), total: 60 },
     ui: { filter: "all", page: 0, tick: 0 } }];
 
@@ -199,14 +216,14 @@ console.log("Probe: the delta wire codec — fidelity, locality, bidirectional b
     reconMatch = reconMatch && deepEq(rRecv, tRecv);
     allExact = allExact && deepEq(tRecv, tLive);
 
-    for (const [recv, tracked] of [[rRecv, false], [tRecv, true]]) {
+    for (const [recv, tracked] of [[rRecv as WtFrame[], false], [tRecv as WtFrame[], true]] as const) {
       recv[0].ui.filter = ["all", "active", "done"][hop % 3];
       recv[0].ui.tick = hop + 1;
       const row = recv[0].model.feed[hop % 60]; row.done = !row.done;
       if (tracked) touch(tThere, recv[0].ui, row);                      // bump version on each write
     }
-    rLive = rRecv; [rHere, rThere] = [rThere, rHere];
-    tLive = tRecv; [tHere, tThere] = [tThere, tHere];
+    rLive = rRecv as WtFrame[]; [rHere, rThere] = [rThere, rHere];
+    tLive = tRecv as WtFrame[]; [tHere, tThere] = [tThere, tHere];
   }
   check("write-tracked ships the SAME object count as the rescan oracle, every hop", countsMatch);
   check("write-tracked reconstructs IDENTICALLY to the rescan oracle, every hop", reconMatch);
@@ -216,14 +233,15 @@ console.log("Probe: the delta wire codec — fidelity, locality, bidirectional b
   // a NEW object created mid-oscillation must be detected and shipped (the walk finds it past the
   // dirty array that now references it), even though it was never itself touch()ed.
   const s = makeTrackedSession("server"), p = makeTrackedSession("browser");
-  const live = [{ fn: "F", pc: 0, root: { items: [{ id: 0 }] } }];
+  const live = [{ fn: "F", pc: 0, root: { items: [{ id: 0 }] as Record<string, unknown>[] } }];
   applyDeltaTracked(p, encodeDeltaTracked(s, live, null).bytes);        // prime
   live[0].root.items.push({ id: 1, note: "new" });
   touch(s, live[0].root.items);                                        // bump the mutated array
   const enc = encodeDeltaTracked(s, live, null);
   const { stack: recv } = applyDeltaTracked(p, enc.bytes);
+  const F = recv[0] as any;   // ad hoc fixture — see note above
   check("write-tracked: a new object created mid-stream is shipped and linked on the peer",
-    recv[0].root.items.length === 2 && recv[0].root.items[1].note === "new");
+    F.root.items.length === 2 && F.root.items[1].note === "new");
   check("write-tracked: it ships exactly the mutated array + the one new object (2)", enc.shipped === 2);
 }
 
@@ -235,32 +253,34 @@ console.log("Probe: the delta wire codec — fidelity, locality, bidirectional b
 {
   const A = makeDeltaSession("server"), B = makeDeltaSession("browser");
   const shared = { tag: "s" };
-  const m = new Map([["k", 1], [shared, { v: 10 }], ["arr", [1, 2, 3]]]);
-  const set = new Set([shared, "x", 42]);
-  const cyc = new Map(); cyc.set("self", cyc);                           // a cyclic Map
+  const m = new Map<unknown, unknown>([["k", 1], [shared, { v: 10 }], ["arr", [1, 2, 3]]]);
+  const set = new Set<unknown>([shared, "x", 42]);
+  const cyc = new Map<string, unknown>(); cyc.set("self", cyc);                           // a cyclic Map
   const stack = [{ fn: "App", pc: 1, m, set, shared, cyc }];
   const { stack: s } = applyDelta(B, encodeDelta(A, stack, null).bytes);
+  const F = s[0] as any;   // ad hoc fixture — see note above
   check("map/set: Map and Set reconstruct with the right size and entries",
-    s[0].m instanceof Map && s[0].m.size === 3 && s[0].m.get("arr").length === 3 && s[0].set instanceof Set && s[0].set.has(42));
-  const mapKey = [...s[0].m.keys()].find((k) => k && k.tag === "s");
+    F.m instanceof Map && F.m.size === 3 && F.m.get("arr").length === 3 && F.set instanceof Set && F.set.has(42));
+  const mapKey = [...F.m.keys()].find((k: any) => k && k.tag === "s");
   check("map/set: a shared object is ONE instance across a Map key, a Set member, and a local",
-    mapKey === s[0].shared && s[0].set.has(s[0].shared));
-  check("map/set: a cyclic Map (m.self === m) round-trips", s[0].cyc.get("self") === s[0].cyc);
+    mapKey === F.shared && F.set.has(F.shared));
+  check("map/set: a cyclic Map (m.self === m) round-trips", F.cyc.get("self") === F.cyc);
 }
 {
   // Map.set ships only the changed Map, matching the rescan oracle
   const rs = makeDeltaSession("server"), rp = makeDeltaSession("browser");
   const ts = makeTrackedSession("server"), tp = makeTrackedSession("browser");
-  const mk = () => [{ fn: "F", pc: 0, cache: new Map([["a", { n: 1 }], ["b", { n: 2 }]]), tags: new Set(["x"]) }];
+  const mk = () => [{ fn: "F", pc: 0, cache: new Map<string, { n: number }>([["a", { n: 1 }], ["b", { n: 2 }]]), tags: new Set<string>(["x"]) }];
   const rl = mk(), tl = mk();
   applyDelta(rp, encodeDelta(rs, rl, null).bytes); applyDeltaTracked(tp, encodeDeltaTracked(ts, tl, null).bytes);
   rl[0].cache.set("c", { n: 3 }); rl[0].tags.add("y");
   tl[0].cache.set("c", { n: 3 }); tl[0].tags.add("y"); touch(ts, tl[0].cache, tl[0].tags);
   const re = encodeDelta(rs, rl, null), te = encodeDeltaTracked(ts, tl, null);
   const rb = applyDelta(rp, re.bytes), tb = applyDeltaTracked(tp, te.bytes);
+  const RB = rb.stack[0] as any, TB = tb.stack[0] as any;   // ad hoc fixtures — see note above
   check("map/set: a Map.set + Set.add ship the same count tracked as rescan", re.shipped === te.shipped);
   check("map/set: both reconstruct the grown Map (3) and Set (2)",
-    rb.stack[0].cache.size === 3 && tb.stack[0].cache.size === 3 && tb.stack[0].tags.has("y") && tb.stack[0].cache.get("c").n === 3);
+    RB.cache.size === 3 && TB.cache.size === 3 && TB.tags.has("y") && TB.cache.get("c").n === 3);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -277,8 +297,9 @@ console.log("Probe: the delta wire codec — fidelity, locality, bidirectional b
   live[0].list.shift(); touch(s, live[0].list);                          // …then orphan it (remove from the list)
   const enc = encodeDeltaTracked(s, live, null);
   const { stack: recv } = applyDeltaTracked(p, enc.bytes);
+  const F = recv[0] as any;   // ad hoc fixture — see note above
   check("orphan: the reconstruction is correct — list is [{id:1}], the orphaned row is gone",
-    recv[0].list.length === 1 && recv[0].list[0].id === 1 && !recv[0].list.some((r) => r.id === 0));
+    F.list.length === 1 && F.list[0].id === 1 && !F.list.some((r: any) => r.id === 0));
   check("orphan: a subsequent clean capture ships nothing new (the stray was bounded to one hop)",
     (live[0].list.push({ id: 2, n: 0 }), touch(s, live[0].list), encodeDeltaTracked(s, live, null).shipped) <= 2);
 }
@@ -291,16 +312,17 @@ console.log("Probe: the delta wire codec — fidelity, locality, bidirectional b
   const le = mk(), lp = mk();
   applyDeltaTracked(p, encodeDeltaTracked(s, le, null, { exact: true }).bytes);
   applyDeltaTracked(pP, encodeDeltaTracked(sP, lp, null).bytes);
-  for (const [live, sess] of [[le, s], [lp, sP]]) {                            // same mutate-then-orphan on both
+  for (const [live, sess] of [[le, s], [lp, sP]] as const) {                            // same mutate-then-orphan on both
     live[0].list[0].n = 7; touch(sess, live[0].list[0]);
     live[0].list.shift(); touch(sess, live[0].list);
   }
   const ex = encodeDeltaTracked(s, le, null, { exact: true });
   const pr = encodeDeltaTracked(sP, lp, null);
   const { stack: exRecv } = applyDeltaTracked(p, ex.bytes);
+  const F = exRecv[0] as any;   // ad hoc fixture — see note above
   check("orphan: { exact:true } ships strictly fewer objects than pruned on a mutate-then-orphan (no stray)", ex.shipped < pr.shipped);
   check("orphan: { exact:true } still reconstructs correctly — list is [{id:1},{id:2}]",
-    exRecv[0].list.length === 2 && exRecv[0].list[0].id === 1 && exRecv[0].list[1].id === 2);
+    F.list.length === 2 && F.list[0].id === 1 && F.list[1].id === 2);
 }
 
 console.log(`\n  delta wire: ${ok() ? "fidelity, locality, bounce, floor, write-tracked≡rescan, Map/Set, and orphan-correctness all hold" : "FAILURES above"}`);

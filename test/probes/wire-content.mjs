@@ -16,7 +16,7 @@ import { encodeWireBinary, decodeWireBinary } from "tierless/wire";
 import { makeTrackedSession, subForFullWire, exciseForCapture, adoptBaseline } from "tierless/delta";
 import { makeTier } from "tierless/heap";
 import { ContentStore, newPeerView, hashOf } from "tierless/content";
-import { makeCounter } from "../lib/check.mjs";
+import { makeCounter } from "../lib/check.mts";
 
 const deepFreeze = (o) => { if (o && typeof o === "object" && !Object.isFrozen(o)) { Object.freeze(o); for (const k of Object.keys(o)) deepFreeze(o[k]); } return o; };
 const size = (enc) => JSON.stringify(enc).length;
