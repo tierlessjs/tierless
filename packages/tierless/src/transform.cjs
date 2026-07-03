@@ -51,6 +51,20 @@ const traverse = require("@babel/traverse").default || require("@babel/traverse"
 const generate = require("@babel/generator").default || require("@babel/generator");
 const t = require("@babel/types");
 const fs = require("fs");
+const { stripTypeScriptTypes } = require("node:module");
+
+// A mix module may be authored in TypeScript (app.src.ts) instead of plain JS (app.src.js).
+// Detected by filename, stripped to plain JS text BEFORE parsing — the rest of the compiler
+// never sees TS syntax. Erasable TS only (mode:"strip"): the same ceiling as
+// `node --experimental-strip-types` and every .mts file elsewhere in this repo, not full
+// TS (no enums, no namespaces, no parameter-properties) — stripTypeScriptTypes throws a
+// clear error on those rather than silently doing the wrong thing. Whitespace-replacement
+// (not deletion) means every line/column position survives unchanged, so --source-map's
+// line tracking needs no changes at all.
+const TS_FILE = /\.(ts|mts)$/;
+function stripIfTs(src, filename) {
+  return filename && TS_FILE.test(filename) ? stripTypeScriptTypes(src, { mode: "strip" }) : src;
+}
 const gen = (n) => generate(n, { concise: true }).code;
 
 // ---- PASS 1: allow-list rewrite. Calls to tier-pinned namespaces become yields. ----
@@ -932,14 +946,14 @@ function configure(opts = {}) {
 // which of them the source `export`ed (the actions surface), and the pure passthroughs.
 function compileModule(src, opts = {}) {
   configure(opts);
-  return compile(src, opts.preamble || "");
+  return compile(stripIfTs(src, opts.filename), opts.preamble || "");
 }
 
 // analyze(src, opts) -> per-function suspendability report (what `tierless explain` prints):
 // is it compiled, why (direct resource touches / transitive calls), and every suspension point.
 function analyze(src, opts = {}) {
   configure(opts);
-  const ast = parser.parse(src, { sourceType: "module" });
+  const ast = parser.parse(stripIfTs(src, opts.filename), { sourceType: "module" });
   allowlist(ast);
   const { fnPaths, susp, directly, calls } = collectProgram(ast);
   const functions = [];

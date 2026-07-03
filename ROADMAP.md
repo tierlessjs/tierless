@@ -13,12 +13,18 @@ secured and `npm i tierless` / `npm create tierless@latest` work. Still open:
   `npm publish --provenance`) so npm shows the green ✓ tying each release to its
   exact source commit and build. Needs a public repo and a CI publish workflow;
   the first name-securing release is published by hand and predates it.
-- **TypeScript sources for mix modules.** The framework's own source
-  (`packages/tierless/src/*.mts`) and public API are TypeScript, compiled by
-  `tsc` and checked against the real implementation on every build. But
-  `"use tierless"` files — the user's own mix-module code — are still plain
-  JS: the transform needs @babel/parser's TS plugin + type stripping.
-  Richer generated types than `(...args: any[]) => any` from `tierless types`.
+- **TypeScript everywhere.** The framework's own source
+  (`packages/tierless/src/*.mts`, `bin/`, `create-tierless`, `test/`, `bench/`) is
+  TypeScript, compiled or type-checked by `tsc` on every build — checked against
+  the real implementation, not hand-maintained separately. `"use tierless"` mix
+  modules can be authored in TypeScript too (`app.src.ts`): `transform.cjs`
+  detects the extension and strips erasable TS syntax (`node:module`'s
+  `stripTypeScriptTypes`, the same ceiling as `node --experimental-strip-types` —
+  no enums, no namespaces, no parameter properties) before parsing, so the rest
+  of the compiler stays untouched. Still open: `tierless types` still emits
+  `(...args: any[]) => any` for every endpoint — richer generated types would
+  need parsing the service module's own signatures, not just its registered
+  endpoint names.
 - **Production build story for the Vite plugin.** Dev is first-class (the
   plugin hosts the endpoint on Vite's own server); prod works today by mounting
   `attachTierless` with a CLI-built machine (see `docs/production.md` and

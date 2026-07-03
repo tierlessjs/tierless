@@ -52,6 +52,11 @@ npx tierless build test/e2e/heap-write.src.js test/e2e/heap-write.gen.mjs --bare
 If you change a `*.src.js` input or the compiler, regenerate and commit the matching
 `*.gen.mjs`.
 
+A mix module can also be authored as `*.src.ts` (or `.mts`): the compiler detects the
+extension and strips TypeScript syntax before parsing (erasable TS only — no enums, no
+namespaces, no parameter properties, same as `node --experimental-strip-types`), so it
+compiles through the same pipeline as `.src.js`.
+
 ## Code style
 
 - **Match the surrounding code.** The pump and the codec are written in a deliberately

@@ -71,6 +71,19 @@ check("a \"use tierless\" module compiles to a machine + bound action exports",
   out !== null && out.code.includes("export const PROGRAMS") && out.code.includes("export const rebalance = __actions[\"rebalance\"]"), out && out.code.slice(0, 80));
 check("pure exports pass through still exported", out.code.includes("export function fmt"));
 check("the module id is stamped for server-side resolution", out.code.includes(JSON.stringify(actionsId)));
+
+// ---- a "use tierless" module authored in TypeScript (dev-mode entry point for .src.ts) -----
+const TS_ACTIONS = `"use tierless";
+interface Quote { sym: string; price: number }
+export function priceCheck(sym: string): Quote {
+  const price = api.getQuote(sym) as number;
+  return { sym, price };
+}
+`;
+const tsOut = plugin.transform(TS_ACTIONS, join(dir, "actions.ts"));
+check("a \"use tierless\" .ts module strips types and compiles (Vite dev-mode entry point)",
+  tsOut !== null && tsOut.code.includes("export const PROGRAMS") && tsOut.code.includes("export const priceCheck = __actions[\"priceCheck\"]"), tsOut && tsOut.code.slice(0, 80));
+check("the compiled output carries no leftover TS syntax", tsOut !== null && !/:\s*(string|number)\b/.test(tsOut.code) && !tsOut.code.includes("interface Quote"));
 writeFileSync(actionsId, out.code);
 
 // ---- end to end: page-side call -> vite endpoint -> ssr module -> sidecar --------------

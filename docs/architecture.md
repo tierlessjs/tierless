@@ -44,7 +44,9 @@ docs/               this document, the design spec
 
 ## How a function becomes migratable
 
-`transform.cjs` is a Babel transform that runs in two passes.
+`transform.cjs` is a Babel transform that runs in two passes. A `.ts`/`.mts` input is
+stripped to plain JS text first (`node:module`'s `stripTypeScriptTypes`, erasable syntax
+only) — both passes below only ever see plain JS.
 
 1. **Allow-list rewrite.** A call to a tier-pinned namespace becomes a suspension:
    `api.getRows(x)` → `yield R("server", "api.getRows", x)`, `commit(v)` →

@@ -31,6 +31,7 @@ const cases = [
   { file: "test/probes/deref-liveness.mjs", needs: ["the --auto-deref liveness pass prunes redundant guards within a straight-line run and re-guards after any hop"] },
   { file: "test/probes/source-maps.mjs", needs: ["--source-map carries each frame's source position through the transform, so a migrated continuation reports a portable file:line"] },
   { file: "test/probes/lang-coverage.mjs", needs: ["desugar and migrate correctly; un-migratable tier calls are rejected with a clear error"] },
+  { file: "test/probes/ts-mix-module.mjs", needs: ["strip to plain JS before parsing and compile+run identically to .src.js; a non-erasable construct is rejected with a clear error; plain .js is unaffected"] },
   { file: "test/probes/compiler-api.mjs", needs: ["the compiler is an importable library: configurable resources, module-shaped input (exports/imports/state preserved), and an analyze() report"] },
   { file: "test/probes/types.mjs", needs: ["the public surface is typed end to end: every exports-map entry resolves a declaration under strict nodenext, and misuse is rejected"] },
   { file: "test/probes/cli.mjs", needs: ["the tierless CLI works end to end: build (custom resources), explain (the analysis made visible), api (load-time pre-ship check), types (the api surface as a declaration)"] },

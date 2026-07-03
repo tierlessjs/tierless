@@ -31,10 +31,9 @@ executable proof in `npm test`):
 **When NOT to use it (yet):** you need production hardening today (this is a
 research-stage 0.1 — see the status note); your workflows are single-call CRUD (a plain
 fetch is already one round trip; Tierless buys you nothing); your hot loops must run
-inside suspendable functions (factor them into pure helpers or keep them out); you need
-TypeScript *sources* for mix modules (the public API is fully typed, but `"use tierless"`
-files are plain JS for now); or you need websocket reconnection/resume across dropped
-connections (not built yet — see [`docs/production.md`](./docs/production.md)).
+inside suspendable functions (factor them into pure helpers or keep them out); or you
+need websocket reconnection/resume across dropped connections (not built yet — see
+[`docs/production.md`](./docs/production.md)).
 
 > **Status: research-stage.** The mechanism is proven end to end — a React-style app
 > renders on the server, migrates into real headless Chromium to commit the DOM,
