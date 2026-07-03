@@ -61,7 +61,7 @@
       "default": "./src/transform.cjs"
     },
     "./runtime": {
-      "types": "./types/runtime.d.ts",
+      "types": "./types/runtime.d.mts",
       "default": "./src/runtime.mjs"
     },
     "./wire": {
