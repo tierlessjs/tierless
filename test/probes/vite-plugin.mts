@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import tierless from "tierless/vite";
+import type { TierlessPlugin, TierlessPluginOptions } from "tierless/vite";
 import { configureTierless } from "tierless/browser";
 import { WS_PATH } from "tierless/server";
 import { makeCounter } from "../lib/check.mts";
@@ -49,16 +50,17 @@ export function fmt(x) { return "[" + x + "]"; }
 `;
 const actionsId = join(dir, "actions.mjs");
 
-const makePlugin = (opts) => tierless({
+const makePlugin = (opts: TierlessPluginOptions): TierlessPlugin => tierless({
   api: "api.server.mjs",
   runtime: pathToFileURL(join(SRC_DIR, "browser.mjs")).href,      // resolvable without node_modules
   ...opts,
 });
-const fakeVite = async (plugin) => {
+const fakeVite = async (plugin: TierlessPlugin) => {
   const httpServer = http.createServer((_q, r) => { r.writeHead(404); r.end(); });
-  await new Promise((r) => httpServer.listen(0, r));
-  await plugin.configureServer({ httpServer, config: { root: dir }, ssrLoadModule: (id) => import(pathToFileURL(id).href) });
-  return { httpServer, port: httpServer.address().port };
+  await new Promise<void>((r) => httpServer.listen(0, () => r()));
+  await plugin.configureServer({ httpServer, config: { root: dir }, ssrLoadModule: (id: string) => import(pathToFileURL(id).href) });
+  const addr = httpServer.address();
+  return { httpServer, port: addr && typeof addr === "object" ? addr.port : 0 };
 };
 
 console.log("Probe: the Vite plugin — \"use tierless\" modules become monitor-backed actions, headless\n");
@@ -69,8 +71,8 @@ check("non-tierless modules are untouched", plugin.transform("export const x = 1
 const out = plugin.transform(ACTIONS, actionsId);
 check("a \"use tierless\" module compiles to a machine + bound action exports",
   out !== null && out.code.includes("export const PROGRAMS") && out.code.includes("export const rebalance = __actions[\"rebalance\"]"), out && out.code.slice(0, 80));
-check("pure exports pass through still exported", out.code.includes("export function fmt"));
-check("the module id is stamped for server-side resolution", out.code.includes(JSON.stringify(actionsId)));
+check("pure exports pass through still exported", out!.code.includes("export function fmt"));
+check("the module id is stamped for server-side resolution", out!.code.includes(JSON.stringify(actionsId)));
 
 // ---- a "use tierless" module authored in TypeScript (dev-mode entry point for .src.ts) -----
 const TS_ACTIONS = `"use tierless";
@@ -84,13 +86,14 @@ const tsOut = plugin.transform(TS_ACTIONS, join(dir, "actions.ts"));
 check("a \"use tierless\" .ts module strips types and compiles (Vite dev-mode entry point)",
   tsOut !== null && tsOut.code.includes("export const PROGRAMS") && tsOut.code.includes("export const priceCheck = __actions[\"priceCheck\"]"), tsOut && tsOut.code.slice(0, 80));
 check("the compiled output carries no leftover TS syntax", tsOut !== null && !/:\s*(string|number)\b/.test(tsOut.code) && !tsOut.code.includes("interface Quote"));
-writeFileSync(actionsId, out.code);
+writeFileSync(actionsId, out!.code);
 
 // ---- end to end: page-side call -> vite endpoint -> ssr module -> sidecar --------------
 {
   const { httpServer, port } = await fakeVite(plugin);
   configureTierless({ url: `ws://localhost:${port}${WS_PATH}` });
-  const mod = await import(pathToFileURL(actionsId).href);
+  // compiler output generated at test time — no static declaration to check against
+  const mod: any = await import(pathToFileURL(actionsId).href);
   check("the emitted module's pure export runs in place", mod.fmt("x") === "[x]");
   check("__bundle exposes the machine for the server side", !!(mod.__bundle && mod.__bundle.PROGRAMS.rebalance));
 
@@ -106,8 +109,9 @@ writeFileSync(actionsId, out.code);
   const anon = makePlugin({});                                     // no login: anonymous socket
   const { httpServer, port } = await fakeVite(anon);
   configureTierless({ url: `ws://localhost:${port}${WS_PATH}` });
-  const mod = await import(pathToFileURL(actionsId).href + "?anon");   // fresh module instance, same file
-  const err = await mod.rebalance(["abc"]).then(() => null, (e) => String((e && e.message) || e));
+  // compiler output generated at test time — no static declaration to check against
+  const mod: any = await import(pathToFileURL(actionsId).href + "?anon");   // fresh module instance, same file
+  const err = await mod.rebalance(["abc"]).then(() => null, (e: any) => String((e && e.message) || e));
   check("an anonymous action's write is denied at the monitor and rejects the call", err === "denied", err);
   httpServer.close();
 }
