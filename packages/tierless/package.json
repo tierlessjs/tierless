@@ -85,7 +85,7 @@
       "default": "./src/fetch.mjs"
     },
     "./content": {
-      "types": "./types/content.d.ts",
+      "types": "./types/content.d.mts",
       "default": "./src/content.mjs"
     },
     "./transport": {

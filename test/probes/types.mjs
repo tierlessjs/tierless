@@ -30,6 +30,7 @@ import { compile, analyze, DEFAULT_RESOURCES } from "tierless/compiler";
 import { encodeWireBinary, decodeWireBinary } from "tierless/wire";
 import { makePeer, wsPort } from "tierless/transport";
 import { encodeGraph, decodeGraph, isHandle, approxExceeds, GLOBALS } from "tierless/graph";
+import { hashOf, ContentStore, newPeerView } from "tierless/content";
 
 const bundle: Bundle = { PROGRAMS: {}, __unwind: () => false };
 const pump = makePump(bundle);
@@ -60,6 +61,11 @@ const back = decodeGraph(g);
 void isHandle(back[0]); void approxExceeds(back, 1000);
 const mathRef = GLOBALS.Math;   // only compiles if GLOBALS is the real object literal, not Map<string, unknown>
 void mathRef;
+const store = new ContentStore();
+const h = store.register({ a: 1 });
+void store.get(h); void store.has(h); void store.hashFor({ a: 1 });
+const peer = newPeerView(); peer.add(h);   // 0-arg factory returning a Set, not newPeerView(store)
+void hashOf({ a: 1 });
 `);
 const ok = tsc([join("test", ".types-fixture", "ok.ts")]);
 check("a consumer exercising every main entry type-checks under --strict", ok.status === 0, (ok.stdout || "").split("\n").slice(0, 3).join(" | "));
@@ -67,8 +73,10 @@ check("a consumer exercising every main entry type-checks under --strict", ok.st
 writeFileSync(join(dir, "bad.ts"), `
 import { useAction } from "tierless/react";
 import { defineApi, PUBLIC } from "tierless/api";
+import { ContentStore } from "tierless/content";
 useAction("not a function");
 defineApi({ leak: { authorize: PUBLIC, run: () => 1, extra: true } });
+new ContentStore().resolve("x");   // no such method — the real one is get(); this must fail, not silently pass
 `);
 const bad = tsc([join("test", ".types-fixture", "bad.ts")]);
 check("deliberate misuse FAILS to type-check (the types are load-bearing)", bad.status !== 0 && (bad.stdout || "").includes("error TS"), bad.status);
