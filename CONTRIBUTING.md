@@ -19,12 +19,17 @@ two-tier walkthrough, see [`test/e2e/README.md`](./test/e2e/README.md).
 
 ## The checks that must pass
 
-CI runs two gates, and both should be green locally before you open a PR:
+CI runs three gates, and all three should be green locally before you open a PR:
 
 ```bash
-npm run lint        # ESLint (correctness-focused)
-npm test            # the full regression suite (every demo + probe)
+npm run build -w tierless   # compile packages/tierless/src/*.mts to .mjs + .d.mts, then:
+git diff --exit-code -- packages/tierless/src packages/tierless/types   # ...and commit the result
+npm run lint                # ESLint (correctness-focused)
+npm test                    # the full regression suite (every demo + probe)
 ```
+
+If you edit anything under `packages/tierless/src/*.mts`, rebuild and commit the
+generated `.mjs`/`.d.mts` — CI fails if they're out of sync with the source.
 
 `npm test` is not just "exit 0" — `test/run.mjs` asserts the headline claim of each
 demo (continuation sizes, migrate-vs-fetch decisions, cross-tier correctness). If you
@@ -56,16 +61,20 @@ If you change a `*.src.js` input or the compiler, regenerate and commit the matc
   `.editorconfig`).
 - `*.src.js` (compiler inputs) and `*.gen.mjs` (compiler outputs) are eslint-ignored
   by design — don't hand-edit a `.gen.mjs`.
+- Everything under `packages/tierless/src/` is TypeScript (`*.mts`) except
+  `transform.cjs`. Edit the `.mts` file; `tsc` compiles it to the `.mjs` + `.d.mts`
+  that ship (also eslint-ignored — don't hand-edit those either). The dense,
+  one-line style applies to the `.mts` source the same as everywhere else.
 
 ## Where things live
 
 | You want to change... | Edit... |
 |---|---|
 | the compiler (plain JS → state machine) | `packages/tierless/src/transform.cjs` |
-| the pump / wire envelope | `packages/tierless/src/runtime.mjs` |
-| the graph/wire codec | `packages/tierless/src/graph.mjs` |
-| the §5 heap, write-back, §6 policy | `packages/tierless/src/heap.mjs`, `packages/tierless/src/fetch.mjs` |
-| the WebSocket transport | `packages/tierless/src/transport.mjs` |
+| the pump / wire envelope | `packages/tierless/src/runtime.mts` |
+| the graph/wire codec | `packages/tierless/src/graph.mts` |
+| the §5 heap, write-back, §6 policy | `packages/tierless/src/heap.mts`, `packages/tierless/src/fetch.mts` |
+| the WebSocket transport | `packages/tierless/src/transport.mts` |
 | the demo app | `test/e2e/app/` |
 | the browser tier | `test/e2e/public/` |
 | a proof / regression case | `test/e2e/*.mjs` + `test/run.mjs` |
