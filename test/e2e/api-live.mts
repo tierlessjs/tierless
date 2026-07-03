@@ -13,10 +13,10 @@
 //     across the tier into the continuation,
 //   - a FORGED token (tampered claims break the signature) buys exactly nothing,
 //   - an oversize payload is rejected by the monitor's resource budget before running.
-import { makePump, initialStack } from "tierless/runtime";
+import { makePump, initialStack, type Exec, type Frame } from "tierless/runtime";
 import { startSidecar, makeApiExec } from "tierless/api";
 import { encodeWireBinary, decodeWireBinary } from "tierless/wire";
-import { textOf } from "./app/render.mts";
+import { textOf, type Rendered } from "./app/render.mts";
 import * as bundle from "./app/bundle.gen.mjs";
 import { makeCounter } from "../lib/check.mts";
 
@@ -24,18 +24,19 @@ const pump = makePump(bundle);
 
 const { check, counts } = makeCounter();
 
-const ownsServer = (tier) => tier === "server";
+const ownsServer = (tier: string) => tier === "server";
 
 // Drive the App continuation on the runtime pump: api.* to the monitor via exec, dom.commit
 // answered from a scripted event list, the whole stack crossing the binary wire at each hop.
-async function runSession(exec, events) {
-  const commits = [];
+async function runSession(exec: Exec, events: unknown[]) {
+  const commits: string[] = [];
   let ei = 0;
   let res = await pump(initialStack("App"), ownsServer, exec);
   while (!res.done) {
     if (res.request.name !== "dom.commit") throw new Error("unexpected request " + res.request.name);
-    const { stack } = decodeWireBinary(encodeWireBinary(res.stack, res.request));   // MIGRATE: browser hop, both directions
-    commits.push(textOf(res.request.args[0]));
+    const { stack: wireStack } = decodeWireBinary(encodeWireBinary(res.stack, res.request));   // MIGRATE: browser hop, both directions
+    const stack = wireStack as Frame[];   // decodeWireBinary's DeltaFrame is the wire codec's generic view; the round-trip re-hydrates real Frame objects
+    commits.push(textOf(res.request.args[0] as Rendered));
     stack[stack.length - 1].ret = events[ei++] || { ev: "stop" };
     res = await pump(stack, ownsServer, exec);
   }
@@ -48,7 +49,7 @@ const apiService = startSidecar(new URL("./api/tasks-fns.mts", import.meta.url))
 await apiService.ready();
 try {
   // ---- authenticated session: the exact verify.mjs journey, now through the monitor ----
-  const login = await apiService.call("login", [{ user: "demo", pass: "demo" }]);
+  const login = (await apiService.call("login", [{ user: "demo", pass: "demo" }])) as { ok: true; value: string };   // login is PUBLIC and always succeeds — narrow past the ok/error union
   check("the session logs in over the pipe (the monitor mints the token in its own process)", login.ok === true);
   const token = login.value;
 
@@ -66,7 +67,7 @@ try {
   const anonExec = makeApiExec(apiService, null);
   let anonCommits = null, anonErr = null;
   try { await runSession(anonExec, [{ ev: "cycle", id: 2, next: "doing" }]); }
-  catch (e) { anonErr = e; }
+  catch (e: any) { anonErr = e; }
   // rerun read-only to capture what an anonymous session CAN see (the session above aborted)
   anonCommits = (await runSession(anonExec, [{ ev: "stop" }])).commits;
   check("anonymous PUBLIC reads still render the dashboard (authorization, not a dead pipe)", anonCommits.length === 1 && anonCommits[0].includes("5 tasks"), anonCommits[0]);
@@ -77,14 +78,14 @@ try {
   const forged = Buffer.from(JSON.stringify({ sub: "demo", role: "admin" }), "utf8").toString("base64url") + "." + sig;
   let forgedErr = null;
   try { await runSession(makeApiExec(apiService, forged), [{ ev: "delete", id: 2 }]); }
-  catch (e) { forgedErr = e; }
+  catch (e: any) { forgedErr = e; }
   check("a forged token (client-edited claims, stale signature) is denied identically", forgedErr !== null && forgedErr.message === "denied", forgedErr && forgedErr.message);
   check("the forgery really did break verification (control: the untampered token still works)", body.length > 0 && (await apiService.call("getStats", [], token)).ok === true);
 
   // ---- resource budget: an oversize payload is rejected before anything runs ----
   const oversize = await apiService.call("addTask", [{ title: "x".repeat(20000) }], token);
   check("an oversize call is rejected by the monitor's args budget (even authenticated)", oversize.ok === false);
-  const stats = await apiService.call("getStats", [], token);
+  const stats = (await apiService.call("getStats", [], token)) as { ok: true; value: { total: number } };   // narrow past the ok/error union to check the count
   check("the oversize task was never created", stats.ok === true && stats.value.total === 5, stats.value && stats.value.total);
 } finally {
   apiService.close();

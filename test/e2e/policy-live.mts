@@ -11,35 +11,46 @@
 // set is what makes migrating expensive; §5 excision is the complementary optimization,
 // proven separately in heap-live.mjs.)
 //
-// Run:  node src/policy-live.mjs
+// Run:  node test/e2e/policy-live.mts
 import { createRequire } from "node:module";
 import { wsPort, makePeer } from "tierless/transport";
 import { encodeWireBinary, decodeWireBinary } from "tierless/wire";   // the §6 decision prices the real (binary) wire
 import { PROGRAMS } from "./policy-app.gen.mjs";
 import { makeCheck } from "../lib/check.mts";
+import type { Frame, MachineResult } from "tierless/runtime";
 
 const { WebSocketServer, WebSocket } = createRequire(import.meta.url)("ws");
-const fmt = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB");
+const fmt = (n: number): string => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB");
 const { check, ok } = makeCheck();
+
+// The resource-request arm of a machine step, and what our hand-rolled local pump resolves to
+// — mirrors runtime.mts's real Pump/PumpResult, simplified for this fixture: no "throw"
+// handling, since these compiled PROGRAMS never emit one at the top level (same assumption
+// the original untyped pump made — it only ever branched on ownsHere(r.tier)).
+type Req = Extract<MachineResult, { op: "resource" }>;
+type PumpResult = { done: true; value: unknown } | { done: false; request: Req; stack: Frame[] };
 
 // One pump, both tiers: run owned resources inline, push sub-frames on a call, stop at a
 // resource this tier doesn't own (the §6 boundary). Same logic as runtime.mjs / heap-live.
-function pumpLocal(stack, ownsHere, execHere, incoming = null) {
+function pumpLocal(stack: Frame[], ownsHere: (tier: string) => boolean, execHere: (req: Req) => unknown, incoming: Req | null = null): PumpResult {
   if (incoming) stack[stack.length - 1].ret = execHere(incoming);
   for (;;) {
     const top = stack[stack.length - 1];
     const r = PROGRAMS[top.fn](top);
     if (r.op === "return") { stack.pop(); if (!stack.length) return { done: true, value: r.value }; stack[stack.length - 1].ret = r.value; }
     else if (r.op === "call") { stack.push({ fn: r.fn, pc: 0, args: r.args }); }
-    else if (ownsHere(r.tier)) { stack[stack.length - 1].ret = execHere(r); }
-    else return { done: false, request: r, stack };
+    else if (ownsHere((r as Req).tier)) { stack[stack.length - 1].ret = execHere(r as Req); }  // see the Req/PumpResult note above — r is never "throw" here
+    else return { done: false, request: r as Req, stack };
   }
 }
+
+type SampleMode = "cold" | "informed";
+interface Decision { choice: "migrate" | "fetch"; why: string }
 
 // The §6 decision, priced with real bytes. A side-effecting resource (no fetchBytes) can
 // only be reached by migrating. A data resource offers the genuine choice; when uninformed
 // (cold) the fetch isn't priced yet so we migrate — the naive "only cross when forced".
-function decide(contBytes, fetchBytes, mode) {
+function decide(contBytes: number, fetchBytes: number, mode: SampleMode): Decision {
   if (mode === "cold") return { choice: "migrate", why: "fetch not yet priced (cost = infinite)" };
   if (fetchBytes === Infinity) return { choice: "migrate", why: "side effect: cannot fetch" };
   return contBytes <= fetchBytes
@@ -51,15 +62,15 @@ function decide(contBytes, fetchBytes, mode) {
 // Owns the data resource api.fetchData(k) -> k rows. Serves two endpoints: `rpc` runs ONE
 // resource and ships its result back (the fetch path); `resume` runs a migrated
 // continuation to completion here (the migrate path).
-const ownsServer = (tier) => tier === "server";
-const makeData = (k) => Array.from({ length: k }, (_, i) => ({ id: i, v: "data-" + i }));
-const apiExec = (req) => { if (req.name === "api.fetchData") return makeData(req.args[0]); throw new Error("no resource " + req.name); };
+const ownsServer = (tier: string): boolean => tier === "server";
+const makeData = (k: number): { id: number; v: string }[] => Array.from({ length: k }, (_, i) => ({ id: i, v: "data-" + i }));
+const apiExec = (req: Req): unknown => { if (req.name === "api.fetchData") return makeData(req.args[0] as number); throw new Error("no resource " + req.name); };
 
 const wss = new WebSocketServer({ port: 0 });
-await new Promise((r) => wss.on("listening", r));
+await new Promise<void>((r) => wss.on("listening", r));
 const PORT = wss.address().port;
-const serverReady = new Promise((resolve) => {
-  wss.on("connection", (ws) => {
+const serverReady = new Promise<void>((resolve) => {
+  wss.on("connection", (ws: any) => {
     const peer = makePeer(wsPort(ws));
     peer.on("rpc", (m) => {                                   // FETCH: compute one resource, report result + its real size
       const result = apiExec(m.request);
@@ -67,11 +78,11 @@ const serverReady = new Promise((resolve) => {
     });
     peer.on("resume", (payload, bin) => {                     // MIGRATE: run the migrated continuation here to completion
       try {
-        const { stack, request } = decodeWireBinary(bin);
-        const r = pumpLocal(stack, ownsServer, apiExec, request);  // `request` = the api.fetchData we suspended on; run it here
+        const { stack, request } = decodeWireBinary(bin!);
+        const r = pumpLocal(stack as Frame[], ownsServer, apiExec, request as Req | null);  // `request` = the api.fetchData we suspended on; run it here
         if (r.done) return { obj: { type: "done", value: r.value } };
         return { obj: { type: "suspend" }, bin: encodeWireBinary(r.stack, r.request, {}) };
-      } catch (e) { return { obj: { type: "error", message: String((e && e.message) || e) } }; }
+      } catch (e: any) { return { obj: { type: "error", message: String((e && e.message) || e) } }; }
     });
     resolve();
   });
@@ -80,24 +91,27 @@ const serverReady = new Promise((resolve) => {
 // --------------------------------------------------------------- browser tier ----
 // The entry/driver. Builds a working set, hits api.fetchData (a server resource), and at
 // that boundary decides migrate-vs-fetch from real bytes, then executes the choice.
-const ownsBrowser = () => false;                              // this app's only resource is the server's
-const browserExec = () => { throw new Error("browser owns no resource in this app"); };
+const ownsBrowser = (): boolean => false;                              // this app's only resource is the server's
+const browserExec = (): unknown => { throw new Error("browser owns no resource in this app"); };
 const ws = new WebSocket(`ws://localhost:${PORT}`);
 const peer = makePeer(wsPort(ws));
-await new Promise((r, j) => { ws.on("open", r); ws.on("error", j); });
+await new Promise<void>((r, j) => { ws.on("open", r); ws.on("error", j); });
 await serverReady;
+
+interface Report { choice: "migrate" | "fetch"; why: string; contBytes: number; fetchBytes: number; cold: "migrate" | "fetch" }
+interface RunResult { value: unknown; report: Report; crossed: number }
 
 // Drive Survey(workSize, dataKey) on the browser. `mode` ("cold"|"informed") and `profile`
 // (site -> sampled fetch bytes, locked in once) feed the §6 decision. `site` names the call
 // path so the locked profile is consulted per path (§6: "typical result size per call path").
 // Returns the result plus what was decided and how many bytes really crossed the socket.
-async function runSurvey(workSize, dataKey, { mode, profile, site }) {
+async function runSurvey(workSize: number, dataKey: number, { mode, profile, site }: { mode: SampleMode; profile: Map<string, number>; site: string }): Promise<RunResult> {
   let res = pumpLocal([{ fn: "Survey", pc: 0, args: [workSize, dataKey] }], ownsBrowser, browserExec);
-  let report = null, crossed = 0;
+  let report: Report | null = null, crossed = 0;
   while (!res.done) {
     const req = res.request;
     const contBytes = encodeWireBinary(res.stack, req, {}).length;  // ship-the-continuation cost (full working set, real binary bytes)
-    const fetchBytes = profile.has(site) ? profile.get(site) : Infinity;
+    const fetchBytes = profile.has(site) ? profile.get(site)! : Infinity;
     const d = decide(contBytes, fetchBytes, mode);
     report = { choice: d.choice, why: d.why, contBytes, fetchBytes, cold: decide(contBytes, fetchBytes, "cold").choice };
     if (d.choice === "migrate") {
@@ -105,14 +119,14 @@ async function runSurvey(workSize, dataKey, { mode, profile, site }) {
       crossed += wire.length;
       let { obj: reply, bin } = await peer.request({ type: "resume" }, wire);
       while (reply.type === "suspend") {                            // (Survey never bounces back, but keep the loop correct)
-        const got = decodeWireBinary(bin);
-        const r2 = pumpLocal(got.stack, ownsBrowser, browserExec, got.request);
+        const got = decodeWireBinary(bin!);
+        const r2 = pumpLocal(got.stack as Frame[], ownsBrowser, browserExec, got.request as Req | null);
         if (r2.done) { reply = { type: "done", value: r2.value }; break; }
         wire = encodeWireBinary(r2.stack, r2.request, {}); crossed += wire.length;
         ({ obj: reply, bin } = await peer.request({ type: "resume" }, wire));
       }
       if (reply.type === "error") throw new Error("server: " + reply.message);
-      return { value: reply.value, report, crossed };
+      return { value: reply.value, report: report!, crossed };  // report is always set: Survey's first step is always a resource request
     } else {
       const { obj } = await peer.request({ type: "rpc", request: { name: req.name, args: req.args } });  // only the data crosses
       if (obj.type === "error") throw new Error("server: " + obj.message);
@@ -121,29 +135,31 @@ async function runSurvey(workSize, dataKey, { mode, profile, site }) {
       res = pumpLocal(res.stack, ownsBrowser, browserExec);
     }
   }
-  return { value: res.value, report, crossed };
+  return { value: res.value, report: report!, crossed };  // same invariant as above
 }
 
 // One-time PROFILING (§6 "sampling, not always-on"): sample each call path's data size once
 // over the socket and lock it in. Production runs then decide with zero further sampling.
-async function sample(name, args) {
+async function sample(name: string, args: unknown[]): Promise<number> {
   const { obj } = await peer.request({ type: "rpc", request: { name, args } });
   return obj.bytes;
 }
 
 console.log("LIVE §6 migrate-vs-fetch over a real websocket — the decision steers what crosses\n");
 
-const profile = new Map();
+const profile = new Map<string, number>();
 let sampleBytes = 0;
 // Two call paths: "page" pulls a big result, "fact" pulls a tiny one. Sample each once.
 const pageBytes = await sample("api.fetchData", [4000]); sampleBytes += pageBytes; profile.set("page", pageBytes);
 const factBytes = await sample("api.fetchData", [1]);    sampleBytes += factBytes; profile.set("fact", factBytes);
 
+type SurveyValue = { work: number; data: number };   // this app's own Survey() return shape
+
 // --- Regime 1: SMALL continuation, BIG data -> migrate (the §5 "stack < heap" case) -----
 const r1 = await runSurvey(2, 4000, { mode: "informed", profile, site: "page" });
 console.log("Regime 1: tiny working set, large data (build 2 rows, then need a 4000-row page)");
 console.log(`  migrate=${fmt(r1.report.contBytes)}  fetch=${fmt(r1.report.fetchBytes)}  -> cold ${r1.report.cold.toUpperCase()}, informed ${r1.report.choice.toUpperCase()} (${r1.report.why})`);
-check("regime 1 computed the right answer", r1.value && r1.value.work === 2 && r1.value.data === 4000);
+check("regime 1 computed the right answer", !!r1.value && (r1.value as SurveyValue).work === 2 && (r1.value as SurveyValue).data === 4000);
 check("regime 1 chose MIGRATE (continuation cheaper than the data)", r1.report.choice === "migrate");
 check("regime 1 actually shipped the continuation over the socket", r1.crossed === r1.report.contBytes);
 
@@ -151,7 +167,7 @@ check("regime 1 actually shipped the continuation over the socket", r1.crossed =
 const r2 = await runSurvey(4000, 1, { mode: "informed", profile, site: "fact" });
 console.log("\nRegime 2: large working set, one small fact (build 4000 rows, then need 1 row)");
 console.log(`  migrate=${fmt(r2.report.contBytes)}  fetch=${fmt(r2.report.fetchBytes)}  -> cold ${r2.report.cold.toUpperCase()}, informed ${r2.report.choice.toUpperCase()} (${r2.report.why})`);
-check("regime 2 computed the right answer", r2.value && r2.value.work === 4000 && r2.value.data === 1);
+check("regime 2 computed the right answer", !!r2.value && (r2.value as SurveyValue).work === 4000 && (r2.value as SurveyValue).data === 1);
 check("regime 2's COLD rule would have migrated (the naive baseline)", r2.report.cold === "migrate");
 check("regime 2's INFORMED rule FLIPS to fetch (data cheaper than the continuation)", r2.report.choice === "fetch");
 check(`regime 2 kept the big continuation home: only ${fmt(r2.crossed)} crossed, not the ${fmt(r2.report.contBytes)} continuation`,

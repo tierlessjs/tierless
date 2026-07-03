@@ -16,7 +16,7 @@
 // Run:  node src/server-live.mjs   (or: npm run live)
 //       then open the printed http://localhost:PORT in a browser and click.
 import { fileURLToPath } from "node:url";
-import { serveApp } from "tierless/server";
+import { serveApp, type ResourceRequest } from "tierless/server";
 import { startSidecar, makeApiExec } from "tierless/api";
 import * as bundle from "./app/bundle.gen.mjs";
 
@@ -82,11 +82,11 @@ const app = await serveApp({
     console.log("\n— browser connected; starting render on the server tier —");
     const login = await apiService.call("login", [{ user: "demo", pass: "demo" }]);
     if (!login.ok) throw new Error("login failed: " + login.error);
-    const exec = makeApiExec(apiService, login.value);
+    const exec = makeApiExec(apiService, login.value as string);   // login.value: the session token minted by the sidecar
     return {
-      exec: (req) => { console.log(`  server  ${req.name}(${JSON.stringify(req.args).slice(1, -1)}) → monitor`); return exec(req); },
+      exec: (req: ResourceRequest) => { console.log(`  server  ${req.name}(${JSON.stringify(req.args).slice(1, -1)}) → monitor`); return exec(req); },
       entry: "App",
-      onDone: (value) => console.log(`  => session value: ${JSON.stringify(value)}`),
+      onDone: (value: unknown) => console.log(`  => session value: ${JSON.stringify(value)}`),
     };
   },
 });

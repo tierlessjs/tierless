@@ -14,7 +14,7 @@
     "test": "node test/run.mts",
     "typecheck": "tsc -p tsconfig.check.json",
     "lint": "eslint .",
-    "live": "node test/e2e/server-live.mjs",
+    "live": "node test/e2e/server-live.mts",
     "bench": "node bench/overhead.mts && node bench/conduit.mts && node bench/wire.mts && node bench/delta.mts",
     "bench:overhead": "node bench/overhead.mts",
     "bench:conduit": "node bench/conduit.mts",
