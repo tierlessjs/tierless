@@ -18,7 +18,7 @@ import { startSidecar } from "tierless/api";
 import { makeCounter } from "../lib/check.mts";
 
 const { check, counts } = makeCounter();
-const threw = (fn, re) => { try { fn(); return false; } catch (e) { return re ? re.test(e.message) : true; } };
+const threw = (fn: () => unknown, re?: RegExp): boolean => { try { fn(); return false; } catch (e: any) { return re ? re.test(e.message) : true; } };
 
 console.log("Proof: the api is an external reference monitor — authority outside the untrusted client\n");
 
@@ -27,9 +27,9 @@ console.log("A. the monitor's rules");
 
 // A1 — exposure and authorization are the same gate: omitting authorize is a LOAD-TIME error.
 check("omitting authorize is a load-time error (cannot ship an unauthorized endpoint)",
-  threw(() => new Api().fn("oops", { run: () => 1 }), /authorize is required/));
+  threw(() => new Api().fn("oops", { run: () => 1 } as any), /authorize is required/));  // missing authorize is the point of this test — bypass the static check to reach the runtime guard
 check("a missing run is a load-time error too",
-  threw(() => new Api().fn("oops", { authorize: PUBLIC }), /run must be a function/));
+  threw(() => new Api().fn("oops", { authorize: PUBLIC } as any), /run must be a function/));  // missing run is the point of this test — bypass the static check to reach the runtime guard
 check("a duplicate name is a load-time error",
   threw(() => { const a = new Api(); a.fn("x", { authorize: PUBLIC, run: () => 1 }); a.fn("x", { authorize: PUBLIC, run: () => 2 }); }, /already registered/));
 
@@ -41,7 +41,7 @@ check("a duplicate name is a load-time error",
   base.fn("guarded", { authorize: (p) => p != null, run: () => "secret" });
   check("default-deny floor: PUBLIC passes on the base Api", (await base.handle({ name: "open", token: "anything" })).ok === true);
   check("default-deny floor: a guarded call is denied (base verify trusts no token)", (await base.handle({ name: "guarded", token: "anything" })).ok === false);
-  check("an unknown endpoint is denied, opaquely", (await base.handle({ name: "nope" })).error === "denied");
+  check("an unknown endpoint is denied, opaquely", ((await base.handle({ name: "nope" })) as { ok: false; error: string }).error === "denied");
 }
 
 // A3 — DENY rejects even a valid principal.
@@ -65,7 +65,7 @@ check("a duplicate name is a load-time error",
 // A5 — fail closed: an authorizer must return EXACTLY true; truthy-not-true or a throw denies.
 {
   const a = new JwtApi("s");
-  a.fn("loose", { authorize: () => "yes", run: () => 1 });        // returns a truthy string, not true
+  a.fn("loose", { authorize: (() => "yes") as any, run: () => 1 });        // returns a truthy string, not true — bypass the static check to reach the runtime fail-closed guard
   a.fn("boom", { authorize: () => { throw new Error("auth bug"); }, run: () => 1 });
   check("fail-closed: a truthy-but-not-true authorizer denies", (await a.handle({ name: "loose" })).ok === false);
   check("fail-closed: an authorizer that throws denies", (await a.handle({ name: "boom" })).ok === false);
@@ -75,12 +75,13 @@ check("a duplicate name is a load-time error",
 // map). "Easy to do something standard; also easy to roll your own."
 {
   class ApiKeyApi extends Api {
-    constructor(keys) { super(); this._keys = keys; }
-    verify(token) { return this._keys.get(token) || null; }
+    private _keys: Map<string, Record<string, unknown>>;
+    constructor(keys: Map<string, Record<string, unknown>>) { super(); this._keys = keys; }
+    verify(token: string | null): Record<string, unknown> | null { return (token !== null && this._keys.get(token)) || null; }  // Map.get needs a non-null key; a null token just misses, same as the base lookup
   }
   const k = new ApiKeyApi(new Map([["k-live-123", { sub: "svc", role: "service" }]]));
   k.fn("ping", { authorize: (p) => p?.role === "service", run: () => "pong" });
-  check("roll-your-own verify: a known API key is authorized", (await k.handle({ name: "ping", token: "k-live-123" })).value === "pong");
+  check("roll-your-own verify: a known API key is authorized", ((await k.handle({ name: "ping", token: "k-live-123" })) as { ok: true; value: string }).value === "pong");
   check("roll-your-own verify: an unknown API key is denied", (await k.handle({ name: "ping", token: "k-bogus" })).ok === false);
 }
 
@@ -107,15 +108,15 @@ try {
   check("anonymous guarded call (whoami) is denied", (await api.call("whoami")).ok === false);
 
   // B3 — login mints a token INSIDE the monitor; bad creds are rejected.
-  const bobR = await api.call("login", [{ user: "bob", pass: "builder" }]);
-  const aliceR = await api.call("login", [{ user: "alice", pass: "wonderland" }]);
+  const bobR = (await api.call("login", [{ user: "bob", pass: "builder" }])) as { ok: true; value: string };  // login is PUBLIC and always succeeds — narrow past the ok/error union
+  const aliceR = (await api.call("login", [{ user: "alice", pass: "wonderland" }])) as { ok: true; value: string };
   const bobTok = bobR.value, aliceTok = aliceR.value;
   check("login with good credentials returns a token", bobR.ok === true && typeof bobTok === "string");
   check("login with bad credentials is rejected", (await api.call("login", [{ user: "bob", pass: "wrong" }])).ok === false);
 
   // B4 — an authenticated call sees the verified principal (not anything the client asserted).
   const who = await api.call("whoami", [], bobTok);
-  check("an authenticated call resolves the verified principal", who.ok === true && who.value.sub === "bob");
+  check("an authenticated call resolves the verified principal", who.ok === true && (who.value as { sub: string }).sub === "bob");
 
   // B5 — escalation by REACHING the call. A forged continuation can jump straight to deleteUser; the
   // monitor doesn't care how control flow got there — it re-authorizes for THIS principal and THESE
@@ -137,7 +138,7 @@ try {
   // B8 — the audit trail lives in the trusted process and recorded the escalation attempt (who +
   // outcome). Reading it is itself admin-only: an admin can, a user cannot.
   const log = await api.call("auditTail", [50], aliceTok);
-  const auditedDeny = log.ok === true && log.value.some((e) => e.name === "deleteUser" && e.who === "bob" && /^deny/.test(e.outcome));
+  const auditedDeny = log.ok === true && (log.value as { name: string; who: string | null; outcome: string }[]).some((e) => e.name === "deleteUser" && e.who === "bob" && /^deny/.test(e.outcome));
   check("the monitor audited the denied escalation (who=bob, deny) in the trusted process", auditedDeny);
   check("reading the audit trail is itself admin-only", (await api.call("auditTail", [50], bobTok)).ok === false);
 } finally {
