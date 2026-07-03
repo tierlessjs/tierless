@@ -20,16 +20,18 @@ moves.
 packages/tierless/  the npm package — what `npm i tierless` delivers
   src/
     transform.cjs   the compiler: plain JS -> serializable state machine (Babel; importable + CLI)
-    runtime.mjs     makePump: one tier-agnostic continuation driver, generic over any bundle
-    host.mjs        the session host both tiers share; server.mjs/browser.mjs assemble it
+    runtime.mts     makePump: one tier-agnostic continuation driver, generic over any bundle
+    host.mts        the session host both tiers share; server.mts/browser.mts assemble it
                     (attachTierless/serveApp on node, connect/bindActions in the page)
-    graph.mjs       identity/cycle-safe graph codec for the wire
-    wire-binary.mjs the compact binary wire; wire-delta.mjs the delta wire; content.mjs
-    heap.mjs        §5 distributed handle heap; fetch.mjs Heap/Channel/makeHost
-    transport.mjs   WebSocket framing + RPC peer (browser-safe)
+    graph.mts       identity/cycle-safe graph codec for the wire
+    wire-binary.mts the compact binary wire; wire-delta.mts the delta wire; content.mts
+    heap.mts        §5 distributed handle heap; fetch.mts Heap/Channel/makeHost
+    transport.mts   WebSocket framing + RPC peer (browser-safe)
     api/            the trust boundary — the reference monitor + sidecar transport
-    vite.mjs        the Vite plugin ("use tierless" modules -> monitor-backed actions)
-    react.mjs       useAction
+    vite.mts        the Vite plugin ("use tierless" modules -> monitor-backed actions)
+    react.mts       useAction
+                    (everything above is TypeScript; tsc compiles each .mts to the
+                    .mjs + .d.mts that ship — see CONTRIBUTING.md)
   bin/              the tierless CLI
 packages/create-tierless/  the scaffolder behind `npm create tierless`
 test/               the regression runner + all proofs, importing the real package
@@ -62,7 +64,7 @@ Because the continuation is just `F` (a plain object: `fn`, `pc`, and named loca
 plus the small call stack of such frames, it is plain JSON — there is no native
 stack frame and no closure to capture.
 
-## The pump (`runtime.mjs`)
+## The pump (`runtime.mts`)
 
 One tier-agnostic driver runs the continuation on whichever tier holds it:
 
@@ -80,7 +82,7 @@ therefore flows back and forth across the socket, finishing wherever the last
 resource lands. Exceptions propagate across frames via a serializable handler stack,
 so a resource that throws on one tier is caught by a `try` on the other.
 
-## The wire (`graph.mjs` + `wire-binary.mjs`)
+## The wire (`graph.mts` + `wire-binary.mts`)
 
 What crosses the socket is an envelope — `{ frames, req, graph }` — where `frames`
 is the call-stack skeleton (`fn`, `pc`, which locals, where they start in the graph),
@@ -99,14 +101,14 @@ each distinct object is one entry and every reference is `{k:"r", id}`. That:
   copied;
 - **content-addresses immutable subgraphs** — a registered immutable subgraph (code,
   class shapes, config) ships inline once and then by content hash, resolving on the
-  peer to the copy it cached (`content.mjs`); the same by-reference idea as globals,
+  peer to the copy it cached (`content.mts`); the same by-reference idea as globals,
   generalized from well-known names to any immutable subgraph;
 - carries the non-JSON cases faithfully (`undefined`, BigInt, symbols, Map/Set,
   non-enumerable + symbol-keyed props) and ships host globals and well-known symbols
   by reference rather than copying them.
 
 That `{ frames, req, graph }` structure is serialized for the socket by the **binary wire
-codec** (`wire-binary.mjs`): 1-byte type tags + LEB128 varints replace the `{k,id}` ref
+codec** (`wire-binary.mts`): 1-byte type tags + LEB128 varints replace the `{k,id}` ref
 objects, a **string table** interns every key and value, a **shape table** lets same-shaped
 records emit their keys once, and homogeneous numeric arrays pack with no per-element tag —
 1.9×–5.4× smaller than the JSON form on record-heavy payloads. This is what crosses the
@@ -115,7 +117,7 @@ debug serialization. Because the wire is deserialized from the *other* tier (§7
 decoder is hardened (bounds-checked, count-guarded, `__proto__`-stripping) and fuzz-tested.
 
 For the **oscillation case** — a session that crosses the boundary many times, re-shipping a
-near-identical continuation each hop — `wire-delta.mjs` ships a capture as a *patch* over what
+near-identical continuation each hop — `wire-delta.mts` ships a capture as a *patch* over what
 the peer already holds: each tier keeps a replicated, stably-identified object store, and only
 the changed objects travel (a deep edit bumps just its own object, not its ancestors, because
 content versions are shallow — children by id). The strategy is `min(delta, full wire)` per
@@ -140,7 +142,7 @@ preserved across Map keys and Set members. The delta also **composes with §5 ex
 and the delta carries a handle leaf in its place, so the big data stays home *and* only the changed
 UI ships — an 80 KB inline capture becomes 115 B (`test/probes/wire-delta-handle.mjs`).
 
-## The heap (`heap.mjs` + `fetch.mjs`)
+## The heap (`heap.mts` + `fetch.mts`)
 
 The §5 distributed heap is how the big data stays put.
 
@@ -192,7 +194,7 @@ hop to the monitor"; the pipe hop is ~free next to the network hop, so the whole
 single api round trip — the cost a traditional client→server call already pays — with the trust
 boundary where it belongs.
 
-**The interface (`packages/tierless/src/api/api.mjs`).** A server-only function is `api.fn(name, { authorize, run })`.
+**The interface (`packages/tierless/src/api/api.mts`).** A server-only function is `api.fn(name, { authorize, run })`.
 `authorize` is **mandatory**: exposing an endpoint and stating who may call it are the same act, so
 omitting it is a **load-time error** (thrown at registration, before the process serves a single call)
 — an unauthorized endpoint cannot ship. To mean "anyone" you say so with the `PUBLIC` sentinel; `DENY`
@@ -218,7 +220,7 @@ on every tier; `api.*` and `dom.*` are edges to resources owned by *other princi
 business, guarded by the monitor; the dom by the user, guarded by their browser). The framework is
 opinionated about the **contract** at that edge — `{ name, args, token }` in, verified principal,
 mandatory `authorize`, default-deny, a denial thrown *into* the continuation so a `try`/`catch`
-catches it across tiers (`makeApiExec` in `sidecar.mjs` is that adapter) — and agnostic about the
+catches it across tiers (`makeApiExec` in `sidecar.mts` is that adapter) — and agnostic about the
 **transport**: the pipe sidecar is the reference implementation; the same contract over HTTPS to a
 separately-deployed monitor is a small adapter. Concretely: the Tasks app's DB and endpoints live in
 `test/e2e/api/tasks-fns.mjs`, a separate trusted service the demos fork as a sidecar — the pump host holds
