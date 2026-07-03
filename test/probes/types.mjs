@@ -29,6 +29,7 @@ import { defineApi, PUBLIC, DENY, JwtApi, startSidecar, makeApiExec, sidecarMain
 import { compile, analyze, DEFAULT_RESOURCES } from "tierless/compiler";
 import { encodeWireBinary, decodeWireBinary } from "tierless/wire";
 import { makePeer, wsPort } from "tierless/transport";
+import { encodeGraph, decodeGraph, isHandle, approxExceeds, GLOBALS } from "tierless/graph";
 
 const bundle: Bundle = { PROGRAMS: {}, __unwind: () => false };
 const pump = makePump(bundle);
@@ -54,6 +55,11 @@ const { code, meta } = compile("function f(){}", { resources: { db: "server" } }
 void code; void meta.exported;
 void analyze("function f(){}"); void DEFAULT_RESOURCES.api;
 void encodeWireBinary; void decodeWireBinary; void makePeer; void wsPort;
+const g = encodeGraph([1, { a: 1 }]);
+const back = decodeGraph(g);
+void isHandle(back[0]); void approxExceeds(back, 1000);
+const mathRef = GLOBALS.Math;   // only compiles if GLOBALS is the real object literal, not Map<string, unknown>
+void mathRef;
 `);
 const ok = tsc([join("test", ".types-fixture", "ok.ts")]);
 check("a consumer exercising every main entry type-checks under --strict", ok.status === 0, (ok.stdout || "").split("\n").slice(0, 3).join(" | "));
@@ -70,6 +76,6 @@ check("deliberate misuse FAILS to type-check (the types are load-bearing)", bad.
 const { pass, fail } = counts();
 const okAll = fail === 0;
 console.log(okAll
-  ? `\nOK — the public surface is typed end to end: every exports-map entry resolves a hand-written declaration under strict nodenext, and misuse is rejected (${pass} checks)`
+  ? `\nOK — the public surface is typed end to end: every exports-map entry resolves a declaration under strict nodenext, and misuse is rejected (${pass} checks)`
   : `\nFAILED (${pass} passed, ${fail} failed)`);
 process.exit(okAll ? 0 : 1);

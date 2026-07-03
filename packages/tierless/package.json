@@ -73,7 +73,7 @@
       "default": "./src/wire-delta.mjs"
     },
     "./graph": {
-      "types": "./types/graph.d.ts",
+      "types": "./types/graph.d.mts",
       "default": "./src/graph.mjs"
     },
     "./heap": {
