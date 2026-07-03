@@ -18,7 +18,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { serveApp } from "tierless/server";
 import { connect } from "tierless/browser";
 import { WS_PATH } from "tierless/server";
-import { makeCounter } from "../lib/check.mjs";
+import { makeCounter } from "../lib/check.mts";
 
 const TX = fileURLToPath(new URL("../../packages/tierless/src/transform.cjs", import.meta.url));
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -34,21 +34,23 @@ function appMain() { const a = api.dbl(2); const ev = commit({ a }); return "end
 const dir = mkdtempSync(join(tmpdir(), "host-"));
 writeFileSync(join(dir, "app.src.js"), SRC);
 execFileSync(process.execPath, [TX, join(dir, "app.src.js"), join(dir, "app.gen.mjs"), "--bare"], { cwd: ROOT });
-const bundle = await import(pathToFileURL(join(dir, "app.gen.mjs")));
+// app.gen.mjs is compiler OUTPUT for a fixture built at test time — no declaration file to
+// generate one for, and its shape (a Bundle) is only known once the dynamic import resolves.
+const bundle: any = await import(pathToFileURL(join(dir, "app.gen.mjs")).href);
 
-const served = [];
-const apiExec = (req) => { served.push(req.name); if (req.name === "api.dbl") return req.args[0] * 2; throw new Error("no resource " + req.name); };
+const served: string[] = [];
+const apiExec = (req: { name: string; args: unknown[] }): unknown => { served.push(req.name); if (req.name === "api.dbl") return (req.args[0] as number) * 2; throw new Error("no resource " + req.name); };
 
 console.log("Probe: the assembled host — serveApp/connect, both session directions, over a real socket\n");
 
 // ---- actions mode: the client starts sessions on the server -------------------------
 {
   const app = await serveApp({ port: 0, bundle, session: async () => ({ exec: apiExec }) });
-  const commits = [];
+  const commits: any[] = [];
   const conn = connect({
     url: `ws://localhost:${app.port}${WS_PATH}`,
     bundle,
-    exec: (req) => { commits.push(req.args[0]); return { n: 10 }; },   // dom.commit -> scripted "click"
+    exec: (req: any) => { commits.push(req.args[0]); return { n: 10 }; },   // dom.commit -> scripted "click"
   });
   await conn.ready;
 
@@ -70,10 +72,10 @@ console.log("Probe: the assembled host — serveApp/connect, both session direct
 
 // ---- full-tierless mode: the server starts the session per connection ----------------
 {
-  let doneValue = null, resolveDone; const done = new Promise((r) => { resolveDone = r; });
+  let doneValue: unknown = null, resolveDone: () => void; const done = new Promise<void>((r) => { resolveDone = r; });
   const app = await serveApp({
     port: 0, bundle,
-    session: async () => ({ exec: apiExec, entry: "appMain", onDone: (v) => { doneValue = v; resolveDone(); } }),
+    session: async () => ({ exec: apiExec, entry: "appMain", onDone: (v: unknown) => { doneValue = v; resolveDone(); } }),
   });
   const conn = connect({ url: `ws://localhost:${app.port}${WS_PATH}`, bundle, exec: () => ({ n: 7 }) });
   await conn.ready;

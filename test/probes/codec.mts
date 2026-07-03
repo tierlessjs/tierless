@@ -7,11 +7,15 @@
 // supplies the tier whose heap a big subgraph excises into as a handle.
 import { encodeGraph, decodeGraph, isHandle } from "tierless/graph";
 import { makeTier } from "tierless/heap";
-import { makeCheck } from "../lib/check.mjs";
+import { makeCheck } from "../lib/check.mts";
 
-const roundtrip = (values, opts) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph(values, opts))));
-function tree(n, b = 4) {
-  const nodes = Array.from({ length: n }, (_, i) => ({ id: i, payload: "x".repeat(40), kids: [] }));
+// encodeGraph/decodeGraph are generic over any JSON-like value (unknown in, unknown out) —
+// this probe exercises that genericity directly, so the round-tripped values are cast at
+// each use to the ad hoc shape this probe put in, not narrowed by the codec itself.
+const roundtrip = (values: unknown[], opts?: Parameters<typeof encodeGraph>[1]): any[] => decodeGraph(JSON.parse(JSON.stringify(encodeGraph(values, opts))));
+interface TreeNode { id: number; payload: string; kids: TreeNode[] }
+function tree(n: number, b = 4): TreeNode {
+  const nodes: TreeNode[] = Array.from({ length: n }, (_, i) => ({ id: i, payload: "x".repeat(40), kids: [] }));
   for (let i = 1; i < n; i++) nodes[Math.floor((i - 1) / b)].kids.push(nodes[i]); // root reaches all
   return nodes[0];
 }
@@ -27,7 +31,7 @@ x.label = "mutated";
 check("aliasing: mutating via one local is visible via the other", y.label === "mutated");
 
 // 2) cycle
-const n = { id: 1 }; n.self = n;                          // the most ordinary cyclic graph
+const n = { id: 1, self: null as unknown }; n.self = n;   // the most ordinary cyclic graph
 let cyc = false, cycRef = false;
 try { const [r] = roundtrip([n]); cyc = true; cycRef = r.self === r; } catch { /* threw */ }
 check("cycle: node.self = node round-trips without throwing", cyc);
@@ -40,7 +44,7 @@ const [bigBack] = decodeGraph(JSON.parse(JSON.stringify(bigEnc)));
 check("big graph (5000 nodes) -> §5 handle, NOT shipped (continuation stays small)",
   isHandle(bigBack) && Buffer.byteLength(JSON.stringify(bigEnc)) < 1024);
 const [smallBack] = roundtrip([tree(50)], { tier });
-const count = (r, seen = new Set()) => { if (!r || seen.has(r)) return 0; seen.add(r); return 1 + r.kids.reduce((a, k) => a + count(k, seen), 0); };
+const count = (r: TreeNode, seen = new Set<TreeNode>()): number => { if (!r || seen.has(r)) return 0; seen.add(r); return 1 + r.kids.reduce((a, k) => a + count(k, seen), 0); };
 check("small graph (50 nodes) -> shipped whole and fully traversable", count(smallBack) === 50);
 
 // 4) exotic values that aren't JSON-native

@@ -5,7 +5,7 @@
 // "OK — <claim> (${pass} checks)" or "(${pass} passed, ${fail} failed)").
 export function makeCheck() {
   let pass = true;
-  const check = (name, cond, extra = "") => {
+  const check = (name: string, cond: boolean, extra: unknown = ""): void => {
     console.log(`  ${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  " + extra : ""}`);
     pass = pass && cond;
   };
@@ -14,7 +14,7 @@ export function makeCheck() {
 
 export function makeCounter() {
   let pass = 0, fail = 0;
-  const check = (label, cond, got) => {
+  const check = (label: string, cond: boolean, got?: unknown): void => {
     if (cond) { pass++; console.log(`  PASS  ${label}`); }
     else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : `  (got ${JSON.stringify(got)})`}`); }
   };

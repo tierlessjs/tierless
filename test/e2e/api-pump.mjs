@@ -10,7 +10,7 @@
 import { PROGRAMS, __unwind } from "./api-pump-app.gen.mjs";
 import { startSidecar, makeApiExec } from "tierless/api";
 import { encodeGraph, decodeGraph } from "tierless/graph";
-import { makeCounter } from "../lib/check.mjs";
+import { makeCounter } from "../lib/check.mts";
 
 const wire = (stack) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([stack]))))[0];   // serialize the continuation at each hop (proves migration)
 
@@ -58,7 +58,7 @@ const { check, counts } = makeCounter();
 
 console.log("Proof: the live pump services api.* through the trusted monitor (sidecar)\n");
 
-const api = startSidecar(new URL("./api/server-fns.mjs", import.meta.url));
+const api = startSidecar(new URL("./api/server-fns.mts", import.meta.url));
 await api.ready();
 try {
   const aliceTok = (await api.call("login", [{ user: "alice", pass: "wonderland" }])).value;

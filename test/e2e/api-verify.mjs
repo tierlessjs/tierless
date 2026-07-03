@@ -15,7 +15,7 @@
 
 import { Api, JwtApi, PUBLIC, DENY } from "tierless/api";
 import { startSidecar } from "tierless/api";
-import { makeCounter } from "../lib/check.mjs";
+import { makeCounter } from "../lib/check.mts";
 
 const { check, counts } = makeCounter();
 const threw = (fn, re) => { try { fn(); return false; } catch (e) { return re ? re.test(e.message) : true; } };
@@ -99,7 +99,7 @@ check("a duplicate name is a load-time error",
 // ── B. The real boundary (a forked process, over a pipe) ─────────────────────────────────────────────
 console.log("\nB. across the process boundary (the sidecar)");
 
-const api = startSidecar(new URL("./api/server-fns.mjs", import.meta.url));
+const api = startSidecar(new URL("./api/server-fns.mts", import.meta.url));
 await api.ready();
 try {
   // B1/B2 — anonymous: a PUBLIC read works; a guarded call does not.

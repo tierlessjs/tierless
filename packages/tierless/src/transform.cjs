@@ -1034,7 +1034,7 @@ function cliMain() {
   const headFlag = flags.find((f) => f.startsWith("--head="));
   const preamble = flags.includes("--bare") ? ""
     : headFlag ? fs.readFileSync(headFlag.slice("--head=".length), "utf8").trimEnd()
-      : 'import { h } from "./h.mjs";\nimport { Dashboard } from "./components.mjs";\nimport { render } from "./render.mjs";';
+      : 'import { h } from "./h.mts";\nimport { Dashboard } from "./components.mts";\nimport { render } from "./render.mts";';
   const { code } = compileModule(fs.readFileSync(inPath, "utf8"), {
     preamble, resources, filename: inPath,
     autoWriteback: flags.includes("--auto-writeback"),

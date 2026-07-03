@@ -6,7 +6,7 @@
 // fetches the dataset only if it derefs the handle, coherently (single-writer + version-
 // invalidated cache). Reuses the project's Heap/Channel/makeHost and graph codec.
 import { makeTier, encodeWire, decodeWire, wireHandles, Channel, makeHost } from "tierless/heap";
-import { makeCheck } from "../lib/check.mjs";
+import { makeCheck } from "../lib/check.mts";
 
 const fmt = (n) => (n < 1024 ? n + " B" : n < 1024 * 1024 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB");
 const { check, ok } = makeCheck();

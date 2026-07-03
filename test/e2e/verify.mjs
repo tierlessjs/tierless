@@ -8,8 +8,8 @@
 // api-live.mjs proves on this same app. demo.mjs proves the same continuation also
 // migrates across a real websocket into real Chromium.
 import { run, start } from "./app/bundle.gen.mjs";
-import * as api from "./api/tasks-fns.mjs";
-import { textOf } from "./app/render.mjs";
+import * as api from "./api/tasks-fns.mts";
+import { textOf } from "./app/render.mts";
 
 api.seed();
 const API = {

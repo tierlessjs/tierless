@@ -5,7 +5,7 @@
 // loop is exercised by heap-live.mjs; here we isolate the compiler's auto-deref.)
 import { PROGRAMS } from "./heap-auto.gen.mjs";
 import { makeTier, encodeWire, decodeWire, wireHandles, Channel, makeHost } from "tierless/heap";
-import { makeCheck } from "../lib/check.mjs";
+import { makeCheck } from "../lib/check.mts";
 
 const body = "markdown body. ".repeat(40);
 const ROWS = Array.from({ length: 1500 }, (_, i) => ({ id: i, title: "Article " + i, score: i % 100, body }));

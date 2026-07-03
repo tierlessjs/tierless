@@ -67,7 +67,7 @@ const PAGE = `<!doctype html>
 </html>`;
 
 // The trusted side: the tasks service in its own process (it seeds the DB on start).
-const apiService = startSidecar(new URL("./api/tasks-fns.mjs", import.meta.url));
+const apiService = startSidecar(new URL("./api/tasks-fns.mts", import.meta.url));
 await apiService.ready();
 
 const app = await serveApp({

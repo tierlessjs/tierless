@@ -6,13 +6,13 @@ import { spawnSync } from "node:child_process";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { makeCounter } from "../lib/check.mjs";
+import { makeCounter } from "../lib/check.mts";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const dir = join(ROOT, "test", ".types-fixture");
 mkdirSync(dir, { recursive: true });
 const { check, counts } = makeCounter();
-const tsc = (files) => spawnSync(process.execPath, [join(ROOT, "node_modules/typescript/bin/tsc"),
+const tsc = (files: string[]) => spawnSync(process.execPath, [join(ROOT, "node_modules/typescript/bin/tsc"),
   "--noEmit", "--strict", "--module", "nodenext", "--moduleResolution", "nodenext", "--target", "es2022",
   "--types", "node", ...files], { cwd: ROOT, encoding: "utf8" });
 

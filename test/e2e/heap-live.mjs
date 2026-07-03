@@ -13,7 +13,7 @@ import { initialStack } from "tierless/runtime";
 import { makeTier } from "tierless/heap";
 import { encodeWireBinary, decodeWireBinary } from "tierless/wire";   // the binary continuation wire crosses the socket
 import { PROGRAMS } from "./heap-app.gen.mjs";
-import { makeCheck } from "../lib/check.mjs";
+import { makeCheck } from "../lib/check.mts";
 
 const { WebSocketServer, WebSocket } = createRequire(import.meta.url)("ws");
 const fmt = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB");

@@ -17,7 +17,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import tierless from "tierless/vite";
 import { configureTierless } from "tierless/browser";
 import { WS_PATH } from "tierless/server";
-import { makeCounter } from "../lib/check.mjs";
+import { makeCounter } from "../lib/check.mts";
 
 const SRC_DIR = fileURLToPath(new URL("../../packages/tierless/src/", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "vite-"));

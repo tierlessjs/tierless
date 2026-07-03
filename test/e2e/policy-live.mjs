@@ -16,7 +16,7 @@ import { createRequire } from "node:module";
 import { wsPort, makePeer } from "tierless/transport";
 import { encodeWireBinary, decodeWireBinary } from "tierless/wire";   // the §6 decision prices the real (binary) wire
 import { PROGRAMS } from "./policy-app.gen.mjs";
-import { makeCheck } from "../lib/check.mjs";
+import { makeCheck } from "../lib/check.mts";
 
 const { WebSocketServer, WebSocket } = createRequire(import.meta.url)("ws");
 const fmt = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB");

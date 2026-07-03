@@ -17,7 +17,7 @@ import { encodeGraph, decodeGraph, isHandle } from "tierless/graph";
 import { makeTier } from "tierless/heap";
 import { makeTrackedSession, planDelta, applyDeltaTracked, adoptBaseline, exciseForCapture, subForFullWire, touch } from "tierless/delta";
 import { PROGRAMS, __setDirtySink } from "./delta-app.gen.mjs";
-import { makeCheck } from "../lib/check.mjs";
+import { makeCheck } from "../lib/check.mts";
 
 const { WebSocketServer, WebSocket } = createRequire(import.meta.url)("ws");
 const fmt = (n) => (n < 1024 ? n + " B" : (n / 1024).toFixed(1) + " KB");

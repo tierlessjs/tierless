@@ -8,7 +8,7 @@
 // even a changed container's UNCHANGED slots stay home, not just every unchanged object.
 import { openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot } from "tierless/delta";
 import { encodeGraph, decodeGraph } from "tierless/graph";
-import { makeCheck } from "../lib/check.mjs";
+import { makeCheck } from "../lib/check.mts";
 
 const fetchCopy = (v) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([v]))))[0];   // a detached snapshot, as Channel.fetch makes one
 const fmt = (n) => (n < 1024 ? n + " B" : (n / 1024).toFixed(1) + " KB");

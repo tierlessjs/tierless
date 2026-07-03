@@ -16,7 +16,7 @@ import { createRequire } from "node:module";
 import { serveApp } from "tierless/server";
 import { connect } from "tierless/browser";
 import { startSidecar, makeApiExec } from "tierless/api";
-import { vdomToHtml, shell } from "./dom.mjs";
+import { vdomToHtml, shell } from "./dom.mts";
 import * as bundle from "./app/bundle.gen.mjs";
 import { WS_PATH } from "tierless/server";
 
@@ -24,7 +24,7 @@ const { chromium } = createRequire(process.env.PLAYWRIGHT_REQUIRE || "/opt/node2
 const trace = [];
 
 // ---------------------------------------------------------------- server tier ----
-const apiService = startSidecar(new URL("./api/tasks-fns.mjs", import.meta.url));
+const apiService = startSidecar(new URL("./api/tasks-fns.mts", import.meta.url));
 await apiService.ready();
 
 let resolveSession;

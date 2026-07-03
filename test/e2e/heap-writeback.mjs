@@ -8,7 +8,7 @@
 // re-apply, and retry. No lost updates — the CAS guarantee applied to a fetched §5
 // snapshot. Reuses the project's Heap/Channel and the identity/cycle-safe graph codec.
 import { makeTier, Channel, writeBack, commitWrite } from "tierless/heap";
-import { makeCheck } from "../lib/check.mjs";
+import { makeCheck } from "../lib/check.mts";
 
 const { check, ok } = makeCheck();
 console.log("Probe: §5 write-back — a reader's mutation propagates back to the master under optimistic CAS\n");

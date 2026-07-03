@@ -16,9 +16,9 @@
 import { makePump, initialStack } from "tierless/runtime";
 import { startSidecar, makeApiExec } from "tierless/api";
 import { encodeWireBinary, decodeWireBinary } from "tierless/wire";
-import { textOf } from "./app/render.mjs";
+import { textOf } from "./app/render.mts";
 import * as bundle from "./app/bundle.gen.mjs";
-import { makeCounter } from "../lib/check.mjs";
+import { makeCounter } from "../lib/check.mts";
 
 const pump = makePump(bundle);
 
@@ -44,7 +44,7 @@ async function runSession(exec, events) {
 
 console.log("Proof: the default api.* path is the reference monitor (the runtime pump + the tasks service over the pipe)\n");
 
-const apiService = startSidecar(new URL("./api/tasks-fns.mjs", import.meta.url));
+const apiService = startSidecar(new URL("./api/tasks-fns.mts", import.meta.url));
 await apiService.ready();
 try {
   // ---- authenticated session: the exact verify.mjs journey, now through the monitor ----
