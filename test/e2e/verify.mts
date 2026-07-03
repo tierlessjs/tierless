@@ -10,11 +10,12 @@
 import { run, start } from "./app/bundle.gen.mjs";
 import * as api from "./api/tasks-fns.mts";
 import { textOf } from "./app/render.mts";
+import type { Rendered } from "./app/render.mts";
 
 api.seed();
-const API = {
-  "api.getTasks": (a) => api.getTasks(a), "api.getStats": () => api.getStats(),
-  "api.addTask": (a) => api.addTask(a), "api.setStatus": (id, s) => api.setStatus(id, s), "api.deleteTask": (id) => api.deleteTask(id),
+const API: Record<string, (...args: unknown[]) => unknown> = {
+  "api.getTasks": (a) => api.getTasks(a as { status?: string } | undefined), "api.getStats": () => api.getStats(),
+  "api.addTask": (a) => api.addTask(a as { title: string }), "api.setStatus": (id, s) => api.setStatus(id as number, s as string), "api.deleteTask": (id) => api.deleteTask(id as number),
 };
 const events = [
   { ev: "filter", value: "done" }, { ev: "filter", value: "all" },
@@ -22,12 +23,12 @@ const events = [
   { ev: "delete", id: 1 }, { ev: "stop" },
 ];
 let ei = 0;
-const commits = [];
+const commits: string[] = [];
 let res = start("App");
 while (!res.done) {
   const req = res.request;
   if (req.tier === "browser" && req.name === "dom.commit") {
-    commits.push(textOf(req.args[0]));
+    commits.push(textOf(req.args[0] as Rendered));
     res.stack[res.stack.length - 1].ret = events[ei++] || { ev: "stop" };
   } else if (req.tier === "server") {
     res.stack[res.stack.length - 1].ret = API[req.name](...req.args);

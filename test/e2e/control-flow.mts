@@ -6,17 +6,18 @@
 // caught by a try/catch in the migrated code. No browser, no socket, no Babel.
 import { PROGRAMS, __unwind } from "./cf-fixtures.gen.mjs";
 import { encodeGraph, decodeGraph } from "tierless/graph";
+import type { Frame, ResourceRequest } from "tierless/runtime";
 
-const wire = (stack) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([stack]))))[0];
-const exec = (req) => {                       // dbl/get echo arg; inc adds 1; lt3 is i<3; fail throws
+const wire = (stack: Frame[]): Frame[] => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([stack])))) [0] as Frame[]; // round-tripped through the wire codec — same shape
+const exec = (req: ResourceRequest): unknown => {                       // dbl/get echo arg; inc adds 1; lt3 is i<3; fail throws
   if (req.name === "api.fail") throw new Error("resource failed");
-  if (req.name === "api.inc") return req.args[0] + 1;
-  if (req.name === "api.lt3") return req.args[0] < 3 ? 1 : 0;
+  if (req.name === "api.inc") return (req.args[0] as number) + 1;
+  if (req.name === "api.lt3") return (req.args[0] as number) < 3 ? 1 : 0;
   return req.args[0];
 };
 
-function runMigrating(fn) {
-  let stack = [{ fn, pc: 0, args: [] }];
+function runMigrating(fn: string): unknown {
+  let stack: Frame[] = [{ fn, pc: 0, args: [] }];
   for (;;) {
     const top = stack[stack.length - 1];
     const r = PROGRAMS[top.fn](top);
@@ -59,21 +60,21 @@ const cases = [
   ["suspending do-while test", "doWhileTestSusp", 3],
   ["unbraced if-branch: suspension runs ONLY in the taken branch", "unbracedBranchSusp", 10],
   ["unbraced loop-body if with a suspending branch", "unbracedLoopBodySusp", 100],
-];
+] as const;
 
 let pass = 0;
 for (const [label, fn, expected] of cases) {
-  let got, err = null;
+  let got: unknown, err: unknown = null;
   try { got = runMigrating(fn); } catch (e) { err = e; }
   const ok = err == null && got === expected;
   if (ok) pass++;
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : `  (got ${err ? "ERR:" + err.message : JSON.stringify(got)}, expected ${JSON.stringify(expected)})`}`);
+  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : `  (got ${err ? "ERR:" + (err as Error).message : JSON.stringify(got)}, expected ${JSON.stringify(expected)})`}`);
 }
 
 // Safety net: a frame whose pc has no case (a transform bug, or a continuation mangled in transit)
 // must hard-error at once, never spin `while (true)` forever. Drive a real machine with an
 // out-of-range pc and assert it throws RangeError instead of hanging.
-let guardErr = null;
+let guardErr: unknown = null;
 try { PROGRAMS.forContinue({ fn: "forContinue", pc: 0xbeef, args: [] }); } catch (e) { guardErr = e; }
 const pcGuardOk = guardErr instanceof RangeError && /invalid pc/.test(guardErr.message);
 console.log(`  ${pcGuardOk ? "PASS" : "FAIL"}  out-of-range pc hard-errors (no infinite loop)`);
