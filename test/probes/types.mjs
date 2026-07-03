@@ -38,6 +38,7 @@ import {
   adoptBaseline, subForFullWire, exciseForCapture,
   openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot,
 } from "tierless/delta";
+import { makeTier, encodeWire, decodeWire, wireHandles, writeBack, commitWrite, makeCoherentHost } from "tierless/heap";
 
 const bundle: Bundle = { PROGRAMS: {}, __unwind: () => false };
 const pump = makePump(bundle);
@@ -93,6 +94,19 @@ const snap = openSnapshot("server", { a: 1 });
 void diffSnapshot(snap, { a: 2 }).byteLength;
 const wholeBytes = wholeSnapshot("server", { a: 1 });
 void applySnapshot("server", { a: 1 }, wholeBytes);
+const hTier = makeTier("server");
+const hWire = encodeWire(dStack, null, { tier: hTier, threshold: 8192 });
+const hDecoded = decodeWire(hWire);
+void hDecoded.stack; void hDecoded.request;
+const hHandles = wireHandles(hWire); if (hHandles.length) void hHandles[0].owner;
+const hHandle = hTier.heap.put({ big: true });
+const wb = writeBack(hTier.heap, hHandle.id, hTier.heap.version(hHandle.id), { big: false });
+void wb.ok; void wb.version;
+const hChannel = new Channel({ [hTier.id]: { heap: hTier.heap } });
+const cw = commitWrite(hChannel, hHandle, (copy) => { void copy; }, { tries: 3 });
+void cw.ok; void cw.tries;
+const chost = makeCoherentHost(hTier, hChannel);
+void chost.stats.fetches; void chost.deref(hHandle); void chost.writeBack({});
 `);
 const ok = tsc([join("test", ".types-fixture", "ok.ts")]);
 check("a consumer exercising every main entry type-checks under --strict", ok.status === 0, (ok.stdout || "").split("\n").slice(0, 3).join(" | "));
@@ -103,11 +117,13 @@ import { defineApi, PUBLIC } from "tierless/api";
 import { ContentStore } from "tierless/content";
 import { Heap } from "tierless/fetch";
 import { exciseForCapture, makeTrackedSession } from "tierless/delta";
+import { makeTier } from "tierless/heap";
 useAction("not a function");
 defineApi({ leak: { authorize: PUBLIC, run: () => 1, extra: true } });
 new ContentStore().resolve("x");   // no such method — the real one is get(); this must fail, not silently pass
 new Heap(42);                      // the real constructor takes a string tierId
 exciseForCapture(makeTrackedSession("x"), [{ fn: "F", pc: 0 }], null);   // missing the required tier argument (4th) — no default
+makeTier("server", {});            // the real function takes 1 argument (id); there is no options param
 `);
 const bad = tsc([join("test", ".types-fixture", "bad.ts")]);
 check("deliberate misuse FAILS to type-check (the types are load-bearing)", bad.status !== 0 && (bad.stdout || "").includes("error TS"), bad.status);

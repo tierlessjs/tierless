@@ -77,7 +77,7 @@
       "default": "./src/graph.mjs"
     },
     "./heap": {
-      "types": "./types/heap.d.ts",
+      "types": "./types/heap.d.mts",
       "default": "./src/heap.mjs"
     },
     "./fetch": {
