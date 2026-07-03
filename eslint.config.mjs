@@ -42,6 +42,7 @@ export default [
       "packages/tierless/src/transform.cjs",
       // Compiled from the hand-authored .mts source next to each file — not hand-edited.
       "packages/tierless/src/**/*.mjs",
+      "packages/tierless/bin/tierless.mjs",
     ],
   },
   js.configs.recommended,

@@ -24,7 +24,7 @@
   "license": "Apache-2.0",
   "author": "Bright Fulton",
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.bin.json"
   },
   "files": [
     "src",
