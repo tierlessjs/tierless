@@ -8,17 +8,20 @@
 // tier. Same continuation, three principals — authority is enforced at the boundary, never inferred from
 // how control flow arrived.
 import { PROGRAMS, __unwind } from "./api-pump-app.gen.mjs";
-import { startSidecar, makeApiExec } from "tierless/api";
+import { startSidecar, makeApiExec, type SidecarClient } from "tierless/api";
 import { encodeGraph, decodeGraph } from "tierless/graph";
 import { makeCounter } from "../lib/check.mts";
+import type { Frame, ResourceRequest, Exec } from "tierless/runtime";
 
-const wire = (stack) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([stack]))))[0];   // serialize the continuation at each hop (proves migration)
+const wire = (stack: Frame[]): Frame[] => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([stack]))))[0] as Frame[];   // serialize the continuation at each hop (proves migration)
+
+type StepResult = { done: true; value: unknown } | { done: false; request: ResourceRequest; stack: Frame[] };
 
 // The pump (mirrors runtime.mjs, bound to this app's PROGRAMS). Runs the continuation on the local tier,
 // stopping at the first foreign resource. A resource failure routes through __unwind, so a monitor
 // denial thrown by execHere lands in the app's try/catch even one frame up.
-async function pumpLocal(stack, ownsHere, execHere, incoming) {
-  const service = async (req) => { try { stack[stack.length - 1].ret = await execHere(req); } catch (e) { if (!__unwind(stack, e)) throw e; } };
+async function pumpLocal(stack: Frame[], ownsHere: (tier: string) => boolean, execHere: Exec, incoming: ResourceRequest | null): Promise<StepResult> {
+  const service = async (req: ResourceRequest) => { try { stack[stack.length - 1].ret = await execHere(req); } catch (e) { if (!__unwind(stack, e)) throw e; } };
   if (incoming) await service(incoming);
   for (;;) {
     const top = stack[stack.length - 1];
@@ -31,19 +34,21 @@ async function pumpLocal(stack, ownsHere, execHere, incoming) {
   }
 }
 
-const ownsServer = (tier) => tier === "server";
-const ownsBrowser = (tier) => tier === "browser";
+const ownsServer = (tier: string) => tier === "server";
+const ownsBrowser = (tier: string) => tier === "browser";
+
+interface Committed { who: string; outcome: string }
 
 // The backend client services api.* with makeApiExec — the same default adapter the live
 // demos use: monitor over the pipe with the session token, a denial becoming a catchable
 // throw in the continuation. The browser services commit.
-function browserExec(sink) {
-  return (req) => { if (req.name === "dom.commit") { sink.committed = req.args[0]; return "shown"; } throw new Error("browser can't service " + req.name); };
+function browserExec(sink: { committed?: Committed }) {
+  return (req: ResourceRequest): unknown => { if (req.name === "dom.commit") { sink.committed = req.args[0] as Committed; return "shown"; } throw new Error("browser can't service " + req.name); };
 }
 
 // Drive one continuation across the two tiers under a given session token, serializing at every hop.
-async function runFlow(api, token) {
-  const sink = {};
+async function runFlow(api: SidecarClient, token: string | null) {
+  const sink: { committed?: Committed } = {};
   const sExec = makeApiExec(api, token), bExec = browserExec(sink);
   let res = await pumpLocal([{ fn: "Flow", pc: 0, args: [] }], ownsServer, sExec, null);
   let onServer = true;
@@ -51,7 +56,7 @@ async function runFlow(api, token) {
     onServer = !onServer;                               // migrate to the other tier
     res = await pumpLocal(wire(res.stack), onServer ? ownsServer : ownsBrowser, onServer ? sExec : bExec, res.request);
   }
-  return { value: res.value, committed: sink.committed };
+  return { value: res.value, committed: sink.committed! };   // Flow always ends via commit(...), so a completed run always populated this
 }
 
 const { check, counts } = makeCounter();
@@ -61,8 +66,8 @@ console.log("Proof: the live pump services api.* through the trusted monitor (si
 const api = startSidecar(new URL("./api/server-fns.mts", import.meta.url));
 await api.ready();
 try {
-  const aliceTok = (await api.call("login", [{ user: "alice", pass: "wonderland" }])).value;
-  const bobTok = (await api.call("login", [{ user: "bob", pass: "builder" }])).value;
+  const aliceTok = ((await api.call("login", [{ user: "alice", pass: "wonderland" }])) as { ok: true; value: string }).value;   // login is PUBLIC and always succeeds — narrow past the ok/error union
+  const bobTok = ((await api.call("login", [{ user: "bob", pass: "builder" }])) as { ok: true; value: string }).value;
 
   // Admin session: whoami resolves the verified principal, the admin-only call is allowed, and the
   // continuation bounces to the browser carrying the result.

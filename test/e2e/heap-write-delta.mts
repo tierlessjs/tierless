@@ -10,15 +10,19 @@ import { openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot } from "tierle
 import { encodeGraph, decodeGraph } from "tierless/graph";
 import { makeCheck } from "../lib/check.mts";
 
-const fetchCopy = (v) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([v]))))[0];   // a detached snapshot, as Channel.fetch makes one
-const fmt = (n) => (n < 1024 ? n + " B" : (n / 1024).toFixed(1) + " KB");
+const fetchCopy = <T,>(v: T): T => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([v]))))[0] as T;   // a detached snapshot, as Channel.fetch makes one
+const fmt = (n: number): string => (n < 1024 ? n + " B" : (n / 1024).toFixed(1) + " KB");
 
 const { check, ok } = makeCheck();
 console.log("Probe: §5 write-back as a delta — only the changed objects cross, collections included\n");
 
+interface Shared { kind: string }
+interface Row { id: number; title: string; score: number; body: string; meta: Shared | null }
+interface MasterDoc { rows: Row[]; tags: Set<string>; index: Map<string, number>; config: { theme: string; page: number } }
+
 const body = "markdown body. ".repeat(40);
-const newMaster = () => {
-  const shared = { kind: "draft" };
+const newMaster = (): MasterDoc => {
+  const shared: Shared = { kind: "draft" };
   return {
     rows: Array.from({ length: 1500 }, (_, i) => ({ id: i, title: "Article " + i, score: i % 100, body, meta: i < 2 ? shared : null })),
     tags: new Set(["news", "tech"]),
@@ -26,7 +30,7 @@ const newMaster = () => {
     config: { theme: "light", page: 1 },
   };
 };
-const wholeOf = (v) => wholeSnapshot("browser", v).length;
+const wholeOf = (v: unknown): number => wholeSnapshot("browser", v).length;
 
 // ── Case 1: member edits — ship just the touched objects (the clean per-object win) ─────────────────
 {
@@ -34,13 +38,13 @@ const wholeOf = (v) => wholeSnapshot("browser", v).length;
   const session = openSnapshot("browser", copy);
   copy.rows[2].score = 777;                 // member assignment
   copy.config.theme = "dark";               // nested member assignment
-  copy.rows[0].meta.kind = "published";     // mutate the SHARED object (reachable from rows[0] and rows[1])
+  copy.rows[0].meta!.kind = "published";    // mutate the SHARED object (reachable from rows[0] and rows[1])
   const delta = diffSnapshot(session, copy);
   check(`member edits ship only the touched objects (${fmt(delta.length)} vs ${fmt(whole)} whole, ${(whole / delta.length).toFixed(0)}x smaller)`, delta.length * 50 < whole);
   applySnapshot("server", master, delta);
   check("member edit landed (rows[2].score)", master.rows[2].score === 777);
   check("nested member edit landed (config.theme)", master.config.theme === "dark");
-  check("the change to the SHARED object traveled once and both refs see it", master.rows[0].meta === master.rows[1].meta && master.rows[0].meta.kind === "published");
+  check("the change to the SHARED object traveled once and both refs see it", master.rows[0].meta === master.rows[1].meta && master.rows[0].meta!.kind === "published");
   check("every unchanged row stayed home (values + bodies intact)", master.rows[1].score === 1 && master.rows[3].body === body && master.rows[5].title === "Article 5");
 }
 
@@ -64,7 +68,7 @@ const wholeOf = (v) => wholeSnapshot("browser", v).length;
 
 // ── min(delta, whole): a near-total change is never larger than the old whole-object write-back ──────
 {
-  const tiny = { a: 1, b: 2 }, tinyMaster = fetchCopy(tiny);
+  const tiny: { a: number; b: number; c?: number } = { a: 1, b: 2 }, tinyMaster = fetchCopy(tiny);
   const ts = openSnapshot("browser", tiny);
   tiny.a = 9; tiny.b = 8; tiny.c = 7;                                    // change all of it
   const td = diffSnapshot(ts, tiny), tw = wholeSnapshot("browser", tiny);
