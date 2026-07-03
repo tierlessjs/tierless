@@ -13,18 +13,19 @@ import { makeDeltaSession, encodeDelta, applyDelta,
   makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "tierless/delta";
 import { encodeWireBinary } from "tierless/wire";
 import { makeCheck } from "../lib/check.mts";
+import type { Frame, MachineResult } from "tierless/runtime";
 
 const { check, ok } = makeCheck();
-function deepEq(a, b, seen = new Set()) {
+function deepEq(a: unknown, b: unknown, seen: Set<unknown> = new Set()): boolean {
   if (a === b) return true;
   if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return Object.is(a, b);
   if (seen.has(a)) return true; seen.add(a);
   if (Array.isArray(a) !== Array.isArray(b)) return false;
   const ka = Object.keys(a), kb = Object.keys(b);
-  return ka.length === kb.length && ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && deepEq(a[k], b[k], seen));
+  return ka.length === kb.length && ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && deepEq((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], seen));
 }
 // step the compiled machine until it suspends at a resource (commit) or returns
-function runToResource(stack) {
+function runToResource(stack: Frame[]): { done: true; value: unknown } | { done: false; request: Extract<MachineResult, { op: "resource" }>; stack: Frame[] } {
   for (;;) {
     const top = stack[stack.length - 1];
     const r = PROGRAMS[top.fn](top);
@@ -34,6 +35,10 @@ function runToResource(stack) {
     else throw new Error("unexpected op " + r.op);
   }
 }
+// the driver only ever suspends in this probe's scripted runs (the event script always ends in an
+// explicit "stop" event serviced as a resource commit, never an immediate machine return) — cast
+// the union down to its suspended arm at call sites that skip the .done check on that invariant.
+type Suspended = Extract<ReturnType<typeof runToResource>, { done: false }>;
 
 console.log("Probe: the compiler write-barrier (--track-writes) drives write-tracked delta on plain source\n");
 
@@ -58,7 +63,7 @@ const events = [
 ];
 
 let countsMatch = true, reconMatch = true, fidelity = true, hops = 0, sawTinyDelta = false;
-const trackedTotal = [], fullTotal = []; // bytes per hop: write-tracked delta vs a full re-ship
+const trackedTotal: number[] = [], fullTotal: number[] = []; // bytes per hop: write-tracked delta vs a full re-ship
 
 let r = runToResource([{ fn: "Session", pc: 0, args: [] }]);   // run to the first commit (model built, not yet mutated)
 let evIdx = 0;
@@ -105,18 +110,19 @@ check("warm hops ship only the few mutated objects, not the whole model (the obj
 {
   const s = makeTrackedSession("server"), p = makeTrackedSession("browser");
   __setDirtySink((o) => touch(s, o));
-  let rr = runToResource([{ fn: "Session", pc: 0, args: [] }]);
+  let rr = runToResource([{ fn: "Session", pc: 0, args: [] }]) as Suspended;
   applyDeltaTracked(p, encodeDeltaTracked(s, rr.stack, rr.request).bytes);    // baseline: empty model
   rr.stack[rr.stack.length - 1].ret = { type: "add", id: 1, label: "x" };
-  rr = runToResource(rr.stack);
+  rr = runToResource(rr.stack) as Suspended;
   applyDeltaTracked(p, encodeDeltaTracked(s, rr.stack, rr.request).bytes);    // peer now holds a row, done=false
 
   __setDirtySink(null);                                                       // stop reporting writes
   rr.stack[rr.stack.length - 1].ret = { type: "toggle", idx: 0 };             // a pure in-place edit of the existing row
-  rr = runToResource(rr.stack);
+  rr = runToResource(rr.stack) as Suspended;
   encodeDeltaTracked(s, rr.stack, rr.request);                                // capture with the sink off…
   const back = applyDeltaTracked(p, encodeDeltaTracked(s, rr.stack, rr.request).bytes);
-  const liveDone = rr.stack[0].model.items[0].done, peerDone = back.stack[0].model.items[0].done;
+  // ad hoc fixture read — track-app's compiled model shape isn't declared anywhere but its own source
+  const liveDone = (rr.stack[0] as any).model.items[0].done, peerDone = (back.stack[0] as any).model.items[0].done;
   // (the fresh event object is still shipped — new objects are found by the walk — but the existing
   // row's in-place toggle is NOT, because no __dirty fired for it: the peer's row stays stale.)
   check("control: sink uninstalled ⇒ the existing row's in-place toggle is lost (live toggled, peer did not)", liveDone === true && peerDone === false);

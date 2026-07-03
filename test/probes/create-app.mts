@@ -37,7 +37,7 @@ const server = spawn(process.execPath, ["server.mjs"], { cwd: APP, env: { ...pro
 let log = "";
 server.stdout.on("data", (d) => { log += d; });
 server.stderr.on("data", (d) => { log += d; });
-const port = await new Promise((res, rej) => {
+const port = await new Promise<number>((res, rej) => {
   const t = setTimeout(() => rej(new Error("server didn't start:\n" + log)), 15000);
   const iv = setInterval(() => { const m = log.match(/listening on http:\/\/localhost:(\d+)/); if (m) { clearTimeout(t); clearInterval(iv); res(Number(m[1])); } }, 100);
 });
@@ -45,13 +45,14 @@ check("the scaffolded server boots and prints its URL", port > 0, port);
 
 // ---- drive a session as the browser tier ------------------------------------------------
 try {
-  const bundle = await import(pathToFileURL(join(APP, "app.gen.mjs")).href);
-  const commits = [];
+  // compiler output generated at test time — no static declaration to check against
+  const bundle: any = await import(pathToFileURL(join(APP, "app.gen.mjs")).href);
+  const commits: any[] = [];
   const script = [{ ev: "add", text: "hi from the probe" }, { ev: "add", text: "   " }, { ev: "stop" }];
   let si = 0;
-  const conn = connect({ url: `ws://localhost:${port}${WS_PATH}`, bundle, exec: (req) => { commits.push(req.args[0]); return script[si++] || { ev: "stop" }; } });
+  const conn = connect({ url: `ws://localhost:${port}${WS_PATH}`, bundle, exec: (req: any) => { commits.push(req.args[0]); return script[si++] || { ev: "stop" }; } });
   await conn.ready;
-  await new Promise((res, rej) => {
+  await new Promise<void>((res, rej) => {
     const t = setTimeout(() => rej(new Error("session didn't finish; commits=" + commits.length)), 15000);
     const iv = setInterval(() => { if (si >= script.length) { clearTimeout(t); clearInterval(iv); setTimeout(res, 300); } }, 100);
   });

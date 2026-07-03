@@ -11,17 +11,20 @@ import { makeDeltaSession, encodeDelta, applyDelta, makeTrackedSession, encodeDe
 import { isHandle } from "tierless/graph";
 import { makeTier } from "tierless/heap";
 import { makeCheck } from "../lib/check.mts";
+import type { DeltaFrame, DeltaRequest } from "tierless/delta";
+
+type Cont = { stack: DeltaFrame[]; request: DeltaRequest | null };
 
 const { check, ok } = makeCheck();
-const rng = (seed) => { let s = (seed >>> 0) || 1; return () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; };
+const rng = (seed: number): (() => number) => { let s = (seed >>> 0) || 1; return () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; };
 console.log("Probe: delta wire codec — property round-trips, differential, boundaries, robustness\n");
 
 // --- seeded random-graph generator for the delta codec's value set (no symbols / non-enum) ------
 const STRPOOL = ["", "a", "id", "title", "x", "δσ", "🦄✓", "k k", "q\"q", "l\nb", "123", "-1", "a".repeat(40), "dup", "dup"];
 const serverTier = makeTier("server");
-function makeGraph(rnd) {
-  const pool = [], rint = (n) => Math.floor(rnd() * n), pick = (a) => a[rint(a.length)];
-  function leaf() {
+function makeGraph(rnd: () => number): { frames: DeltaFrame[]; request: DeltaRequest | null } {
+  const pool: unknown[] = [], rint = (n: number): number => Math.floor(rnd() * n), pick = <T,>(a: T[]): T => a[rint(a.length)];
+  function leaf(): unknown {
     switch (rint(11)) {
       case 0: return rint(256) - 128;
       case 1: { const m = rint(0x7fffffff); return rnd() < 0.5 && m !== 0 ? -m : m; }
@@ -33,24 +36,24 @@ function makeGraph(rnd) {
       default: return pick([0.1, Math.PI, 5e-324, 1e308]);
     }
   }
-  function node(d) {
+  function node(d: number): unknown {
     if (d <= 0 || rnd() < 0.4) return leaf();
     if (pool.length && rnd() < 0.3) return pick(pool);                            // reuse -> DAG sharing / cycles
     const kind = rint(5);
-    if (kind === 0) { const a = []; pool.push(a); const n = rint(5); for (let i = 0; i < n; i++) a.push(node(d - 1)); return a; }
-    if (kind === 1) { const o = {}; pool.push(o); const n = rint(5); for (let i = 0; i < n; i++) { const key = pick(STRPOOL); if (key !== "__proto__") o[key] = node(d - 1); } return o; }
-    if (kind === 2) { const m = new Map(); pool.push(m); const n = rint(4); for (let i = 0; i < n; i++) m.set(rnd() < 0.5 ? pick(STRPOOL) : node(d - 1), node(d - 1)); return m; }
-    if (kind === 3) { const s = new Set(); pool.push(s); const n = rint(4); for (let i = 0; i < n; i++) s.add(node(d - 1)); return s; }
+    if (kind === 0) { const a: unknown[] = []; pool.push(a); const n = rint(5); for (let i = 0; i < n; i++) a.push(node(d - 1)); return a; }
+    if (kind === 1) { const o: Record<string, unknown> = {}; pool.push(o); const n = rint(5); for (let i = 0; i < n; i++) { const key = pick(STRPOOL); if (key !== "__proto__") o[key] = node(d - 1); } return o; }
+    if (kind === 2) { const m = new Map<unknown, unknown>(); pool.push(m); const n = rint(4); for (let i = 0; i < n; i++) m.set(rnd() < 0.5 ? pick(STRPOOL) : node(d - 1), node(d - 1)); return m; }
+    if (kind === 3) { const s = new Set<unknown>(); pool.push(s); const n = rint(4); for (let i = 0; i < n; i++) s.add(node(d - 1)); return s; }
     const h = { __tierless_handle__: true, owner: "server", id: serverTier.heapPut({ blob: "x".repeat(rint(50)) }), kind: "object" }; pool.push(h); return h;  // §5 handle leaf
   }
-  const frames = []; const nf = 1 + rint(2);
-  for (let fi = 0; fi < nf; fi++) { const fr = { fn: "F" + fi, pc: rint(20) }; const nl = rint(4); for (let i = 0; i < nl; i++) fr["loc" + i] = node(4); frames.push(fr); }
+  const frames: DeltaFrame[] = []; const nf = 1 + rint(2);
+  for (let fi = 0; fi < nf; fi++) { const fr: DeltaFrame = { fn: "F" + fi, pc: rint(20) }; const nl = rint(4); for (let i = 0; i < nl; i++) fr["loc" + i] = node(4); frames.push(fr); }
   const request = rnd() < 0.6 ? { op: "resource", tier: pick(["server", "browser"]), name: "api.x", args: Array.from({ length: rint(3) }, () => node(4)) } : null;
   return { frames, request };
 }
 
 // identity-aware structural equality (maps a-objects to b-objects so sharing & cycles must match)
-function structEq(a, b, map) {
+function structEq(a: unknown, b: unknown, map: Map<unknown, unknown>): boolean {
   if (typeof a === "number" || typeof b === "number") return typeof a === typeof b && Object.is(a, b);
   if (typeof a === "bigint" || typeof b === "bigint") return a === b;
   if (a === undefined || b === undefined || a === null || b === null) return a === b;
@@ -65,20 +68,20 @@ function structEq(a, b, map) {
   if (aa || Array.isArray(b)) { if (!aa || !Array.isArray(b) || a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (!structEq(a[i], b[i], map)) return false; return true; }
   const ka = Object.keys(a), kb = Object.keys(b);
   if (ka.length !== kb.length) return false;
-  for (const k of ka) { if (!Object.prototype.hasOwnProperty.call(b, k) || !structEq(a[k], b[k], map)) return false; }
+  for (const k of ka) { if (!Object.prototype.hasOwnProperty.call(b, k) || !structEq((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], map)) return false; }
   return true;
 }
-const sameCont = (x, y) => { const map = new Map(); if (x.stack.length !== y.stack.length) return false; for (let i = 0; i < x.stack.length; i++) if (!structEq(x.stack[i], y.stack[i], map)) return false; if ((x.request === null) !== (y.request === null)) return false; if (x.request) { if (x.request.name !== y.request.name || x.request.tier !== y.request.tier) return false; if (!structEq(x.request.args, y.request.args, map)) return false; } return true; };
-const rt = (mode, frames, request) => mode === "rescan"
+const sameCont = (x: Cont, y: Cont): boolean => { const map = new Map<unknown, unknown>(); if (x.stack.length !== y.stack.length) return false; for (let i = 0; i < x.stack.length; i++) if (!structEq(x.stack[i], y.stack[i], map)) return false; if ((x.request === null) !== (y.request === null)) return false; if (x.request) { if (x.request.name !== y.request!.name || x.request.tier !== y.request!.tier) return false; if (!structEq(x.request.args, y.request!.args, map)) return false; } return true; };
+const rt = (mode: "rescan" | "tracked", frames: DeltaFrame[], request: DeltaRequest | null): Cont => mode === "rescan"
   ? applyDelta(makeDeltaSession("browser"), encodeDelta(makeDeltaSession("server"), frames, request).bytes)
   : applyDeltaTracked(makeTrackedSession("browser"), encodeDeltaTracked(makeTrackedSession("server"), frames, request).bytes);
 
 // === 1) property round-trip, both modes (cold ships everything) ===
-for (const mode of ["rescan", "tracked"]) {
+for (const mode of ["rescan", "tracked"] as const) {
   let fail = -1;
   for (let i = 0; i < 2000 && fail < 0; i++) {
     const { frames, request } = makeGraph(rng(0x1234 + i));
-    let back; try { back = rt(mode, frames, request); } catch (e) { console.log("    threw at iter " + i + ": " + e.message); fail = i; break; }
+    let back; try { back = rt(mode, frames, request); } catch (e) { console.log("    threw at iter " + i + ": " + (e as Error).message); fail = i; break; }
     if (!sameCont({ stack: frames, request }, back)) fail = i;
   }
   check(`property round-trip (${mode}): 2000 random graphs (sharing/cycles/Map/Set/handles) decode identically`, fail < 0, fail < 0 ? "" : "first failure at iter " + fail);
@@ -93,27 +96,27 @@ for (let i = 0; i < 1500 && diffFail < 0; i++) {
 check("differential: write-tracked decodes a cold capture identically to rescan (1500 graphs)", diffFail < 0, diffFail < 0 ? "" : "first divergence at iter " + diffFail);
 
 // === 3) boundaries ===
-const rt1 = (v) => applyDelta(makeDeltaSession("b"), encodeDelta(makeDeltaSession("s"), [{ fn: "F", pc: 0, v }], null).bytes).stack[0].v;
+const rt1 = (v: unknown): unknown => applyDelta(makeDeltaSession("b"), encodeDelta(makeDeltaSession("s"), [{ fn: "F", pc: 0, v }], null).bytes).stack[0].v;
 let intsOk = true; for (const n of [0, 1, -1, 127, 128, -128, 16383, 16384, 2 ** 20, 2 ** 28, 2 ** 31 - 1, -(2 ** 31 - 1), 2 ** 31, 2 ** 40, 2 ** 52, 2 ** 53 - 1]) intsOk = intsOk && Object.is(rt1(n), n);
 check("integer boundaries round-trip exactly (incl. the int/float threshold at 2^31)", intsOk);
 let specialOk = true; for (const sp of [NaN, Infinity, -Infinity, -0, 5e-324, 1e308]) specialOk = specialOk && Object.is(rt1(sp), sp);
 check("NaN / ±Infinity / -0 and float extremes round-trip exactly", specialOk);
 let bigOk = true; for (const bg of [0n, 1n, -1n, 123456789012345678901234567890n, -98765432109876543210n]) bigOk = bigOk && rt1(bg) === bg;
 check("bigint boundaries round-trip exactly", bigOk);
-const eb = rt1({ o: {}, a: [], m: new Map(), s: new Set(), str: "" });
+const eb = rt1({ o: {}, a: [], m: new Map(), s: new Set(), str: "" }) as any;   // ad hoc fixture — rt1's return is genuinely unknown by design
 check("empty object / array / map / set / string round-trip", Object.keys(eb.o).length === 0 && eb.a.length === 0 && eb.m.size === 0 && eb.s.size === 0 && eb.str === "");
-const many = {}; for (let i = 0; i < 400; i++) many["field_" + i] = "value_" + i;
+const many: Record<string, string> = {}; for (let i = 0; i < 400; i++) many["field_" + i] = "value_" + i;
 const list = Array.from({ length: 400 }, (_, i) => ({ n: i }));
-const lb = rt1({ many, list });
+const lb = rt1({ many, list }) as any;   // ad hoc fixture — see note above
 check("large string/obj tables (>127 entries, multi-byte varint indices) round-trip", lb.many.field_399 === "value_399" && lb.list.length === 400 && lb.list[399].n === 399);
-const ub = rt1({ s: "héllo 🦄   \n \"q\"", long: "x".repeat(5000) });
+const ub = rt1({ s: "héllo 🦄   \n \"q\"", long: "x".repeat(5000) }) as any;   // ad hoc fixture — see note above
 check("unicode, NUL, control chars, and a 5 KB string round-trip", ub.s === "héllo 🦄   \n \"q\"" && ub.long.length === 5000);
-let deep = { v: 0 }; for (let i = 0; i < 500; i++) deep = { next: deep };           // 500-deep nesting
-check("a 500-deep nested graph round-trips without overflow", rt1(deep).next.next.v !== undefined || true);
+let deep: unknown = { v: 0 }; for (let i = 0; i < 500; i++) deep = { next: deep };           // 500-deep nesting
+check("a 500-deep nested graph round-trips without overflow", (rt1(deep) as any).next.next.v !== undefined || true);
 
 // === 4) decode robustness against truncated / corrupted / hostile bytes ===
 const valid = encodeDelta(makeDeltaSession("s"), [{ fn: "F", pc: 0, x: { a: 1, b: [1, 2, 3], c: "s", m: new Map([["k", 1]]) } }], { op: "resource", tier: "server", name: "api.x", args: [{ k: 1 }] }).bytes;
-const tryApply = (bytes) => { try { applyDelta(makeDeltaSession("z"), bytes); return true; } catch (e) { return e instanceof Error; } };  // throw OR return ⇒ terminated cleanly
+const tryApply = (bytes: Uint8Array): boolean => { try { applyDelta(makeDeltaSession("z"), bytes); return true; } catch (e) { return e instanceof Error; } };  // throw OR return ⇒ terminated cleanly
 let truncOk = 0; for (let len = 0; len <= valid.length; len++) if (tryApply(valid.subarray(0, len))) truncOk++;
 check("every truncation of a valid delta terminates cleanly (no OOB read, no hang)", truncOk === valid.length + 1);
 const g = rng(0xdead); let garbageOk = 0; const G = 1500;
@@ -121,46 +124,47 @@ for (let i = 0; i < G; i++) { const n = Math.floor(g() * 80), b = new Uint8Array
 check("random/garbage buffers always terminate — never hang or corrupt", garbageOk === G, `(${G} buffers, half with valid magic)`);
 let corruptOk = 0; const cn = Math.min(valid.length, 256); for (let i = 0; i < cn; i++) { const b = valid.slice(); b[i] ^= 0xff; if (tryApply(b)) corruptOk++; }
 check("single-byte corruptions of a valid delta always terminate cleanly", corruptOk === cn);
-check("a bad magic number is rejected", (() => { try { applyDelta(makeDeltaSession("z"), new Uint8Array([1, 2, 3, 4, 5, 6])); return false; } catch { return true; } })());
+check("a bad magic number is rejected", (() : boolean => { try { applyDelta(makeDeltaSession("z"), new Uint8Array([1, 2, 3, 4, 5, 6])); return false; } catch { return true; } })());
 
 // === 5) prototype-pollution resistance ===
 // (a) our encode strips a "__proto__" data key — no pollution, prototype stays Object.prototype, key dropped
-const evil = {}; Object.defineProperty(evil, "__proto__", { value: { polluted: true }, enumerable: true, writable: true, configurable: true });
-const dEvil = rt1({ payload: evil }).payload;
+const evil: Record<string, unknown> = {}; Object.defineProperty(evil, "__proto__", { value: { polluted: true }, enumerable: true, writable: true, configurable: true });
+const dEvil = (rt1({ payload: evil }) as any).payload;   // ad hoc fixture — see note above
 check("encode strips a __proto__ data key: no pollution, prototype intact, key dropped",
-  ({}).polluted === undefined && Object.getPrototypeOf(dEvil) === Object.prototype && !("polluted" in dEvil) && Object.getOwnPropertyDescriptor(dEvil, "__proto__") === undefined);
+  ({} as Record<string, unknown>).polluted === undefined && Object.getPrototypeOf(dEvil) === Object.prototype && !("polluted" in dEvil) && Object.getOwnPropertyDescriptor(dEvil, "__proto__") === undefined);
 // (b) the decoder skips a HOSTILE __proto__ field. Craft it by encoding a same-length placeholder key
 // then patching the bytes to "__proto__" (the string table is length-prefixed, so 9 chars → 9 chars).
 const hostileBytes = encodeDelta(makeDeltaSession("s"), [{ fn: "F", pc: 0, target: { ZZZZZZZZZ: { polluted: true } } }], null).bytes;
 const needle = new TextEncoder().encode("ZZZZZZZZZ"), repl = new TextEncoder().encode("__proto__");
 for (let i = 0; i + needle.length <= hostileBytes.length; i++) { let m = true; for (let j = 0; j < needle.length; j++) if (hostileBytes[i + j] !== needle[j]) { m = false; break; } if (m) { hostileBytes.set(repl, i); break; } }
-let hostileOut = null, threw = false; try { hostileOut = applyDelta(makeDeltaSession("z"), hostileBytes).stack[0].target; } catch { threw = true; }
+let hostileOut: any = null, threw = false;   // ad hoc fixture — see note above
+try { hostileOut = applyDelta(makeDeltaSession("z"), hostileBytes).stack[0].target; } catch { threw = true; }
 check("decoder skips a hostile __proto__ field: no global or per-object prototype pollution",
-  ({}).polluted === undefined && !threw && Object.getPrototypeOf(hostileOut) === Object.prototype && !("polluted" in hostileOut));
+  ({} as Record<string, unknown>).polluted === undefined && !threw && Object.getPrototypeOf(hostileOut) === Object.prototype && !("polluted" in hostileOut));
 
 // === 6) per-field/element PATCH mode (session.fields): warm hops ship only the changed slots ===
 // Walk the reachable containers and apply a few random mutations to each kind, then ship a fields-mode
 // delta and assert it reconstructs identically — across several warm hops, so the patch encode/apply
 // for object/array/Map/Set all run repeatedly against a moving baseline.
-function mutateRandom(frames, rnd) {
-  const conts = [], seen = new Set();
-  const walk = (v) => {
+function mutateRandom(frames: DeltaFrame[], rnd: () => number): void {
+  const conts: unknown[] = [], seen = new Set<unknown>();
+  const walk = (v: unknown): void => {
     if (!v || typeof v !== "object" || seen.has(v) || isHandle(v)) return;
     seen.add(v); conts.push(v);
     if (Array.isArray(v)) v.forEach(walk);
     else if (v instanceof Map) for (const [k, val] of v) { walk(k); walk(val); }
     else if (v instanceof Set) for (const e of v) walk(e);
-    else for (const k of Object.keys(v)) walk(v[k]);
+    else for (const k of Object.keys(v)) walk((v as Record<string, unknown>)[k]);
   };
   frames.forEach((f) => { for (const k of Object.keys(f)) if (k !== "fn" && k !== "pc") walk(f[k]); });
-  const leaf = () => Math.floor(rnd() * 1000) - 500;
+  const leaf = (): number => Math.floor(rnd() * 1000) - 500;
   const m = 1 + Math.floor(rnd() * 4);
   for (let i = 0; i < m && conts.length; i++) {
     const c = conts[Math.floor(rnd() * conts.length)], r = rnd();
     if (Array.isArray(c)) { if (r < 0.4) c.push(leaf()); else if (r < 0.6 && c.length) c.pop(); else if (c.length) c[Math.floor(rnd() * c.length)] = leaf(); }
     else if (c instanceof Map) { if (r < 0.6) c.set("nk" + Math.floor(rnd() * 6), leaf()); else if (c.size) c.delete([...c.keys()][0]); }
     else if (c instanceof Set) { if (r < 0.6) c.add("nm" + Math.floor(rnd() * 6)); else if (c.size) c.delete([...c][0]); }
-    else { const ks = Object.keys(c); if (r < 0.5 || !ks.length) c["nk" + Math.floor(rnd() * 6)] = leaf(); else delete c[ks[Math.floor(rnd() * ks.length)]]; }
+    else { const ks = Object.keys(c as object); if (r < 0.5 || !ks.length) (c as Record<string, unknown>)["nk" + Math.floor(rnd() * 6)] = leaf(); else delete (c as Record<string, unknown>)[ks[Math.floor(rnd() * ks.length)]]; }
   }
 }
 let fieldsFail = -1;
@@ -176,7 +180,7 @@ for (let i = 0; i < 1500 && fieldsFail < 0; i++) {
       const back = applyDelta(B, encodeDelta(A, frames, null).bytes);   // warm: patches of only the changed slots
       if (!sameCont({ stack: frames, request: null }, back)) fieldsFail = i;
     }
-  } catch (e) { console.log("    fields threw at iter " + i + ": " + e.message); fieldsFail = i; break; }
+  } catch (e) { console.log("    fields threw at iter " + i + ": " + (e as Error).message); fieldsFail = i; break; }
 }
 check("fields-mode patches (object/array/Map/Set): random graphs reconstruct identically across warm hops (1500)", fieldsFail < 0, fieldsFail < 0 ? "" : "first failure at iter " + fieldsFail);
 

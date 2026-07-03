@@ -8,10 +8,13 @@
 import { makeTrackedSession, adoptBaseline, encodeDeltaTracked, applyDeltaTracked, touch } from "tierless/delta";
 import { encodeGraph, decodeGraph } from "tierless/graph";
 import { makeCheck } from "../lib/check.mts";
+import type { DeltaFrame, Session } from "tierless/delta";
 
-const fresh = (v) => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([v]))))[0];   // a structurally-identical detached copy
-const frame = (m) => [{ fn: "_", pc: 0, m }];
-const makeModel = () => ({
+interface Model { profile: Record<string, number>; rows: { id: number; v: number }[]; tags: Set<string>; index: Map<string, number> }
+
+const fresh = (v: Model): Model => decodeGraph(JSON.parse(JSON.stringify(encodeGraph([v]))))[0] as Model;   // a structurally-identical detached copy
+const frame = (m: Model): DeltaFrame[] => [{ fn: "_", pc: 0, m }];
+const makeModel = (): Model => ({
   profile: Object.fromEntries(Array.from({ length: 60 }, (_, i) => ["f" + i, i])),    // a 60-field record
   rows: Array.from({ length: 800 }, (_, i) => ({ id: i, v: i })),                      // a big array
   tags: new Set(Array.from({ length: 50 }, (_, i) => "t" + i)),                        // a Set
@@ -22,8 +25,8 @@ const { check, ok } = makeCheck();
 console.log("Probe: per-field/element delta granularity — ship the changed slots, not the whole container\n");
 
 // fields ON (patch) vs OFF (whole container), the SAME single-slot mutation, to show the win per kind.
-const measure = (mutate, container) => {
-  const out = {};
+const measure = (mutate: (m: Model) => void, container: (m: Model) => unknown): Record<string, number> => {
+  const out: Record<string, number> = {};
   for (const fields of [true, false]) {
     const s = makeTrackedSession("s"); s.fields = fields;
     const m = makeModel(); adoptBaseline(s, frame(m), null);
@@ -48,7 +51,7 @@ const B = makeTrackedSession("browser"); B.fields = true;
 const mA = makeModel(), mB = fresh(mA);
 adoptBaseline(A, frame(mA), null);
 adoptBaseline(B, frame(mB), null);
-const hop = (from, mFrom, to) => { applyDeltaTracked(to, encodeDeltaTracked(from, frame(mFrom), null).bytes); };
+const hop = (from: Session, mFrom: Model, to: Session): void => { applyDeltaTracked(to, encodeDeltaTracked(from, frame(mFrom), null).bytes); };
 
 mA.profile.f1 = 11; touch(A, mA.profile);
 mA.rows[400].v = 22; touch(A, mA.rows[400]);

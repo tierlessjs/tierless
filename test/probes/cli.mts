@@ -10,12 +10,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { makeCounter } from "../lib/check.mts";
+import type { Frame } from "tierless/runtime";
 
 const BIN = fileURLToPath(new URL("../../packages/tierless/bin/tierless.mjs", import.meta.url));
 const SRC = fileURLToPath(new URL("../../packages/tierless/src/", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "cli-"));
 const { check, counts } = makeCounter();
-const run = (args) => spawnSync(process.execPath, [BIN, ...args], { encoding: "utf8" });
+const run = (args: string[]) => spawnSync(process.execPath, [BIN, ...args], { encoding: "utf8" });
 
 console.log("Probe: the tierless CLI — build / explain / api / types\n");
 
@@ -23,8 +24,9 @@ console.log("Probe: the tierless CLI — build / explain / api / types\n");
 writeFileSync(join(dir, "flow.js"), 'function go(x) { const r = db.get(x); return r + 1; }\n');
 const b = run(["build", join(dir, "flow.js"), join(dir, "flow.gen.mjs"), "--bare", "--resource=db:server"]);
 check("build compiles a module", b.status === 0 && b.stdout.includes("wrote"), b.stderr);
-const mod = await import(pathToFileURL(join(dir, "flow.gen.mjs")));
-const F = { fn: "go", pc: 0, args: [4] };
+// compiler output generated at test time — no static declaration to check against
+const mod: any = await import(pathToFileURL(join(dir, "flow.gen.mjs")).href);
+const F: Frame = { fn: "go", pc: 0, args: [4] };
 const req = mod.PROGRAMS.go(F);
 check("the built machine runs and pins the custom namespace", req.op === "resource" && req.name === "db.get" && req.tier === "server", req);
 
@@ -38,7 +40,7 @@ check("explain totals", e.stdout.includes("3 compiled, 1 pure."), undefined);
 const ej = run(["explain", join(dir, "acts.js"), "--json"]);
 const rep = ej.status === 0 ? JSON.parse(ej.stdout) : null;
 check("explain --json emits the machine-readable report (for agents/tooling)",
-  rep !== null && rep.functions.some((f) => f.name === "fetchAll" && f.suspendable && f.suspensions[0].name === "api.get"), rep && rep.functions.length);
+  rep !== null && rep.functions.some((f: any) => f.name === "fetchAll" && f.suspendable && f.suspensions[0].name === "api.get"), rep && rep.functions.length);
 
 // ---- api (pre-ship check) ---------------------------------------------------------------
 writeFileSync(join(dir, "svc.mjs"), `

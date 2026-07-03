@@ -9,13 +9,14 @@ import { writeFileSync, readFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import type { Frame } from "tierless/runtime";
 
 const TX = fileURLToPath(new URL("../../packages/tierless/src/transform.cjs", import.meta.url));
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "srcmap-"));
 
 let pass = 0, fail = 0;
-const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : ` (got ${got})`}`); } };
+const check = (label: string, cond: boolean, got?: unknown): void => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label}${got === undefined ? "" : ` (got ${got})`}`); } };
 
 console.log("Probe: --source-map — a migrated frame reports a portable file:line, not just a pc\n");
 
@@ -27,21 +28,22 @@ const SRC = "function Flow() {\n  const a = api.one();\n  const b = api.two();\n
 const inF = join(dir, "flow.src.js"), outF = join(dir, "flow.gen.mjs");
 writeFileSync(inF, SRC);
 execFileSync(process.execPath, [TX, inF, outF, "--bare", "--source-map"], { cwd: ROOT });
-const { PROGRAMS, SITES, SOURCE_FILE, frameSite, stackSites } = await import(pathToFileURL(outF));
+// compiler output generated at test time — no static declaration to check against
+const { PROGRAMS, SITES, SOURCE_FILE, frameSite, stackSites }: any = await import(pathToFileURL(outF).href);
 
 check("SOURCE_FILE points at the original source", SOURCE_FILE === inF, SOURCE_FILE);
 check("a pc->line table is emitted for the suspendable fn", SITES.Flow && Object.keys(SITES.Flow).length > 0, JSON.stringify(SITES.Flow));
 
 // Drive the machine to each suspension; F.pc then points at the resume block, whose site is the line of
 // the suspending statement.
-let F = { fn: "Flow", pc: 0, args: [] };
-const seen = [];
+let F: Frame = { fn: "Flow", pc: 0, args: [] };
+const seen: string[] = [];
 for (let i = 0; i < 8; i++) { const r = PROGRAMS.Flow(F); if (r.op === "return") break; seen.push(frameSite({ fn: "Flow", pc: F.pc })); F.ret = i; }
 
 check("the frame parked at the first suspension maps to api.one()'s line", seen[0] === inF + ":2", seen[0]);
 check("the frame parked at the second suspension maps to api.two()'s line", seen[1] === inF + ":3", seen[1]);
 const whole = stackSites([{ fn: "Flow", pc: 0 }, { fn: "Flow", pc: 1 }]);
-check("stackSites maps every frame of a stack to a file:line", Array.isArray(whole) && whole.length === 2 && whole.every((s) => s.startsWith(inF + ":")), JSON.stringify(whole));
+check("stackSites maps every frame of a stack to a file:line", Array.isArray(whole) && whole.length === 2 && whole.every((s: string) => s.startsWith(inF + ":")), JSON.stringify(whole));
 
 // Gating: the SAME input without --source-map reproduces the committed bundle byte-for-byte (zero cost
 // when off). cf-fixtures is a --bare bundle; rebuild it (relative path, so the header matches) and compare.

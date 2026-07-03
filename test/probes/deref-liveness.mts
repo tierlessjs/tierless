@@ -15,7 +15,7 @@ const TX = fileURLToPath(new URL("../../packages/tierless/src/transform.cjs", im
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "deref-liveness-"));
 let n = 0;
-const guardsFor = (src) => {
+const guardsFor = (src: string): number => {
   const inF = join(dir, `s${n}.src.js`), outF = join(dir, `s${n}.gen.mjs`); n++;
   writeFileSync(inF, src);
   execFileSync(process.execPath, [TX, inF, outF, "--bare", "--auto-deref"], { cwd: ROOT });
@@ -23,7 +23,7 @@ const guardsFor = (src) => {
 };
 
 let pass = 0, fail = 0;
-const check = (label, cond, got) => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label} (got ${got})`); } };
+const check = (label: string, cond: boolean, got: number): void => { if (cond) { pass++; console.log(`  PASS  ${label}`); } else { fail++; console.log(`  FAIL  ${label} (got ${got})`); } };
 
 console.log("Probe: --auto-deref liveness — prune guards dominated by an earlier guard with no hop between\n");
 

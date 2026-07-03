@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { makeCounter } from "../lib/check.mts";
+import type { Frame } from "tierless/runtime";
 
 const TX = fileURLToPath(new URL("../../packages/tierless/src/transform.cjs", import.meta.url));
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -25,16 +26,16 @@ const dir = mkdtempSync(join(tmpdir(), "langcov-"));
 let n = 0;
 const { check, counts } = makeCounter();
 
-function compile(src, flags = ["--bare"]) {
+function compile(src: string, flags: string[] = ["--bare"]): string {
   const inF = join(dir, `s${n}.src.js`), outF = join(dir, `s${n++}.gen.mjs`);
   writeFileSync(inF, src);
   try { execFileSync(process.execPath, [TX, inF, outF, ...flags], { cwd: ROOT, stdio: ["ignore", "ignore", "pipe"] }); }
-  catch (e) { const err = new Error("compile failed"); err.stderr = (e.stderr || "").toString(); throw err; }
+  catch (e: any) { const err: any = new Error("compile failed"); err.stderr = (e.stderr || "").toString(); throw err; }
   return outF;
 }
 
 // The mock resource layer. Return values become part of the continuation.
-const service = (name, args) => {
+const service = (name: string, args: any[]): unknown => {
   const [x, y] = args;
   switch (name) {
     case "api.get": return x;
@@ -52,9 +53,9 @@ const service = (name, args) => {
 // Drive a compiled bundle to completion. At every suspension the whole frame stack is put through
 // JSON — a stand-in for the wire — so a bundle that parked a non-serializable value (a closure, a
 // native cursor) would come back wrong. Returns the final value and the ordered resource calls.
-function drive(mod, entry, args = [], migrate = true) {
-  const calls = [];
-  let stack = [{ fn: entry, pc: 0, args }];
+function drive(mod: any, entry: string, args: unknown[] = [], migrate: boolean = true): { value: unknown; calls: string[] } {
+  const calls: string[] = [];
+  let stack: Frame[] = [{ fn: entry, pc: 0, args }];
   for (let steps = 0; steps < 100000; steps++) {
     const top = stack[stack.length - 1];
     const r = mod.PROGRAMS[top.fn](top);
@@ -70,38 +71,38 @@ function drive(mod, entry, args = [], migrate = true) {
   throw new Error("did not terminate");
 }
 
-async function supported(label, src, entry, expect, args = []) {
+async function supported(label: string, src: string, entry: string, expect: unknown, args: unknown[] = []): Promise<void> {
   let mod;
   try { mod = await import(pathToFileURL(compile(src)).href); }
-  catch (e) { check(label, false, "COMPILE ERROR: " + (e.stderr || e.message).split("\n").find((l) => l.includes("Error")) || "?"); return; }
+  catch (e: any) { check(label, false, "COMPILE ERROR: " + (e.stderr || e.message).split("\n").find((l: string) => l.includes("Error")) || "?"); return; }
   try { const { value } = drive(mod, entry, args); check(`${label} -> ${JSON.stringify(expect)}`, JSON.stringify(value) === JSON.stringify(expect), value); }
-  catch (e) { check(label, false, "RUNTIME: " + e.message); }
+  catch (e: any) { check(label, false, "RUNTIME: " + e.message); }
 }
 
-function declined(label, src, needle) {
+function declined(label: string, src: string, needle: string): void {
   try { compile(src); check(`${label} (should be rejected)`, false, "compiled without error"); }
-  catch (e) { const msg = (e.stderr || "").includes(needle) && (e.stderr || "").includes("not supported"); check(`${label} -> clear error`, msg, msg ? undefined : (e.stderr || "").split("\n").filter(Boolean).slice(-2).join(" ⏎ ")); }
+  catch (e: any) { const msg = (e.stderr || "").includes(needle) && (e.stderr || "").includes("not supported"); check(`${label} -> clear error`, msg, msg ? undefined : (e.stderr || "").split("\n").filter(Boolean).slice(-2).join(" ⏎ ")); }
 }
 
 // Oracle for optional-chaining: run the SAME source as plain JS with a native `api` (api.get
 // echoes its arg and records the call). The compiled+migrated result must match both the value
 // AND the exact call sequence — so a tier call correctly SKIPPED on short-circuit is proven, not
 // just the happy path, and `this`-binding is checked by the value.
-function oracle(src, entry) {
-  const calls = [];
-  const api = { get: (x) => { calls.push("api.get"); return x; } };
+function oracle(src: string, entry: string): { value: unknown; calls: string[] } {
+  const calls: string[] = [];
+  const api = { get: (x: unknown): unknown => { calls.push("api.get"); return x; } };
   return { value: new Function("api", `${src}\nreturn ${entry}();`)(api), calls };
 }
-async function optchain(label, src, entry, migrate = true) {
+async function optchain(label: string, src: string, entry: string, migrate: boolean = true): Promise<void> {
   const exp = oracle(src, entry);
   let mod;
   try { mod = await import(pathToFileURL(compile(src)).href); }
-  catch (e) { check(label, false, "COMPILE: " + ((e.stderr || e.message).split("\n").find((l) => l.includes("Error")) || "?")); return; }
+  catch (e: any) { check(label, false, "COMPILE: " + ((e.stderr || e.message).split("\n").find((l: string) => l.includes("Error")) || "?")); return; }
   try {
     const got = drive(mod, entry, [], migrate);
     const ok = JSON.stringify(got.value) === JSON.stringify(exp.value) && JSON.stringify(got.calls) === JSON.stringify(exp.calls);
     check(`${label} -> ${JSON.stringify(exp.value)} calls=${JSON.stringify(exp.calls)}`, ok, ok ? undefined : `compiled ${JSON.stringify(got.value)}/${JSON.stringify(got.calls)}`);
-  } catch (e) { check(label, false, "RUNTIME: " + e.message); }
+  } catch (e: any) { check(label, false, "RUNTIME: " + e.message); }
 }
 
 console.log("Probe: language coverage — non-trivial binding forms desugar and migrate; un-migratable forms are rejected\n");
