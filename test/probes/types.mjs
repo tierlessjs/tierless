@@ -67,6 +67,13 @@ const def = defineApi((api) => ({
 }), { maxArgsBytes: 1024 });
 const j: JwtApi = def.create("secret");
 void j.fns(); void startSidecar; void makeApiExec; void sidecarMain;
+void (async () => {
+  const hr = await j.handle({ name: "login", args: [] });
+  if (hr.ok) void hr.value; else void hr.error;   // HandleResult is a real discriminated union, not {ok,value,error} all-optional
+  void j.handle(null); void j.handle(undefined);  // call is defensively nullable — arrives untrusted over the sidecar pipe
+})();
+const auditEntries = j.audit();
+void auditEntries[0]?.who;
 const { code, meta } = compile("function f(){}", { resources: { db: "server" } });
 void code; void meta.exported;
 void analyze("function f(){}"); void DEFAULT_RESOURCES.api;
@@ -135,12 +142,14 @@ import { ContentStore } from "tierless/content";
 import { Heap } from "tierless/fetch";
 import { exciseForCapture, makeTrackedSession } from "tierless/delta";
 import { makeTier } from "tierless/heap";
+import { Api } from "tierless/api";
 useAction("not a function");
 defineApi({ leak: { authorize: PUBLIC, run: () => 1, extra: true } });
 new ContentStore().resolve("x");   // no such method — the real one is get(); this must fail, not silently pass
 new Heap(42);                      // the real constructor takes a string tierId
 exciseForCapture(makeTrackedSession("x"), [{ fn: "F", pc: 0 }], null);   // missing the required tier argument (4th) — no default
 makeTier("server", {});            // the real function takes 1 argument (id); there is no options param
+void new Api()._fns;               // _fns is private — must not be reachable from outside the class
 `);
 const bad = tsc([join("test", ".types-fixture", "bad.ts")]);
 check("deliberate misuse FAILS to type-check (the types are load-bearing)", bad.status !== 0 && (bad.stdout || "").includes("error TS"), bad.status);
