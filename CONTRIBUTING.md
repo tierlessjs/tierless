@@ -66,16 +66,18 @@ compiles through the same pipeline as `.src.js`.
   `.editorconfig`).
 - `*.src.js` (compiler inputs) and `*.gen.mjs` (compiler outputs) are eslint-ignored
   by design — don't hand-edit a `.gen.mjs`.
-- Everything under `packages/tierless/src/` is TypeScript (`*.mts`) except
-  `transform.cjs`. Edit the `.mts` file; `tsc` compiles it to the `.mjs` + `.d.mts`
-  that ship (also eslint-ignored — don't hand-edit those either). The dense,
-  one-line style applies to the `.mts` source the same as everywhere else.
+- Everything under `packages/tierless/src/` is TypeScript (`*.mts`, and
+  `transform.cts` for the compiler — its `.cts` extension forces CommonJS emit
+  regardless of the shared `tsconfig.json`'s `module` setting, since it must stay
+  `require()`-able). Edit the `.mts`/`.cts` file; `tsc` compiles it to the shipped
+  `.mjs`/`.cjs` + `.d.mts`/`.d.cts` (also eslint-ignored — don't hand-edit those
+  either). The dense, one-line style applies to the source the same as everywhere else.
 
 ## Where things live
 
 | You want to change... | Edit... |
 |---|---|
-| the compiler (plain JS → state machine) | `packages/tierless/src/transform.cjs` |
+| the compiler (plain JS → state machine) | `packages/tierless/src/transform.cts` |
 | the pump / wire envelope | `packages/tierless/src/runtime.mts` |
 | the graph/wire codec | `packages/tierless/src/graph.mts` |
 | the §5 heap, write-back, §6 policy | `packages/tierless/src/heap.mts`, `packages/tierless/src/fetch.mts` |

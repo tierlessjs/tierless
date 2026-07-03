@@ -13,5 +13,5 @@
     "types": ["node"],
     "verbatimModuleSyntax": true
   },
-  "include": ["src/**/*.mts"]
+  "include": ["src/**/*.mts", "src/**/*.cts"]
 }

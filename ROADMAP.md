@@ -14,10 +14,10 @@ secured and `npm i tierless` / `npm create tierless@latest` work. Still open:
   exact source commit and build. Needs a public repo and a CI publish workflow;
   the first name-securing release is published by hand and predates it.
 - **TypeScript everywhere.** The framework's own source
-  (`packages/tierless/src/*.mts`, `bin/`, `create-tierless`, `test/`, `bench/`) is
+  (`packages/tierless/src/*.mts`/`*.cts`, `bin/`, `create-tierless`, `test/`, `bench/`) is
   TypeScript, compiled or type-checked by `tsc` on every build — checked against
   the real implementation, not hand-maintained separately. `"use tierless"` mix
-  modules can be authored in TypeScript too (`app.src.ts`): `transform.cjs`
+  modules can be authored in TypeScript too (`app.src.ts`): the compiler
   detects the extension and strips erasable TS syntax (`node:module`'s
   `stripTypeScriptTypes`, the same ceiling as `node --experimental-strip-types` —
   no enums, no namespaces, no parameter properties) before parsing, so the rest

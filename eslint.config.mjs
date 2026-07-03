@@ -38,9 +38,10 @@ export default [
       "test/e2e/api-pump-app.gen.mjs",
       "bench/overhead.gen.mjs",
       "bench/conduit.gen.mjs",
-      // The compiler itself: a CommonJS build tool that needs the Babel toolchain.
+      // Compiled from the hand-authored .mts/.cts source next to each file — not hand-edited.
+      // transform.cjs (from transform.cts) is the compiler itself: a CommonJS build tool that
+      // needs the Babel toolchain, forced to .cjs emit by its own file extension.
       "packages/tierless/src/transform.cjs",
-      // Compiled from the hand-authored .mts source next to each file — not hand-edited.
       "packages/tierless/src/**/*.mjs",
       "packages/tierless/bin/tierless.mjs",
       "test/e2e/app/h.mjs",

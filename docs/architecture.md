@@ -30,8 +30,8 @@ packages/tierless/  the npm package — what `npm i tierless` delivers
     api/            the trust boundary — the reference monitor + sidecar transport
     vite.mts        the Vite plugin ("use tierless" modules -> monitor-backed actions)
     react.mts       useAction
-                    (everything above is TypeScript; tsc compiles each .mts to the
-                    .mjs + .d.mts that ship — see CONTRIBUTING.md)
+                    (everything above is TypeScript; tsc compiles each .mts/.cts to the
+                    .mjs/.cjs + .d.mts/.d.cts that ship — see CONTRIBUTING.md)
   bin/              the tierless CLI
 packages/create-tierless/  the scaffolder behind `npm create tierless`
 test/               the regression runner + all proofs, importing the real package
