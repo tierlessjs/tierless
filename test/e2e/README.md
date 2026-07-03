@@ -246,7 +246,7 @@ node packages/tierless/src/transform.cjs test/e2e/heap-write.src.js test/e2e/hea
   are optimizations, not gaps: the deref guard re-checks each read past a hop because a round-trip
   migration can re-excise a big local back into a handle (so it's *correct*, not merely
   pessimistic; a liveness pass prunes the guards a straight-line run makes redundant, re-guarding
-  after any hop or join — `test/probes/deref-liveness.mjs`), a write-back ships the whole edited
+  after any hop or join — `test/probes/deref-liveness.mts`), a write-back ships the whole edited
   object rather than a field-level diff, and the §6 fetch-size profile is sampled once and locked in
   (no online re-profiling — by design).
 - Cross-tier **shared mutable state** has the design's full answer now: read-mostly via

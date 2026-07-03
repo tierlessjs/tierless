@@ -31,10 +31,10 @@ npm test                    # the full regression suite (every demo + probe)
 If you edit anything under `packages/tierless/src/*.mts`, rebuild and commit the
 generated `.mjs`/`.d.mts` — CI fails if they're out of sync with the source.
 
-`npm test` is not just "exit 0" — `test/run.mjs` asserts the headline claim of each
+`npm test` is not just "exit 0" — `test/run.mts` asserts the headline claim of each
 demo (continuation sizes, migrate-vs-fetch decisions, cross-tier correctness). If you
 change runtime or compiler behavior, the relevant proof should still pass; if you add
-behavior, add a proof and wire it into `test/run.mjs`.
+behavior, add a proof and wire it into `test/run.mts`.
 
 ## Working with the compiler
 
@@ -82,7 +82,7 @@ compiles through the same pipeline as `.src.js`.
 | the WebSocket transport | `packages/tierless/src/transport.mts` |
 | the demo app | `test/e2e/app/` |
 | the browser tier | `test/e2e/public/` |
-| a proof / regression case | `test/e2e/*.mjs` + `test/run.mjs` |
+| a proof / regression case | `test/e2e/*.mjs` + `test/run.mts` |
 
 ## Commits & pull requests
 

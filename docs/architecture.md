@@ -142,7 +142,7 @@ ever makes a delta no smaller. Map and Set are first-class kinds in the delta co
 preserved across Map keys and Set members. The delta also **composes with §5 excision**
 (`encodeDeltaTracked(…, { tier, threshold })`): a big subgraph excises into the owning tier's heap
 and the delta carries a handle leaf in its place, so the big data stays home *and* only the changed
-UI ships — an 80 KB inline capture becomes 115 B (`test/probes/wire-delta-handle.mjs`).
+UI ships — an 80 KB inline capture becomes 115 B (`test/probes/wire-delta-handle.mts`).
 
 ## The heap (`heap.mts` + `fetch.mts`)
 
@@ -259,7 +259,7 @@ These are deliberate trade-offs in the compiler, not accidental gaps:
   into a handle, so a read *past a hop* must re-check. A liveness pass keeps the first guard in
   each straight-line run and prunes the rest, re-guarding after any hop (a tier resource or a
   suspendable call) or control-flow join — so correctness is unchanged and the repeated
-  re-checks are gone (`test/probes/deref-liveness.mjs`).
+  re-checks are gone (`test/probes/deref-liveness.mts`).
 - **Write-back is a delta to the master** (`openSnapshot`/`diffSnapshot`/`applySnapshot`): it ships
   only the objects that changed in the snapshot — member edits and collection mutations alike, since
   the codec diffs the result, not the operation — applied in place under the same CAS, never larger than

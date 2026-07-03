@@ -41,7 +41,7 @@ object method — is a *compile-time error* with the rewrite in the message (lif
 loop: `for (const x of items) { const r = api.f(x); … }`). This is fundamental, not a
 gap: the callback runs synchronously inside native code that cannot suspend. Everything
 else ordinary — loops, destructuring, optional chains, `try/finally`, labeled breaks —
-compiles; `test/probes/lang-coverage.mjs` is the coverage contract.
+compiles; `test/probes/lang-coverage.mts` is the coverage contract.
 
 ## Perf triage
 
