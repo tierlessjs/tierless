@@ -13,9 +13,11 @@ secured and `npm i tierless` / `npm create tierless@latest` work. Still open:
   `npm publish --provenance`) so npm shows the green ✓ tying each release to its
   exact source commit and build. Needs a public repo and a CI publish workflow;
   the first name-securing release is published by hand and predates it.
-- **TypeScript sources for mix modules.** The public API is fully typed
-  (hand-written `.d.ts`, tsc-verified in `npm test`), but `"use tierless"` files are
-  plain JS: the transform needs @babel/parser's TS plugin + type stripping.
+- **TypeScript sources for mix modules.** The framework's own source
+  (`packages/tierless/src/*.mts`) and public API are TypeScript, compiled by
+  `tsc` and checked against the real implementation on every build. But
+  `"use tierless"` files — the user's own mix-module code — are still plain
+  JS: the transform needs @babel/parser's TS plugin + type stripping.
   Richer generated types than `(...args: any[]) => any` from `tierless types`.
 - **Production build story for the Vite plugin.** Dev is first-class (the
   plugin hosts the endpoint on Vite's own server); prod works today by mounting
@@ -36,8 +38,8 @@ secured and `npm i tierless` / `npm create tierless@latest` work. Still open:
 
 ## Code quality
 
-- **Unify the low-level wire I/O.** `wire-binary.mjs`, `wire-delta.mjs`, and
-  `heap.mjs` each hand-roll the same growable-buffer writer/bounds-checked
+- **Unify the low-level wire I/O.** `wire-binary.mts`, `wire-delta.mts`, and
+  `heap.mts` each hand-roll the same growable-buffer writer/bounds-checked
   LEB128 reader, the magic-header + string-table read/write, and the
   frame/request root-flatten-and-rebuild logic — three independent copies of
   code that's fuzz-tested and security-relevant (§7's wire hardening). The
