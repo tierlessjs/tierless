@@ -32,6 +32,12 @@ import { makePeer, wsPort } from "tierless/transport";
 import { encodeGraph, decodeGraph, isHandle, approxExceeds, GLOBALS } from "tierless/graph";
 import { hashOf, ContentStore, newPeerView } from "tierless/content";
 import { Heap, Channel } from "tierless/fetch";
+import {
+  makeDeltaSession, encodeDelta, applyDelta,
+  makeTrackedSession, touch, planDelta, encodeDeltaTracked, applyDeltaTracked,
+  adoptBaseline, subForFullWire, exciseForCapture,
+  openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot,
+} from "tierless/delta";
 
 const bundle: Bundle = { PROGRAMS: {}, __unwind: () => false };
 const pump = makePump(bundle);
@@ -70,6 +76,23 @@ void hashOf({ a: 1 });
 const heap = new Heap("t1");
 const handle = heap.put({ a: 1 }); void heap.get(handle.id); void heap.version(handle.id);
 void new Channel({ t1: { heap } });
+const dA = makeDeltaSession("server");
+const dStack = [{ fn: "F", pc: 0, x: 1 }];
+const denc = encodeDelta(dA, dStack, null);
+void applyDelta(makeDeltaSession("z"), denc.bytes);
+const dB = makeTrackedSession("browser");
+const tenc = encodeDeltaTracked(dB, dStack, null, { exact: true });
+void applyDeltaTracked(makeTrackedSession("z"), tenc.bytes);
+void touch(dB, { n: 1 }, dStack[0]);          // variadic — must accept 2+ objects, not just 1
+adoptBaseline(dB, dStack, null);
+planDelta(dB, dStack, null).commit();
+const rebuilt = subForFullWire(dB, dStack, null);
+void rebuilt.stack; void rebuilt.request;
+exciseForCapture(dB, dStack, null, { id: "server", heapPut: () => "h1" }, 1024);
+const snap = openSnapshot("server", { a: 1 });
+void diffSnapshot(snap, { a: 2 }).byteLength;
+const wholeBytes = wholeSnapshot("server", { a: 1 });
+void applySnapshot("server", { a: 1 }, wholeBytes);
 `);
 const ok = tsc([join("test", ".types-fixture", "ok.ts")]);
 check("a consumer exercising every main entry type-checks under --strict", ok.status === 0, (ok.stdout || "").split("\n").slice(0, 3).join(" | "));
@@ -79,10 +102,12 @@ import { useAction } from "tierless/react";
 import { defineApi, PUBLIC } from "tierless/api";
 import { ContentStore } from "tierless/content";
 import { Heap } from "tierless/fetch";
+import { exciseForCapture, makeTrackedSession } from "tierless/delta";
 useAction("not a function");
 defineApi({ leak: { authorize: PUBLIC, run: () => 1, extra: true } });
 new ContentStore().resolve("x");   // no such method — the real one is get(); this must fail, not silently pass
 new Heap(42);                      // the real constructor takes a string tierId
+exciseForCapture(makeTrackedSession("x"), [{ fn: "F", pc: 0 }], null);   // missing the required tier argument (4th) — no default
 `);
 const bad = tsc([join("test", ".types-fixture", "bad.ts")]);
 check("deliberate misuse FAILS to type-check (the types are load-bearing)", bad.status !== 0 && (bad.stdout || "").includes("error TS"), bad.status);

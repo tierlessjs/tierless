@@ -69,7 +69,7 @@
       "default": "./src/wire-binary.mjs"
     },
     "./delta": {
-      "types": "./types/delta.d.ts",
+      "types": "./types/wire-delta.d.mts",
       "default": "./src/wire-delta.mjs"
     },
     "./graph": {

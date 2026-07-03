@@ -81,7 +81,7 @@ const db2 = decodeWireBinary(b2, { content: { store: recvB } });
 check(`binary warm hop: only the hash crosses (${b1.length} B -> ${b2.length} B), resolving to the cached instance`, b2.length * 5 < b1.length && db2.stack[0].config === recvB.get(hashB) && db2.stack[0].ui.route === "article");
 
 // ── Composition: content-addressing + §5 excision + the min(delta, full) FULL arm together ──────────
-const tier = makeTier("server"), session = makeTrackedSession(tier);
+const tier = makeTier("server"), session = makeTrackedSession(tier.id);
 const cprod = new ContentStore(), crecv = new ContentStore(), ct = { store: cprod, peer: newPeerView() };
 const chash = cprod.register(CONFIG);
 const DATASET = { rows: Array.from({ length: 3000 }, (_, i) => ({ id: i, v: "row " + i })) };  // big + MUTABLE -> §5 handle (excision), not content
