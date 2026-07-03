@@ -81,7 +81,7 @@
       "default": "./src/heap.mjs"
     },
     "./fetch": {
-      "types": "./types/fetch.d.ts",
+      "types": "./types/fetch.d.mts",
       "default": "./src/fetch.mjs"
     },
     "./content": {
