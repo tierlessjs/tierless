@@ -33,7 +33,7 @@
   ],
   "exports": {
     ".": {
-      "types": "./types/index.d.ts",
+      "types": "./types/host.d.mts",
       "default": "./src/host.mjs"
     },
     "./api": {
@@ -41,11 +41,11 @@
       "default": "./src/api/index.mjs"
     },
     "./server": {
-      "types": "./types/server.d.ts",
+      "types": "./types/server.d.mts",
       "default": "./src/server.mjs"
     },
     "./browser": {
-      "types": "./types/browser.d.ts",
+      "types": "./types/browser.d.mts",
       "default": "./src/browser.mjs"
     },
     "./react": {
@@ -118,5 +118,5 @@
     "typescript": "^6.0.3",
     "@types/node": "^26.1.0"
   },
-  "types": "./types/index.d.ts"
+  "types": "./types/host.d.mts"
 }

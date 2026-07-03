@@ -19,7 +19,7 @@ const tsc = (files) => spawnSync(process.execPath, [join(ROOT, "node_modules/typ
 console.log("Probe: the TypeScript surface — every entry typed through the exports map\n");
 
 writeFileSync(join(dir, "ok.ts"), `
-import { makeHost, answerWith, type Bundle } from "tierless";
+import { makeHost, answerWith, type Bundle, type Host } from "tierless";
 import { makePump, initialStack } from "tierless/runtime";
 import { attachTierless, serveApp, WS_PATH } from "tierless/server";
 import { connect, bindActions, configureTierless } from "tierless/browser";
@@ -45,9 +45,14 @@ const pump = makePump(bundle);
 void pump(initialStack("App"), (t) => t === "server", async () => 1);
 const host = makeHost({ bundle, tier: "server", exec: () => 0 });
 void host.call;
-void answerWith; void attachTierless; void serveApp; void WS_PATH;
+void answerWith; void WS_PATH;
+const attached = attachTierless({} as any, { bundle, tier: "server", session: async () => ({ exec: async () => 1 }) });
+void attached.close();
+serveApp({ bundle, session: async () => ({ exec: async () => 1 }) }).then((a) => { void a.port; a.close(); });
 const conn = connect({ url: "ws://x", bundle });
 void conn.call("f", [1]);
+const regHost: Host = conn.register("m2", bundle);   // register() returns Host, not unknown (the old .d.ts's declared return)
+void regHost.pump;
 void bindActions(bundle, { module: "m" }); void configureTierless({});
 const a = useAction((x: number) => Promise.resolve(x + 1));
 void a.run(2); const r: boolean = a.running; void r;
