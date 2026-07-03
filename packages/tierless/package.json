@@ -23,6 +23,9 @@
   },
   "license": "Apache-2.0",
   "author": "Bright Fulton",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
   "files": [
     "src",
     "bin",
@@ -110,6 +113,10 @@
     "@babel/traverse": "^8.0.0",
     "@babel/types": "^8.0.0",
     "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "@types/node": "^26.1.0"
   },
   "types": "./types/index.d.ts"
 }

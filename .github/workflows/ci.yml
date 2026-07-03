@@ -32,6 +32,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify generated .mjs/.d.mts match the committed TypeScript source
+        run: |
+          npm run build -w tierless
+          git diff --exit-code -- packages/tierless/src packages/tierless/types
+
       - name: Lint
         run: npm run lint
 

@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "declaration": true,
+    "sourceMap": false,
+    "declarationMap": false,
+    "newLine": "lf",
+    "rootDir": "src",
+    "declarationDir": "types",
+    "types": ["node"],
+    "verbatimModuleSyntax": true
+  },
+  "include": ["src/**/*.mts"]
+}

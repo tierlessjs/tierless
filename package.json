@@ -10,6 +10,7 @@
     "node": ">=22.18.0"
   },
   "scripts": {
+    "build": "npm run build -w tierless",
     "test": "node test/run.mjs",
     "lint": "eslint .",
     "live": "node test/e2e/server-live.mjs",
