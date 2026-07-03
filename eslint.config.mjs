@@ -43,6 +43,9 @@ export default [
       // Compiled from the hand-authored .mts source next to each file — not hand-edited.
       "packages/tierless/src/**/*.mjs",
       "packages/tierless/bin/tierless.mjs",
+      "test/e2e/app/h.mjs",
+      "test/e2e/app/components.mjs",
+      "test/e2e/app/render.mjs",
     ],
   },
   js.configs.recommended,

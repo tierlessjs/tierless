@@ -36,7 +36,8 @@ jobs:
         run: |
           npm run build -w tierless
           npm run build -w create-tierless
-          git diff --exit-code -- packages/tierless/src packages/tierless/bin packages/tierless/types packages/create-tierless/index.mjs
+          tsc -p test/e2e/app/tsconfig.json
+          git diff --exit-code -- packages/tierless/src packages/tierless/bin packages/tierless/types packages/create-tierless/index.mjs test/e2e/app/h.mjs test/e2e/app/components.mjs test/e2e/app/render.mjs
 
       - name: Typecheck test/ and bench/ sources
         run: npm run typecheck

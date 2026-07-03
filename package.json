@@ -10,7 +10,7 @@
     "node": ">=22.18.0"
   },
   "scripts": {
-    "build": "npm run build -w tierless && npm run build -w create-tierless",
+    "build": "npm run build -w tierless && npm run build -w create-tierless && tsc -p test/e2e/app/tsconfig.json",
     "test": "node test/run.mts",
     "typecheck": "tsc -p tsconfig.check.json",
     "lint": "eslint .",

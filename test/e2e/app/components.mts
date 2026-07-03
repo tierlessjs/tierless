@@ -2,7 +2,7 @@
 // (e.g. {ev:"cycle", id, next}) instead of closures, because the rendered vdom is
 // shipped across the wire to the browser tier and a click there resolves the
 // continuation with that exact token.
-import { h } from "./h.mts";
+import { h } from "./h.mjs";
 
 interface Task { id: string | number; status: string; prioLabel: string; title: string; assignee: string }
 interface Stats { total: number; pctDone: number; byStatus: { todo: number; doing: number; done: number } }
