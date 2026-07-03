@@ -18,8 +18,8 @@ import { makeTier } from "tierless/heap";
 import { ContentStore, newPeerView, hashOf } from "tierless/content";
 import { makeCounter } from "../lib/check.mts";
 
-const deepFreeze = (o) => { if (o && typeof o === "object" && !Object.isFrozen(o)) { Object.freeze(o); for (const k of Object.keys(o)) deepFreeze(o[k]); } return o; };
-const size = (enc) => JSON.stringify(enc).length;
+const deepFreeze = <T,>(o: T): T => { if (o && typeof o === "object" && !Object.isFrozen(o)) { Object.freeze(o); for (const k of Object.keys(o)) deepFreeze((o as unknown as Record<string, unknown>)[k]); } return o; };
+const size = (enc: unknown): number => JSON.stringify(enc).length;
 
 const { check, counts } = makeCounter();
 
@@ -41,7 +41,8 @@ const content = { store: prod, peer: sent };
 const stack1 = [{ fn: "View", pc: 2, config: CONFIG, alsoConfig: CONFIG, ui: { route: "home", scroll: 0 } }];
 const enc1 = encodeGraph([stack1], { content });
 const wire1 = size(enc1);
-const dec1 = decodeGraph(enc1, { content: { store: recv } })[0];
+// decodeGraph is generic (unknown[] out) — cast to the ad hoc shape this probe put on the wire, as in codec.mts/wire-binary.mts.
+const dec1 = decodeGraph(enc1, { content: { store: recv } })[0] as any;
 
 check("cold hop: CONFIG travels inline (the bytes are on the wire)", JSON.stringify(enc1).includes("immutable config field number 199"));
 check("cold hop: it reconstructs faithfully", dec1[0].config.fields.length === 200 && dec1[0].config.fields[199].doc === "immutable config field number 199");
@@ -53,7 +54,7 @@ check("the content hash is stable (same immutable subgraph -> same hash)", hashO
 const stack2 = [{ fn: "View", pc: 5, config: CONFIG, alsoConfig: CONFIG, ui: { route: "article", scroll: 120 } }];
 const enc2 = encodeGraph([stack2], { content });
 const wire2 = size(enc2);
-const dec2 = decodeGraph(enc2, { content: { store: recv } })[0];
+const dec2 = decodeGraph(enc2, { content: { store: recv } })[0] as any;
 
 check("warm hop: CONFIG is NOT inline — only its hash crosses", !JSON.stringify(enc2).includes("immutable config field number 199"));
 check("warm hop: the hash resolves to the SAME instance the receiver already held (identity by content)", dec2[0].config === recv.get(hash) && dec2[0].config === dec1[0].config);
@@ -65,9 +66,9 @@ const baseline = size(encodeGraph([stack2]));
 check(`control: without content-addressing the warm capture re-ships CONFIG inline (${baseline} B)`, baseline > wire2 * 5);
 
 // ── Opt-in & composable: an UNregistered graph with cycles round-trips untouched even with content on. ─
-const node = { name: "n" }; node.self = node;             // a cycle, NOT registered as immutable
+const node = { name: "n", self: null as unknown }; node.self = node;   // a cycle, NOT registered as immutable
 const enc3 = encodeGraph([node], { content: { store: prod, peer: newPeerView() } });
-const dec3 = decodeGraph(enc3, { content: { store: recv } })[0];
+const dec3 = decodeGraph(enc3, { content: { store: recv } })[0] as any;
 check("composable: an unregistered cyclic object still round-trips (content-addressing is opt-in)", dec3.self === dec3 && dec3.name === "n");
 
 // ── Through the BINARY wire — the frame that actually crosses the socket ─────────────────────────────
@@ -75,10 +76,12 @@ const prodB = new ContentStore(), recvB = new ContentStore(), sentB = newPeerVie
 const hashB = prodB.register(CONFIG);
 const b1 = encodeWireBinary([{ fn: "View", pc: 2, config: CONFIG, alsoConfig: CONFIG, ui: { route: "home" } }], null, { content: { store: prodB, peer: sentB } });
 const db1 = decodeWireBinary(b1, { content: { store: recvB } });
-check("binary cold hop: CONFIG reconstructs, shared identity holds, cached by hash", db1.stack[0].config.fields[199].doc === "immutable config field number 199" && db1.stack[0].config === db1.stack[0].alsoConfig && recvB.get(hashB) === db1.stack[0].config);
+const f1 = db1.stack[0] as any;                            // DeltaFrame's index signature types extra fields unknown; cast to access the ad hoc shape
+check("binary cold hop: CONFIG reconstructs, shared identity holds, cached by hash", f1.config.fields[199].doc === "immutable config field number 199" && f1.config === f1.alsoConfig && recvB.get(hashB) === f1.config);
 const b2 = encodeWireBinary([{ fn: "View", pc: 5, config: CONFIG, alsoConfig: CONFIG, ui: { route: "article" } }], null, { content: { store: prodB, peer: sentB } });
 const db2 = decodeWireBinary(b2, { content: { store: recvB } });
-check(`binary warm hop: only the hash crosses (${b1.length} B -> ${b2.length} B), resolving to the cached instance`, b2.length * 5 < b1.length && db2.stack[0].config === recvB.get(hashB) && db2.stack[0].ui.route === "article");
+const f2 = db2.stack[0] as any;
+check(`binary warm hop: only the hash crosses (${b1.length} B -> ${b2.length} B), resolving to the cached instance`, b2.length * 5 < b1.length && f2.config === recvB.get(hashB) && f2.ui.route === "article");
 
 // ── Composition: content-addressing + §5 excision + the min(delta, full) FULL arm together ──────────
 const tier = makeTier("server"), session = makeTrackedSession(tier.id);
@@ -95,7 +98,7 @@ const full1 = encodeWireBinary(subC1.stack, subC1.request, { content: ct });
 const dc1 = decodeWireBinary(full1, { content: { store: crecv } });
 adoptBaseline(session, stackC1, null);                    // establish the shared baseline (walks CONFIG in full — content stays id-consistent)
 check("compose cold: CONFIG reconstructs, DATASET stayed home as a §5 handle, CONFIG cached by hash",
-  dc1.stack[0].config.fields.length === 200 && isHandle(dc1.stack[0].data) && crecv.get(chash) === dc1.stack[0].config);
+  (dc1.stack[0].config as any).fields.length === 200 && isHandle(dc1.stack[0].data) && crecv.get(chash) === dc1.stack[0].config);
 
 // Re-frame FULL hop (the case min(delta, full) falls back to a full frame): the immutable CONFIG now ships by HASH.
 const stackC2 = [{ fn: "View", pc: 9, config: CONFIG, data: DATASET, ui: { route: "article", scroll: 200 } }];
