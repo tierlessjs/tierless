@@ -14,17 +14,25 @@
 // Result: session bytes track CHANGE, not total size — and the win GROWS with model size, because
 // the full wire grows with the model while the delta stays flat in the (constant) per-hop change.
 //
-//   node bench/delta.mjs
+//   node bench/delta.mts
 import { makeDeltaSession, encodeDelta, applyDelta,
   makeTrackedSession, encodeDeltaTracked, applyDeltaTracked, touch } from "tierless/delta";
 import { encodeWireBinary } from "tierless/wire";
+import type { DeltaFrame, Session } from "tierless/delta";
 
-const fmt = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(2) + " MB");
-const sum = (a) => a.reduce((x, y) => x + y, 0);
+const fmt = (n: number): string => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(2) + " MB");
+const sum = (a: number[]): number => a.reduce((x, y) => x + y, 0);
+
+interface Row { id: number; title: string; author: string; score: number; done: boolean }
+// The benchmark's own fixed continuation shape. The wire functions are generic over the loose
+// DeltaFrame (any object with fn/pc), so their DeltaFrame[] returns are cast back to this shape
+// below — round-tripping through this benchmark's own session pair preserves it exactly, which
+// the generic signature can't express structurally.
+interface ContinuationFrame extends DeltaFrame { model: { feed: Row[]; total: number }; ui: { filter: string; page: number; selected: number; tick: number } }
 
 // A realistic continuation: a fixed-size feed model the session reads, plus a small UI cursor the
 // events mutate. `rows` rows of {id, title, author, score, done}.
-const makeContinuation = (rows) => [{
+const makeContinuation = (rows: number): ContinuationFrame[] => [{
   fn: "App", pc: 4,
   model: { feed: Array.from({ length: rows }, (_, i) => ({ id: i, title: "Article number " + i, author: "user" + (i % 20), score: i % 100, done: false })), total: rows },
   ui: { filter: "all", page: 0, selected: -1, tick: 0 },
@@ -33,11 +41,11 @@ const makeContinuation = (rows) => [{
 // Bounce the continuation A→B→A… K times. Each hop the holder mutates a couple of small UI locals
 // (a filter change, a page step) and toggles one feed row's `done` (a deep edit). Return per-hop
 // delta bytes and the full-wire bytes the same hop would have cost.
-function oscillate(rows, K) {
+function oscillate(rows: number, K: number) {
   const A = makeDeltaSession("server"), B = makeDeltaSession("browser");
   let live = makeContinuation(rows);
   let here = A, there = B;
-  const delta = [], full = [], shipped = [];
+  const delta: number[] = [], full: number[] = [], shipped: number[] = [];
   for (let hop = 0; hop < K; hop++) {
     const enc = encodeDelta(here, live, null);
     const { stack: recv } = applyDelta(there, enc.bytes);
@@ -45,11 +53,12 @@ function oscillate(rows, K) {
     full.push(encodeWireBinary(live, null, {}).length);
     shipped.push(enc.shipped);
     // the receiver now holds it — drive one event, then bounce back (roles swap)
-    recv[0].ui.filter = ["all", "active", "done"][hop % 3];
-    recv[0].ui.page = hop;
-    recv[0].ui.tick = hop + 1;
-    recv[0].model.feed[hop % rows].done = !recv[0].model.feed[hop % rows].done;   // a deep edit (1 row object)
-    live = recv;
+    const r = recv as ContinuationFrame[];
+    r[0].ui.filter = ["all", "active", "done"][hop % 3];
+    r[0].ui.page = hop;
+    r[0].ui.tick = hop + 1;
+    r[0].model.feed[hop % rows].done = !r[0].model.feed[hop % rows].done;   // a deep edit (1 row object)
+    live = r;
     [here, there] = [there, here];
   }
   return { delta, full, shipped };
@@ -98,7 +107,7 @@ console.log(`decision: ship a coherence patch, and pick the cheaper of {patch, f
 //   full        encodeWireBinary(whole)            — today's per-hop cost (walk + serialize all)
 //   delta-cold  encodeDelta(fresh peer, whole)     — worst case: walk + hash all + serialize all
 //   delta-warm  encodeDelta(primed peer, whole)    — steady state: walk + hash all + serialize ~none
-const best = (thunk, iters = 300) => { for (let i = 0; i < 5; i++) thunk(); let b = Infinity; for (let k = 0; k < 8; k++) { const t = process.hrtime.bigint(); for (let i = 0; i < iters; i++) thunk(); b = Math.min(b, Number(process.hrtime.bigint() - t) / iters); } return b / 1000; };
+const best = (thunk: () => unknown, iters = 300): number => { for (let i = 0; i < 5; i++) thunk(); let b = Infinity; for (let k = 0; k < 8; k++) { const t = process.hrtime.bigint(); for (let i = 0; i < iters; i++) thunk(); b = Math.min(b, Number(process.hrtime.bigint() - t) / iters); } return b / 1000; };
 
 console.log(`\nCPU — encode time per hop (the accounting cost), JS codec, ${traceRows}-record continuation:\n`);
 console.log("   encoder                                         time      vs full");
@@ -110,7 +119,7 @@ console.log("   encoder                                         time      vs ful
   const warm = makeDeltaSession("server"); const peer = makeDeltaSession("browser");
   applyDelta(peer, encodeDelta(warm, live, null).bytes);
   const tWarm = best(() => encodeDelta(warm, live, null));
-  const rel = (x) => (x / tFull).toFixed(2) + "×";
+  const rel = (x: number) => (x / tFull).toFixed(2) + "×";
   console.log(`   full wire (serialize whole graph)           ${tFull.toFixed(1).padStart(7)} µs     ${"1.00×".padStart(6)}`);
   console.log(`   delta — cold (no baseline, ships all)       ${tCold.toFixed(1).padStart(7)} µs     ${rel(tCold).padStart(6)}`);
   console.log(`   delta — warm (baseline held, ships change)  ${tWarm.toFixed(1).padStart(7)} µs     ${rel(tWarm).padStart(6)}`);
@@ -127,7 +136,7 @@ console.log(`falls back to the full wire. That O(reachable) walk is what the wri
 // dirty when it is mutated (touch(), the version bump), so it ships the dirty set directly and the
 // peer's apply touches only the shipped objects — O(changed), FLAT in model size. Same wire, same
 // reconstruction (proven in the probe). Measure encode AND apply, warm, across sizes.
-function warmPairs(rows) {
+function warmPairs(rows: number) {
   // rescan pair: encoder + a receiver primed with the baseline; encoder holds a 2-object change.
   const rs = makeDeltaSession("server"), rp = makeDeltaSession("browser");
   const rl = makeContinuation(rows); applyDelta(rp, encodeDelta(rs, rl, null).bytes);
@@ -164,7 +173,7 @@ console.log(`(the --auto-writeback hook) provides; rescan stays the safe fallbac
 // ships only reachable objects (no strays) but pays a full O(reachable) walk. Which is optimal is a
 // data question, not an assertion: measure the orphan rate, the wasted bytes, and the CPU under a
 // MEAN workload (realistic oscillation, never orphans) and an EXTREME one (orphans every hop).
-function runWorkload(rows, hops, exact, extreme) {
+function runWorkload(rows: number, hops: number, exact: boolean, extreme: boolean) {
   const s = makeTrackedSession("server"), p = makeTrackedSession("browser");
   const live = makeContinuation(rows);
   applyDeltaTracked(p, encodeDeltaTracked(s, live, null, { exact }).bytes);     // cold baseline
@@ -182,11 +191,11 @@ function runWorkload(rows, hops, exact, extreme) {
 
 console.log(`\nThe orphan tradeoff — pruned O(changed) vs exact O(reachable), 200 rows, 40 hops:\n`);
 console.log("   workload                       pruned objs   exact objs   orphans   wasted bytes   pruned/exact enc");
-for (const [label, extreme] of [["mean (realistic oscillation)", false], ["extreme (orphan every hop)", true]]) {
+for (const [label, extreme] of [["mean (realistic oscillation)", false], ["extreme (orphan every hop)", true]] as const) {
   const pr = runWorkload(200, 40, false, extreme), ex = runWorkload(200, 40, true, extreme);
   const orphans = pr.objs - ex.objs, wasted = pr.bytes - ex.bytes;
   // CPU: a single warm encode under each mode on a primed session holding a one-row edit
-  const mk = (exact) => { const s = makeTrackedSession("server"), p = makeTrackedSession("browser"); const l = makeContinuation(200); applyDeltaTracked(p, encodeDeltaTracked(s, l, null, { exact }).bytes); return () => { l[0].ui.tick++; touch(s, l[0].ui); l[0].model.feed[0].done = !l[0].model.feed[0].done; touch(s, l[0].model.feed[0]); return encodeDeltaTracked(s, l, null, { exact }).bytes; }; };
+  const mk = (exact: boolean) => { const s = makeTrackedSession("server"), p = makeTrackedSession("browser"); const l = makeContinuation(200); applyDeltaTracked(p, encodeDeltaTracked(s, l, null, { exact }).bytes); return () => { l[0].ui.tick++; touch(s, l[0].ui); l[0].model.feed[0].done = !l[0].model.feed[0].done; touch(s, l[0].model.feed[0]); return encodeDeltaTracked(s, l, null, { exact }).bytes; }; };
   const tP = best(mk(false)), tE = best(mk(true));
   console.log(`   ${label.padEnd(30)} ${String(pr.objs).padStart(8)}   ${String(ex.objs).padStart(10)}   ${String(orphans).padStart(7)}   ${fmt(Math.max(0, wasted)).padStart(11)}   ${tP.toFixed(1)}/${tE.toFixed(1)} µs`);
 }

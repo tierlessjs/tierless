@@ -5,15 +5,16 @@
 //   B) serialization cost — encode+decode of the continuation per crossing, vs working-set
 //      size, plus the §5-handle effect that keeps the wire flat when the data is big.
 //
-//   node bench/overhead.mjs
+//   node bench/overhead.mts
 import { PROGRAMS } from "./overhead.gen.mjs";
 import { encodeWire, decodeWire, makeTier } from "tierless/heap";
+import type { Frame } from "tierless/runtime";
 
 const SEED = 12345;
-const fmt = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB");
+const fmt = (n: number): string => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB");
 
 // --- the plain baseline: byte-identical loop to overhead.src.js (asserted equal below) ---
-function churnPlain(n, seed) {
+function churnPlain(n: number, seed: number): number {
   let acc = seed;
   for (let i = 0; i < n; i = i + 1) {
     acc = (acc * 1103515245 + 12345) & 0x7fffffff;
@@ -23,8 +24,8 @@ function churnPlain(n, seed) {
 }
 
 // --- a minimal single-tier pump: owns api.seed, runs everything inline (no migration) ---
-function drive(fn, n) {
-  const stack = [{ fn, pc: 0, args: [n] }];
+function drive(fn: string, n: number): unknown {
+  const stack: Frame[] = [{ fn, pc: 0, args: [n] }];
   for (;;) {
     const top = stack[stack.length - 1];
     const r = PROGRAMS[top.fn](top);
@@ -35,7 +36,7 @@ function drive(fn, n) {
 }
 
 // best-of-batches ns/call (min suppresses GC/scheduler noise — standard for microbench)
-function nsPerCall(thunk, iters, batches = 8) {
+function nsPerCall(thunk: () => unknown, iters: number, batches = 8): number {
   for (let i = 0; i < 3; i++) thunk();                                   // warm the JIT
   let best = Infinity;
   for (let b = 0; b < batches; b++) {
@@ -63,7 +64,7 @@ for (const n of [1000, 10000, 100000]) {
   const plain = nsPerCall(() => churnPlain(n, SEED), iters);
   const real = nsPerCall(() => drive("realistic", n), iters);
   const worst = nsPerCall(() => drive("worst", n), iters);
-  const us = (x) => (x / 1000).toFixed(1).padStart(8) + " µs";
+  const us = (x: number) => (x / 1000).toFixed(1).padStart(8) + " µs";
   console.log(`   ${String(n).padStart(7)}  ${us(plain)}  ${us(real)} (${(real / plain).toFixed(2)}x)   ${us(worst)} (${(worst / plain).toFixed(1)}x)`);
 }
 console.log("\n   Read: 'realistic' ≈ 1x — factoring a hot loop into a pure helper costs ~nothing, because");

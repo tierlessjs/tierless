@@ -10,15 +10,16 @@
     "node": ">=22.18.0"
   },
   "scripts": {
-    "build": "npm run build -w tierless",
+    "build": "npm run build -w tierless && npm run build -w create-tierless",
     "test": "node test/run.mjs",
+    "typecheck": "tsc -p tsconfig.check.json",
     "lint": "eslint .",
     "live": "node test/e2e/server-live.mjs",
-    "bench": "node bench/overhead.mjs && node bench/conduit.mjs && node bench/wire.mjs && node bench/delta.mjs",
-    "bench:overhead": "node bench/overhead.mjs",
-    "bench:conduit": "node bench/conduit.mjs",
-    "bench:wire": "node bench/wire.mjs",
-    "bench:delta": "node bench/delta.mjs"
+    "bench": "node bench/overhead.mts && node bench/conduit.mts && node bench/wire.mts && node bench/delta.mts",
+    "bench:overhead": "node bench/overhead.mts",
+    "bench:conduit": "node bench/conduit.mts",
+    "bench:wire": "node bench/wire.mts",
+    "bench:delta": "node bench/delta.mts"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",

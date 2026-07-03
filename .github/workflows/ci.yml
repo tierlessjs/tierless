@@ -35,7 +35,11 @@ jobs:
       - name: Verify generated .mjs/.d.mts match the committed TypeScript source
         run: |
           npm run build -w tierless
-          git diff --exit-code -- packages/tierless/src packages/tierless/types
+          npm run build -w create-tierless
+          git diff --exit-code -- packages/tierless/src packages/tierless/bin packages/tierless/types packages/create-tierless/index.mjs
+
+      - name: Typecheck test/ and bench/ sources
+        run: npm run typecheck
 
       - name: Lint
         run: npm run lint

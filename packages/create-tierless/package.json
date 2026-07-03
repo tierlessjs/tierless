@@ -10,5 +10,15 @@
     "index.mjs",
     "template"
   ],
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "@types/node": "^26.1.0"
+  }
 }
