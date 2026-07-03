@@ -63,7 +63,11 @@ void j.fns(); void startSidecar; void makeApiExec; void sidecarMain;
 const { code, meta } = compile("function f(){}", { resources: { db: "server" } });
 void code; void meta.exported;
 void analyze("function f(){}"); void DEFAULT_RESOURCES.api;
-void encodeWireBinary; void decodeWireBinary; void makePeer; void wsPort;
+const wbin = encodeWireBinary([{ fn: "F", pc: 0, x: 1 }], { op: "start", tier: "server", name: "x", args: [1] });   // op:"start", not "resource" — must NOT require the ResourceRequest literal
+const wbout = decodeWireBinary(wbin);
+void wbout.stack;
+if (wbout.request && wbout.request.op === "start") void 0;   // only compiles if request.op is string, not pinned to the "resource" literal
+void makePeer; void wsPort;
 const g = encodeGraph([1, { a: 1 }]);
 const back = decodeGraph(g);
 void isHandle(back[0]); void approxExceeds(back, 1000);

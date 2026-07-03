@@ -65,7 +65,7 @@
       "default": "./src/runtime.mjs"
     },
     "./wire": {
-      "types": "./types/wire.d.ts",
+      "types": "./types/wire-binary.d.mts",
       "default": "./src/wire-binary.mjs"
     },
     "./delta": {
