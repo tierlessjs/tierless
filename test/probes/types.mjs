@@ -23,7 +23,7 @@ import { makeHost, answerWith, type Bundle, type Host } from "tierless";
 import { makePump, initialStack } from "tierless/runtime";
 import { attachTierless, serveApp, WS_PATH } from "tierless/server";
 import { connect, bindActions, configureTierless } from "tierless/browser";
-import { useAction } from "tierless/react";
+import { useAction, type ActionStatus } from "tierless/react";
 import tierlessPlugin from "tierless/vite";
 import { defineApi, PUBLIC, DENY, JwtApi, startSidecar, makeApiExec, sidecarMain } from "tierless/api";
 import { compile, analyze, DEFAULT_RESOURCES } from "tierless/compiler";
@@ -56,6 +56,8 @@ void regHost.pump;
 void bindActions(bundle, { module: "m" }); void configureTierless({});
 const a = useAction((x: number) => Promise.resolve(x + 1));
 void a.run(2); const r: boolean = a.running; void r;
+const s: ActionStatus = a.status;   // only compiles if status is the real union, not widened to plain string
+void s;
 const plugin = tierlessPlugin({ api: "./api.server.mjs" });
 void plugin.transform("code", "id");
 const def = defineApi((api) => ({

@@ -49,7 +49,7 @@
       "default": "./src/browser.mjs"
     },
     "./react": {
-      "types": "./types/react.d.ts",
+      "types": "./types/react.d.mts",
       "default": "./src/react.mjs"
     },
     "./vite": {
@@ -116,7 +116,8 @@
   },
   "devDependencies": {
     "typescript": "^6.0.3",
-    "@types/node": "^26.1.0"
+    "@types/node": "^26.1.0",
+    "@types/react": "^19.2.17"
   },
   "types": "./types/host.d.mts"
 }
