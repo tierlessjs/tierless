@@ -3,34 +3,43 @@
 // verbatim; they emit serializable onClick EVENT TOKENS (plain objects, never closures), because
 // the rendered vdom ships to the browser tier and a click there resolves the continuation with the
 // token. Input values (a comment body, the editor fields) are merged into the token by the client.
-export const h = (type, props, ...children) => ({ type, props: { ...(props || {}), children } });
+export const h = (type: string | ((props: any) => unknown), props: Record<string, unknown> | null, ...children: unknown[]) =>
+  ({ type, props: { ...(props || {}), children } });
 
-const flat = (c) => (Array.isArray(c) ? c.flatMap(flat) : c == null || c === false || c === true ? [] : [c]);
-export function render(el) {
+export type Rendered = string | { type: string; props: Record<string, unknown>; children: Rendered[] } | null;
+interface RawElement { type: string | ((props: any) => unknown); props: Record<string, unknown> & { children?: unknown } }
+
+const flat = (c: unknown): unknown[] => (Array.isArray(c) ? c.flatMap(flat) : c == null || c === false || c === true ? [] : [c]);
+export function render(el: unknown): Rendered {
   if (el == null || el === false || el === true) return null;
   if (typeof el === "string" || typeof el === "number") return String(el);
-  const { type, props } = el;
+  const { type, props } = el as RawElement;
   if (typeof type === "function") return render(type(props));     // pure component: call it, recurse
-  const kids = flat(props.children).map(render).filter((c) => c != null);
+  const kids = flat(props.children).map(render).filter((c): c is Rendered => c != null);
   const { children: _children, ...rest } = props;
   return { type, props: rest, children: kids };
 }
-export const textOf = (n) => (n == null ? "" : typeof n === "string" ? n : n.children.map(textOf).filter(Boolean).join(" "));
+export const textOf = (n: Rendered): string => (n == null ? "" : typeof n === "string" ? n : n.children.map(textOf).filter(Boolean).join(" "));
+
+// Data shapes the components render — kept local (not imported from conduit/api.mts) since these
+// components only ever see whatever props the compiled continuation passes them.
+interface ArticlePreview { slug: string; title: string; description: string; tagList: string[]; author: string; favoritesCount: number }
+interface ArticleComment { id: number; body: string; author: string }
 
 // ---- home feed ----
-export function TagList({ tags, active }) {
+export function TagList({ tags, active }: { tags: string[]; active: string }) {
   return h("div", { className: "tags" }, [
     h("button", { key: "_all", className: active === "" ? "active" : "", onClick: { ev: "home" } }, "all"),
     ...tags.map((t) => h("button", { key: t, className: t === active ? "active" : "", onClick: { ev: "tag", tag: t } }, "#" + t)),
   ]);
 }
-export function Preview({ article }) {
+export function Preview({ article }: { article: ArticlePreview }) {
   return h("div", { className: "preview" },
     h("a", { className: "title", onClick: { ev: "open", slug: article.slug } }, article.title),
     h("p", { className: "desc" }, article.description),
     h("span", { className: "meta" }, "@" + article.author + " · ♥ " + article.favoritesCount + " · " + article.tagList.join(" ")));
 }
-export function HomeView({ tags, feed, tag }) {
+export function HomeView({ tags, feed, tag }: { tags: string[]; feed: ArticlePreview[]; tag: string }) {
   return h("div", { className: "home" }, h("h1", null, "conduit"), h(TagList, { tags, active: tag }),
     feed.length === 0
       ? h("p", { className: "empty" }, "No articles" + (tag ? " tagged #" + tag : "") + ".")
@@ -39,12 +48,15 @@ export function HomeView({ tags, feed, tag }) {
 }
 
 // ---- article page ----
-export function Comment({ comment }) {
+export function Comment({ comment }: { comment: ArticleComment }) {
   return h("div", { className: "comment" }, h("p", null, comment.body),
     h("span", { className: "by" }, "@" + comment.author),
     h("button", { onClick: { ev: "uncomment", id: comment.id } }, "x"));
 }
-export function ArticleView({ article, comments }) {
+export function ArticleView({ article, comments }: {
+  article: { title: string; author: string; createdAt: string; favorited: boolean; favoritesCount: number; tagList: string[]; body: string };
+  comments: ArticleComment[];
+}) {
   return h("div", { className: "article" },
     h("button", { className: "back", onClick: { ev: "home" } }, "← back"),
     h("h1", null, article.title),
@@ -60,7 +72,7 @@ export function ArticleView({ article, comments }) {
 }
 
 // ---- editor ----
-export function EditorView({ draft, error }) {
+export function EditorView({ draft, error }: { draft: { title: string; body: string; tags: string }; error: string | null }) {
   return h("div", { className: "editor" }, h("h1", null, "New Article"),
     error ? h("p", { className: "error" }, error) : null,
     h("input", { id: "art-title", placeholder: "Article Title", value: draft.title }),

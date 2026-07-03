@@ -1,1 +1,1 @@
-import { h, render, HomeView, ArticleView, EditorView } from "./view.mjs";
+import { h, render, HomeView, ArticleView, EditorView } from "./view.mts";

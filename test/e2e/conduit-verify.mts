@@ -7,11 +7,11 @@
 // socket; this guards the compiler output for a real multi-view app with routing, forms, and
 // try/catch over a resource. (demo/live prove the same continuation also migrates over a socket.)
 import { run, start, __unwind } from "./conduit/bundle.gen.mjs";
-import * as api from "./conduit/api.mjs";
-import { textOf } from "./conduit/view.mjs";
+import * as api from "./conduit/api.mts";
+import { textOf, type Rendered } from "./conduit/view.mts";
 
 api.seed();
-const API = {
+const API: Record<string, (...args: any[]) => unknown> = {
   "api.getTags": () => api.getTags(), "api.feed": (t) => api.feed(t),
   "api.getArticle": (s) => api.getArticle(s), "api.getComments": (s) => api.getComments(s),
   "api.toggleFavorite": (s) => api.toggleFavorite(s), "api.addComment": (s, b) => api.addComment(s, b),
@@ -32,12 +32,12 @@ const events = [
 ];
 
 let ei = 0;
-const views = [];
+const views: string[] = [];
 let res = start("App");
 while (!res.done) {
   const req = res.request;
   if (req.tier === "browser" && req.name === "dom.commit") {
-    views.push(textOf(req.args[0]));
+    views.push(textOf(req.args[0] as Rendered));   // dom.commit's arg is whatever render() produced — no static declaration ties them together
     res.stack[res.stack.length - 1].ret = events[ei++] || { ev: "stop" };
   } else if (req.tier === "server") {
     // route a server-tier throw INTO the continuation's try/catch (what runtime.mjs's service does):
@@ -49,7 +49,7 @@ while (!res.done) {
 }
 
 views.forEach((v, i) => console.log(`  [${i + 1}] ${v.slice(0, 96)}`));
-const has = (i, s) => views[i] && views[i].includes(s);
+const has = (i: number, s: string) => views[i] && views[i].includes(s);
 const ok = res.value === "session ended" && views.length === 11 &&
   has(0, "conduit") && has(0, "A Deep Dive into CPS") && has(0, "Ten Tips") &&     // [1] feed, fav-sorted
   has(1, "A Deep Dive into CPS") && has(1, "♡ 7") && has(1, "Mind blown") && has(1, "1 comments") && // [2] article
