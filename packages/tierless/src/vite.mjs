@@ -22,74 +22,72 @@
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-
 const require = createRequire(import.meta.url);
-
 const DIRECTIVE = /^(?:\s|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*["']use tierless["']\s*;?/;
-
 export default function tierless(opts = {}) {
-  const {
-    api,                                   // path to the trusted service module (forked as a sidecar)
-    login = null,                          // { user, pass }: log in once per connection, carry the token
-    resources,                             // extra allow-list namespaces (merged over api/commit defaults)
-    runtime = "tierless/browser",          // import specifier for the browser host (overridable for tests)
-    path: wsPath,                          // session endpoint path (defaults to WS_PATH)
-    compilerOptions = {},                  // passed through to the transform (trackWrites, sourceMap, …)
-  } = opts;
-
-  const isTierlessModule = (code) => DIRECTIVE.test(code);
-  let sidecar = null;
-
-  return {
-    name: "tierless",
-    enforce: "pre",
-
-    transform(code, id) {
-      if (id.includes("node_modules") || !isTierlessModule(code)) return null;
-      const { compile } = require("./transform.cjs");
-      const { code: compiled, meta } = compile(code, { ...compilerOptions, resources, filename: id, preamble: "" });
-      if (!meta.exported.length) this?.warn?.(`tierless: ${id} has "use tierless" but exports no suspendable function`);
-      const wrappers = [
-        `import { bindActions as __bindActions } from ${JSON.stringify(runtime)};`,
-        `export const __bundle = { PROGRAMS, __unwind };`,
-        `const __actions = __bindActions(__bundle, { module: ${JSON.stringify(id)} });`,
-        ...meta.exported.map((n) => `export const ${n} = __actions[${JSON.stringify(n)}];`),
-      ].join("\n");
-      return { code: compiled + "\n" + wrappers + "\n", map: null };
-    },
-
-    // Dev server: fork the api sidecar and host the session endpoint on Vite's own http
-    // server. Each module's continuations resolve their server copy via ssrLoadModule,
-    // so the browser and the server always run the SAME transformed machine.
-    async configureServer(server) {
-      const { attachTierless } = await import("./server.mjs");
-      const { startSidecar, makeApiExec } = await import("./api/sidecar.mjs");
-      if (api) {
-        const entry = pathToFileURL(path.resolve(server.config?.root || process.cwd(), api));
-        sidecar = startSidecar(entry);
-        await sidecar.ready();
-        server.httpServer.on("close", () => sidecar.close());
-      }
-      attachTierless(server.httpServer, {
-        path: wsPath,
-        bundle: async (moduleId) => {
-          if (!moduleId) throw new Error("tierless: session did not name its module");
-          const mod = await server.ssrLoadModule(moduleId);
-          if (!mod.__bundle) throw new Error("tierless: " + moduleId + " is not a tierless module");
-          return mod.__bundle;
+    const { api, // path to the trusted service module (forked as a sidecar)
+    login = null, // { user, pass }: log in once per connection, carry the token
+    resources, // extra allow-list namespaces (merged over api/commit defaults)
+    runtime = "tierless/browser", // import specifier for the browser host (overridable for tests)
+    path: wsPath, // session endpoint path (defaults to WS_PATH)
+    compilerOptions = {}, // passed through to the transform (trackWrites, sourceMap, …)
+     } = opts;
+    const isTierlessModule = (code) => DIRECTIVE.test(code);
+    let sidecar = null;
+    return {
+        name: "tierless",
+        enforce: "pre",
+        transform(code, id) {
+            if (id.includes("node_modules") || !isTierlessModule(code))
+                return null;
+            const { compile } = require("./transform.cjs");
+            const { code: compiled, meta } = compile(code, { ...compilerOptions, resources, filename: id, preamble: "" });
+            if (!meta.exported.length)
+                this?.warn?.(`tierless: ${id} has "use tierless" but exports no suspendable function`);
+            const wrappers = [
+                `import { bindActions as __bindActions } from ${JSON.stringify(runtime)};`,
+                `export const __bundle = { PROGRAMS, __unwind };`,
+                `const __actions = __bindActions(__bundle, { module: ${JSON.stringify(id)} });`,
+                ...meta.exported.map((n) => `export const ${n} = __actions[${JSON.stringify(n)}];`),
+            ].join("\n");
+            return { code: compiled + "\n" + wrappers + "\n", map: null };
         },
-        session: async () => {
-          let token = null;
-          if (sidecar && login) {
-            const res = await sidecar.call("login", [login]);
-            if (!res.ok) throw new Error("tierless: login failed: " + res.error);
-            token = res.value;
-          }
-          const exec = sidecar ? makeApiExec(sidecar, token)
-            : () => { throw new Error("tierless: no api service configured (pass { api } to the plugin)"); };
-          return { exec };
+        // Dev server: fork the api sidecar and host the session endpoint on Vite's own http
+        // server. Each module's continuations resolve their server copy via ssrLoadModule,
+        // so the browser and the server always run the SAME transformed machine.
+        async configureServer(server) {
+            const s = server;
+            const { attachTierless } = await import("./server.mjs");
+            const { startSidecar, makeApiExec } = await import("./api/sidecar.mjs");
+            if (api) {
+                const entry = pathToFileURL(path.resolve(s.config?.root || process.cwd(), api));
+                sidecar = startSidecar(entry);
+                await sidecar.ready();
+                s.httpServer.on("close", () => sidecar.close());
+            }
+            attachTierless(s.httpServer, {
+                path: wsPath,
+                bundle: async (moduleId) => {
+                    if (!moduleId)
+                        throw new Error("tierless: session did not name its module");
+                    const mod = await s.ssrLoadModule(moduleId);
+                    if (!mod.__bundle)
+                        throw new Error("tierless: " + moduleId + " is not a tierless module");
+                    return mod.__bundle;
+                },
+                session: async () => {
+                    let token = null;
+                    if (sidecar && login) {
+                        const res = await sidecar.call("login", [login]);
+                        if (!res.ok)
+                            throw new Error("tierless: login failed: " + res.error);
+                        token = res.value;
+                    }
+                    const exec = sidecar ? makeApiExec(sidecar, token)
+                        : () => { throw new Error("tierless: no api service configured (pass { api } to the plugin)"); };
+                    return { exec };
+                },
+            });
         },
-      });
-    },
-  };
+    };
 }

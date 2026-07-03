@@ -53,7 +53,7 @@
       "default": "./src/react.mjs"
     },
     "./vite": {
-      "types": "./types/vite.d.ts",
+      "types": "./types/vite.d.mts",
       "default": "./src/vite.mjs"
     },
     "./compiler": {

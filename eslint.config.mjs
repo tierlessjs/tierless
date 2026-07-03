@@ -40,6 +40,8 @@ export default [
       "bench/conduit.gen.mjs",
       // The compiler itself: a CommonJS build tool that needs the Babel toolchain.
       "packages/tierless/src/transform.cjs",
+      // Compiled from the hand-authored .mts source next to each file — not hand-edited.
+      "packages/tierless/src/**/*.mjs",
     ],
   },
   js.configs.recommended,
@@ -65,8 +67,9 @@ export default [
     },
   },
   {
-    // The browser tier runs in a real page (DOM, WebSocket, …).
-    files: ["test/e2e/public/**/*.mjs", "packages/tierless/src/browser.mjs", "packages/tierless/src/react.mjs", "examples/**/*.mjs", "examples/**/*.jsx", "packages/create-tierless/template/client.mjs"],
+    // The browser tier runs in a real page (DOM, WebSocket, …). (packages/tierless/src/browser.mjs
+    // and react.mjs are compiled output now ignored above — their .mts source isn't ESLint-linted.)
+    files: ["test/e2e/public/**/*.mjs", "examples/**/*.mjs", "examples/**/*.jsx", "packages/create-tierless/template/client.mjs"],
     languageOptions: { globals: { ...globals.browser } },
   },
   {
