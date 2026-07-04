@@ -4,7 +4,7 @@
 // mounts it with `bundleResolverFromManifest`: no second `tierless build` pass, no hand-written
 // module resolver. This drives the plugin's build hooks headless, then stands up the real prod
 // path (resolver + serveApp + sidecar) and calls an action across a socket, end to end.
-import { writeFileSync, mkdtempSync, existsSync, readFileSync } from "node:fs";
+import { writeFileSync, mkdtempSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
@@ -41,6 +41,19 @@ export function rebalance(syms) {
 `;
 const actionsId = join(dir, "actions.mjs");
 
+// A second mix module that imports a RELATIVE helper from a subdir — the server copy lands in
+// dist-tierless/ so its `./lib/fmt.mjs` must be rewritten to resolve from there.
+mkdirSync(join(dir, "lib"));
+writeFileSync(join(dir, "lib", "fmt.mjs"), `export const tag = (s) => "<" + s + ">";\n`);
+const WITHIMPORT = `"use tierless";
+import { tag } from "./lib/fmt.mjs";
+export function decideOne(sym) {
+  const q = api.getQuote(sym);        // suspends → runs server-side, where the rewritten import must resolve
+  return tag(sym + ":" + q);
+}
+`;
+const withImportId = join(dir, "decide.mjs");
+
 console.log("Probe: the Vite build emit — one compile, a manifest, a prod mount with no re-compile\n");
 
 const plugin = tierless({ api: "api.server.mjs", runtime: pathToFileURL(join(SRC_DIR, "browser.mjs")).href });
@@ -49,6 +62,9 @@ const plugin = tierless({ api: "api.server.mjs", runtime: pathToFileURL(join(SRC
 const out = plugin.transform(ACTIONS, actionsId);
 if (!out) throw new Error("transform returned null for a \"use tierless\" module");
 writeFileSync(actionsId, out.code);
+const out2 = plugin.transform(WITHIMPORT, withImportId);
+if (!out2) throw new Error("transform returned null for the helper-importing module");
+writeFileSync(withImportId, out2.code);
 
 // ---- the build emit: writeBundle drops the server bundles + manifest ----------------------
 plugin.configResolved({ root: dir });
@@ -64,6 +80,15 @@ const serverFile = join(dir, "dist-tierless", manifest.modules[actionsId]);
 const serverMod: any = await import(pathToFileURL(serverFile).href);
 check("the emitted server bundle IS the machine — same compiler output, no second pass",
   !!(serverMod.PROGRAMS && serverMod.PROGRAMS.rebalance) && typeof serverMod.__unwind === "function");
+
+// ---- the helper-importing module: its relative import is rewritten for the emit dir -------
+const serverFile2 = join(dir, "dist-tierless", manifest.modules[withImportId]);
+const emitted2 = readFileSync(serverFile2, "utf8");
+check("the server bundle's relative import is rewritten to resolve from dist-tierless/",
+  emitted2.includes(`"../lib/fmt.mjs"`) && !emitted2.includes(`"./lib/fmt.mjs"`), emitted2.split("\n")[1]);
+const serverMod2: any = await import(pathToFileURL(serverFile2).href);   // executes the rewritten import
+check("the rewritten import resolves — the server bundle imports its helper from the new location",
+  !!(serverMod2.PROGRAMS && serverMod2.PROGRAMS.decideOne));
 
 // ---- the prod mount: resolver + serveApp + sidecar, action call end to end ----------------
 const apiService = startSidecar(pathToFileURL(join(dir, "api.server.mjs")));
@@ -84,6 +109,12 @@ const mod: any = await import(pathToFileURL(actionsId).href);
 const v = await mod.rebalance(["abc", "a", "abcd"]);
 check("the prod path serves the action from the manifest bundle, monitor-authorized",
   v === "ana:abc@30,ana:abcd@40", v);
+
+// the helper-importing action runs on the server, using the imported (rewritten) helper there
+const mod2: any = await import(pathToFileURL(withImportId).href);
+const v2 = await mod2.decideOne("abc");
+check("an action that imports a relative helper runs server-side with it, end to end",
+  v2 === "<abc:30>", v2);
 
 // a module the manifest never saw is a clear error, not a silent wrong machine
 const missing = await bundle("/nope/unknown.mjs").then(() => null, (e: any) => String(e && e.message || e));

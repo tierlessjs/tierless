@@ -13,6 +13,8 @@ interface CompileMeta {
     /** Exported suspendable functions — the module's actions surface. */
     exported: string[];
     pure: string[];
+    /** Top-level relative import/export-from specifiers, in source form (for server-emit rewriting). */
+    imports: string[];
 }
 interface FunctionReport {
     name: string;

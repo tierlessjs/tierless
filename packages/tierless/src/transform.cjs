@@ -1177,6 +1177,20 @@ function collectProgram(ast) {
     }
     return { fnPaths, rest, susp, directly, calls };
 }
+// The module's own top-level RELATIVE import/export-from specifiers (`./`, `../`), in source
+// form. The compiled machine keeps these verbatim (they sit in `kept`); when the Vite plugin
+// emits the server copy to a different directory it rewrites them relative to that directory
+// (see vite.mts). Bare specifiers (packages) resolve from node_modules unchanged, so they're
+// not listed.
+function relativeImports(rest) {
+    const specs = [];
+    for (const n of rest) {
+        const src = t.isImportDeclaration(n) || t.isExportNamedDeclaration(n) || t.isExportAllDeclaration(n) ? n.source : null;
+        if (src && t.isStringLiteral(src) && src.value.startsWith("."))
+            specs.push(src.value);
+    }
+    return [...new Set(specs)];
+}
 function compile(src, preamble) {
     const ast = parser.parse(src, { sourceType: "module" });
     allowlist(ast);
@@ -1186,7 +1200,7 @@ function compile(src, preamble) {
     fnSites = {};
     const { fnPaths, rest, susp } = collectProgram(ast);
     suspSet = susp;
-    const pure = [], progs = [], meta = { programs: [], exported: [], pure: [] };
+    const pure = [], progs = [], meta = { programs: [], exported: [], pure: [], imports: relativeImports(rest) };
     for (const [name, { p, exported }] of fnPaths) { // pure single-tier fns run wholesale (lower() handles suspendable ones)
         if (suspSet.has(name)) {
             progs.push(lower(p));

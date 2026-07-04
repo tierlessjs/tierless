@@ -41,6 +41,24 @@ const shortHash = (s: string): string => {
 const serverBundleName = (id: string): string =>
   path.basename(id).replace(/\.[^.]+$/, "") + "." + shortHash(id) + ".server.mjs";
 
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Rewrite a server bundle's own relative import specifiers so they resolve from the emit dir
+// (dist-tierless/) instead of the source dir. A `./util.mjs` next to src/actions.mjs becomes
+// `../src/util.mjs` under dist-tierless/ — machine-independent (both dirs travel together in the
+// deploy tree, the same assumption the served api.server.mjs already relies on). Only the exact
+// specifiers the compiler reported are touched, and only in `from "…"` / `import "…"` position, so
+// a string literal in the machine body that happens to look like a path is never rewritten.
+const rewriteRelativeImports = (code: string, srcDir: string, outDir: string, specs: string[]): string => {
+  let out = code;
+  for (const spec of specs) {
+    let rel = path.relative(outDir, path.resolve(srcDir, spec)).split(path.sep).join("/");
+    if (!rel.startsWith(".")) rel = "./" + rel;
+    out = out.replace(new RegExp(`((?:from|import)\\s*)(['"])${escapeRegExp(spec)}\\2`, "g"), `$1$2${rel}$2`);
+  }
+  return out;
+};
+
 export interface TierlessPluginOptions {
   /** Path to the trusted service module (forked as a reference-monitor sidecar). */
   api?: string;
@@ -94,7 +112,7 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
 
   const isTierlessModule = (code: string): boolean => DIRECTIVE.test(code);
   let sidecar: SidecarClient | null = null;
-  const machines = new Map<string, string>();  // moduleId -> compiled server machine (byte-identical to `tierless build --bare`)
+  const machines = new Map<string, { code: string; imports: string[] }>();  // moduleId -> compiled server machine + its relative imports
   let root = process.cwd();                     // Vite root, captured in configResolved (for the build emit path)
 
   return {
@@ -106,7 +124,7 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
       const { compile } = require("./transform.cjs");
       const { code: compiled, meta } = compile(code, { ...compilerOptions, resources, filename: id, preamble: "" });
       if (!meta.exported.length) this?.warn?.(`tierless: ${id} has "use tierless" but exports no suspendable function`);
-      machines.set(id, compiled);            // the SAME machine the browser will run — emitted for the server at writeBundle
+      machines.set(id, { code: compiled, imports: meta.imports });   // the SAME machine the browser will run — emitted for the server at writeBundle
       const wrappers = [
         `import { bindActions as __bindActions } from ${JSON.stringify(runtime)};`,
         `export const __bundle = { PROGRAMS, __unwind };`,
@@ -133,9 +151,10 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
       const outDir = path.resolve(root, serverOutDir);
       mkdirSync(outDir, { recursive: true });
       const modules: Record<string, string> = {};
-      for (const [id, code] of machines) {
+      for (const [id, { code, imports }] of machines) {
         const name = serverBundleName(id);
-        writeFileSync(path.join(outDir, name), code);
+        const emitted = imports.length ? rewriteRelativeImports(code, path.dirname(id), outDir, imports) : code;
+        writeFileSync(path.join(outDir, name), emitted);
         modules[id] = name;
       }
       writeFileSync(path.join(outDir, "tierless.manifest.json"),
