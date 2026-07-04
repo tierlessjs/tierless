@@ -72,7 +72,7 @@ else if (cmd === "explain") {
     const [file] = rest.filter((a) => !a.startsWith("--"));
     if (!file)
         die(usage);
-    let rep;
+    let rep; // definite-assignment: die() below never returns, so rep is always set past here
     try {
         rep = analyze(readFileSync(file, "utf8"), { resources: parseResources(rest), filename: file });
     }

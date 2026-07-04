@@ -65,7 +65,7 @@ if (cmd === "build") {
 } else if (cmd === "explain") {
   const [file] = rest.filter((a) => !a.startsWith("--"));
   if (!file) die(usage);
-  let rep;
+  let rep!: ReturnType<typeof analyze>;                             // definite-assignment: die() below never returns, so rep is always set past here
   try { rep = analyze(readFileSync(file, "utf8"), { resources: parseResources(rest), filename: file }); }
   catch (e) { die((e as Error).message); }                         // same rejection as build — a clear message, not a V8 stack
   if (rest.includes("--json")) { process.stdout.write(JSON.stringify({ file, ...rep }, null, 2) + "\n"); process.exit(0); }
