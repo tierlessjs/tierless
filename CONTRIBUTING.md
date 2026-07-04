@@ -19,11 +19,12 @@ two-tier walkthrough, see [`test/e2e/README.md`](./test/e2e/README.md).
 
 ## The checks that must pass
 
-CI runs three gates, and all three should be green locally before you open a PR:
+CI runs four gates, and all four should be green locally before you open a PR:
 
 ```bash
 npm run build -w tierless   # compile packages/tierless/src/*.mts to .mjs + .d.mts, then:
 git diff --exit-code -- packages/tierless/src packages/tierless/types   # ...and commit the result
+npm run typecheck           # tsc over the test/ + bench/ sources (type-checked, not emitted)
 npm run lint                # ESLint (correctness-focused)
 npm test                    # the full regression suite (every demo + probe)
 ```
@@ -84,7 +85,7 @@ compiles through the same pipeline as `.src.js`.
 | the WebSocket transport | `packages/tierless/src/transport.mts` |
 | the demo app | `test/e2e/app/` |
 | the browser tier | `test/e2e/public/` |
-| a proof / regression case | `test/e2e/*.mjs` + `test/run.mts` |
+| a proof / regression case | `test/e2e/*.mts` or `test/probes/*.mts` + `test/run.mts` |
 
 ## Commits & pull requests
 

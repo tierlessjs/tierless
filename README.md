@@ -39,7 +39,7 @@ need websocket reconnection/resume across dropped connections (not built yet —
 > renders on the server, migrates into real headless Chromium to commit the DOM,
 > takes a real click, and migrates back — but the API is pre-1.0 and Tierless is not
 > yet meant to run untrusted code across a trust boundary in production. Every headline
-> claim is an executable assertion: clone and `npm test` (33 proofs). See
+> claim is an executable assertion: clone and `npm test` (34 proofs). See
 > [`ROADMAP.md`](./ROADMAP.md), [`CHANGELOG.md`](./CHANGELOG.md),
 > [`SECURITY.md`](./SECURITY.md).
 

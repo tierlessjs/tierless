@@ -40,12 +40,11 @@
 // callback / comparator / method — it runs synchronously inside native code (Array.map/sort, a
 // method dispatch) that can't suspend or migrate, so lift it to a loop.
 //
-// Needs the Babel toolchain to RUN (not a repo dependency, like emscripten for
-// qjs-migrate). The committed *.gen.mjs files are its output, so the demos run without
-// it. To regenerate:
+// Needs the Babel toolchain to RUN, but it is NOT a runtime dependency of the framework: the
+// committed *.gen.mjs files are its output, so the demos and tests run without it. To regenerate:
 //   npm i -D @babel/parser@8 @babel/traverse@8 @babel/generator@8 @babel/types@8
-//   node transform.cjs app/App.src.js app/bundle.gen.mjs
-//   node transform.cjs cf-fixtures.src.js cf-fixtures.gen.mjs --bare
+//   npx tierless build test/e2e/app/App.src.js test/e2e/app/bundle.gen.mjs
+//   npx tierless build test/e2e/cf-fixtures.src.js test/e2e/cf-fixtures.gen.mjs --bare
 import parser = require("@babel/parser");
 import traverseModule = require("@babel/traverse");
 import type { NodePath } from "@babel/traverse";

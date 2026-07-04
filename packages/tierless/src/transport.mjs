@@ -1,8 +1,9 @@
 // Tierless — WebSocket transport. Migrate a live continuation between the browser tier
 // and the server tier over one ws connection, and fetch §5 handles on demand across that
 // same socket. Browser-safe: no Node Buffer or stream dependency (the frame codec uses
-// TextEncoder/Uint8Array), and the only WebSocket reference is the injectable
-// globalThis.WebSocket the browser owns.
+// TextEncoder/Uint8Array), and it never constructs a socket — it adapts a WebSocket-like object
+// handed to it (a browser WebSocket or a Node `ws`), so the actual `new WebSocket` lives in
+// browser.mts, not here.
 //
 // Protocol — one discrete message per ws frame, length-prefixed JSON + optional binary:
 //   request  { kind:"request", id, payload }
