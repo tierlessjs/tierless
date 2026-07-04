@@ -102,6 +102,15 @@ const END = (id: string, seq: number): TraceRecord => ({ t: "end", id, hop: 1, s
   const g = decide(8000, siteKey("Go", 4, "api.a"), unstable, { mode: "trajectory", argFeatures: ["300"], stability: 0.9 });
   check("an unstable suffix (50% modal) degrades to the greedy rule", g.choice === "fetch" && g.why.includes("unstable"), g.why);
 
+  // unserializable results (resultBytes -1) are no size sample: they must not skew the
+  // mean, and a site with ONLY them has no price — cold, not "fetch costs 0"
+  const opaque = buildProfile([
+    R("o1", 0, "api.a", ["300"], 7000), R("o1", 1, "api.a", ["300"], -1), END("o1", 2),
+    R("o2", 0, "api.x", ["1"], -1), END("o2", 1),
+  ], "cafe0001");
+  check("an unserializable result does not skew the site mean", opaque.sites[siteKey("Go", 4, "api.a")].meanSize === 7000);
+  check("a site with only unserializable results stays cold", decide(50, siteKey("Go", 4, "api.x"), opaque).why.includes("cold"));
+
   // the bundle-identity gate
   check("loadProfile accepts the matching bundle", loadProfile(p, "cafe0001") === p);
   check("loadProfile refuses a mismatched bundle (stale = silent misattribution)", loadProfile(p, "cafe0002") === null);

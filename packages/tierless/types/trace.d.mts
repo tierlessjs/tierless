@@ -96,6 +96,7 @@ interface SizeBucket {
 }
 export interface SiteProfile {
     n: number;
+    sized: number;
     meanSize: number;
     sizes: Record<string, SizeBucket>;
     contMean: number;

@@ -162,6 +162,7 @@ export const siteKey = (fn: string, pc: number, resource: string): string => fn 
 interface SizeBucket { n: number; mean: number }
 export interface SiteProfile {
   n: number;                                        // resource touches observed
+  sized: number;                                    // touches with a measurable result (meanSize's denominator)
   meanSize: number;                                 // overall mean result bytes
   sizes: Record<string, SizeBucket>;                // per argFeatures bucket — the §1.2 fix
   contMean: number;                                 // mean continuation bytes observed at this site's crossings
@@ -190,7 +191,7 @@ export function buildProfile(records: TraceRecord[], bundle: string): Profile {
     byRun.get(r.id)!.push(r);
   }
   const sites: Record<string, SiteProfile> = {};
-  const site = (k: string): SiteProfile => (sites[k] ||= { n: 0, meanSize: 0, sizes: {}, contMean: 0, contN: 0, suffixes: {}, modal: null, stability: 0, complete: 0 });
+  const site = (k: string): SiteProfile => (sites[k] ||= { n: 0, sized: 0, meanSize: 0, sizes: {}, contMean: 0, contN: 0, suffixes: {}, modal: null, stability: 0, complete: 0 });
   let completeRuns = 0;
 
   for (const recs of byRun.values()) {
@@ -201,8 +202,9 @@ export function buildProfile(records: TraceRecord[], bundle: string): Profile {
 
     for (const r of touches) {                                     // size model: every run, truncated included
       const s = site(siteKey(r.fn, r.pc, r.resource));
-      if (r.resultBytes >= 0) {
-        s.meanSize += (r.resultBytes - s.meanSize) / (s.n + 1);
+      if (r.resultBytes >= 0) {                                    // an unserializable result contributes no size sample
+        s.meanSize += (r.resultBytes - s.meanSize) / (s.sized + 1);
+        s.sized++;
         const bucket = (s.sizes[r.argFeatures.join(",")] ||= { n: 0, mean: 0 });
         bucket.mean += (r.resultBytes - bucket.mean) / (bucket.n + 1);
         bucket.n++;
@@ -273,7 +275,7 @@ export interface DecideOpts {
 export function decide(contBytes: number, key: string, profile: Profile | null, { fetchable = true, mode = "trajectory", stability = 0.9, argFeatures = [] }: DecideOpts = {}): Decision {
   if (!fetchable) return { choice: "migrate", why: "side effect: cannot fetch", fetchSide: Infinity };
   const s = profile?.sites[key];
-  if (!s || !s.n) return { choice: "migrate", why: "fetch not yet priced (cold)", fetchSide: Infinity };
+  if (!s || !s.sized) return { choice: "migrate", why: "fetch not yet priced (cold)", fetchSide: Infinity };   // touches without a measurable size are no price
   const here = expectedFetch(s, argFeatures);
   let fetchSide = here, how = "greedy: this fetch";
   if (mode === "trajectory" && s.modal !== null && s.stability >= stability) {

@@ -139,7 +139,7 @@ export function buildProfile(records, bundle) {
         byRun.get(r.id).push(r);
     }
     const sites = {};
-    const site = (k) => (sites[k] ||= { n: 0, meanSize: 0, sizes: {}, contMean: 0, contN: 0, suffixes: {}, modal: null, stability: 0, complete: 0 });
+    const site = (k) => (sites[k] ||= { n: 0, sized: 0, meanSize: 0, sizes: {}, contMean: 0, contN: 0, suffixes: {}, modal: null, stability: 0, complete: 0 });
     let completeRuns = 0;
     for (const recs of byRun.values()) {
         recs.sort((a, b) => a.seq - b.seq); // seq rides the continuation: one global order across both tiers
@@ -149,8 +149,9 @@ export function buildProfile(records, bundle) {
         const touches = recs.filter((r) => r.t === "res");
         for (const r of touches) { // size model: every run, truncated included
             const s = site(siteKey(r.fn, r.pc, r.resource));
-            if (r.resultBytes >= 0) {
-                s.meanSize += (r.resultBytes - s.meanSize) / (s.n + 1);
+            if (r.resultBytes >= 0) { // an unserializable result contributes no size sample
+                s.meanSize += (r.resultBytes - s.meanSize) / (s.sized + 1);
+                s.sized++;
                 const bucket = (s.sizes[r.argFeatures.join(",")] ||= { n: 0, mean: 0 });
                 bucket.mean += (r.resultBytes - bucket.mean) / (bucket.n + 1);
                 bucket.n++;
@@ -213,8 +214,8 @@ export function decide(contBytes, key, profile, { fetchable = true, mode = "traj
     if (!fetchable)
         return { choice: "migrate", why: "side effect: cannot fetch", fetchSide: Infinity };
     const s = profile?.sites[key];
-    if (!s || !s.n)
-        return { choice: "migrate", why: "fetch not yet priced (cold)", fetchSide: Infinity };
+    if (!s || !s.sized)
+        return { choice: "migrate", why: "fetch not yet priced (cold)", fetchSide: Infinity }; // touches without a measurable size are no price
     const here = expectedFetch(s, argFeatures);
     let fetchSide = here, how = "greedy: this fetch";
     if (mode === "trajectory" && s.modal !== null && s.stability >= stability) {
