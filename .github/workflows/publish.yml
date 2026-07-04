@@ -123,3 +123,23 @@ jobs:
           V=$(node -p "require('./packages/create-tierless/package.json').version")
           if npm view "create-tierless@$V" version > /dev/null 2>&1; then echo "create-tierless@$V is already on the registry — skipping"
           else npm publish --provenance --access public -w create-tierless; fi
+
+      # Second surface, same notes: the GitHub Release publishes this version's hand-written
+      # CHANGELOG section to the repo's Releases tab / watchers / feed. Runs only after both
+      # npm publishes, so a release entry always means "it is actually on the registry".
+      - name: Create the GitHub Release from the CHANGELOG section
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(node -p "require('./packages/tierless/package.json').version")
+          if gh release view "v$V" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "release v$V already exists — skipping"; exit 0
+          fi
+          node -e '
+            const fs = require("fs");
+            const v = require("./packages/tierless/package.json").version;
+            const sec = fs.readFileSync("CHANGELOG.md", "utf8").split(/^## /m).find((s) => s.startsWith(v + " "));
+            if (!sec) { console.error("no CHANGELOG section for " + v + " — write the release notes first"); process.exit(1); }
+            fs.writeFileSync(process.env.RUNNER_TEMP + "/notes.md", sec.split("\n").slice(1).join("\n").trim() + "\n");
+          '
+          gh release create "v$V" --repo "$GITHUB_REPOSITORY" --title "v$V" --notes-file "$RUNNER_TEMP/notes.md"
