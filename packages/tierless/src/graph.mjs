@@ -178,9 +178,20 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024, conten
     }
     return { roots: values.map(enc), objs };
 }
+// A bigint crosses the wire as a decimal string; a hostile peer can send a non-numeric one.
+// Bare BigInt() throws SyntaxError, which would escape the reader's "clean RangeError on bad
+// input" contract (see wire-binary.mts) — normalize it here, at the §7 trust boundary.
+export function toBigInt(s) {
+    try {
+        return BigInt(s);
+    }
+    catch {
+        throw new RangeError("wire: invalid bigint literal");
+    }
+}
 export function decodeGraph({ roots, objs }, { content = null } = {}) {
     const built = objs.map((s) => (s.k === "a" ? [] : s.k === "o" ? {} : s.k === "map" ? new Map() : s.k === "set" ? new Set() : s.k === "symu" ? Symbol(s.d) : s.k === "c" ? (content && content.store.get(s.h)) : s.h)); // pre-create for cycles/sharing; k:"c" resolves to the held immutable subgraph
-    const dec = (n) => (n.k === "u" ? undefined : n.k === "big" ? BigInt(n.v) : n.k === "glob" ? GLOBALS[n.name] : n.k === "symw" ? Symbol[n.name] : n.k === "symf" ? Symbol.for(n.key) : n.k === "p" ? n.v : built[n.id]);
+    const dec = (n) => (n.k === "u" ? undefined : n.k === "big" ? toBigInt(n.v) : n.k === "glob" ? GLOBALS[n.name] : n.k === "symw" ? Symbol[n.name] : n.k === "symf" ? Symbol.for(n.key) : n.k === "p" ? n.v : built[n.id]);
     objs.forEach((s, i) => {
         if (s.k === "a")
             for (const n of s.e)

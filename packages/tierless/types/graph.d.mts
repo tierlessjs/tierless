@@ -38,4 +38,5 @@ export interface EncodedGraph {
     objs: unknown[];
 }
 export declare function encodeGraph(values: unknown[], { tier, threshold, content }?: EncodeOptions): EncodedGraph;
+export declare function toBigInt(s: string): bigint;
 export declare function decodeGraph({ roots, objs }: EncodedGraph, { content }?: DecodeOptions): unknown[];

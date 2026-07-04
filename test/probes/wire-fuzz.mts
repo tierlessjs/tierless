@@ -147,6 +147,13 @@ const out = decodeGraph(hostile)[0] as any;   // decodeGraph is generic (unknown
 check("decodeGraph defends a hostile __proto__ key (no global or per-object prototype pollution)",
   ({} as Record<string, unknown>).polluted === undefined && out.polluted === undefined && Object.getPrototypeOf(out) === Object.prototype);
 
+// (c) a hostile bigint node (non-numeric string) must fail with a clean RangeError, not the raw
+// SyntaxError bare BigInt() throws — the reader's stated "clean RangeError on bad input" contract.
+let bigClean = false;
+try { decodeGraph({ roots: [{ k: "big", v: "not-a-number" }], objs: [] }); }
+catch (e) { bigClean = e instanceof RangeError; }
+check("a hostile bigint literal fails with a clean RangeError, not a raw SyntaxError", bigClean);
+
 // a §5 handle still excises + round-trips through the binary wire
 const hb = decodeWireBinary(encodeWireBinary([{ fn: "F", pc: 0, big: { blob: "x".repeat(20000) }, args: [] }], null, { tier: makeTier("server"), threshold: 8192 })).stack[0];
 check("§5 handle excision survives the binary wire", isHandle(hb.big));

@@ -80,7 +80,15 @@ const MIME = {
 export async function serveApp({ port = 0, page, staticRoot, ...attachOpts }) {
     const root = staticRoot ? path.resolve(staticRoot) + path.sep : null;
     const server = http.createServer((req, res) => {
-        const url = new URL(req.url, "http://localhost");
+        let url, pathname;
+        try {
+            url = new URL(req.url, "http://localhost");
+            pathname = decodeURIComponent(url.pathname);
+        }
+        catch {
+            res.writeHead(400);
+            return res.end("bad request");
+        } // malformed URL / percent-encoding from an untrusted client — don't crash the process
         if (page && (url.pathname === "/" || url.pathname === "/index.html")) {
             res.writeHead(200, { "Content-Type": MIME[".html"] });
             return res.end(page);
@@ -89,7 +97,7 @@ export async function serveApp({ port = 0, page, staticRoot, ...attachOpts }) {
             res.writeHead(404);
             return res.end("not found");
         }
-        const abs = path.join(root, decodeURIComponent(url.pathname).replace(/^\/+/, ""));
+        const abs = path.join(root, pathname.replace(/^\/+/, ""));
         if (!abs.startsWith(root)) {
             res.writeHead(403);
             return res.end("forbidden");

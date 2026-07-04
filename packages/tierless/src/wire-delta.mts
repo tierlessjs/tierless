@@ -25,7 +25,7 @@
 // null/undefined/bigint, and §5 handles — with identity and cycles preserved across all of them
 // (a shared object that is also a Map key and a Set member stays one object). Symbols and
 // non-enumerable props extend mechanically (same node table as wire-binary).
-import { isHandle, approxExceeds, type Handle, type EncodeTier, type ContentStoreView } from "./graph.mjs";
+import { isHandle, approxExceeds, toBigInt, type Handle, type EncodeTier, type ContentStoreView } from "./graph.mjs";
 
 export interface DeltaFrame {
   fn: string;
@@ -304,7 +304,7 @@ function parseDelta(bytes: Uint8Array | ArrayBufferLike): { frames: RootFrame[];
     case 0: return { ref: S(r.varu()) };
     case 1: return { v: r.vari() }; case 2: return { v: r.f64() }; case 3: return { v: S(r.varu()) };
     case 4: return { v: true }; case 5: return { v: false }; case 6: return { v: null }; case 7: return { v: undefined };
-    case 8: return { v: BigInt(S(r.varu())) };
+    case 8: return { v: toBigInt(S(r.varu())) };
     default: throw new RangeError("wire-delta: bad node tag " + t); } };
   const rootNodes: any[] = []; { const n = r.count(); for (let i = 0; i < n; i++) rootNodes.push(node()); }
   const changed: any[] = []; { const n = r.count(); for (let i = 0; i < n; i++) {

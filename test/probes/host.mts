@@ -86,9 +86,21 @@ console.log("Probe: the assembled host — serveApp/connect, both session direct
 
 check("every api.* was serviced on the server tier, none leaked to the client", served.every((n) => n === "api.dbl"));
 
+// ---- static file server: a hostile request must 400, never crash the process (§7 boundary) ----
+{
+  writeFileSync(join(dir, "ok.txt"), "hi");
+  const app = await serveApp({ port: 0, bundle, staticRoot: dir, session: async () => ({ exec: apiExec }) });
+  const base = `http://localhost:${app.port}`;
+  const bad = await fetch(`${base}/%`);                          // malformed percent-encoding — used to take the whole process down
+  const good = await fetch(`${base}/ok.txt`);
+  check("a malformed static request is refused with 400, not a process crash", bad.status === 400);
+  check("a well-formed static request still serves its file", good.status === 200 && (await good.text()) === "hi");
+  app.close();
+}
+
 const { pass, fail } = counts();
 const ok = fail === 0;
 console.log(ok
-  ? `\nOK — serveApp/connect assemble the full host: client-started actions (with mid-flight bounces and concurrency) and server-started sessions both run over one socket (${pass} checks)`
+  ? `\nOK — serveApp/connect assemble the full host: client-started actions (with mid-flight bounces and concurrency) and server-started sessions both run over one socket, and a malformed static request is refused without crashing the host (${pass} checks)`
   : `\nFAILED (${pass} passed, ${fail} failed)`);
 process.exit(ok ? 0 : 1);
