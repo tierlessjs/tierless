@@ -5,9 +5,17 @@ name: Publish (npm, provenance)
 # GitHub OIDC id-token, and `--provenance` ties the published tarball to this exact commit
 # and workflow run (the green "Built and signed" checkmark on npmjs.com).
 #
-# One-time setup (per package, on npmjs.com → package → Settings → Trusted publisher):
-#   GitHub Actions / repository: tierlessjs/tierless / workflow: publish.yml
-# After that, releasing is: bump versions + CHANGELOG, then `git tag v<version> && git push --tags`.
+# One-time setup:
+#   1. GitHub: repo Settings → Environments → create "npm-publish", add yourself as a
+#      required reviewer. The job runs in that environment, so every publish waits for a
+#      human approval click between the tag push and npm — the last gate before an
+#      irreversible publish.
+#   2. npmjs.com (per package → Settings → Trusted publisher): GitHub Actions /
+#      repository: tierlessjs/tierless / workflow: publish.yml / environment: npm-publish.
+#      Filling the environment field pins npm's OIDC match to this environment — a
+#      workflow run outside it can't publish even from this repo.
+# After that, releasing is: bump versions + CHANGELOG, then `git tag v<version> && git push --tags`,
+# then approve the run.
 
 on:
   push:
@@ -20,6 +28,7 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: npm-publish
     steps:
       - uses: actions/checkout@v4
 
@@ -51,6 +60,33 @@ jobs:
           npm run typecheck
           npm run lint
           npm test
+
+      # Test the ARTIFACT, not the checkout: pack both tarballs, then prove every exports-map
+      # subpath imports from the installed pack, the installed bin compiles a machine that steps,
+      # and the packed scaffolder yields an app that builds against the packed framework. This is
+      # the class the source-tree suite can't catch (a file missing from the pack, a broken
+      # exports path) — and the reason a broken publish would otherwise reach npm unreversibly.
+      - name: Smoke-test the packed tarballs
+        run: |
+          npm pack -w tierless -w create-tierless --pack-destination "$RUNNER_TEMP"
+          mkdir -p "$RUNNER_TEMP/app" && cd "$RUNNER_TEMP/app" && npm init -y > /dev/null
+          npm install --no-save react "$RUNNER_TEMP"/tierless-*.tgz
+          node --input-type=module -e '
+            const subs = ["tierless","tierless/api","tierless/server","tierless/browser","tierless/react","tierless/vite","tierless/compiler","tierless/runtime","tierless/wire","tierless/delta","tierless/graph","tierless/heap","tierless/fetch","tierless/content","tierless/transport"];
+            for (const s of subs) await import(s);
+            console.log(subs.length + "/15 subpaths import from the installed tarball");'
+          echo 'function go(x){ const r = api.get(x); return r + 1; }' > app.src.js
+          npx tierless build app.src.js app.gen.mjs --bare
+          node --input-type=module -e '
+            const m = await import("./app.gen.mjs");
+            const r = m.PROGRAMS.go({ fn: "go", pc: 0, args: [4] });
+            if (r.op !== "resource" || r.name !== "api.get") throw new Error("bad machine step: " + JSON.stringify(r));
+            console.log("the installed bin compiles and the machine steps correctly");'
+          mkdir "$RUNNER_TEMP/pkg" && tar -xzf "$RUNNER_TEMP"/create-tierless-*.tgz -C "$RUNNER_TEMP/pkg"
+          node "$RUNNER_TEMP/pkg/package/index.mjs" "$RUNNER_TEMP/scaffold"
+          cd "$RUNNER_TEMP/scaffold" && npm install --no-save "$RUNNER_TEMP"/tierless-*.tgz
+          npx tierless build app.src.js app.gen.mjs --bare && test -f app.gen.mjs
+          echo "the packed scaffolder produces an app that builds with the packed framework"
 
       - name: Publish tierless
         run: npm publish --provenance --access public -w tierless
