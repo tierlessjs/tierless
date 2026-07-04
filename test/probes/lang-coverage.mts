@@ -131,6 +131,11 @@ await supported("destructured parameter", "function A({ a, b }){ return a * b; }
 await supported("rest parameter", "function A(a, ...xs){ return a + xs.length; } function B(){ const r = A(api.get(9), 1, 2, 3); return r; }", "B", 12);
 // completion semantics: falling off the end returns undefined (plain-JS), not a compiler sentinel
 await supported("a function with no return statement yields undefined, not a sentinel", "function A(){ const x = api.dbl(3); } function B(){ const r = A(); return r === undefined ? 'undefined' : ('LEAKED:' + r); }", "B", "undefined");
+// nested-scope correctness of the frame-local rewrite: a callback param SHADOWING a frame local keeps
+// its own binding (x below is 1,2,3, not the frame's 10); a callback CLOSING OVER a frame local reads
+// the frame slot (base is 100). The rewrite resolves each name's binding rather than matching by name.
+await supported("a callback param shadowing a frame local keeps its own binding, not the frame slot", "function A(){ const x = api.get(10); const ys = [1,2,3].map(x => x * 2); return x + ys[0] + ys[1] + ys[2]; }", "A", 22);
+await supported("a nested callback closing over a frame local reads the frame slot", "function A(){ const base = api.get(100); const ys = [1,2].map(i => i + base); return ys[0] + ys[1]; }", "A", 203);
 
 console.log("\noptional-chain conditional suspensions (compiled result checked vs a native-JS oracle — value AND call sequence, so short-circuit skipping the tier call is verified):");
 await optchain("obj?.[api.f()] — receiver present", 'function A(){ const o = { b: 42 }; const r = o?.[api.get("b")]; return r; }', "A");

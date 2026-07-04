@@ -1078,6 +1078,14 @@ function lower(p) {
                 return;
             if (t.isFunction(par))
                 return;
+            // Scope-resolve the name: if it's bound by a NESTED function (its own param/local, shadowing the
+            // frame local — e.g. `xs.map(x => x)` where `x` is also a frame local), leave it alone. A nested
+            // BLOCK's local and a nested function closing OVER a frame local both still resolve to THIS
+            // function, so they still rewrite to F.x. Without this, the name-based rewrite corrupts shadows.
+            const binding = ip.scope.getBinding(name);
+            const bindingFn = binding && binding.path.getFunctionParent();
+            if (bindingFn && bindingFn.node !== node)
+                return;
             if (params.includes(name))
                 ip.replaceWith(t.memberExpression(t.memberExpression(t.identifier("F"), t.identifier("args")), t.numericLiteral(params.indexOf(name)), true));
             else
