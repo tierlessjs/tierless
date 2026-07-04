@@ -109,8 +109,17 @@ jobs:
           npx tierless build app.src.js app.gen.mjs --bare && test -f app.gen.mjs
           echo "the packed scaffolder produces an app that builds with the packed framework"
 
+      # Idempotent: a two-package publish can fail between the two (it did — run 2 published
+      # tierless, then npm refused create-tierless), and npm forbids republishing an existing
+      # version. A retry must skip what already landed instead of dying on it.
       - name: Publish tierless
-        run: npm publish --provenance --access public -w tierless
+        run: |
+          V=$(node -p "require('./packages/tierless/package.json').version")
+          if npm view "tierless@$V" version > /dev/null 2>&1; then echo "tierless@$V is already on the registry — skipping"
+          else npm publish --provenance --access public -w tierless; fi
 
       - name: Publish create-tierless
-        run: npm publish --provenance --access public -w create-tierless
+        run: |
+          V=$(node -p "require('./packages/create-tierless/package.json').version")
+          if npm view "create-tierless@$V" version > /dev/null 2>&1; then echo "create-tierless@$V is already on the registry — skipping"
+          else npm publish --provenance --access public -w create-tierless; fi

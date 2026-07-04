@@ -10,6 +10,11 @@
     "index.mjs",
     "template"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tierlessjs/tierless.git",
+    "directory": "packages/create-tierless"
+  },
   "license": "Apache-2.0",
   "engines": {
     "node": ">=22.18.0"
