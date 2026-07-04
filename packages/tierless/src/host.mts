@@ -13,7 +13,7 @@
 // number of sessions can be in flight on one peer concurrently; the transport's
 // correlation ids keep their bounces apart.
 import { makePump, initialStack } from "./runtime.mjs";
-import { encodeWireBinary, decodeWireBinary } from "./wire-binary.mjs";
+import { encodeWireBinary, decodeWireBinary, encodeArgs, decodeArgs } from "./wire-binary.mjs";
 import type { Bundle, Frame, Exec, ResourceRequest, Peer, Host, HostReply, Pump } from "./types.mjs";
 
 export type { Bundle, Frame, MachineResult, ResourceRequest, Exec, Peer, Host } from "./types.mjs";
@@ -69,9 +69,9 @@ export function makeHost({ bundle, tier, exec, owns, meta = {} }: MakeHostOpts):
     run: async (peer, entry, args = []) => drive(peer, await pump(initialStack(entry, args), ownsHere, exec)),
     // Ask the PEER to start entry(...args) over there; service any bounces back here.
     call: async (peer, entry, args = []) =>
-      drive(peer, await settle(await peer.request({ type: "start", entry, ...meta }, encodeWireBinary([], { op: "start", tier: "", name: "", args })))),
+      drive(peer, await settle(await peer.request({ type: "start", entry, ...meta }, encodeArgs(args)))),
     // The answering half, exposed as plain handlers so a dispatcher can route by meta.
-    handleStart: (payload, bin) => step(initialStack(payload.entry, decodeWireBinary(bin!).request!.args), null),
+    handleStart: (payload, bin) => step(initialStack(payload.entry, decodeArgs(bin!)), null),
     handleResume: (payload, bin) => { const { stack, request } = decodeWireBinary(bin!); return step(stack as Frame[], request as ResourceRequest | null); },
     // Convenience: answer starts/resumes on a peer when this host is the only one on it.
     answer(peer) { peer.on("start", host.handleStart); peer.on("resume", host.handleResume); return host; },

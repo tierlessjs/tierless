@@ -137,6 +137,12 @@ function callSusp(s) {
 }
 // A generic AST walk over ANY node shape (not just the cases callers narrow to), so its inner
 // walker is intentionally untyped — see the module comment above containsSuspCall's uses.
+// Walk each child value of a raw AST node, skipping Babel's position/comment metadata (which the two
+// untyped walkers below must not descend into). One copy of the skip-list, so it can't drift.
+const AST_META = new Set(["loc", "start", "end", "leadingComments", "trailingComments"]);
+function eachChild(n, fn) { for (const k in n)
+    if (!AST_META.has(k))
+        fn(n[k]); }
 function containsSuspCall(node) {
     let found = false;
     (function walk(n) {
@@ -148,11 +154,7 @@ function containsSuspCall(node) {
             found = true;
             return;
         }
-        for (const k in n) {
-            if (k === "loc" || k === "start" || k === "end" || k === "leadingComments" || k === "trailingComments")
-                continue;
-            walk(n[k]);
-        }
+        eachChild(n, walk);
     })(node);
     return found;
 }
@@ -176,11 +178,7 @@ function hasSuspInside(node, exclSelf) {
             found = true;
             return;
         }
-        for (const k in n) {
-            if (k === "loc" || k === "start" || k === "end" || k === "leadingComments" || k === "trailingComments")
-                continue;
-            walk(n[k], false);
-        }
+        eachChild(n, (c) => walk(c, false));
     })(node, true);
     return found;
 }

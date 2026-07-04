@@ -170,13 +170,18 @@ function callSusp(s: t.Statement): { assign: string | null; fn: string; args: st
 }
 // A generic AST walk over ANY node shape (not just the cases callers narrow to), so its inner
 // walker is intentionally untyped — see the module comment above containsSuspCall's uses.
+// Walk each child value of a raw AST node, skipping Babel's position/comment metadata (which the two
+// untyped walkers below must not descend into). One copy of the skip-list, so it can't drift.
+const AST_META = new Set(["loc", "start", "end", "leadingComments", "trailingComments"]);
+function eachChild(n: any, fn: (child: any) => void): void { for (const k in n) if (!AST_META.has(k)) fn(n[k]); }
+
 function containsSuspCall(node: t.Node | t.Node[] | null | undefined): boolean {   // a suspendable call buried in a sub-expression (rejected)
   let found = false;
   (function walk(n: any) {
     if (found || !n || typeof n !== "object") return;
     if (Array.isArray(n)) return n.forEach(walk);
     if (n.type === "CallExpression" && n.callee && n.callee.type === "Identifier" && suspSet.has(n.callee.name)) { found = true; return; }
-    for (const k in n) { if (k === "loc" || k === "start" || k === "end" || k === "leadingComments" || k === "trailingComments") continue; walk(n[k]); }
+    eachChild(n, walk);
   })(node);
   return found;
 }
@@ -196,7 +201,7 @@ function hasSuspInside(node: t.Node | t.Node[] | null | undefined, exclSelf: boo
     if (found || !n || typeof n !== "object") return;
     if (Array.isArray(n)) return n.forEach((x: any) => walk(x, false));
     if (!(root && exclSelf) && isSuspExpr(n)) { found = true; return; }
-    for (const k in n) { if (k === "loc" || k === "start" || k === "end" || k === "leadingComments" || k === "trailingComments") continue; walk(n[k], false); }
+    eachChild(n, (c) => walk(c, false));
   })(node, true);
   return found;
 }

@@ -50,6 +50,9 @@ export default function tierless(opts = {}) {
                 `const __actions = __bindActions(__bundle, { module: ${JSON.stringify(id)} });`,
                 ...meta.exported.map((n) => `export const ${n} = __actions[${JSON.stringify(n)}];`),
             ].join("\n");
+            // No debugger sourcemap: the compiler rewrites the module into a state machine (whole-program
+            // CPS), so output lines don't correspond to input lines — there is no honest line map to hand
+            // Vite. (The compiler's own `--source-map` is a runtime frame→line table, unrelated to this.)
             return { code: compiled + "\n" + wrappers + "\n", map: null };
         },
         // Dev server: fork the api sidecar and host the session endpoint on Vite's own http

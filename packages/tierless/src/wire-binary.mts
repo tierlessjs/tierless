@@ -212,3 +212,9 @@ export function decodeWireBinary(bytes: Uint8Array | ArrayBufferLike, { content 
   const request: DeltaRequest | null = req ? { op: req.op, tier: req.tier, name: req.name, args: vals.slice(req.a0, req.a0 + req.argc) } : null;
   return { stack, request };
 }
+
+// A fresh start ships only the entry args — no continuation and no resource yet. Carry them through
+// the same value-root machinery (handles, cycles, and all), rather than hand-rolling a placeholder
+// ResourceRequest with a fake op: there is no request, so only `args` round-trips.
+export const encodeArgs = (args: unknown[], opts: EncodeOptions = {}): Uint8Array => encodeWireBinary([], { op: "", tier: "", name: "", args }, opts);
+export const decodeArgs = (bytes: Uint8Array | ArrayBufferLike): unknown[] => decodeWireBinary(bytes).request?.args ?? [];

@@ -74,7 +74,9 @@ export default [
   {
     // The browser tier runs in a real page (DOM, WebSocket, …). (packages/tierless/src/browser.mjs
     // and react.mjs are compiled output now ignored above — their .mts source isn't ESLint-linted.)
-    files: ["test/e2e/public/**/*.mjs", "examples/**/*.mjs", "examples/**/*.jsx", "packages/create-tierless/template/client.mjs"],
+    // The example's browser code is .jsx; its .mjs (server.prod/vite.config/api.server) is Node and
+    // stays on the base config's node globals — don't sweep it into the browser block.
+    files: ["test/e2e/public/**/*.mjs", "examples/**/*.jsx", "packages/create-tierless/template/client.mjs"],
     languageOptions: { globals: { ...globals.browser } },
   },
   {

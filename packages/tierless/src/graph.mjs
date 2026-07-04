@@ -198,9 +198,11 @@ export function decodeGraph({ roots, objs }, { content = null } = {}) {
                 built[i].push(dec(n));
         else if (s.k === "o") {
             for (const key in s.f) {
+                if (key === "__proto__")
+                    continue;
                 const val = dec(s.f[key]);
-                if ((s.h && s.h[key]) || key === "__proto__")
-                    Object.defineProperty(built[i], key, { value: val, writable: true, enumerable: !(s.h && s.h[key]), configurable: true });
+                if (s.h && s.h[key])
+                    Object.defineProperty(built[i], key, { value: val, writable: true, enumerable: false, configurable: true });
                 else
                     built[i][key] = val;
             }
@@ -212,7 +214,7 @@ export function decodeGraph({ roots, objs }, { content = null } = {}) {
                     else
                         Object.defineProperty(built[i], key, { value: val, writable: true, enumerable: false, configurable: true });
                 }
-        }
+        } // drop a hostile __proto__ key (our encoder strips it), consistent with wire-binary/wire-delta — never reconstruct it, even as an own property
         else if (s.k === "map")
             for (const [kn, vn] of s.e)
                 built[i].set(dec(kn), dec(vn));

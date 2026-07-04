@@ -34,13 +34,17 @@ export interface TierlessPluginOptions {
   api?: string;
   /** Demo session: log in once per connection with these credentials, carry the token. */
   login?: { user: string; pass: string } | null;
-  /** Extra allow-list namespaces, merged over the api/commit defaults (e.g. { db: "server" }). */
+  /** Extra allow-list namespaces merged over the api/commit defaults. Note: the dev plugin's own
+   *  server exec (`makeApiExec` over the sidecar) services `api.*` only — pinning another namespace
+   *  here also needs a custom exec that can service it, or those calls throw at runtime. */
   resources?: Record<string, string>;
   /** Import specifier for the browser host in emitted modules (test override). */
   runtime?: string;
   /** Session endpoint path (defaults to WS_PATH). */
   path?: string;
-  /** Passed through to the compiler (trackWrites, sourceMap, …). */
+  /** Passed through to the compiler (e.g. `trackWrites`). Note: the compiler's `sourceMap` emits a
+   *  runtime frame→line table for `file:line` reporting (see source-maps.mts), not a debugger
+   *  sourcemap Vite can chain — this transform returns no map (see below). */
   compilerOptions?: Record<string, unknown>;
 }
 export interface TierlessPlugin {
@@ -87,6 +91,9 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
         `const __actions = __bindActions(__bundle, { module: ${JSON.stringify(id)} });`,
         ...meta.exported.map((n: string) => `export const ${n} = __actions[${JSON.stringify(n)}];`),
       ].join("\n");
+      // No debugger sourcemap: the compiler rewrites the module into a state machine (whole-program
+      // CPS), so output lines don't correspond to input lines — there is no honest line map to hand
+      // Vite. (The compiler's own `--source-map` is a runtime frame→line table, unrelated to this.)
       return { code: compiled + "\n" + wrappers + "\n", map: null };
     },
 

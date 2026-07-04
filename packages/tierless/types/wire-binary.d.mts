@@ -5,3 +5,5 @@ export declare function decodeWireBinary(bytes: Uint8Array | ArrayBufferLike, { 
     stack: DeltaFrame[];
     request: DeltaRequest | null;
 };
+export declare const encodeArgs: (args: unknown[], opts?: EncodeOptions) => Uint8Array;
+export declare const decodeArgs: (bytes: Uint8Array | ArrayBufferLike) => unknown[];
