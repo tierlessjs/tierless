@@ -56,13 +56,18 @@ jobs:
           C=$(node -p "require('./packages/create-tierless/package.json').version")
           test "$V" = "$C" || { echo "tierless ($V) and create-tierless ($C) versions differ"; exit 1; }
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            if git ls-remote --exit-code --tags origin "v$V" > /dev/null; then
-              echo "tag v$V already exists — bump the package versions before dispatching a release"; exit 1
+            EXISTING=$(git ls-remote --tags origin "refs/tags/v$V" | cut -f1)
+            if [ -n "$EXISTING" ]; then
+              # idempotent retry: a failed publish leaves the tag behind (it is minted before the
+              # gate) — re-dispatching the SAME release must proceed, not demand a version bump.
+              test "$EXISTING" = "$GITHUB_SHA" || { echo "tag v$V exists at $EXISTING, not this commit — bump the package versions before dispatching a new release"; exit 1; }
+              echo "tag v$V already points at this commit — retrying its publish"
+            else
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git tag "v$V" && git push origin "v$V"
+              echo "minted tag v$V — continuing into the gate and publish in this run"
             fi
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git tag "v$V" && git push origin "v$V"
-            echo "minted tag v$V — continuing into the gate and publish in this run"
           else
             test "v$V" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != package version v$V"; exit 1; }
           fi
