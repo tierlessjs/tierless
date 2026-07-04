@@ -6,8 +6,8 @@ proven (34 executable proofs, `npm test`).
 
 ## Packaging & release
 
-`tierless@0.1.0` and `create-tierless@0.1.0` are published — the names are
-secured and `npm i tierless` / `npm create tierless@latest` work. Still open:
+`tierless` and `create-tierless` are published — `npm i tierless` /
+`npm create tierless@latest` work. Still open:
 
 - **Verified-provenance badge.** The publish workflow is in place
   (`.github/workflows/publish.yml`: a `v*` tag runs the full CI gate, then

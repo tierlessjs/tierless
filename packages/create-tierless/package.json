@@ -1,6 +1,6 @@
 {
   "name": "create-tierless",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Scaffold a new Tierless app: one tierless program, a trusted api service, a two-tier host — running in under a minute.",
   "bin": {
@@ -10,6 +10,11 @@
     "index.mjs",
     "template"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tierlessjs/tierless.git",
+    "directory": "packages/create-tierless"
+  },
   "license": "Apache-2.0",
   "engines": {
     "node": ">=22.18.0"
