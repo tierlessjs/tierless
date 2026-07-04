@@ -6,13 +6,17 @@ deployment, so nothing here surprises you in an afternoon of testing.
 ## What works today
 
 - **Prod serving shape (actions mode).** The Vite plugin is dev-first, but production is
-  the same contract mounted yourself: build the client with Vite as usual (the plugin
-  transforms `"use tierless"` modules at build time), compile the server copy of the actions
-  with `npx tierless build src/actions.mjs actions.server.gen.mjs --bare`, and serve it with
-  `serveApp({ bundle, session, staticRoot, page })` (or `attachTierless(yourHttpServer, { bundle, session })`
-  to attach to an existing server) — see
-  [`examples/react-vite/server.prod.mjs`](../examples/react-vite/server.prod.mjs), which uses `serveApp`.
-  The browser and server machines are identical because the same compiler emitted both.
+  the same contract mounted yourself. `vite build` emits both sides in one pass: the client
+  bundle as usual, plus — into `dist-tierless/` — the compiled server machine for every
+  `"use tierless"` module and a `tierless.manifest.json` mapping each module id to its bundle.
+  Serve it with `serveApp({ bundle, session, staticRoot, page })` (or
+  `attachTierless(yourHttpServer, { bundle, session })` to attach to an existing server), passing
+  `bundle: await bundleResolverFromManifest("dist-tierless/tierless.manifest.json")` — no second
+  compile pass, no hand-written module dispatch. See
+  [`examples/react-vite/server.prod.mjs`](../examples/react-vite/server.prod.mjs). The browser and
+  server machines are identical because the same compiler pass emitted both. (`serverOutDir` on the
+  plugin changes where the server bundles land; it stays out of the client outDir so server code is
+  never shipped to the browser.)
 - **The trust boundary.** Run the api service as a sidecar (`startSidecar`) or any
   process implementing the monitor contract; budgets (`maxArgsBytes`, per-principal
   rate window) are on in the examples. The wire decoder is hardened and fuzz-tested.

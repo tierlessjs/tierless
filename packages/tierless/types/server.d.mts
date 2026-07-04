@@ -30,4 +30,5 @@ export declare function serveApp({ port, page, staticRoot, ...attachOpts }: Serv
     port: number;
     close(): void;
 }>;
+export declare function bundleResolverFromManifest(manifestPath: string): Promise<(moduleId: string) => Promise<Bundle>>;
 export type { Bundle, Exec, ResourceRequest };

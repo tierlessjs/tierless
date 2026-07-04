@@ -16,6 +16,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { makeHost, answerWith } from "./host.mjs";
 import { makePeer, wsPort } from "./transport.mjs";
@@ -117,5 +118,36 @@ export async function serveApp({ port = 0, page, staticRoot, ...attachOpts }) {
         server,
         port: server.address().port,
         close: () => { attached.close(); server.close(); },
+    };
+}
+// ---------------------------------------------------------------- prod build ----------
+// Consume the manifest the Vite plugin emits at `vite build` (see vite.mts writeBundle): a
+// `(moduleId) => Bundle` resolver ready to hand straight to `attachTierless`/`serveApp` as
+// its `bundle`. This is the whole server side of a Vite prod deployment — no second
+// `tierless build` pass, no hand-written module dispatch. The browser stamps each action's
+// build-time module id onto the wire; that key is looked up here (exact, with a suffix
+// fallback for a client built under a different absolute root), and the matched server
+// bundle is imported once and cached.
+export async function bundleResolverFromManifest(manifestPath) {
+    const dir = path.dirname(path.resolve(manifestPath));
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    const cache = new Map();
+    const load = async (file) => {
+        if (!cache.has(file)) {
+            const mod = await import(pathToFileURL(path.join(dir, file)).href);
+            cache.set(file, { PROGRAMS: mod.PROGRAMS, __unwind: mod.__unwind });
+        }
+        return cache.get(file);
+    };
+    return async (moduleId) => {
+        let file = manifest.modules[moduleId];
+        if (!file) { // client built under a different root: match by path suffix
+            const hit = Object.keys(manifest.modules).find((k) => k.endsWith(moduleId) || moduleId.endsWith(k));
+            if (hit)
+                file = manifest.modules[hit];
+        }
+        if (!file)
+            throw new Error("tierless: no server bundle for module " + JSON.stringify(moduleId));
+        return load(file);
     };
 }

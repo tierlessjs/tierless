@@ -20,10 +20,23 @@
 //
 // The plugin is a plain object (no vite import), so it is unit-testable headless.
 import { createRequire } from "node:module";
+import { writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { WS_PATH } from "./ws-path.mjs";
 const require = createRequire(import.meta.url);
 const DIRECTIVE = /^(?:\s|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*["']use tierless["']\s*;?/;
+// A stable, collision-free filename for a module's server bundle: its basename plus a short
+// FNV-1a hash of the full id (two src/actions.mjs in different dirs don't clash).
+const shortHash = (s) => {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 0x01000193);
+    }
+    return (h >>> 0).toString(16).padStart(8, "0");
+};
+const serverBundleName = (id) => path.basename(id).replace(/\.[^.]+$/, "") + "." + shortHash(id) + ".server.mjs";
 export default function tierless(opts = {}) {
     const { api, // path to the trusted service module (forked as a sidecar)
     login = null, // { user, pass }: log in once per connection, carry the token
@@ -31,9 +44,12 @@ export default function tierless(opts = {}) {
     runtime = "tierless/browser", // import specifier for the browser host (overridable for tests)
     path: wsPath, // session endpoint path (defaults to WS_PATH)
     compilerOptions = {}, // passed through to the transform (trackWrites, sourceMap, …)
+    serverOutDir = "dist-tierless", // where `vite build` emits the server bundles + manifest
      } = opts;
     const isTierlessModule = (code) => DIRECTIVE.test(code);
     let sidecar = null;
+    const machines = new Map(); // moduleId -> compiled server machine (byte-identical to `tierless build --bare`)
+    let root = process.cwd(); // Vite root, captured in configResolved (for the build emit path)
     return {
         name: "tierless",
         enforce: "pre",
@@ -44,6 +60,7 @@ export default function tierless(opts = {}) {
             const { code: compiled, meta } = compile(code, { ...compilerOptions, resources, filename: id, preamble: "" });
             if (!meta.exported.length)
                 this?.warn?.(`tierless: ${id} has "use tierless" but exports no suspendable function`);
+            machines.set(id, compiled); // the SAME machine the browser will run — emitted for the server at writeBundle
             const wrappers = [
                 `import { bindActions as __bindActions } from ${JSON.stringify(runtime)};`,
                 `export const __bundle = { PROGRAMS, __unwind };`,
@@ -54,6 +71,28 @@ export default function tierless(opts = {}) {
             // CPS), so output lines don't correspond to input lines — there is no honest line map to hand
             // Vite. (The compiler's own `--source-map` is a runtime frame→line table, unrelated to this.)
             return { code: compiled + "\n" + wrappers + "\n", map: null };
+        },
+        configResolved(config) { if (config?.root)
+            root = config.root; },
+        buildStart() { machines.clear(); }, // fresh build: transform repopulates the map
+        // Build: emit the server side of what the client build just produced. For every "use tierless"
+        // module the transform compiled, write its machine (byte-identical to `tierless build --bare` —
+        // the SAME compiler output, no second pass) plus a manifest mapping the module id the browser
+        // stamps onto the wire to its bundle file. A prod server mounts these with
+        // `bundleResolverFromManifest` — no hand-written module resolver, no re-compile. Runs on build
+        // only (Vite never calls writeBundle in dev serve).
+        writeBundle() {
+            if (!machines.size)
+                return;
+            const outDir = path.resolve(root, serverOutDir);
+            mkdirSync(outDir, { recursive: true });
+            const modules = {};
+            for (const [id, code] of machines) {
+                const name = serverBundleName(id);
+                writeFileSync(path.join(outDir, name), code);
+                modules[id] = name;
+            }
+            writeFileSync(path.join(outDir, "tierless.manifest.json"), JSON.stringify({ path: wsPath || WS_PATH, modules }, null, 2) + "\n");
         },
         // Dev server: fork the api sidecar and host the session endpoint on Vite's own http
         // server. Each module's continuations resolve their server copy via ssrLoadModule,

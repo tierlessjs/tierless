@@ -32,7 +32,8 @@ What to notice:
   plugin forks it as a **sidecar** and the server holds only a pipe and a session token.
   Delete the `login:` line in `vite.config.mjs` and the buy/sell click shows a live denial:
   reads still work (they're `PUBLIC`), the order placement is refused by the monitor.
-- Production shape: build the actions module with the same plugin, then serve it with
-  `serveApp({ bundle, session, staticRoot, page })` from `tierless/server` (as
-  [`server.prod.mjs`](./server.prod.mjs) does) — `serveApp` wraps `attachTierless`, the same
-  session endpoint the dev plugin hosts.
+- Production shape: `npx vite build` emits the client bundle **and** the server machines +
+  manifest (into `dist-tierless/`); serve them with `serveApp({ bundle, session, staticRoot, page })`
+  from `tierless/server`, passing `bundle: await bundleResolverFromManifest(...)` — no second
+  compile, no hand-written resolver (as [`server.prod.mjs`](./server.prod.mjs) does). `serveApp`
+  wraps `attachTierless`, the same session endpoint the dev plugin hosts.

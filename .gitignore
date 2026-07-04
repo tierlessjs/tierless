@@ -6,8 +6,8 @@ test/e2e/api/tasks-db.json
 # example apps: installed deps + build output
 examples/*/node_modules/
 examples/*/dist/
+examples/*/dist-tierless/
 examples/*/package-lock.json
 
 # tsc fixture written by test/probes/types.mjs
 test/.types-fixture/
-examples/*/actions.server.gen.mjs

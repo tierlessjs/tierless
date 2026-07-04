@@ -18,6 +18,9 @@ export interface TierlessPluginOptions {
      *  runtime frame→line table for `file:line` reporting (see source-maps.mts), not a debugger
      *  sourcemap Vite can chain — this transform returns no map (see below). */
     compilerOptions?: Record<string, unknown>;
+    /** Where `vite build` writes the server bundles + manifest (see writeBundle). Relative to the
+     *  Vite root; kept OUT of the client outDir so server code is never served. Default `dist-tierless`. */
+    serverOutDir?: string;
 }
 export interface TierlessPlugin {
     name: string;
@@ -26,6 +29,11 @@ export interface TierlessPlugin {
         code: string;
         map: null;
     } | null;
+    configResolved(config: {
+        root?: string;
+    }): void;
+    buildStart(): void;
+    writeBundle(): void;
     configureServer(server: unknown): Promise<void>;
 }
 export default function tierless(opts?: TierlessPluginOptions): TierlessPlugin;
