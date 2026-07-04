@@ -63,19 +63,14 @@ jobs:
               git tag "v$V" && git push origin "v$V"
               echo "minted tag v$V — continuing into the gate and publish in this run"
             elif [ "$EXISTING" = "$GITHUB_SHA" ]; then
+              # same-sha retry (e.g. a registry hiccup between the two publishes) — the publish
+              # steps below skip whatever already landed.
               echo "tag v$V already points at this commit — retrying its publish"
             else
-              # The tag marks where v$V FIRST shipped from and is never moved or deleted. Whether a
-              # dispatch may proceed is the REGISTRY's question, not the tag's: if every package of
-              # this version is already published, this is a forgotten bump — refuse. If any is
-              # missing (a partial release, e.g. a fix commit landed between the two publishes),
-              # complete the missing publishes from this commit and leave the tag where it is.
-              TL=$(npm view "tierless@$V" version 2> /dev/null || true)
-              CT=$(npm view "create-tierless@$V" version 2> /dev/null || true)
-              if [ -n "$TL" ] && [ -n "$CT" ]; then
-                echo "v$V is fully published and tagged at $EXISTING — bump the package versions before dispatching a new release"; exit 1
-              fi
-              echo "tag v$V exists at $EXISTING from a partial release — completing the missing publishes from this commit (tag left in place)"
+              # A version describes ONE source commit. The tag marks where v$V shipped from and is
+              # never moved or deleted; if the source has changed since (this commit ≠ the tag),
+              # that is a NEW release, whether v$V completed or not — bump and dispatch again.
+              echo "tag v$V exists at $EXISTING, not this commit — a version is one source commit; bump the package versions and dispatch a new release"; exit 1
             fi
           else
             test "v$V" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != package version v$V"; exit 1; }
