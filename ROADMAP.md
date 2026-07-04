@@ -4,16 +4,6 @@ What's genuinely open. Everything that has landed — with its measurements and
 proofs — moved to [`CHANGELOG.md`](./CHANGELOG.md); the mechanism itself is
 proven (35 executable proofs, `npm test`).
 
-## Packaging & release
-
-`tierless` and `create-tierless` are published — `npm i tierless` /
-`npm create tierless@latest` work, both with npm provenance. Still open:
-
-- **`tierless types` return types.** Generated api signatures type every
-  endpoint's parameters from its real `run` destructure, but return types are
-  `any` — inferring them needs a type checker over the service body, not a
-  parse.
-
 ## Runtime hardening
 
 - **Reconnect/resume.** A dropped websocket loses the session today. The
