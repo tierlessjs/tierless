@@ -44,15 +44,21 @@ const serverBundleName = (id: string): string =>
 const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // Rewrite a server bundle's own relative import specifiers so they resolve from the emit dir
-// (dist-tierless/) instead of the source dir. A `./util.mjs` next to src/actions.mjs becomes
-// `../src/util.mjs` under dist-tierless/ — machine-independent (both dirs travel together in the
-// deploy tree, the same assumption the served api.server.mjs already relies on). Only the exact
-// specifiers the compiler reported are touched, and only in `from "…"` / `import "…"` position, so
-// a string literal in the machine body that happens to look like a path is never rewritten.
-const rewriteRelativeImports = (code: string, srcDir: string, outDir: string, specs: string[]): string => {
+// (dist-tierless/) instead of the source dir. Two cases:
+//   - the target is another compiled mix module → point at ITS co-located server bundle
+//     (`./format.<hash>.server.mjs`), so a mix module importing another resolves to the compiled
+//     copy and dist-tierless/ is self-contained for the mix-to-mix graph;
+//   - anything else (a plain helper) → `../src/util.mjs`, machine-independent (source and emit
+//     dirs travel together in the deploy tree, the same assumption the served api.server.mjs
+//     already relies on).
+// Only the exact specifiers the compiler reported are touched, and only in `from "…"` / `import "…"`
+// position, so a string literal in the machine body that happens to look like a path is never hit.
+const rewriteRelativeImports = (code: string, srcDir: string, outDir: string, specs: string[], mixByPath: Map<string, string>): string => {
   let out = code;
   for (const spec of specs) {
-    let rel = path.relative(outDir, path.resolve(srcDir, spec)).split(path.sep).join("/");
+    const abs = path.resolve(srcDir, spec);
+    const mix = mixByPath.get(abs);
+    let rel = mix ? "./" + mix : path.relative(outDir, abs).split(path.sep).join("/");
     if (!rel.startsWith(".")) rel = "./" + rel;
     out = out.replace(new RegExp(`((?:from|import)\\s*)(['"])${escapeRegExp(spec)}\\2`, "g"), `$1$2${rel}$2`);
   }
@@ -151,9 +157,11 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
       const outDir = path.resolve(root, serverOutDir);
       mkdirSync(outDir, { recursive: true });
       const modules: Record<string, string> = {};
+      const mixByPath = new Map<string, string>();   // resolved source path -> its server bundle filename
+      for (const id of machines.keys()) mixByPath.set(path.resolve(id), serverBundleName(id));
       for (const [id, { code, imports }] of machines) {
         const name = serverBundleName(id);
-        const emitted = imports.length ? rewriteRelativeImports(code, path.dirname(id), outDir, imports) : code;
+        const emitted = imports.length ? rewriteRelativeImports(code, path.dirname(id), outDir, imports, mixByPath) : code;
         writeFileSync(path.join(outDir, name), emitted);
         modules[id] = name;
       }

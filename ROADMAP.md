@@ -23,16 +23,11 @@ proven (34 executable proofs, `npm test`).
   to type-check; a run that takes the raw args array keeps the honest
   `(...args: any[])` fallback. Still open: return types are `any` — inferring
   them needs a type checker over the service body, not a parse.
-- **Production build story for the Vite plugin.** `vite build` now emits the
-  server side in the same pass — the compiled machine for every `"use tierless"`
-  module plus a `tierless.manifest.json` into `dist-tierless/` — and a prod server
-  mounts it with `bundleResolverFromManifest` (no second compile, no hand-written
-  resolver; see `docs/production.md` and `examples/react-vite/server.prod.mjs`). A
-  mix module's own relative imports are rewritten to resolve from `dist-tierless/`,
-  so a module that imports a relative helper works unchanged. The one case still
-  pointed at source is a mix module that relatively imports *another* mix module —
-  rare, and it lands on that module's untransformed source rather than its server
-  bundle.
+
+The production build story is done: `vite build` emits the server machine +
+`tierless.manifest.json` into `dist-tierless/` and a prod server mounts it with
+`bundleResolverFromManifest` — no second compile, no hand-written resolver (see
+`docs/production.md`).
 
 ## Runtime hardening
 

@@ -54,6 +54,23 @@ export function decideOne(sym) {
 `;
 const withImportId = join(dir, "decide.mjs");
 
+// Two mix modules where one imports the other: `report` (mix) pulls the pure helper `label` from
+// `format` (also mix). The server copy of report must import format's SERVER bundle, not its
+// untransformed source.
+const FORMAT = `"use tierless";
+export function label(s) { return "<<" + s + ">>"; }   // pure export
+export function priceOf(sym) { return api.getQuote(sym); }  // an action → format is a real mix module
+`;
+const formatId = join(dir, "format.mjs");
+const REPORT = `"use tierless";
+import { label } from "./format.mjs";
+export function report(sym) {
+  const q = api.getQuote(sym);        // suspends → runs server-side, where label (from format's server bundle) must resolve
+  return label(sym + ":" + q);
+}
+`;
+const reportId = join(dir, "report.mjs");
+
 console.log("Probe: the Vite build emit — one compile, a manifest, a prod mount with no re-compile\n");
 
 const plugin = tierless({ api: "api.server.mjs", runtime: pathToFileURL(join(SRC_DIR, "browser.mjs")).href });
@@ -65,6 +82,11 @@ writeFileSync(actionsId, out.code);
 const out2 = plugin.transform(WITHIMPORT, withImportId);
 if (!out2) throw new Error("transform returned null for the helper-importing module");
 writeFileSync(withImportId, out2.code);
+for (const [src, id] of [[FORMAT, formatId], [REPORT, reportId]] as const) {
+  const o = plugin.transform(src, id);
+  if (!o) throw new Error("transform returned null for " + id);
+  writeFileSync(id, o.code);
+}
 
 // ---- the build emit: writeBundle drops the server bundles + manifest ----------------------
 plugin.configResolved({ root: dir });
@@ -89,6 +111,14 @@ check("the server bundle's relative import is rewritten to resolve from dist-tie
 const serverMod2: any = await import(pathToFileURL(serverFile2).href);   // executes the rewritten import
 check("the rewritten import resolves — the server bundle imports its helper from the new location",
   !!(serverMod2.PROGRAMS && serverMod2.PROGRAMS.decideOne));
+
+// ---- mix imports mix: report's server bundle imports format's SERVER bundle, not its source ----
+const reportServer = readFileSync(join(dir, "dist-tierless", manifest.modules[reportId]), "utf8");
+const formatServerName = manifest.modules[formatId];
+check("a mix module's import of another mix module points at that module's server bundle",
+  reportServer.includes(`"./${formatServerName}"`) && !reportServer.includes("format.mjs"), reportServer.split("\n")[1]);
+const reportMod: any = await import(pathToFileURL(join(dir, "dist-tierless", manifest.modules[reportId])).href);
+check("it resolves — dist-tierless/ is self-contained for the mix-to-mix graph", !!reportMod.PROGRAMS.report);
 
 // ---- the prod mount: resolver + serveApp + sidecar, action call end to end ----------------
 const apiService = startSidecar(pathToFileURL(join(dir, "api.server.mjs")));
@@ -115,6 +145,12 @@ const mod2: any = await import(pathToFileURL(withImportId).href);
 const v2 = await mod2.decideOne("abc");
 check("an action that imports a relative helper runs server-side with it, end to end",
   v2 === "<abc:30>", v2);
+
+// report (mix) calls label imported from format (mix) — server-side, via format's server bundle
+const reportBrowser: any = await import(pathToFileURL(reportId).href);
+const v3 = await reportBrowser.report("abc");
+check("a mix module importing another runs end to end, the helper served from its server bundle",
+  v3 === "<<abc:30>>", v3);
 
 // a module the manifest never saw is a clear error, not a silent wrong machine
 const missing = await bundle("/nope/unknown.mjs").then(() => null, (e: any) => String(e && e.message || e));
