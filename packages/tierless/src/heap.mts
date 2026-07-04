@@ -12,6 +12,7 @@
 import { encodeGraph, decodeGraph, isHandle, type Handle, type EncodeTier } from "./graph.mjs";
 import { Heap, type Channel, type LocalTier } from "./fetch.mjs";
 import { openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot, type Session, type DeltaFrame, type DeltaRequest } from "./wire-delta.mjs";
+import { rootsOf, rebuildStack } from "./wire-io.mjs";
 
 export { Channel, makeHost } from "./fetch.mjs";
 
@@ -36,26 +37,13 @@ export interface EncodeWireOpts {
 // DeltaFrame/DeltaRequest (from the delta wire) are the same stack/request shape this wire
 // uses — reused rather than redeclared.
 export function encodeWire(stack: DeltaFrame[], request: DeltaRequest | null, { tier = null, threshold = 8192 }: EncodeWireOpts = {}): string {
-  const roots: unknown[] = [];
-  const frames = stack.map((f) => {
-    const keys = Object.keys(f).filter((k) => k !== "fn" && k !== "pc");  // fn/pc are scalar machine state
-    const b0 = roots.length; for (const k of keys) roots.push(f[k]);
-    return { fn: f.fn, pc: f.pc, keys, b0 };
-  });
-  let req = null;
-  if (request) {
-    const a0 = roots.length; for (const a of request.args || []) roots.push(a);
-    req = { op: request.op, tier: request.tier, name: request.name, a0, argc: roots.length - a0 };
-  }
-  return JSON.stringify({ frames, req, graph: encodeGraph(roots, { tier, threshold }) });
+  const { rootVals, frames, req } = rootsOf(stack, request);                    // fn/pc are scalar machine state; only value-bearing locals go through the graph codec
+  return JSON.stringify({ frames, req, graph: encodeGraph(rootVals, { tier, threshold }) });
 }
 
 export function decodeWire(wire: string): { stack: DeltaFrame[]; request: DeltaRequest | null } {
   const { frames, req, graph } = JSON.parse(wire);
-  const vals = decodeGraph(graph);
-  const stack: DeltaFrame[] = frames.map((f: any) => { const fr: DeltaFrame = { fn: f.fn, pc: f.pc }; f.keys.forEach((k: string, i: number) => { fr[k] = vals[f.b0 + i]; }); return fr; });
-  const request: DeltaRequest | null = req ? { op: req.op, tier: req.tier, name: req.name, args: vals.slice(req.a0, req.a0 + req.argc) } : null;
-  return { stack, request };
+  return rebuildStack(frames, req, decodeGraph(graph));
 }
 
 // How many §5 handles the wire carries (a local that stayed home), for reporting/tests.

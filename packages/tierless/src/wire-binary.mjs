@@ -9,70 +9,14 @@
 // reconstruction unchanged — only the serialization of that structure is swapped. Browser-
 // safe (Uint8Array/DataView/TextEncoder, no Buffer); ships as one binary frame.
 import { encodeGraph, decodeGraph } from "./graph.mjs";
-const te = new TextEncoder(), td = new TextDecoder();
+import { W, R, isVarInt, writeMagic, checkMagic, makeInterner, writeStrings, readStrings, strAt, rootsOf, rebuildStack, writeFrameHeader, readFrameHeader } from "./wire-io.mjs";
 const MAGIC = "SMW1";
+// The writer/hardened reader, magic header, string table, and frame flatten/rebuild live in
+// wire-io.mts (one copy, shared with the delta wire). This file owns only what is binary-
+// format-specific: the shape table, the node/slot tag encodings, and the numeric-array packs.
 // node tags: 0 ref, 1 int, 2 float, 3 str, 4 true, 5 false, 6 null, 7 undef, 8 bigint, 9 glob, 10 symw, 11 symf
 // slot tags: 0 array, 1 object, 2 map, 3 set, 4 handle, 5 unique-symbol, 6 numeric-array,
 //            7 content-ref leaf (peer holds the hash), 8 content-cache wrapper (ship inline once, cache under hash)
-class W {
-    buf;
-    n;
-    constructor() { this.buf = new Uint8Array(1024); this.n = 0; }
-    ensure(k) { if (this.n + k > this.buf.length) {
-        let cap = this.buf.length * 2;
-        while (cap < this.n + k)
-            cap *= 2;
-        const nb = new Uint8Array(cap);
-        nb.set(this.buf.subarray(0, this.n));
-        this.buf = nb;
-    } }
-    u8(b) { this.ensure(1); this.buf[this.n++] = b & 0xff; }
-    raw(bytes) { this.ensure(bytes.length); this.buf.set(bytes, this.n); this.n += bytes.length; }
-    varu(x) { this.ensure(10); let v = x; for (;;) {
-        const b = v % 128;
-        v = Math.floor(v / 128);
-        if (v !== 0)
-            this.buf[this.n++] = b | 0x80;
-        else {
-            this.buf[this.n++] = b;
-            break;
-        }
-    } } // LEB128, safe to 2^53
-    vari(x) { this.varu(x >= 0 ? x * 2 : -x * 2 - 1); } // zigzag
-    f64(x) { this.ensure(8); new DataView(this.buf.buffer, this.n, 8).setFloat64(0, x, true); this.n += 8; }
-    done() { return this.buf.subarray(0, this.n); }
-}
-// The reader is hardened: every read is bounds-checked and varints are length-capped, so a
-// truncated or hostile buffer fails with a clean RangeError instead of reading past the end,
-// looping, or silently returning garbage. The wire is deserialized from the other tier
-// (§7 trust boundary), so this is load-bearing, not belt-and-suspenders.
-class R {
-    buf;
-    n;
-    len;
-    dv;
-    constructor(buf) { this.buf = buf; this.n = 0; this.len = buf.length; this.dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength); }
-    need(k) { if (k < 0 || this.n + k > this.len)
-        throw new RangeError("wire-binary: truncated/out-of-bounds read"); }
-    u8() { this.need(1); return this.buf[this.n++]; }
-    raw(k) { this.need(k); const s = this.buf.subarray(this.n, this.n + k); this.n += k; return s; }
-    varu() { let v = 0, shift = 1, b, i = 0; do {
-        this.need(1);
-        b = this.buf[this.n++];
-        v += (b & 0x7f) * shift;
-        shift *= 128;
-        if (++i > 9)
-            throw new RangeError("wire-binary: varint too long");
-    } while (b & 0x80); return v; }
-    // a count must be representable in the bytes that remain (each item is ≥ 1 byte) — caps work at O(buffer).
-    count() { const c = this.varu(); if (c > this.len - this.n)
-        throw new RangeError("wire-binary: declared count exceeds buffer"); return c; }
-    vari() { const zz = this.varu(); return zz % 2 === 0 ? zz / 2 : -(zz + 1) / 2; }
-    f64() { this.need(8); const v = this.dv.getFloat64(this.n, true); this.n += 8; return v; }
-}
-// integers small enough for a compact zigzag varint travel as `int`; everything else (floats,
-// NaN/Infinity/-0, huge ints) travels as an exact 8-byte f64.
-const isVarInt = (v) => Number.isInteger(v) && Math.abs(v) < 0x80000000 && !Object.is(v, -0);
 const zlen = (x) => { let v = x >= 0 ? x * 2 : -x * 2 - 1, n = 1; while (v >= 128) {
     v = Math.floor(v / 128);
     n++;
@@ -154,29 +98,10 @@ function readNode(r, S) {
 // Serialize a continuation, mirroring encodeWire's frame-flattening, then writing the
 // {frames, req, {roots, objs}} structure as bytes. opts (tier/threshold) drive §5 excision.
 export function encodeWireBinary(stack, request, { tier = null, threshold = 8192, content = null } = {}) {
-    const rootsVals = [];
-    const frames = stack.map((f) => {
-        const keys = Object.keys(f).filter((k) => k !== "fn" && k !== "pc");
-        const b0 = rootsVals.length;
-        for (const k of keys)
-            rootsVals.push(f[k]);
-        return { fn: f.fn, pc: f.pc, keys, b0 };
-    });
-    let req = null;
-    if (request) {
-        const a0 = rootsVals.length;
-        for (const a of request.args || [])
-            rootsVals.push(a);
-        req = { op: request.op, tier: request.tier, name: request.name, a0, argc: (request.args || []).length };
-    }
-    const graph = encodeGraph(rootsVals, { tier, threshold, content });
+    const { rootVals, frames, req } = rootsOf(stack, request);
+    const graph = encodeGraph(rootVals, { tier, threshold, content });
     // pass 1: intern strings and collect object shapes ------------------------------------
-    const strMap = new Map(), strs = [];
-    const intern = (s) => { let i = strMap.get(s); if (i === undefined) {
-        i = strs.length;
-        strMap.set(s, i);
-        strs.push(s);
-    } return i; };
+    const { strs, intern } = makeInterner();
     const shapeMap = new Map(), shapes = []; // sig -> idx; shapes[idx] = [[keyStrIdx, nonEnum], ...]
     const slotShape = new Array(graph.objs.length);
     const internNode = (n) => { if (n.k === "big")
@@ -247,13 +172,8 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
     }
     // pass 2: write ------------------------------------------------------------------------
     const w = new W();
-    w.raw(te.encode(MAGIC));
-    w.varu(strs.length);
-    for (const s of strs) {
-        const b = te.encode(s);
-        w.varu(b.length);
-        w.raw(b);
-    }
+    writeMagic(w, MAGIC);
+    writeStrings(w, strs);
     w.varu(shapes.length);
     for (const sh of shapes) {
         w.varu(sh.length);
@@ -262,23 +182,7 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
             w.u8(ne);
         }
     }
-    w.varu(frames.length);
-    for (const f of frames) {
-        w.varu(intern(f.fn));
-        w.varu(f.pc);
-        w.varu(f.keys.length);
-        for (const k of f.keys)
-            w.varu(intern(k));
-        w.varu(f.b0);
-    }
-    w.u8(req ? 1 : 0);
-    if (req) {
-        w.varu(intern(req.op));
-        w.varu(intern(req.tier));
-        w.varu(intern(req.name));
-        w.varu(req.a0);
-        w.varu(req.argc);
-    }
+    writeFrameHeader(w, frames, req, intern);
     w.varu(graph.roots.length);
     for (const n of graph.roots)
         writeNode(w, n, intern);
@@ -385,17 +289,10 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
     return w.done();
 }
 export function decodeWireBinary(bytes, { content = null } = {}) {
-    const r = new R(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
-    if (td.decode(r.raw(4)) !== MAGIC)
-        throw new RangeError("wire-binary: bad magic");
-    const strs = [];
-    {
-        const n = r.count();
-        for (let i = 0; i < n; i++)
-            strs.push(td.decode(r.raw(r.count())));
-    }
-    const S = (i) => { if (i < 0 || i >= strs.length)
-        throw new RangeError("wire-binary: string index out of range"); return strs[i]; };
+    const r = new R(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), "wire-binary");
+    checkMagic(r, MAGIC);
+    const strs = readStrings(r);
+    const S = strAt(strs, "wire-binary");
     const shapes = [];
     {
         const n = r.count();
@@ -411,24 +308,7 @@ export function decodeWireBinary(bytes, { content = null } = {}) {
     }
     const SH = (i) => { if (i < 0 || i >= shapes.length)
         throw new RangeError("wire-binary: shape index out of range"); return shapes[i]; };
-    const frames = [];
-    {
-        const n = r.count();
-        for (let i = 0; i < n; i++) {
-            const fn = S(r.varu());
-            const pc = r.varu();
-            const kc = r.count();
-            const keys = [];
-            for (let j = 0; j < kc; j++)
-                keys.push(S(r.varu()));
-            frames.push({ fn, pc, keys, b0: r.varu() });
-        }
-    }
-    let req = null;
-    if (r.u8()) {
-        const op = S(r.varu()), tier = S(r.varu()), name = S(r.varu()), a0 = r.varu(), argc = r.varu();
-        req = { op, tier, name, a0, argc };
-    }
+    const { frames, req } = readFrameHeader(r, S);
     const roots = [];
     {
         const n = r.count();
@@ -531,9 +411,7 @@ export function decodeWireBinary(bytes, { content = null } = {}) {
             objs.push(readSlot());
     }
     const vals = decodeGraph({ roots, objs }, { content });
-    const stack = frames.map((f) => { const fr = { fn: f.fn, pc: f.pc }; f.keys.forEach((k, i) => { fr[k] = vals[f.b0 + i]; }); return fr; });
-    const request = req ? { op: req.op, tier: req.tier, name: req.name, args: vals.slice(req.a0, req.a0 + req.argc) } : null;
-    return { stack, request };
+    return rebuildStack(frames, req, vals);
 }
 // A fresh start ships only the entry args — no continuation and no resource yet. Carry them through
 // the same value-root machinery (handles, cycles, and all), rather than hand-rolling a placeholder

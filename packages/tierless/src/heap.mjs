@@ -12,6 +12,7 @@
 import { encodeGraph, decodeGraph, isHandle } from "./graph.mjs";
 import { Heap } from "./fetch.mjs";
 import { openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot } from "./wire-delta.mjs";
+import { rootsOf, rebuildStack } from "./wire-io.mjs";
 export { Channel, makeHost } from "./fetch.mjs";
 export function makeTier(id) {
     const heap = new Heap(id);
@@ -24,29 +25,12 @@ export function makeTier(id) {
 // DeltaFrame/DeltaRequest (from the delta wire) are the same stack/request shape this wire
 // uses — reused rather than redeclared.
 export function encodeWire(stack, request, { tier = null, threshold = 8192 } = {}) {
-    const roots = [];
-    const frames = stack.map((f) => {
-        const keys = Object.keys(f).filter((k) => k !== "fn" && k !== "pc"); // fn/pc are scalar machine state
-        const b0 = roots.length;
-        for (const k of keys)
-            roots.push(f[k]);
-        return { fn: f.fn, pc: f.pc, keys, b0 };
-    });
-    let req = null;
-    if (request) {
-        const a0 = roots.length;
-        for (const a of request.args || [])
-            roots.push(a);
-        req = { op: request.op, tier: request.tier, name: request.name, a0, argc: roots.length - a0 };
-    }
-    return JSON.stringify({ frames, req, graph: encodeGraph(roots, { tier, threshold }) });
+    const { rootVals, frames, req } = rootsOf(stack, request); // fn/pc are scalar machine state; only value-bearing locals go through the graph codec
+    return JSON.stringify({ frames, req, graph: encodeGraph(rootVals, { tier, threshold }) });
 }
 export function decodeWire(wire) {
     const { frames, req, graph } = JSON.parse(wire);
-    const vals = decodeGraph(graph);
-    const stack = frames.map((f) => { const fr = { fn: f.fn, pc: f.pc }; f.keys.forEach((k, i) => { fr[k] = vals[f.b0 + i]; }); return fr; });
-    const request = req ? { op: req.op, tier: req.tier, name: req.name, args: vals.slice(req.a0, req.a0 + req.argc) } : null;
-    return { stack, request };
+    return rebuildStack(frames, req, decodeGraph(graph));
 }
 // How many §5 handles the wire carries (a local that stayed home), for reporting/tests.
 export const wireHandles = (wire) => JSON.parse(wire).graph.objs.filter((o) => o.k === "H").map((o) => o.h);

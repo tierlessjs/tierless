@@ -133,7 +133,7 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
 
 // A bigint crosses the wire as a decimal string; a hostile peer can send a non-numeric one.
 // Bare BigInt() throws SyntaxError, which would escape the reader's "clean RangeError on bad
-// input" contract (see wire-binary.mts) — normalize it here, at the §7 trust boundary.
+// input" contract (see wire-io.mts) — normalize it here, at the §7 trust boundary.
 export function toBigInt(s: string): bigint {
   try { return BigInt(s); } catch { throw new RangeError("wire: invalid bigint literal"); }
 }
