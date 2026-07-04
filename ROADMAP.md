@@ -7,14 +7,8 @@ proven (34 executable proofs, `npm test`).
 ## Packaging & release
 
 `tierless` and `create-tierless` are published — `npm i tierless` /
-`npm create tierless@latest` work. Still open:
+`npm create tierless@latest` work, both with npm provenance. Still open:
 
-- **Verified-provenance badge.** The publish workflow is in place
-  (`.github/workflows/publish.yml`: a `v*` tag runs the full CI gate, then
-  `npm publish --provenance` for both packages via npm OIDC trusted publishing —
-  no token). Remaining: the one-time trusted-publisher config on npmjs.com for
-  each package, then the next tag publishes with the green ✓ tying the release
-  to its exact source commit and build.
 - **TypeScript everywhere.** The framework's own source
   (`packages/tierless/src/*.mts`/`*.cts`, `bin/`, `create-tierless`, `test/`, `bench/`) is
   TypeScript, compiled or type-checked by `tsc` on every build — checked against
