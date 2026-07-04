@@ -1,6 +1,6 @@
 {
   "name": "create-tierless",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Scaffold a new Tierless app: one tierless program, a trusted api service, a two-tier host — running in under a minute.",
   "bin": {

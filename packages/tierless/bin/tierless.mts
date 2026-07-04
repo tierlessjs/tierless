@@ -17,7 +17,10 @@
 //
 //   tierless types <service.mjs> [out.d.ts]
 //       Emit a `declare const api` declaration from the service's registered endpoints,
-//       so `api.getQuote(...)` in a mix module is checked against the real surface.
+//       so `api.getQuote(...)` in a mix module is checked against the real surface. Each
+//       endpoint's parameter list is read from its run signature where statically visible
+//       (the `run: ([sym, n]) => …` array destructure IS the caller's signature); endpoints
+//       whose run takes the raw args array fall back to (...args: any[]).
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -45,6 +48,55 @@ const parseResources = (flags: string[]): Record<string, string> => {
   for (const f of flags) if (f.startsWith("--resource=")) { const [ns, tier] = f.slice("--resource=".length).split(":"); if (!ns || !tier) die("bad --resource (want ns:tier): " + f); resources[ns] = tier; }
   return resources;
 };
+
+// Statically read each endpoint's caller-visible signature from the service source: an endpoint's
+// run receives the ARGS ARRAY first, so its array-destructure pattern `([to, msg, n = 1, ...tags])`
+// names exactly what the mix module passes to api.<name>(...). Collect every `<name>: { run }`
+// object-literal property plus every api.fn("<name>", { run }) call; the emitted surface only uses
+// entries whose name the RUNTIME also reports (api.fns() stays the source of truth for what exists).
+// A run that takes the raw array (`(args) => …`) or a source this parser can't read yields no entry
+// — those endpoints keep the (...args: any[]) fallback rather than a guessed signature.
+interface EndpointSig { params: string[]; rest: string | null }      // "n?" marks an optional (defaulted) element
+function serviceSignatures(src: string): Map<string, EndpointSig> {
+  const sigs = new Map<string, EndpointSig>();
+  let ast: any;
+  try { ast = require("@babel/parser").parse(src, { sourceType: "module", plugins: ["typescript"] }); } catch { return sigs; }
+  const sigOf = (fn: any): EndpointSig | null => {
+    if (!fn || (fn.type !== "ArrowFunctionExpression" && fn.type !== "FunctionExpression")) return null;
+    const p0 = fn.params[0];
+    if (!p0) return { params: [], rest: null };                      // run() — the endpoint takes no args
+    if (p0.type !== "ArrayPattern") return null;                     // run(args) — arity unknowable statically
+    const params: string[] = []; let rest: string | null = null;
+    for (const el of p0.elements) {
+      if (el && el.type === "Identifier") params.push(el.name);
+      else if (el && el.type === "AssignmentPattern" && el.left.type === "Identifier") params.push(el.left.name + "?");
+      else if (el && el.type === "RestElement" && el.argument.type === "Identifier") rest = el.argument.name;
+      else params.push("arg" + params.length);                       // elision / nested pattern — positional name
+    }
+    return { params, rest };
+  };
+  const record = (name: unknown, val: any): void => {
+    if (typeof name !== "string" || !val || val.type !== "ObjectExpression") return;
+    const run = val.properties.find((p: any) => p.type === "ObjectProperty" && !p.computed && (p.key.name === "run" || p.key.value === "run"));
+    const s = run && sigOf(run.value); if (s) sigs.set(name, s);
+  };
+  (function walk(n: any): void {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) return n.forEach(walk);
+    if (n.type === "ObjectProperty" && !n.computed && n.value && n.value.type === "ObjectExpression") record(n.key.name ?? n.key.value, n.value);
+    if (n.type === "CallExpression" && n.callee?.type === "MemberExpression" && n.callee.property?.name === "fn" && n.arguments?.[0]?.type === "StringLiteral") record(n.arguments[0].value, n.arguments[1]);
+    for (const k in n) if (k !== "loc" && k !== "start" && k !== "end" && k !== "leadingComments" && k !== "trailingComments") walk(n[k]);
+  })(ast.program);
+  return sigs;
+}
+// A d.ts parameter list from a signature. TS forbids a required param after an optional one
+// (JS destructuring doesn't), so once one element is optional the rest are emitted optional too.
+function paramList(s: EndpointSig): string {
+  const out: string[] = []; let opt = false;
+  for (const p of s.params) { opt = opt || p.endsWith("?"); out.push((p.endsWith("?") ? p.slice(0, -1) : p) + (opt ? "?" : "") + ": any"); }
+  if (s.rest) out.push(`...${s.rest}: any[]`);
+  return out.join(", ");
+}
 
 // Find the service definition in a module: the default export or any named export that is
 // a defineApi() result ({ create }) or a plain (secret) => Api factory. Arbitrary user code,
@@ -91,7 +143,11 @@ if (cmd === "build") {
   const [file, out] = rest;
   if (!file) die(usage);
   const api = await loadService(file);
-  const lines = api.fns().map((f: { name: string; authorize: string }) => `  /** authorize: ${f.authorize} */\n  ${f.name}(...args: any[]): any;`);
+  const sigs = serviceSignatures(readFileSync(file, "utf8"));
+  const lines = api.fns().map((f: { name: string; authorize: string }) => {
+    const s = sigs.get(f.name);
+    return `  /** authorize: ${f.authorize} */\n  ${f.name}(${s ? paramList(s) : "...args: any[]"}): any;`;
+  });
   const dts = `// GENERATED by \`tierless types ${file}\` — the api surface a mix module calls.\ndeclare const api: {\n${lines.join("\n")}\n};\n`;
   if (out) { writeFileSync(out, dts); console.log("wrote " + out); } else process.stdout.write(dts);
 } else {

@@ -1,0 +1,95 @@
+name: Publish (npm, provenance)
+
+# Publishes tierless + create-tierless to npm on a version tag (v0.2.0, …), with npm
+# TRUSTED PUBLISHING: no long-lived token anywhere — the job authenticates to npm via a
+# GitHub OIDC id-token, and `--provenance` ties the published tarball to this exact commit
+# and workflow run (the green "Built and signed" checkmark on npmjs.com).
+#
+# One-time setup:
+#   1. GitHub: repo Settings → Environments → create "npm-publish", add yourself as a
+#      required reviewer. The job runs in that environment, so every publish waits for a
+#      human approval click between the tag push and npm — the last gate before an
+#      irreversible publish.
+#   2. npmjs.com (per package → Settings → Trusted publisher): GitHub Actions /
+#      repository: tierlessjs/tierless / workflow: publish.yml / environment: npm-publish.
+#      Filling the environment field pins npm's OIDC match to this environment — a
+#      workflow run outside it can't publish even from this repo.
+# After that, releasing is: bump versions + CHANGELOG, then `git tag v<version> && git push --tags`,
+# then approve the run.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write   # the OIDC token npm exchanges for a short-lived publish credential
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Ensure npm supports trusted publishing (needs >= 11.5.1)
+        run: npm install -g npm@latest && npm --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Tag must match the package version
+        run: |
+          V=$(node -p "require('./packages/tierless/package.json').version")
+          C=$(node -p "require('./packages/create-tierless/package.json').version")
+          test "$V" = "$C" || { echo "tierless ($V) and create-tierless ($C) versions differ"; exit 1; }
+          test "v$V" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != package version v$V"; exit 1; }
+
+      - name: The full CI gate (never publish what would fail CI)
+        run: |
+          npm run build -w tierless
+          npm run build -w create-tierless
+          tsc -p test/e2e/app/tsconfig.json
+          git diff --exit-code -- packages/tierless/src packages/tierless/bin packages/tierless/types packages/create-tierless/index.mjs test/e2e/app/h.mjs test/e2e/app/components.mjs test/e2e/app/render.mjs
+          npm run typecheck
+          npm run lint
+          npm test
+
+      # Test the ARTIFACT, not the checkout: pack both tarballs, then prove every exports-map
+      # subpath imports from the installed pack, the installed bin compiles a machine that steps,
+      # and the packed scaffolder yields an app that builds against the packed framework. This is
+      # the class the source-tree suite can't catch (a file missing from the pack, a broken
+      # exports path) — and the reason a broken publish would otherwise reach npm unreversibly.
+      - name: Smoke-test the packed tarballs
+        run: |
+          npm pack -w tierless -w create-tierless --pack-destination "$RUNNER_TEMP"
+          mkdir -p "$RUNNER_TEMP/app" && cd "$RUNNER_TEMP/app" && npm init -y > /dev/null
+          npm install --no-save react "$RUNNER_TEMP"/tierless-*.tgz
+          node --input-type=module -e '
+            const subs = ["tierless","tierless/api","tierless/server","tierless/browser","tierless/react","tierless/vite","tierless/compiler","tierless/runtime","tierless/wire","tierless/delta","tierless/graph","tierless/heap","tierless/fetch","tierless/content","tierless/transport"];
+            for (const s of subs) await import(s);
+            console.log(subs.length + "/15 subpaths import from the installed tarball");'
+          echo 'function go(x){ const r = api.get(x); return r + 1; }' > app.src.js
+          npx tierless build app.src.js app.gen.mjs --bare
+          node --input-type=module -e '
+            const m = await import("./app.gen.mjs");
+            const r = m.PROGRAMS.go({ fn: "go", pc: 0, args: [4] });
+            if (r.op !== "resource" || r.name !== "api.get") throw new Error("bad machine step: " + JSON.stringify(r));
+            console.log("the installed bin compiles and the machine steps correctly");'
+          mkdir "$RUNNER_TEMP/pkg" && tar -xzf "$RUNNER_TEMP"/create-tierless-*.tgz -C "$RUNNER_TEMP/pkg"
+          node "$RUNNER_TEMP/pkg/package/index.mjs" "$RUNNER_TEMP/scaffold"
+          cd "$RUNNER_TEMP/scaffold" && npm install --no-save "$RUNNER_TEMP"/tierless-*.tgz
+          npx tierless build app.src.js app.gen.mjs --bare && test -f app.gen.mjs
+          echo "the packed scaffolder produces an app that builds with the packed framework"
+
+      - name: Publish tierless
+        run: npm publish --provenance --access public -w tierless
+
+      - name: Publish create-tierless
+        run: npm publish --provenance --access public -w create-tierless

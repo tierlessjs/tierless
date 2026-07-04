@@ -26,6 +26,7 @@
 // (a shared object that is also a Map key and a Set member stays one object). Symbols and
 // non-enumerable props extend mechanically (same node table as wire-binary).
 import { isHandle, approxExceeds, toBigInt, type Handle, type EncodeTier, type ContentStoreView } from "./graph.mjs";
+import { W, R, isVarInt, writeMagic, checkMagic, makeInterner, writeStrings, readStrings, strAt, rootsOf, rebuildStack, writeFrameHeader, readFrameHeader, type RootFrame, type RootReq } from "./wire-io.mjs";
 
 export interface DeltaFrame {
   fn: string;
@@ -66,14 +67,12 @@ export interface PlanDeltaOpts extends DeltaOpts {
 }
 
 const MAGIC = "SMD1";
-const te = new TextEncoder(), td = new TextDecoder();
 const isObj = (v: unknown): v is object => v !== null && typeof v === "object";
 const isMap = (v: unknown): v is Map<unknown, unknown> => v instanceof Map;
 const isSet = (v: unknown): v is Set<unknown> => v instanceof Set;
 // Own enumerable string keys, minus __proto__ — never ship it, so a round-trip can't set a
 // reconstructed object's prototype from the wire (the decoder skips it too, defending a hostile peer).
 const ownKeys = (v: object): string[] => Object.keys(v).filter((k) => k !== "__proto__");
-const isVarInt = (v: number): boolean => Number.isInteger(v) && Math.abs(v) < 0x80000000 && !Object.is(v, -0);
 function fnv(s: string): number { let h = 0x811c9dc5 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h >>> 0; }
 // The child values of a container, in a stable order (a §5 handle is an opaque leaf — no children).
 // One definition shared by every graph walk (reach, version, dirty-select) so they never disagree.
@@ -106,58 +105,9 @@ function slotsOf(idOf: WeakMap<object, string>, sub: (v: unknown) => unknown, v:
   return m;
 }
 
-class W {
-  buf: Uint8Array;
-  n: number;
-  constructor() { this.buf = new Uint8Array(256); this.n = 0; }
-  ensure(k: number): void { if (this.n + k > this.buf.length) { let c = this.buf.length * 2; while (c < this.n + k) c *= 2; const b = new Uint8Array(c); b.set(this.buf.subarray(0, this.n)); this.buf = b; } }
-  u8(b: number): void { this.ensure(1); this.buf[this.n++] = b & 0xff; }
-  raw(b: Uint8Array): void { this.ensure(b.length); this.buf.set(b, this.n); this.n += b.length; }
-  varu(x: number): void { this.ensure(10); let v = x; for (;;) { const b = v % 128; v = Math.floor(v / 128); if (v !== 0) this.buf[this.n++] = b | 0x80; else { this.buf[this.n++] = b; break; } } }
-  vari(x: number): void { this.varu(x >= 0 ? x * 2 : -x * 2 - 1); }
-  f64(x: number): void { this.ensure(8); new DataView(this.buf.buffer, this.n, 8).setFloat64(0, x, true); this.n += 8; }
-  done(): Uint8Array { return this.buf.subarray(0, this.n); }
-}
-class R {
-  buf: Uint8Array;
-  n: number;
-  len: number;
-  dv: DataView;
-  constructor(b: Uint8Array) { this.buf = b; this.n = 0; this.len = b.length; this.dv = new DataView(b.buffer, b.byteOffset, b.byteLength); }
-  need(k: number): void { if (this.n + k > this.len) throw new RangeError("wire-delta: truncated"); }
-  u8(): number { this.need(1); return this.buf[this.n++]; }
-  raw(k: number): Uint8Array { this.need(k); const s = this.buf.subarray(this.n, this.n + k); this.n += k; return s; }
-  varu(): number { let v = 0, sh = 1, b: number, i = 0; do { this.need(1); b = this.buf[this.n++]; v += (b & 0x7f) * sh; sh *= 128; if (++i > 9) throw new RangeError("wire-delta: varint too long"); } while (b & 0x80); return v; }
-  count(): number { const c = this.varu(); if (c > this.len - this.n) throw new RangeError("wire-delta: bad count"); return c; }
-  vari(): number { const z = this.varu(); return z % 2 === 0 ? z / 2 : -(z + 1) / 2; }
-  f64(): number { this.need(8); const v = this.dv.getFloat64(this.n, true); this.n += 8; return v; }
-}
-
-// RootFrame/RootReq are rootsOf's internal encoding of a stack frame / request as flat root-value
-// ranges (b0/a0 + count) — the shape both emit() (writing the wire) and parseDelta() (reading it back)
-// share, never exposed outside this module.
-interface RootFrame {
-  fn: string;
-  pc: number;
-  keys: string[];
-  b0: number;
-}
-interface RootReq {
-  op: string;
-  tier: string;
-  name: string;
-  a0: number;
-  argc: number;
-}
-
-// Flatten a frame stack + request into the linear list of root values the graph hangs off.
-function rootsOf(stack: DeltaFrame[], request: DeltaRequest | null): { rootVals: unknown[]; frames: RootFrame[]; req: RootReq | null } {
-  const rootVals: unknown[] = [];
-  const frames = stack.map((f) => { const keys = Object.keys(f).filter((k) => k !== "fn" && k !== "pc"); const b0 = rootVals.length; for (const k of keys) rootVals.push(f[k]); return { fn: f.fn, pc: f.pc, keys, b0 }; });
-  let req: RootReq | null = null;
-  if (request) { const a0 = rootVals.length; for (const a of request.args || []) rootVals.push(a); req = { op: request.op, tier: request.tier, name: request.name, a0, argc: rootVals.length - a0 }; }
-  return { rootVals, frames, req };
-}
+// The writer/hardened reader, magic header, string table, isVarInt cut, and the frame/request
+// flatten + rebuild live in wire-io.mts (one copy, shared with the binary wire). This file owns
+// only what is delta-format-specific: sessions, versioning, the changed-record kinds, and patches.
 
 const sidOfFn = (session: Session) => (v: object): string => { let id = session.idOf.get(v); if (id === undefined) { id = session.tier + "#" + (session.next++); session.idOf.set(v, id); session.store.set(id, v); } return id; };
 // Substitute an excised object with its §5 handle, so every graph walk (reach, version, ship, emit)
@@ -243,8 +193,7 @@ function planRecord(session: Session, sub: (v: unknown) => unknown, id: string, 
 function emit(session: Session, rootVals: unknown[], frames: RootFrame[], req: RootReq | null, changed: string[], full = false): Uint8Array {
   const sub = subFn(session);
   const records: any[] = changed.map((id) => planRecord(session, sub, id, full));
-  const strMap = new Map<string, number>(), strs: string[] = [];
-  const si = (s: string): number => { let i = strMap.get(s); if (i === undefined) { i = strs.length; strMap.set(s, i); strs.push(s); } return i; };
+  const { strs, intern: si } = makeInterner();
   const internVal = (v: unknown): void => { v = sub(v); if (isObj(v)) si(session.idOf.get(v)!); else if (typeof v === "string") si(v); else if (typeof v === "bigint") si(String(v)); };
   for (const f of frames) { si(f.fn); f.keys.forEach(si); }
   if (req) { si(req.op); si(req.tier); si(req.name); }
@@ -275,10 +224,9 @@ function emit(session: Session, rootVals: unknown[], frames: RootFrame[], req: R
     else if (isVarInt(v as number)) { w.u8(1); w.vari(v as number); }
     else { w.u8(2); w.f64(v as number); }
   };
-  w.raw(te.encode(MAGIC));
-  w.varu(strs.length); for (const s of strs) { const b = te.encode(s); w.varu(b.length); w.raw(b); }
-  w.varu(frames.length); for (const f of frames) { w.varu(si(f.fn)); w.varu(f.pc); w.varu(f.keys.length); for (const k of f.keys) w.varu(si(k)); w.varu(f.b0); }
-  w.u8(req ? 1 : 0); if (req) { w.varu(si(req.op)); w.varu(si(req.tier)); w.varu(si(req.name)); w.varu(req.a0); w.varu(req.argc); }
+  writeMagic(w, MAGIC);
+  writeStrings(w, strs);
+  writeFrameHeader(w, frames, req, si);
   w.varu(rootVals.length); for (const v of rootVals) node(v);
   w.varu(records.length);
   for (const r of records) {
@@ -298,12 +246,11 @@ function emit(session: Session, rootVals: unknown[], frames: RootFrame[], req: R
 
 // Parse a delta to a plain structure (no session, no store mutation) — the hardened reader.
 function parseDelta(bytes: Uint8Array | ArrayBufferLike): { frames: RootFrame[]; req: RootReq | null; rootNodes: any[]; changed: any[] } {
-  const r = new R(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
-  if (td.decode(r.raw(4)) !== MAGIC) throw new RangeError("wire-delta: bad magic");
-  const strs: string[] = []; { const n = r.count(); for (let i = 0; i < n; i++) strs.push(td.decode(r.raw(r.count()))); }
-  const S = (i: number): string => { if (i < 0 || i >= strs.length) throw new RangeError("wire-delta: string index out of range"); return strs[i]; };
-  const frames: RootFrame[] = []; { const n = r.count(); for (let i = 0; i < n; i++) { const fn = S(r.varu()); const pc = r.varu(); const kc = r.count(); const keys: string[] = []; for (let j = 0; j < kc; j++) keys.push(S(r.varu())); frames.push({ fn, pc, keys, b0: r.varu() }); } }
-  let req: RootReq | null = null; if (r.u8()) { const op = S(r.varu()), tier = S(r.varu()), name = S(r.varu()), a0 = r.varu(), argc = r.varu(); req = { op, tier, name, a0, argc }; }
+  const r = new R(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), "wire-delta");
+  checkMagic(r, MAGIC);
+  const strs = readStrings(r);
+  const S = strAt(strs, "wire-delta");
+  const { frames, req } = readFrameHeader(r, S);
   const node = (): any => { const t = r.u8(); switch (t) {
     case 0: return { ref: S(r.varu()) };
     case 1: return { v: r.vari() }; case 2: return { v: r.f64() }; case 3: return { v: S(r.varu()) };
@@ -353,8 +300,7 @@ function reconstruct(session: Session, parsed: ReturnType<typeof parseDelta>): {
   const rootVals = rootNodes.map(deref);
   // per-slot baseline upkeep: a fields-mode receiver that later sends back must know what it now holds.
   if (session.fields) { const sub = subFn(session); for (const ch of changed) if (ch.kind !== 2) session.peerSlots.set(ch.sid, slotsOf(session.idOf, sub, ch.obj)); }
-  const stack: DeltaFrame[] = frames.map((f) => { const fr: DeltaFrame = { fn: f.fn, pc: f.pc }; f.keys.forEach((k, i) => { fr[k] = rootVals[f.b0 + i]; }); return fr; });
-  const request: DeltaRequest | null = req ? { op: req.op, tier: req.tier, name: req.name, args: rootVals.slice(req.a0, req.a0 + req.argc) } : null;
+  const { stack, request } = rebuildStack(frames, req, rootVals);
   return { stack, request, rootVals, shipped: changed.map((c) => c.sid) };
 }
 
