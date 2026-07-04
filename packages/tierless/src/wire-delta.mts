@@ -202,12 +202,16 @@ function orderPreserved(base: Slots, cur: Slots): boolean {
 // Records are one of ~7 wire-record shapes (whole o/a/m/s, or a patch op/ap/mp/sp) — a genuinely
 // polymorphic per-kind union kept as `any` internally (same pragmatism as graph.mts's enc/dec): every
 // caller either hands it straight to emit()'s writer (which already switches on `kind`) or discards it.
-function planRecord(session: Session, sub: (v: unknown) => unknown, id: string): any {
+function planRecord(session: Session, sub: (v: unknown) => unknown, id: string, full = false): any {
   const v: any = session.store.get(id);
   if (isHandle(v)) return { id, kind: "H", v };
-  const base = session.fields ? session.peerSlots.get(id) : undefined;
+  // `full` (the wholeSnapshot arm) ships every object as a whole container AND leaves session.peerSlots
+  // untouched, so it can be computed from the SAME fetch session as the delta without advancing — and
+  // corrupting — the delta's per-slot baseline (advancing it is what made min(delta, whole) mis-decode).
+  const useFields = session.fields && !full;
+  const base = useFields ? session.peerSlots.get(id) : undefined;
   let cur: any;
-  if (session.fields) { cur = slotsOf(session.idOf, sub, v); session.peerSlots.set(id, cur); }
+  if (useFields) { cur = slotsOf(session.idOf, sub, v); session.peerSlots.set(id, cur); }
   if (base) {                                                           // we know what the peer holds slot-by-slot -> consider a patch
     if (Array.isArray(v)) {
       const sets = [];
@@ -236,9 +240,9 @@ function planRecord(session: Session, sub: (v: unknown) => unknown, id: string):
 // Serialize { frames, req, roots, changed-objects } to bytes. Shared by both encoders — the wire
 // is identical; only the choice of `changed` (the sids to ship) differs. `changed` objects are
 // read from session.store (sidOf put every live object there); every value reference is its sid.
-function emit(session: Session, rootVals: unknown[], frames: RootFrame[], req: RootReq | null, changed: string[]): Uint8Array {
+function emit(session: Session, rootVals: unknown[], frames: RootFrame[], req: RootReq | null, changed: string[], full = false): Uint8Array {
   const sub = subFn(session);
-  const records: any[] = changed.map((id) => planRecord(session, sub, id));
+  const records: any[] = changed.map((id) => planRecord(session, sub, id, full));
   const strMap = new Map<string, number>(), strs: string[] = [];
   const si = (s: string): number => { let i = strMap.get(s); if (i === undefined) { i = strs.length; strMap.set(s, i); strs.push(s); } return i; };
   const internVal = (v: unknown): void => { v = sub(v); if (isObj(v)) si(session.idOf.get(v)!); else if (typeof v === "string") si(v); else if (typeof v === "bigint") si(String(v)); };
@@ -585,14 +589,15 @@ export function diffSnapshot(session: Session, value: unknown): Uint8Array {
   return bytes;
 }
 
-// Reader side: encode the WHOLE snapshot (every reachable object) in the same wire, so the caller can
-// take min(delta, whole) — the write-back can never be larger than shipping the whole object did before.
-// applySnapshot decodes it identically (a "whole" is just a delta in which everything changed).
-export function wholeSnapshot(tierId: string, value: unknown): Uint8Array {
-  const session = makeTrackedSession(tierId);
-  adoptBaseline(session, snapStack(value), null);
+// Reader side: encode the WHOLE snapshot (every reachable object) under the SAME fetch-anchored
+// baseline the delta arm and the owner's applySnapshot use, so the caller can take min(delta, whole)
+// and either arm lands on the right master shells. It MUST reuse the session, not re-baseline over the
+// mutated value: a fresh DFS renumbers @ids the moment a mutation changes the graph's pre-order shape,
+// so a whole built that way drops records on the wrong shell (an array record onto an object, etc.).
+// With the shared baseline a "whole" really is just a delta in which every reachable object changed.
+export function wholeSnapshot(session: Session, value: unknown): Uint8Array {
   const { reach } = scan(session, [value]);
-  return emit(session, [value], [{ fn: "@snap", pc: 0, keys: ["v"], b0: 0 }], null, [...reach.keys()]);
+  return emit(session, [value], [{ fn: "@snap", pc: 0, keys: ["v"], b0: 0 }], null, [...reach.keys()], true);  // full=true
 }
 
 // Owner side: apply a snapshot delta onto the master IN PLACE. Baselines the master (matching ids — it

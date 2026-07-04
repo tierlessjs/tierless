@@ -73,6 +73,6 @@ export declare function exciseForCapture(session: Session, stack: DeltaFrame[], 
 } | null): void;
 export declare function openSnapshot(tierId: string, value: unknown): Session;
 export declare function diffSnapshot(session: Session, value: unknown): Uint8Array;
-export declare function wholeSnapshot(tierId: string, value: unknown): Uint8Array;
+export declare function wholeSnapshot(session: Session, value: unknown): Uint8Array;
 export declare function applySnapshot(tierId: string, master: unknown, bytes: Uint8Array | ArrayBufferLike): unknown;
 export {};

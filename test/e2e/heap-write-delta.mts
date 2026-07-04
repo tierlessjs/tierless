@@ -30,7 +30,7 @@ const newMaster = (): MasterDoc => {
     config: { theme: "light", page: 1 },
   };
 };
-const wholeOf = (v: unknown): number => wholeSnapshot("browser", v).length;
+const wholeOf = (v: unknown): number => wholeSnapshot(openSnapshot("browser", v), v).length;
 
 // ── Case 1: member edits — ship just the touched objects (the clean per-object win) ─────────────────
 {
@@ -71,10 +71,26 @@ const wholeOf = (v: unknown): number => wholeSnapshot("browser", v).length;
   const tiny: { a: number; b: number; c?: number } = { a: 1, b: 2 }, tinyMaster = fetchCopy(tiny);
   const ts = openSnapshot("browser", tiny);
   tiny.a = 9; tiny.b = 8; tiny.c = 7;                                    // change all of it
-  const td = diffSnapshot(ts, tiny), tw = wholeSnapshot("browser", tiny);
-  check("min(delta, whole): on a near-total change the whole wins, so the wire is never larger", Math.min(td.length, tw.length) <= tw.length);
-  applySnapshot("server", tinyMaster, td.length < tw.length ? td : tw);
+  const td = diffSnapshot(ts, tiny), tw = wholeSnapshot(ts, tiny);
+  check("min(delta, whole): on a near-total change the whole is actually the smaller arm (delta's per-object overhead loses)", tw.length <= td.length, `delta=${td.length} whole=${tw.length}`);
+  applySnapshot("server", tinyMaster, td.length < tw.length ? td : tw);           // picks whole — exercises the whole arm end to end
   check("the near-total change still applies correctly", tinyMaster.a === 9 && tinyMaster.b === 8 && tinyMaster.c === 7);
+}
+
+// ── Case 4 (regression): the WHOLE arm must decode a SHAPE-CHANGING mutation. It is baselined on the
+//    same fetch session as the delta and the owner's applySnapshot, so replacing an object and pushing
+//    a new one — which both shift the graph's DFS pre-order — still land every record on the right master
+//    shell. Before the fix, the whole arm re-numbered @ids over the mutated graph and threw
+//    "ch.obj.push is not a function" whenever min(delta, whole) happened to pick it. ──
+{
+  const master: { rows: Array<{ id: number; tags?: string[] }> } = { rows: [{ id: 1, tags: ["a"] }, { id: 2, tags: ["b"] }] };
+  const copy = fetchCopy(master);
+  const session = openSnapshot("browser", copy);
+  copy.rows[0] = { id: 1 };                          // replace (new identity, one fewer child)
+  copy.rows.push({ id: 3, tags: ["c", "d"] });       // add — both shift the pre-order that numbers @ids
+  const whole = wholeSnapshot(session, copy);
+  applySnapshot("server", master, whole);            // must not throw, and must reconstruct exactly
+  check("the whole arm decodes a shape-changing mutation onto the right master shells (no id renumbering)", JSON.stringify(master) === JSON.stringify(copy));
 }
 
 console.log(ok()

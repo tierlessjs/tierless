@@ -116,7 +116,7 @@ void rebuilt.stack; void rebuilt.request;
 exciseForCapture(dB, dStack, null, { id: "server", heapPut: () => "h1" }, 1024);
 const snap = openSnapshot("server", { a: 1 });
 void diffSnapshot(snap, { a: 2 }).byteLength;
-const wholeBytes = wholeSnapshot("server", { a: 1 });
+const wholeBytes = wholeSnapshot(snap, { a: 1 });
 void applySnapshot("server", { a: 1 }, wholeBytes);
 const hTier = makeTier("server");
 const hWire = encodeWire(dStack, null, { tier: hTier, threshold: 8192 });

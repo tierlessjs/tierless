@@ -162,9 +162,10 @@ export function makeCoherentHost(localTier: LocalTier, channel: Channel): Cohere
       }
       if (ownerHeap.version(prov.id) !== prov.version) { stats.conflicts++; return obj; } // optimistic CAS: stale -> reject (a real reader refetches+retries via commitWrite)
       const session = sessions.get(prov.id);
-      const delta = session ? diffSnapshot(session, obj) : null;
-      const whole = wholeSnapshot(localTier.id, obj);                              // the floor: what shipping the whole snapshot would cost, same codec
-      const bytes = delta && delta.length < whole.length ? delta : whole;          // min(delta, whole)
+      if (!session) return obj;                                                    // no fetch baseline to diff against (a remote deref always opens one) — nothing coherent to ship
+      const delta = diffSnapshot(session, obj);
+      const whole = wholeSnapshot(session, obj);                                   // the floor: same fetch-anchored baseline as the delta + the owner's applySnapshot, so ids align
+      const bytes = delta.length < whole.length ? delta : whole;                   // min(delta, whole)
       applySnapshot(prov.owner, ownerHeap.get(prov.id), bytes);                    // mutate the master in place by matching id
       ownerHeap.ver.set(prov.id, prov.version + 1);
       prov.version += 1;
