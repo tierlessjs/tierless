@@ -4,6 +4,7 @@
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "strict": true,
+    "noEmitOnError": true,
     "declaration": true,
     "sourceMap": false,
     "declarationMap": false,
