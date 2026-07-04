@@ -7,7 +7,7 @@ export const PROGRAMS = {
       case 0:
         F.pc = 6; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: render(h(HomeView, { tags: F.tags, feed: F.feed, tag: F.args[0] })) };
       case 3:
@@ -28,7 +28,7 @@ export const PROGRAMS = {
       case 0:
         F.pc = 6; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: render(h(ArticleView, { article: F.article, comments: F.comments })) };
       case 3:
@@ -49,7 +49,7 @@ export const PROGRAMS = {
       case 0:
         F.pc = 54; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: "session ended" };
       case 3:

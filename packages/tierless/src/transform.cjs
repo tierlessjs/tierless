@@ -630,7 +630,7 @@ function compileFn(node) {
     if (SOURCE_MAP)
         curLine = node.loc.start.line;
     const END = nb();
-    blocks[END].term = { kind: "ret", value: '"(end)"' };
+    blocks[END].term = { kind: "ret", value: "undefined" }; // fall off the end -> return undefined, matching plain-JS semantics
     const entry = compileStmts(node.body.body, { next: END, brk: END, brkDepth: 0, cont: END, contDepth: 0, tryDepth: 0, tryStack: [], labels: {}, label: undefined });
     const boot = nb();
     blocks[boot].term = { kind: "jump", to: entry }; // pc 0 -> entry

@@ -8,7 +8,7 @@ export const PROGRAMS = {
       case 0:
         F.pc = 11; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.sum };
       case 3:
@@ -43,7 +43,7 @@ F.sum = F.sum + F.x;
       case 0:
         F.pc = 11; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.acc };
       case 3:
@@ -78,7 +78,7 @@ F.acc = F.acc + F.v;
       case 0:
         F.pc = 11; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.r };
       case 3:
@@ -115,7 +115,7 @@ F.r = "got:" + F.v;
       case 0:
         F.pc = 12; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.log };
       case 3:
@@ -154,7 +154,7 @@ F.log = F.log + F.v;
       case 0:
         F.pc = 17; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.log };
       case 3:
@@ -207,7 +207,7 @@ F.log = F.log + F.v;
       case 0:
         F.pc = 4; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.row + F.row };
       case 3:
@@ -223,7 +223,7 @@ F.log = F.log + F.v;
       case 0:
         F.pc = 9; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.total };
       case 3:
@@ -254,7 +254,7 @@ F.total = F.total + F.r;
       case 0:
         F.pc = 4; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.v };
       case 3:
@@ -270,7 +270,7 @@ F.total = F.total + F.r;
       case 0:
         F.pc = 11; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.r };
       case 3:
@@ -307,7 +307,7 @@ F.r = "ok:" + F.v;
       case 0:
         F.pc = 11; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.out };
       case 3:
@@ -342,7 +342,7 @@ F.r = "ok:" + F.v;
       case 0:
         F.pc = 4; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.__t0 + 1 };
       case 3:
@@ -358,7 +358,7 @@ F.r = "ok:" + F.v;
       case 0:
         F.pc = 6; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.out };
       case 3:
@@ -380,7 +380,7 @@ F.r = "ok:" + F.v;
       case 0:
         F.pc = 6; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: "no" };
       case 3:
@@ -400,7 +400,7 @@ F.r = "ok:" + F.v;
       case 0:
         F.pc = 11; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.sum };
       case 3:
@@ -435,7 +435,7 @@ F.sum = F.sum + F.i;
       case 0:
         F.pc = 6; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: addPure(F.__t0, F.__t1) };
       case 3:
@@ -456,7 +456,7 @@ F.sum = F.sum + F.i;
       case 0:
         F.pc = 4; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.__t0 + 1 };
       case 3:
@@ -472,7 +472,7 @@ F.sum = F.sum + F.i;
       case 0:
         F.pc = 11; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.x };
       case 3:
@@ -507,7 +507,7 @@ F.sum = F.sum + F.i;
       case 0:
         F.pc = 15; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.a + F.b };
       case 3:
@@ -554,7 +554,7 @@ F.b = F.__t1; // && short-circuits: api.fail never runs
       case 0:
         F.pc = 17; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.out };
       case 3:
@@ -603,7 +603,7 @@ F.b = F.__t1; // && short-circuits: api.fail never runs
       case 0:
         F.pc = 17; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.acc };
       case 3:
@@ -652,7 +652,7 @@ F.b = F.__t1; // && short-circuits: api.fail never runs
       case 0:
         F.pc = 14; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.found };
       case 3:
@@ -694,7 +694,7 @@ F.b = F.__t1; // && short-circuits: api.fail never runs
       case 0:
         F.pc = 10; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.sum };
       case 3:
@@ -727,7 +727,7 @@ F.sum = F.sum + F.v;
       case 0:
         F.pc = 9; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.sum };
       case 3:
@@ -757,7 +757,7 @@ F.sum = F.sum + F.i;
       case 0:
         F.pc = 2; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         (F.__h || (F.__h = [])).push({ catch: 3, fin: null, state: 0 }); F.pc = 7; break;
       case 3:
@@ -788,7 +788,7 @@ F.sum = F.sum + F.i;
       case 0:
         F.pc = 16; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.sum };
       case 3:
@@ -838,7 +838,7 @@ F.sum = F.sum + F.v;
       case 0:
         F.pc = 12; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         (F.__h || (F.__h = [])).push({ catch: null, fin: 3, state: 0 }); F.pc = 7; break;
       case 3:
@@ -875,7 +875,7 @@ F.sum = F.sum + F.v;
       case 0:
         F.pc = 14; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.sum };
       case 3:
@@ -918,7 +918,7 @@ F.sum = F.sum + F.i;
       case 0:
         F.pc = 16; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.sum };
       case 3:
@@ -966,7 +966,7 @@ F.sum = F.sum + F.i;
       case 0:
         F.pc = 15; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.out };
       case 3:
@@ -1011,7 +1011,7 @@ F.sum = F.sum + F.i;
       case 0:
         F.pc = 10; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.sum };
       case 3:

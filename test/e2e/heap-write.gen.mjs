@@ -6,7 +6,7 @@ export const PROGRAMS = {
       case 0:
         F.pc = 17; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.rows[F.ev.idx].score };
       case 3:

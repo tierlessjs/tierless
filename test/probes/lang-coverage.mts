@@ -129,6 +129,8 @@ await supported("object destructuring with string-literal keys + array elision",
 await supported("default parameter that suspends", "function A(x = api.get(5)){ return x + 1; } function B(){ const r = A(); return r; }", "B", 6);
 await supported("destructured parameter", "function A({ a, b }){ return a * b; } function B(){ const o = api.pair(); const r = A(o); return r; }", "B", 2);
 await supported("rest parameter", "function A(a, ...xs){ return a + xs.length; } function B(){ const r = A(api.get(9), 1, 2, 3); return r; }", "B", 12);
+// completion semantics: falling off the end returns undefined (plain-JS), not a compiler sentinel
+await supported("a function with no return statement yields undefined, not a sentinel", "function A(){ const x = api.dbl(3); } function B(){ const r = A(); return r === undefined ? 'undefined' : ('LEAKED:' + r); }", "B", "undefined");
 
 console.log("\noptional-chain conditional suspensions (compiled result checked vs a native-JS oracle — value AND call sequence, so short-circuit skipping the tier call is verified):");
 await optchain("obj?.[api.f()] — receiver present", 'function A(){ const o = { b: 42 }; const r = o?.[api.get("b")]; return r; }', "A");

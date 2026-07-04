@@ -18,7 +18,7 @@ export const PROGRAMS = {
       case 0:
         F.pc = 4; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: churnPure(F.args[0], F.seed) };
       case 3:
@@ -34,7 +34,7 @@ export const PROGRAMS = {
       case 0:
         F.pc = 11; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.acc };
       case 3:
