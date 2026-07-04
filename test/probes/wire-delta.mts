@@ -182,9 +182,8 @@ console.log("Probe: the delta wire codec — fidelity, locality, bidirectional b
   applyDelta(B, d.bytes);
   const full = encodeWireBinary(fresh, null, {}).length;
   const chosen = Math.min(d.bytes.length, full);                         // the strategy: take the smaller
-  check(`floor: min(delta, full) is never worse than the full wire (ships ${chosen} B; full ${full} B, cold delta ${d.bytes.length} B)`, chosen <= full);
-  check("floor: on a cold capture the delta exceeds full, so the strategy correctly falls back to full",
-    d.bytes.length > full ? chosen === full : true);
+  check(`floor: a cold delta genuinely EXCEEDS the full wire (delta ${d.bytes.length} B > full ${full} B), so min() must fall back — "never larger than full" is a real guarantee, not a no-op`, d.bytes.length > full);
+  check(`floor: min(delta, full) ships the full wire on a cold capture (chosen ${chosen} B === full ${full} B)`, chosen === full);
 }
 
 // ---------------------------------------------------------------------------------------------

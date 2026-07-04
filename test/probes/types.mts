@@ -135,6 +135,9 @@ void chost.stats.fetches; void chost.deref(hHandle); void chost.writeBack({});
 const ok = tsc([join("test", ".types-fixture", "ok.ts")]);
 check("a consumer exercising every main entry type-checks under --strict", ok.status === 0, (ok.stdout || "").split("\n").slice(0, 3).join(" | "));
 
+// Each misuse carries its OWN `@ts-expect-error`, so tsc compiles cleanly ONLY if every one of them
+// still errors: if any single guard regresses (the line starts type-checking), its directive becomes
+// unused and tsc fails — per-line coverage, not "at least one of seven errored somewhere".
 writeFileSync(join(dir, "bad.ts"), `
 import { useAction } from "tierless/react";
 import { defineApi, PUBLIC } from "tierless/api";
@@ -143,16 +146,23 @@ import { Heap } from "tierless/fetch";
 import { exciseForCapture, makeTrackedSession } from "tierless/delta";
 import { makeTier } from "tierless/heap";
 import { Api } from "tierless/api";
+// @ts-expect-error useAction takes an action function, not a string
 useAction("not a function");
+// @ts-expect-error an endpoint spec has no 'extra' property (excess-property check)
 defineApi({ leak: { authorize: PUBLIC, run: () => 1, extra: true } });
-new ContentStore().resolve("x");   // no such method — the real one is get(); this must fail, not silently pass
-new Heap(42);                      // the real constructor takes a string tierId
-exciseForCapture(makeTrackedSession("x"), [{ fn: "F", pc: 0 }], null);   // missing the required tier argument (4th) — no default
-makeTier("server", {});            // the real function takes 1 argument (id); there is no options param
-void new Api()._fns;               // _fns is private — must not be reachable from outside the class
+// @ts-expect-error no such method — the real one is get()
+new ContentStore().resolve("x");
+// @ts-expect-error the real constructor takes a string tierId, not a number
+new Heap(42);
+// @ts-expect-error missing the required tier argument (4th) — no default
+exciseForCapture(makeTrackedSession("x"), [{ fn: "F", pc: 0 }], null);
+// @ts-expect-error the real function takes 1 argument (id); there is no options param
+makeTier("server", {});
+// @ts-expect-error _fns is private — must not be reachable from outside the class
+void new Api()._fns;
 `);
 const bad = tsc([join("test", ".types-fixture", "bad.ts")]);
-check("deliberate misuse FAILS to type-check (the types are load-bearing)", bad.status !== 0 && (bad.stdout || "").includes("error TS"), bad.status);
+check("every one of the 7 deliberate misuses is individually rejected (a @ts-expect-error per line — tsc fails if ANY one silently type-checks)", bad.status === 0, (bad.stdout || "").split("\n").slice(0, 5).join(" | "));
 
 const { pass, fail } = counts();
 const okAll = fail === 0;

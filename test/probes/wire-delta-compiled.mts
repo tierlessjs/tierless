@@ -94,12 +94,14 @@ check("compiler-tracked delta reconstructs IDENTICALLY to the rescan oracle, eve
 check("the reconstruction equals the live continuation the machine produced, every hop", fidelity);
 check("warm hops ship only the few mutated objects, not the whole model (the object-count win)", sawTinyDelta);
 {
-  // This model is tiny, so the delta's fixed overhead (magic + the sid string table) dominates and
-  // it need not beat the compact full wire on raw bytes — that win is for large models (bench/delta).
-  // Here the size claim is just that the strategy is never worse than always shipping the full wire.
+  // min(delta, full) per hop: on the WARM oscillation hops the write-tracked delta ships FEWER bytes
+  // than the compact full wire even for this small model, so the strategy is STRICTLY smaller than
+  // always re-shipping full — proving min() actually selects the delta arm on the hops it wins, not
+  // just the trivial "never larger". (The margin is small here; the large-model win is bench/delta.)
   const strategy = trackedTotal.reduce((a, d, i) => a + Math.min(d, fullTotal[i]), 0);
   const fullOnly = fullTotal.reduce((a, f) => a + f, 0);
-  check("the session under min(delta, full) is never worse than re-shipping the full wire each hop", strategy <= fullOnly);
+  const deltaWon = trackedTotal.filter((d, i) => d < fullTotal[i]).length;
+  check(`min(delta, full) is STRICTLY smaller than re-shipping full each hop — delta wins ${deltaWon}/${trackedTotal.length} hops (strategy ${strategy} B < full-only ${fullOnly} B)`, strategy < fullOnly && deltaWon > 0);
 }
 
 // And confirm the barrier is load-bearing for IN-PLACE edits. New objects are found by the

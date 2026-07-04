@@ -111,8 +111,12 @@ const lb = rt1({ many, list }) as any;   // ad hoc fixture — see note above
 check("large string/obj tables (>127 entries, multi-byte varint indices) round-trip", lb.many.field_399 === "value_399" && lb.list.length === 400 && lb.list[399].n === 399);
 const ub = rt1({ s: "héllo 🦄   \n \"q\"", long: "x".repeat(5000) }) as any;   // ad hoc fixture — see note above
 check("unicode, NUL, control chars, and a 5 KB string round-trip", ub.s === "héllo 🦄   \n \"q\"" && ub.long.length === 5000);
-let deep: unknown = { v: 0 }; for (let i = 0; i < 500; i++) deep = { next: deep };           // 500-deep nesting
-check("a 500-deep nested graph round-trips without overflow", (rt1(deep) as any).next.next.v !== undefined || true);
+let deep: unknown = { v: 0 }; for (let i = 0; i < 500; i++) deep = { next: deep };           // 500-deep nesting, {v:0} at the bottom
+{
+  let cur: any = rt1(deep), depth = 0;                                                        // walk the whole reconstructed chain
+  while (cur && typeof cur === "object" && "next" in cur) { cur = cur.next; depth++; }
+  check("a 500-deep nested graph round-trips without overflow (all 500 levels + the leaf reconstruct)", depth === 500 && !!cur && cur.v === 0, `depth=${depth} leaf=${JSON.stringify(cur)}`);
+}
 
 // === 4) decode robustness against truncated / corrupted / hostile bytes ===
 const valid = encodeDelta(makeDeltaSession("s"), [{ fn: "F", pc: 0, x: { a: 1, b: [1, 2, 3], c: "s", m: new Map([["k", 1]]) } }], { op: "resource", tier: "server", name: "api.x", args: [{ k: 1 }] }).bytes;
