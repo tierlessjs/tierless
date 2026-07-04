@@ -14,15 +14,21 @@ name: Publish (npm, provenance)
 #      repository: tierlessjs/tierless / workflow: publish.yml / environment: npm-publish.
 #      Filling the environment field pins npm's OIDC match to this environment — a
 #      workflow run outside it can't publish even from this repo.
-# After that, releasing is: bump versions + CHANGELOG, then `git tag v<version> && git push --tags`,
-# then approve the run.
+# Two ways to release (both end in the same gate + approval + publish):
+#   - push a version tag:  git tag v<version> && git push --tags
+#   - or dispatch this workflow (Actions → Publish → Run workflow, or the API): it mints the
+#     tag from package.json itself, then continues into the gate and publish IN THIS RUN.
+#     (A tag pushed with the default GITHUB_TOKEN deliberately does not re-trigger workflows —
+#     GitHub's recursion protection — which is exactly why the dispatch path doesn't hand off
+#     to the tag trigger and instead just keeps going.)
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # dispatch path pushes the release tag; tag-push path never writes
   id-token: write   # the OIDC token npm exchanges for a short-lived publish credential
 
 jobs:
@@ -44,12 +50,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Tag must match the package version
+      - name: Resolve the release version (tag push asserts the tag; dispatch mints it)
         run: |
           V=$(node -p "require('./packages/tierless/package.json').version")
           C=$(node -p "require('./packages/create-tierless/package.json').version")
           test "$V" = "$C" || { echo "tierless ($V) and create-tierless ($C) versions differ"; exit 1; }
-          test "v$V" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != package version v$V"; exit 1; }
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            if git ls-remote --exit-code --tags origin "v$V" > /dev/null; then
+              echo "tag v$V already exists — bump the package versions before dispatching a release"; exit 1
+            fi
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "v$V" && git push origin "v$V"
+            echo "minted tag v$V — continuing into the gate and publish in this run"
+          else
+            test "v$V" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != package version v$V"; exit 1; }
+          fi
 
       - name: The full CI gate (never publish what would fail CI)
         run: |
