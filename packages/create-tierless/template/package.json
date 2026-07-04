@@ -9,6 +9,6 @@
     "check:api": "tierless api api.server.mjs"
   },
   "dependencies": {
-    "tierless": "^0.1.0"
+    "tierless": "^0.2.0"
   }
 }

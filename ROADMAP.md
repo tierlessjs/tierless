@@ -9,10 +9,12 @@ proven (34 executable proofs, `npm test`).
 `tierless@0.1.0` and `create-tierless@0.1.0` are published — the names are
 secured and `npm i tierless` / `npm create tierless@latest` work. Still open:
 
-- **Verified-provenance badge.** Publish from CI (GitHub Actions + npm OIDC via
-  `npm publish --provenance`) so npm shows the green ✓ tying each release to its
-  exact source commit and build. Needs a public repo and a CI publish workflow;
-  the first name-securing release is published by hand and predates it.
+- **Verified-provenance badge.** The publish workflow is in place
+  (`.github/workflows/publish.yml`: a `v*` tag runs the full CI gate, then
+  `npm publish --provenance` for both packages via npm OIDC trusted publishing —
+  no token). Remaining: the one-time trusted-publisher config on npmjs.com for
+  each package, then the next tag publishes with the green ✓ tying the release
+  to its exact source commit and build.
 - **TypeScript everywhere.** The framework's own source
   (`packages/tierless/src/*.mts`/`*.cts`, `bin/`, `create-tierless`, `test/`, `bench/`) is
   TypeScript, compiled or type-checked by `tsc` on every build — checked against

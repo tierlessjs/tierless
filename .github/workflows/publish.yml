@@ -1,0 +1,59 @@
+name: Publish (npm, provenance)
+
+# Publishes tierless + create-tierless to npm on a version tag (v0.2.0, …), with npm
+# TRUSTED PUBLISHING: no long-lived token anywhere — the job authenticates to npm via a
+# GitHub OIDC id-token, and `--provenance` ties the published tarball to this exact commit
+# and workflow run (the green "Built and signed" checkmark on npmjs.com).
+#
+# One-time setup (per package, on npmjs.com → package → Settings → Trusted publisher):
+#   GitHub Actions / repository: tierlessjs/tierless / workflow: publish.yml
+# After that, releasing is: bump versions + CHANGELOG, then `git tag v<version> && git push --tags`.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write   # the OIDC token npm exchanges for a short-lived publish credential
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Ensure npm supports trusted publishing (needs >= 11.5.1)
+        run: npm install -g npm@latest && npm --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Tag must match the package version
+        run: |
+          V=$(node -p "require('./packages/tierless/package.json').version")
+          C=$(node -p "require('./packages/create-tierless/package.json').version")
+          test "$V" = "$C" || { echo "tierless ($V) and create-tierless ($C) versions differ"; exit 1; }
+          test "v$V" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != package version v$V"; exit 1; }
+
+      - name: The full CI gate (never publish what would fail CI)
+        run: |
+          npm run build -w tierless
+          npm run build -w create-tierless
+          tsc -p test/e2e/app/tsconfig.json
+          git diff --exit-code -- packages/tierless/src packages/tierless/bin packages/tierless/types packages/create-tierless/index.mjs test/e2e/app/h.mjs test/e2e/app/components.mjs test/e2e/app/render.mjs
+          npm run typecheck
+          npm run lint
+          npm test
+
+      - name: Publish tierless
+        run: npm publish --provenance --access public -w tierless
+
+      - name: Publish create-tierless
+        run: npm publish --provenance --access public -w create-tierless
