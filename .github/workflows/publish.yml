@@ -57,16 +57,25 @@ jobs:
           test "$V" = "$C" || { echo "tierless ($V) and create-tierless ($C) versions differ"; exit 1; }
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             EXISTING=$(git ls-remote --tags origin "refs/tags/v$V" | cut -f1)
-            if [ -n "$EXISTING" ]; then
-              # idempotent retry: a failed publish leaves the tag behind (it is minted before the
-              # gate) — re-dispatching the SAME release must proceed, not demand a version bump.
-              test "$EXISTING" = "$GITHUB_SHA" || { echo "tag v$V exists at $EXISTING, not this commit — bump the package versions before dispatching a new release"; exit 1; }
-              echo "tag v$V already points at this commit — retrying its publish"
-            else
+            if [ -z "$EXISTING" ]; then
               git config user.name "github-actions[bot]"
               git config user.email "github-actions[bot]@users.noreply.github.com"
               git tag "v$V" && git push origin "v$V"
               echo "minted tag v$V — continuing into the gate and publish in this run"
+            elif [ "$EXISTING" = "$GITHUB_SHA" ]; then
+              echo "tag v$V already points at this commit — retrying its publish"
+            else
+              # The tag marks where v$V FIRST shipped from and is never moved or deleted. Whether a
+              # dispatch may proceed is the REGISTRY's question, not the tag's: if every package of
+              # this version is already published, this is a forgotten bump — refuse. If any is
+              # missing (a partial release, e.g. a fix commit landed between the two publishes),
+              # complete the missing publishes from this commit and leave the tag where it is.
+              TL=$(npm view "tierless@$V" version 2> /dev/null || true)
+              CT=$(npm view "create-tierless@$V" version 2> /dev/null || true)
+              if [ -n "$TL" ] && [ -n "$CT" ]; then
+                echo "v$V is fully published and tagged at $EXISTING — bump the package versions before dispatching a new release"; exit 1
+              fi
+              echo "tag v$V exists at $EXISTING from a partial release — completing the missing publishes from this commit (tag left in place)"
             fi
           else
             test "v$V" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != package version v$V"; exit 1; }
