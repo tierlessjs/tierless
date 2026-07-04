@@ -28,7 +28,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # dispatch path pushes the release tag; tag-push path never writes
+  contents: write   # dispatch mints the release tag; both paths create the GitHub Release
   id-token: write   # the OIDC token npm exchanges for a short-lived publish credential
 
 jobs:
