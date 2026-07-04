@@ -2,32 +2,17 @@
 
 What's genuinely open. Everything that has landed — with its measurements and
 proofs — moved to [`CHANGELOG.md`](./CHANGELOG.md); the mechanism itself is
-proven (34 executable proofs, `npm test`).
+proven (35 executable proofs, `npm test`).
 
 ## Packaging & release
 
 `tierless` and `create-tierless` are published — `npm i tierless` /
 `npm create tierless@latest` work, both with npm provenance. Still open:
 
-- **TypeScript everywhere.** The framework's own source
-  (`packages/tierless/src/*.mts`/`*.cts`, `bin/`, `create-tierless`, `test/`, `bench/`) is
-  TypeScript, compiled or type-checked by `tsc` on every build — checked against
-  the real implementation, not hand-maintained separately. `"use tierless"` mix
-  modules can be authored in TypeScript too (`app.src.ts`): the compiler
-  detects the extension and strips erasable TS syntax (`node:module`'s
-  `stripTypeScriptTypes`, the same ceiling as `node --experimental-strip-types` —
-  no enums, no namespaces, no parameter properties) before parsing, so the rest
-  of the compiler stays untouched. `tierless types` reads each endpoint's
-  parameter list from its `run: ([sym, n = 1, ...rest]) => …` destructure (the
-  caller's real signature), so a wrong-arity `api.*` call in a mix module fails
-  to type-check; a run that takes the raw args array keeps the honest
-  `(...args: any[])` fallback. Still open: return types are `any` — inferring
-  them needs a type checker over the service body, not a parse.
-
-The production build story is done: `vite build` emits the server machine +
-`tierless.manifest.json` into `dist-tierless/` and a prod server mounts it with
-`bundleResolverFromManifest` — no second compile, no hand-written resolver (see
-`docs/production.md`).
+- **`tierless types` return types.** Generated api signatures type every
+  endpoint's parameters from its real `run` destructure, but return types are
+  `any` — inferring them needs a type checker over the service body, not a
+  parse.
 
 ## Runtime hardening
 
