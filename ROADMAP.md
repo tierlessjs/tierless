@@ -21,10 +21,12 @@ secured and `npm i tierless` / `npm create tierless@latest` work. Still open:
   detects the extension and strips erasable TS syntax (`node:module`'s
   `stripTypeScriptTypes`, the same ceiling as `node --experimental-strip-types` —
   no enums, no namespaces, no parameter properties) before parsing, so the rest
-  of the compiler stays untouched. Still open: `tierless types` still emits
-  `(...args: any[]) => any` for every endpoint — richer generated types would
-  need parsing the service module's own signatures, not just its registered
-  endpoint names.
+  of the compiler stays untouched. `tierless types` reads each endpoint's
+  parameter list from its `run: ([sym, n = 1, ...rest]) => …` destructure (the
+  caller's real signature), so a wrong-arity `api.*` call in a mix module fails
+  to type-check; a run that takes the raw args array keeps the honest
+  `(...args: any[])` fallback. Still open: return types are `any` — inferring
+  them needs a type checker over the service body, not a parse.
 - **Production build story for the Vite plugin.** Dev is first-class (the
   plugin hosts the endpoint on Vite's own server); prod works today by mounting
   `attachTierless` with a CLI-built machine (see `docs/production.md` and

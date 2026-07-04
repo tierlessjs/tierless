@@ -49,9 +49,16 @@ check("explain rejects a callback tier-call cleanly (clear message, non-zero, no
   cbBad.status !== 0 && cbOut.includes("inside a nested function / callback is not supported") && !/\n\s+at /.test(cbOut), cbOut.split("\n")[0]);
 
 // ---- api (pre-ship check) ---------------------------------------------------------------
+// svc.mjs covers every run-signature style `tierless types` reads: zero-arg (ping/drop),
+// destructured with default + rest (send), and the raw-args style it must NOT guess at (raw).
 writeFileSync(join(dir, "svc.mjs"), `
 import { defineApi, PUBLIC } from ${JSON.stringify(pathToFileURL(join(SRC, "api/api.mjs")).href)};
-export default defineApi({ ping: { authorize: PUBLIC, run: () => "pong" }, drop: { authorize: (p) => p != null, run: () => 1 } });
+export default defineApi({
+  ping: { authorize: PUBLIC, run: () => "pong" },
+  drop: { authorize: (p) => p != null, run: () => 1 },
+  send: { authorize: (p) => p != null, run: ([to, msg, n = 1, ...tags], p) => tags.length + n },
+  raw:  { authorize: PUBLIC, run: (args) => args.length },
+});
 `);
 const a = run(["api", join(dir, "svc.mjs")]);
 check("api lists the surface with authorization kinds", a.status === 0 && a.stdout.includes("PUBLIC   ping") && a.stdout.includes("per-call drop") && a.stdout.includes("the service ships"), a.stdout);
@@ -65,9 +72,20 @@ check("an endpoint with no authorize FAILS the pre-ship check at load time", bad
 
 // ---- types ------------------------------------------------------------------------------
 const ty = run(["types", join(dir, "svc.mjs")]);
-check("types emits the declare-const-api surface", ty.status === 0 && ty.stdout.includes("declare const api") && ty.stdout.includes("ping(...args: any[]): any;") && ty.stdout.includes("authorize: per-call"), ty.stdout.split("\n")[1]);
+check("types emits the declare-const-api surface", ty.status === 0 && ty.stdout.includes("declare const api") && ty.stdout.includes("authorize: per-call"), ty.stdout.split("\n")[1]);
+check("a zero-arg run emits a zero-arg endpoint", ty.stdout.includes("ping(): any;"), ty.stdout.split("\n").find((l) => l.includes("ping")));
+check("a destructured run emits its real names, default -> optional, rest -> variadic", ty.stdout.includes("send(to: any, msg: any, n?: any, ...tags: any[]): any;"), ty.stdout.split("\n").find((l) => l.includes("send")));
+check("a raw-args run falls back to (...args: any[]) rather than a guessed signature", ty.stdout.includes("raw(...args: any[]): any;"), ty.stdout.split("\n").find((l) => l.includes("raw")));
 const tyOut = run(["types", join(dir, "svc.mjs"), join(dir, "api.d.ts")]);
 check("types writes a file when given a target", tyOut.status === 0 && tyOut.stdout.includes("wrote"), tyOut.stdout);
+// the emitted declaration is load-bearing: a correct call type-checks, a wrong-arity call FAILS
+writeFileSync(join(dir, "use-ok.ts"), `/// <reference path="./api.d.ts" />\napi.send("a", "b");\napi.send("a", "b", 2, "t1", "t2");\napi.ping();\n`);
+writeFileSync(join(dir, "use-bad.ts"), `/// <reference path="./api.d.ts" />\napi.send("only-one-arg");\n`);
+const tscJs = fileURLToPath(new URL("../../node_modules/typescript/bin/tsc", import.meta.url));   // spawn via node, same as types.mts
+const tOk = spawnSync(process.execPath, [tscJs, "--noEmit", "--strict", join(dir, "use-ok.ts")], { encoding: "utf8" as const });
+const tBad = spawnSync(process.execPath, [tscJs, "--noEmit", "--strict", join(dir, "use-bad.ts")], { encoding: "utf8" as const });
+check("a correct call against the emitted surface type-checks", tOk.status === 0, (tOk.stdout || "").split("\n")[0]);
+check("a wrong-arity call against the emitted surface is REJECTED", tBad.status !== 0 && (tBad.stdout || "").includes("error TS"), tBad.status);
 
 // ---- usage ------------------------------------------------------------------------------
 const u = run([]);
