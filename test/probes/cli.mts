@@ -41,6 +41,12 @@ const ej = run(["explain", join(dir, "acts.js"), "--json"]);
 const rep = ej.status === 0 ? JSON.parse(ej.stdout) : null;
 check("explain --json emits the machine-readable report (for agents/tooling)",
   rep !== null && rep.functions.some((f: any) => f.name === "fetchAll" && f.suspendable && f.suspensions[0].name === "api.get"), rep && rep.functions.length);
+// explain must reject exactly what build rejects — a tier call in a callback — cleanly, not report it compilable
+writeFileSync(join(dir, "callback.js"), "export function A(xs) { return xs.map(x => api.get(x)); }\n");
+const cbBad = run(["explain", join(dir, "callback.js")]);
+const cbOut = cbBad.stderr + cbBad.stdout;
+check("explain rejects a callback tier-call cleanly (clear message, non-zero, no V8 stack)",
+  cbBad.status !== 0 && cbOut.includes("inside a nested function / callback is not supported") && !/\n\s+at /.test(cbOut), cbOut.split("\n")[0]);
 
 // ---- api (pre-ship check) ---------------------------------------------------------------
 writeFileSync(join(dir, "svc.mjs"), `

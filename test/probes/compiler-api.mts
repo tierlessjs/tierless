@@ -73,6 +73,12 @@ check("analyze marks pure fns", by.fmt.suspendable === false);
 check("analyze reports the effective resource map", rep.resources.db === "server" && rep.resources.api === "server", rep.resources);
 check("defaults still exported for callers", DEFAULT_RESOURCES.api === "server" && DEFAULT_RESOURCES.commit === "browser");
 
+// analyze() must reject exactly what compile() rejects — a tier call in a callback is un-compilable,
+// so `explain` can never report it as a migratable machine (regression: analyze skipped this guard).
+const badSrc = "function A(){ return [1,2,3].map(x => api.dbl(x)); }";
+const threw = (fn: () => unknown): boolean => { try { fn(); return false; } catch { return true; } };
+check("analyze() rejects a callback tier-call, agreeing with compile() (explain never over-reports compilability)", threw(() => analyze(badSrc)) && threw(() => compile(badSrc)));
+
 // ---- the CLI flag drives the same thing --------------------------------------------
 writeFileSync(join(dir, "cli.src.js"), "function go(x) { const r = db.get(x); return r; }");
 execFileSync(process.execPath, [TX, join(dir, "cli.src.js"), join(dir, "cli.gen.mjs"), "--bare", "--resource=db:server"]);

@@ -61,13 +61,24 @@ if (cmd === "build") {
     const files = rest.filter((a) => !a.startsWith("--"));
     if (files.length !== 2)
         die(usage);
-    execFileSync(process.execPath, [TX, ...rest], { stdio: "inherit" });
+    try {
+        execFileSync(process.execPath, [TX, ...rest], { stdio: "inherit" });
+    }
+    catch {
+        process.exit(1);
+    } // transform.cjs already printed the clear message on stderr
 }
 else if (cmd === "explain") {
     const [file] = rest.filter((a) => !a.startsWith("--"));
     if (!file)
         die(usage);
-    const rep = analyze(readFileSync(file, "utf8"), { resources: parseResources(rest), filename: file });
+    let rep;
+    try {
+        rep = analyze(readFileSync(file, "utf8"), { resources: parseResources(rest), filename: file });
+    }
+    catch (e) {
+        die(e.message);
+    } // same rejection as build — a clear message, not a V8 stack
     if (rest.includes("--json")) {
         process.stdout.write(JSON.stringify({ file, ...rep }, null, 2) + "\n");
         process.exit(0);
