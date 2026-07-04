@@ -46,6 +46,8 @@ const cases: Case[] = [
   { file: "test/e2e/heap-write.mts",     needs: ["transparent write-back: an ordinary member assignment propagated to the owning master"] },
   { file: "test/e2e/heap-write-delta.mts", needs: ["a §5 write-back ships only the changed objects (member edits and collection mutations alike), far smaller than the whole snapshot, and min(delta, whole) is never larger"] },
   { file: "test/e2e/policy-live.mts",    needs: ["informed FETCH", "priced migrate vs fetch from real bytes and steered the socket"] },
+  { file: "test/probes/trace.mts",       needs: ["run-level sampling, a wire-borne trace flag with one cross-tier order, truncation-safe profiles with per-feature size models, and a stability-gated trajectory rule over a greedy floor"] },
+  { file: "test/e2e/trio-live.mts",      needs: ["traces recorded through the real host priced fetchA's whole suffix and flipped a locally-losing hop", "the hash gate refuses stale history"] },
   { file: "test/e2e/delta-live.mts",     needs: ["bounce + min(delta,full) + §5 excision + deref all compose, end to end"] },
 ];
 

@@ -97,9 +97,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/app" && cd "$RUNNER_TEMP/app" && npm init -y > /dev/null
           npm install --no-save react "$RUNNER_TEMP"/tierless-*.tgz
           node --input-type=module -e '
-            const subs = ["tierless","tierless/api","tierless/server","tierless/browser","tierless/react","tierless/vite","tierless/compiler","tierless/runtime","tierless/wire","tierless/delta","tierless/graph","tierless/heap","tierless/fetch","tierless/content","tierless/transport"];
+            const subs = ["tierless","tierless/api","tierless/server","tierless/browser","tierless/react","tierless/vite","tierless/compiler","tierless/runtime","tierless/wire","tierless/delta","tierless/graph","tierless/heap","tierless/fetch","tierless/content","tierless/transport","tierless/trace"];
             for (const s of subs) await import(s);
-            console.log(subs.length + "/15 subpaths import from the installed tarball");'
+            console.log(subs.length + "/" + subs.length + " subpaths import from the installed tarball");'
           echo 'function go(x){ const r = api.get(x); return r + 1; }' > app.src.js
           npx tierless build app.src.js app.gen.mjs --bare
           node --input-type=module -e '

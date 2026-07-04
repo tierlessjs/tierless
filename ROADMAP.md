@@ -2,7 +2,7 @@
 
 What's genuinely open. Everything that has landed — with its measurements and
 proofs — moved to [`CHANGELOG.md`](./CHANGELOG.md); the mechanism itself is
-proven (35 executable proofs, `npm test`).
+proven (37 executable proofs, `npm test`).
 
 ## Runtime hardening
 
@@ -27,10 +27,16 @@ proven (35 executable proofs, `npm test`).
   FORCED to cross as a §5 handle (never inlined into a continuation headed client-ward),
   and every deref of it is a monitored, per-principal call. Data-flow confidentiality for
   tier-crossing values without whole-program interposition.
-- **Whole-program placement optimization.** §6 prices one hop at a time (greedy);
-  Stip.js's search-based tier assignment optimized placement globally (total
-  communication, offline availability). A PDG-style global view over the suspension
-  graph could pre-place or replicate pure helpers better than local decisions.
+- **Whole-program placement optimization.** Trajectory pricing (`tierless/trace`,
+  `docs/trajectory.md`) now prices a site's whole recorded same-tier suffix instead of
+  one hop — measured 57% fewer bytes on a workflow where every greedy hop was locally
+  correct. Still open, in order of leverage: land the §6 decide loop in the shipped host
+  (fetch as a first-class protocol message — today the host always migrates and the
+  driver lives in the tests); a suffix horizon for long-running sessions (price up to
+  the first foreign-tier return, say — settle against real traces); and per-site suffix
+  stability in real applications, the load-bearing empirical unknown the recorder now
+  instruments. Beyond that, Stip.js-style global search over the suspension graph
+  (pre-placing or replicating pure helpers) remains the bigger swing.
 
 ## Bigger swings
 

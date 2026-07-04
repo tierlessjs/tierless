@@ -91,6 +91,10 @@
     "./transport": {
       "types": "./types/transport.d.mts",
       "default": "./src/transport.mjs"
+    },
+    "./trace": {
+      "types": "./types/trace.d.mts",
+      "default": "./src/trace.mjs"
     }
   },
   "bin": {

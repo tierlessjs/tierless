@@ -60,10 +60,12 @@ export type HostReply =
 
 export interface Host {
   pump: Pump;
-  /** Start entry(...args) on THIS tier and drive it to completion with the peer. */
-  run(peer: Peer, entry: string, args?: unknown[]): Promise<unknown>;
+  /** Start entry(...args) on THIS tier and drive it to completion with the peer.
+   *  opts.trace forces (true) or suppresses (false) trace recording for this one run;
+   *  absent = the host's sampling rate decides. */
+  run(peer: Peer, entry: string, args?: unknown[], opts?: { trace?: boolean }): Promise<unknown>;
   /** Ask the PEER to start entry(...args) over there; service any bounces back here. */
-  call(peer: Peer, entry: string, args?: unknown[]): Promise<unknown>;
+  call(peer: Peer, entry: string, args?: unknown[], opts?: { trace?: boolean }): Promise<unknown>;
   handleStart(payload: any, bin: Uint8Array | null): Promise<{ obj: HostReply; bin?: Uint8Array }>;
   handleResume(payload: any, bin: Uint8Array | null): Promise<{ obj: HostReply; bin?: Uint8Array }>;
   answer(peer: Peer): Host;

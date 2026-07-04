@@ -1223,8 +1223,21 @@ function compile(src, preamble) {
     // --source-map: a pc->line table per program + a frameSite helper, so a migrated frame reports a
     // portable file:line. Gated, so without the flag the bundle is byte-for-byte what it was before.
     const sm = SOURCE_MAP ? `\nexport const SOURCE_FILE = ${JSON.stringify(srcFile)};\nexport const SITES = ${JSON.stringify(fnSites)};\nexport const frameSite = (f) => { const m = SITES[f.fn], ln = m && m[f.pc]; return SOURCE_FILE + ":" + (ln || "?"); };\nexport const stackSites = (stack) => stack.map(frameSite);\n` : "";
-    const code = head + "\n" + kept + helpers + (pure.length ? pure.join("\n") + "\n" : "") + "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};\n" + DRIVER + sm;
+    const body = head + "\n" + kept + helpers + (pure.length ? pure.join("\n") + "\n" : "") + "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};\n" + DRIVER + sm;
+    // BUNDLE_HASH: identity of this exact compiled machine, for trace/profile validity (§6 of the
+    // trajectory design: a site key is (fn, pc) and pcs silently change meaning across edits, so a
+    // profile is only valid against the bundle whose traces built it). Hashed over the emitted code,
+    // which is identical on both tiers.
+    const code = body + `export const BUNDLE_HASH = ${JSON.stringify(fnv1a(body))};\n`;
     return { code, meta };
+}
+function fnv1a(s) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 0x01000193);
+    }
+    return (h >>> 0).toString(16).padStart(8, "0");
 }
 // ---- the module API (require("./transform.cjs")) — what the Vite plugin and CLI use ----
 function configure(opts = {}) {
