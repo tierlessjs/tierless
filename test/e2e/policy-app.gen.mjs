@@ -15,7 +15,7 @@ export const PROGRAMS = {
       case 0:
         F.pc = 5; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: { work: F.work.length, data: F.data.length } };
       case 3:

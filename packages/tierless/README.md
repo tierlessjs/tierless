@@ -28,5 +28,5 @@ export function rebalance(holdings) {
 }
 ```
 
-Full docs, the evidence (33 executable proofs), examples, and the honest
+Full docs, the evidence (34 executable proofs), examples, and the honest
 production/when-not-to-use notes: **https://github.com/tierlessjs/tierless**

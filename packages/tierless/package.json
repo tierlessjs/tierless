@@ -23,6 +23,9 @@
   },
   "license": "Apache-2.0",
   "author": "Bright Fulton",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.bin.json"
+  },
   "files": [
     "src",
     "bin",
@@ -30,63 +33,63 @@
   ],
   "exports": {
     ".": {
-      "types": "./types/index.d.ts",
+      "types": "./types/host.d.mts",
       "default": "./src/host.mjs"
     },
     "./api": {
-      "types": "./types/api.d.ts",
+      "types": "./types/api/index.d.mts",
       "default": "./src/api/index.mjs"
     },
     "./server": {
-      "types": "./types/server.d.ts",
+      "types": "./types/server.d.mts",
       "default": "./src/server.mjs"
     },
     "./browser": {
-      "types": "./types/browser.d.ts",
+      "types": "./types/browser.d.mts",
       "default": "./src/browser.mjs"
     },
     "./react": {
-      "types": "./types/react.d.ts",
+      "types": "./types/react.d.mts",
       "default": "./src/react.mjs"
     },
     "./vite": {
-      "types": "./types/vite.d.ts",
+      "types": "./types/vite.d.mts",
       "default": "./src/vite.mjs"
     },
     "./compiler": {
-      "types": "./types/compiler.d.ts",
+      "types": "./types/compiler.d.cts",
       "default": "./src/transform.cjs"
     },
     "./runtime": {
-      "types": "./types/runtime.d.ts",
+      "types": "./types/runtime.d.mts",
       "default": "./src/runtime.mjs"
     },
     "./wire": {
-      "types": "./types/wire.d.ts",
+      "types": "./types/wire-binary.d.mts",
       "default": "./src/wire-binary.mjs"
     },
     "./delta": {
-      "types": "./types/delta.d.ts",
+      "types": "./types/wire-delta.d.mts",
       "default": "./src/wire-delta.mjs"
     },
     "./graph": {
-      "types": "./types/graph.d.ts",
+      "types": "./types/graph.d.mts",
       "default": "./src/graph.mjs"
     },
     "./heap": {
-      "types": "./types/heap.d.ts",
+      "types": "./types/heap.d.mts",
       "default": "./src/heap.mjs"
     },
     "./fetch": {
-      "types": "./types/fetch.d.ts",
+      "types": "./types/fetch.d.mts",
       "default": "./src/fetch.mjs"
     },
     "./content": {
-      "types": "./types/content.d.ts",
+      "types": "./types/content.d.mts",
       "default": "./src/content.mjs"
     },
     "./transport": {
-      "types": "./types/transport.d.ts",
+      "types": "./types/transport.d.mts",
       "default": "./src/transport.mjs"
     }
   },
@@ -111,5 +114,10 @@
     "@babel/types": "^8.0.0",
     "ws": "^8.21.0"
   },
-  "types": "./types/index.d.ts"
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "@types/node": "^26.1.0",
+    "@types/react": "^19.2.17"
+  },
+  "types": "./types/host.d.mts"
 }

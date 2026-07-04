@@ -38,8 +38,15 @@ export default [
       "test/e2e/api-pump-app.gen.mjs",
       "bench/overhead.gen.mjs",
       "bench/conduit.gen.mjs",
-      // The compiler itself: a CommonJS build tool that needs the Babel toolchain.
+      // Compiled from the hand-authored .mts/.cts source next to each file — not hand-edited.
+      // transform.cjs (from transform.cts) is the compiler itself: a CommonJS build tool that
+      // needs the Babel toolchain, forced to .cjs emit by its own file extension.
       "packages/tierless/src/transform.cjs",
+      "packages/tierless/src/**/*.mjs",
+      "packages/tierless/bin/tierless.mjs",
+      "test/e2e/app/h.mjs",
+      "test/e2e/app/components.mjs",
+      "test/e2e/app/render.mjs",
     ],
   },
   js.configs.recommended,
@@ -65,8 +72,11 @@ export default [
     },
   },
   {
-    // The browser tier runs in a real page (DOM, WebSocket, …).
-    files: ["test/e2e/public/**/*.mjs", "packages/tierless/src/browser.mjs", "packages/tierless/src/react.mjs", "examples/**/*.mjs", "examples/**/*.jsx", "packages/create-tierless/template/client.mjs"],
+    // The browser tier runs in a real page (DOM, WebSocket, …). (packages/tierless/src/browser.mjs
+    // and react.mjs are compiled output now ignored above — their .mts source isn't ESLint-linted.)
+    // The example's browser code is .jsx; its .mjs (server.prod/vite.config/api.server) is Node and
+    // stays on the base config's node globals — don't sweep it into the browser block.
+    files: ["test/e2e/public/**/*.mjs", "examples/**/*.jsx", "packages/create-tierless/template/client.mjs"],
     languageOptions: { globals: { ...globals.browser } },
   },
   {

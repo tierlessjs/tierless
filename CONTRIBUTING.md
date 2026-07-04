@@ -19,17 +19,23 @@ two-tier walkthrough, see [`test/e2e/README.md`](./test/e2e/README.md).
 
 ## The checks that must pass
 
-CI runs two gates, and both should be green locally before you open a PR:
+CI runs four gates, and all four should be green locally before you open a PR:
 
 ```bash
-npm run lint        # ESLint (correctness-focused)
-npm test            # the full regression suite (every demo + probe)
+npm run build -w tierless   # compile packages/tierless/src/*.mts to .mjs + .d.mts, then:
+git diff --exit-code -- packages/tierless/src packages/tierless/types   # ...and commit the result
+npm run typecheck           # tsc over the test/ + bench/ sources (type-checked, not emitted)
+npm run lint                # ESLint (correctness-focused)
+npm test                    # the full regression suite (every demo + probe)
 ```
 
-`npm test` is not just "exit 0" — `test/run.mjs` asserts the headline claim of each
+If you edit anything under `packages/tierless/src/*.mts`, rebuild and commit the
+generated `.mjs`/`.d.mts` — CI fails if they're out of sync with the source.
+
+`npm test` is not just "exit 0" — `test/run.mts` asserts the headline claim of each
 demo (continuation sizes, migrate-vs-fetch decisions, cross-tier correctness). If you
 change runtime or compiler behavior, the relevant proof should still pass; if you add
-behavior, add a proof and wire it into `test/run.mjs`.
+behavior, add a proof and wire it into `test/run.mts`.
 
 ## Working with the compiler
 
@@ -47,6 +53,11 @@ npx tierless build test/e2e/heap-write.src.js test/e2e/heap-write.gen.mjs --bare
 If you change a `*.src.js` input or the compiler, regenerate and commit the matching
 `*.gen.mjs`.
 
+A mix module can also be authored as `*.src.ts` (or `.mts`): the compiler detects the
+extension and strips TypeScript syntax before parsing (erasable TS only — no enums, no
+namespaces, no parameter properties, same as `node --experimental-strip-types`), so it
+compiles through the same pipeline as `.src.js`.
+
 ## Code style
 
 - **Match the surrounding code.** The pump and the codec are written in a deliberately
@@ -56,19 +67,25 @@ If you change a `*.src.js` input or the compiler, regenerate and commit the matc
   `.editorconfig`).
 - `*.src.js` (compiler inputs) and `*.gen.mjs` (compiler outputs) are eslint-ignored
   by design — don't hand-edit a `.gen.mjs`.
+- Everything under `packages/tierless/src/` is TypeScript (`*.mts`, and
+  `transform.cts` for the compiler — its `.cts` extension forces CommonJS emit
+  regardless of the shared `tsconfig.json`'s `module` setting, since it must stay
+  `require()`-able). Edit the `.mts`/`.cts` file; `tsc` compiles it to the shipped
+  `.mjs`/`.cjs` + `.d.mts`/`.d.cts` (also eslint-ignored — don't hand-edit those
+  either). The dense, one-line style applies to the source the same as everywhere else.
 
 ## Where things live
 
 | You want to change... | Edit... |
 |---|---|
-| the compiler (plain JS → state machine) | `packages/tierless/src/transform.cjs` |
-| the pump / wire envelope | `packages/tierless/src/runtime.mjs` |
-| the graph/wire codec | `packages/tierless/src/graph.mjs` |
-| the §5 heap, write-back, §6 policy | `packages/tierless/src/heap.mjs`, `packages/tierless/src/fetch.mjs` |
-| the WebSocket transport | `packages/tierless/src/transport.mjs` |
+| the compiler (plain JS → state machine) | `packages/tierless/src/transform.cts` |
+| the pump / wire envelope | `packages/tierless/src/runtime.mts` |
+| the graph/wire codec | `packages/tierless/src/graph.mts` |
+| the §5 heap, write-back, §6 policy | `packages/tierless/src/heap.mts`, `packages/tierless/src/fetch.mts` |
+| the WebSocket transport | `packages/tierless/src/transport.mts` |
 | the demo app | `test/e2e/app/` |
 | the browser tier | `test/e2e/public/` |
-| a proof / regression case | `test/e2e/*.mjs` + `test/run.mjs` |
+| a proof / regression case | `test/e2e/*.mts` or `test/probes/*.mts` + `test/run.mts` |
 
 ## Commits & pull requests
 

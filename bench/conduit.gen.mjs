@@ -19,7 +19,7 @@ export const PROGRAMS = {
       case 0:
         F.pc = 8; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.__t0 };
       case 3:
@@ -45,7 +45,7 @@ export const PROGRAMS = {
       case 0:
         F.pc = 16; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.__t0 };
       case 3:
@@ -93,7 +93,7 @@ export const PROGRAMS = {
       case 0:
         F.pc = 13; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.__t0 };
       case 3:
@@ -135,7 +135,7 @@ F.total = F.total + F.art.favoritesCount;
       case 0:
         F.pc = 8; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: F.__t0 };
       case 3:

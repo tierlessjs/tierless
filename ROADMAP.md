@@ -2,16 +2,29 @@
 
 What's genuinely open. Everything that has landed — with its measurements and
 proofs — moved to [`CHANGELOG.md`](./CHANGELOG.md); the mechanism itself is
-proven (33 executable proofs, `npm test`).
+proven (34 executable proofs, `npm test`).
 
-## Toward a first npm release
+## Packaging & release
 
-- **Publish `tierless` + `create-tierless`** at 0.1.0 (the packages are shaped
-  and `npm pack`-verified; the README quick start assumes the registry).
-- **TypeScript sources for mix modules.** The public API is fully typed
-  (hand-written `.d.ts`, tsc-verified in `npm test`), but `"use tierless"` files are
-  plain JS: the transform needs @babel/parser's TS plugin + type stripping.
-  Richer generated types than `(...args: any[]) => any` from `tierless types`.
+`tierless@0.1.0` and `create-tierless@0.1.0` are published — the names are
+secured and `npm i tierless` / `npm create tierless@latest` work. Still open:
+
+- **Verified-provenance badge.** Publish from CI (GitHub Actions + npm OIDC via
+  `npm publish --provenance`) so npm shows the green ✓ tying each release to its
+  exact source commit and build. Needs a public repo and a CI publish workflow;
+  the first name-securing release is published by hand and predates it.
+- **TypeScript everywhere.** The framework's own source
+  (`packages/tierless/src/*.mts`/`*.cts`, `bin/`, `create-tierless`, `test/`, `bench/`) is
+  TypeScript, compiled or type-checked by `tsc` on every build — checked against
+  the real implementation, not hand-maintained separately. `"use tierless"` mix
+  modules can be authored in TypeScript too (`app.src.ts`): the compiler
+  detects the extension and strips erasable TS syntax (`node:module`'s
+  `stripTypeScriptTypes`, the same ceiling as `node --experimental-strip-types` —
+  no enums, no namespaces, no parameter properties) before parsing, so the rest
+  of the compiler stays untouched. Still open: `tierless types` still emits
+  `(...args: any[]) => any` for every endpoint — richer generated types would
+  need parsing the service module's own signatures, not just its registered
+  endpoint names.
 - **Production build story for the Vite plugin.** Dev is first-class (the
   plugin hosts the endpoint on Vite's own server); prod works today by mounting
   `attachTierless` with a CLI-built machine (see `docs/production.md` and
@@ -28,6 +41,22 @@ proven (33 executable proofs, `npm test`).
 - **Event-dispatch model.** The live page parks the whole continuation on one
   human click; a page with several independent event sources needs the next
   event routed to the right resumable point. Application-level today.
+
+## Code quality
+
+- **Unify the low-level wire I/O.** `wire-binary.mts` and `wire-delta.mts` each
+  hand-roll the same growable-buffer writer, bounds-checked LEB128 reader, and
+  magic-header + string-table read/write — two independent copies of fuzz-tested,
+  security-relevant code (§7's wire hardening); `heap.mts` (a JSON wire, no
+  byte-level codec of its own) shares only the third piece, the frame/request
+  root-flatten-and-rebuild. The two byte-level copies have drifted slightly —
+  `wire-binary`'s bounds check has an extra `k < 0 ||` case `wire-delta` lacks —
+  though it's currently harmless (every `need(k)` caller passes an unsigned count,
+  so `k` is never negative and the guard is dead where present). Unifying means
+  keeping the stricter guard, not a pure copy-paste. Worth doing as its own careful
+  pass — extract to a shared module, then run the fuzz probes (`wire-fuzz.mts`,
+  `wire-delta-fuzz.mts`, `wire-content.mts`) hard — not folded into a larger batch
+  of unrelated changes.
 
 ## From the literature (Stip.js, Fission — see design.md §9)
 

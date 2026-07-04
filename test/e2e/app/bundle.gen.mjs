@@ -8,7 +8,7 @@ export const PROGRAMS = {
       case 0:
         F.pc = 6; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: render(h(Dashboard, { tasks: F.tasks, stats: F.stats, filter: F.args[0] })) };
       case 3:
@@ -29,7 +29,7 @@ export const PROGRAMS = {
       case 0:
         F.pc = 20; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: "session ended" };
       case 3:

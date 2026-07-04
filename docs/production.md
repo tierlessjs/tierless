@@ -8,9 +8,10 @@ deployment, so nothing here surprises you in an afternoon of testing.
 - **Prod serving shape (actions mode).** The Vite plugin is dev-first, but production is
   the same contract mounted yourself: build the client with Vite as usual (the plugin
   transforms `"use tierless"` modules at build time), compile the server copy of the actions
-  with `npx tierless build src/actions.mjs actions.server.gen.mjs --bare`, and mount
-  `attachTierless(yourHttpServer, { bundle, session })` — see
-  [`examples/react-vite/server.prod.mjs`](../examples/react-vite/server.prod.mjs).
+  with `npx tierless build src/actions.mjs actions.server.gen.mjs --bare`, and serve it with
+  `serveApp({ bundle, session, staticRoot, page })` (or `attachTierless(yourHttpServer, { bundle, session })`
+  to attach to an existing server) — see
+  [`examples/react-vite/server.prod.mjs`](../examples/react-vite/server.prod.mjs), which uses `serveApp`.
   The browser and server machines are identical because the same compiler emitted both.
 - **The trust boundary.** Run the api service as a sidecar (`startSidecar`) or any
   process implementing the monitor contract; budgets (`maxArgsBytes`, per-principal

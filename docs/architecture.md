@@ -20,16 +20,18 @@ moves.
 packages/tierless/  the npm package — what `npm i tierless` delivers
   src/
     transform.cjs   the compiler: plain JS -> serializable state machine (Babel; importable + CLI)
-    runtime.mjs     makePump: one tier-agnostic continuation driver, generic over any bundle
-    host.mjs        the session host both tiers share; server.mjs/browser.mjs assemble it
+    runtime.mts     makePump: one tier-agnostic continuation driver, generic over any bundle
+    host.mts        the session host both tiers share; server.mts/browser.mts assemble it
                     (attachTierless/serveApp on node, connect/bindActions in the page)
-    graph.mjs       identity/cycle-safe graph codec for the wire
-    wire-binary.mjs the compact binary wire; wire-delta.mjs the delta wire; content.mjs
-    heap.mjs        §5 distributed handle heap; fetch.mjs Heap/Channel/makeHost
-    transport.mjs   WebSocket framing + RPC peer (browser-safe)
+    graph.mts       identity/cycle-safe graph codec for the wire
+    wire-binary.mts the compact binary wire; wire-delta.mts the delta wire; content.mts
+    heap.mts        §5 distributed handle heap; fetch.mts Heap/Channel/makeHost
+    transport.mts   WebSocket framing + RPC peer (browser-safe)
     api/            the trust boundary — the reference monitor + sidecar transport
-    vite.mjs        the Vite plugin ("use tierless" modules -> monitor-backed actions)
-    react.mjs       useAction
+    vite.mts        the Vite plugin ("use tierless" modules -> monitor-backed actions)
+    react.mts       useAction
+                    (everything above is TypeScript; tsc compiles each .mts/.cts to the
+                    .mjs/.cjs + .d.mts/.d.cts that ship — see CONTRIBUTING.md)
   bin/              the tierless CLI
 packages/create-tierless/  the scaffolder behind `npm create tierless`
 test/               the regression runner + all proofs, importing the real package
@@ -42,7 +44,9 @@ docs/               this document, the design spec
 
 ## How a function becomes migratable
 
-`transform.cjs` is a Babel transform that runs in two passes.
+`transform.cjs` is a Babel transform that runs in two passes. A `.ts`/`.mts` input is
+stripped to plain JS text first (`node:module`'s `stripTypeScriptTypes`, erasable syntax
+only) — both passes below only ever see plain JS.
 
 1. **Allow-list rewrite.** A call to a tier-pinned namespace becomes a suspension:
    `api.getRows(x)` → `yield R("server", "api.getRows", x)`, `commit(v)` →
@@ -62,7 +66,7 @@ Because the continuation is just `F` (a plain object: `fn`, `pc`, and named loca
 plus the small call stack of such frames, it is plain JSON — there is no native
 stack frame and no closure to capture.
 
-## The pump (`runtime.mjs`)
+## The pump (`runtime.mts`)
 
 One tier-agnostic driver runs the continuation on whichever tier holds it:
 
@@ -80,7 +84,7 @@ therefore flows back and forth across the socket, finishing wherever the last
 resource lands. Exceptions propagate across frames via a serializable handler stack,
 so a resource that throws on one tier is caught by a `try` on the other.
 
-## The wire (`graph.mjs` + `wire-binary.mjs`)
+## The wire (`graph.mts` + `wire-binary.mts`)
 
 What crosses the socket is an envelope — `{ frames, req, graph }` — where `frames`
 is the call-stack skeleton (`fn`, `pc`, which locals, where they start in the graph),
@@ -99,14 +103,14 @@ each distinct object is one entry and every reference is `{k:"r", id}`. That:
   copied;
 - **content-addresses immutable subgraphs** — a registered immutable subgraph (code,
   class shapes, config) ships inline once and then by content hash, resolving on the
-  peer to the copy it cached (`content.mjs`); the same by-reference idea as globals,
+  peer to the copy it cached (`content.mts`); the same by-reference idea as globals,
   generalized from well-known names to any immutable subgraph;
 - carries the non-JSON cases faithfully (`undefined`, BigInt, symbols, Map/Set,
   non-enumerable + symbol-keyed props) and ships host globals and well-known symbols
   by reference rather than copying them.
 
 That `{ frames, req, graph }` structure is serialized for the socket by the **binary wire
-codec** (`wire-binary.mjs`): 1-byte type tags + LEB128 varints replace the `{k,id}` ref
+codec** (`wire-binary.mts`): 1-byte type tags + LEB128 varints replace the `{k,id}` ref
 objects, a **string table** interns every key and value, a **shape table** lets same-shaped
 records emit their keys once, and homogeneous numeric arrays pack with no per-element tag —
 1.9×–5.4× smaller than the JSON form on record-heavy payloads. This is what crosses the
@@ -115,7 +119,7 @@ debug serialization. Because the wire is deserialized from the *other* tier (§7
 decoder is hardened (bounds-checked, count-guarded, `__proto__`-stripping) and fuzz-tested.
 
 For the **oscillation case** — a session that crosses the boundary many times, re-shipping a
-near-identical continuation each hop — `wire-delta.mjs` ships a capture as a *patch* over what
+near-identical continuation each hop — `wire-delta.mts` ships a capture as a *patch* over what
 the peer already holds: each tier keeps a replicated, stably-identified object store, and only
 the changed objects travel (a deep edit bumps just its own object, not its ancestors, because
 content versions are shallow — children by id). The strategy is `min(delta, full wire)` per
@@ -129,8 +133,8 @@ mark is emitted by the **compiler** (`transform.cjs --track-writes`, the symmetr
 `--auto-writeback`): every in-place mutation compiles with its target wrapped in `__dirty(obj)`,
 so write-tracking works on **plain unannotated source** — no `touch()` in the developer's code.
 Both modes reconstruct identically; the probes cross-check write-tracked against rescan as the
-oracle, including end-to-end on compiled plain source (`test/probes/wire-delta{,-compiled}.mjs`).
-This runs **live over a real socket** (`test/e2e/delta-live.mjs`): a continuation that bounces
+oracle, including end-to-end on compiled plain source (`test/probes/wire-delta{,-compiled}.mts`).
+This runs **live over a real socket** (`test/e2e/delta-live.mts`): a continuation that bounces
 server↔browser each hop ships `min(delta, full)` — the compact full binary frame on the cold hop
 (both tiers then `adoptBaseline` to a shared, DFS-deterministic baseline so ids agree), a
 write-tracked delta on every warm hop, and a fall back to full + re-adopt if a near-total change
@@ -138,9 +142,9 @@ ever makes a delta no smaller. Map and Set are first-class kinds in the delta co
 preserved across Map keys and Set members. The delta also **composes with §5 excision**
 (`encodeDeltaTracked(…, { tier, threshold })`): a big subgraph excises into the owning tier's heap
 and the delta carries a handle leaf in its place, so the big data stays home *and* only the changed
-UI ships — an 80 KB inline capture becomes 115 B (`test/probes/wire-delta-handle.mjs`).
+UI ships — an 80 KB inline capture becomes 115 B (`test/probes/wire-delta-handle.mts`).
 
-## The heap (`heap.mjs` + `fetch.mjs`)
+## The heap (`heap.mts` + `fetch.mts`)
 
 The §5 distributed heap is how the big data stays put.
 
@@ -192,7 +196,7 @@ hop to the monitor"; the pipe hop is ~free next to the network hop, so the whole
 single api round trip — the cost a traditional client→server call already pays — with the trust
 boundary where it belongs.
 
-**The interface (`packages/tierless/src/api/api.mjs`).** A server-only function is `api.fn(name, { authorize, run })`.
+**The interface (`packages/tierless/src/api/api.mts`).** A server-only function is `api.fn(name, { authorize, run })`.
 `authorize` is **mandatory**: exposing an endpoint and stating who may call it are the same act, so
 omitting it is a **load-time error** (thrown at registration, before the process serves a single call)
 — an unauthorized endpoint cannot ship. To mean "anyone" you say so with the `PUBLIC` sentinel; `DENY`
@@ -203,11 +207,11 @@ standard HMAC regime (Cognito/OIDC is the same shape with an RS256-over-JWKS `ve
 own is just an `Api` subclass overriding `verify`. The base `Api` is a safe floor — it trusts no token,
 so without a regime only `PUBLIC` calls pass.
 
-`test/e2e/api-verify.mjs` proves all of this headless (in `npm test`): the load-time mandate, default-deny,
+`test/e2e/api-verify.mts` proves all of this headless (in `npm test`): the load-time mandate, default-deny,
 `PUBLIC`/`DENY`, the JWT regime (sign/verify/tamper/expiry), fail-closed authorizers, and roll-your-own
 — then, **across a real forked process and pipe**, that neither a forged continuation (reaching an
 admin-only call as a non-admin) nor a forged token (a client-flipped `role` claim that breaks the
-signature) can escalate. `test/e2e/api-pump.mjs` then runs a **real compiled continuation across two tiers** with every
+signature) can escalate. `test/e2e/api-pump.mts` then runs a **real compiled continuation across two tiers** with every
 `api.*` serviced by the monitor over the pipe — authorized per principal, the denial caught by the app's
 `try`/`catch` across the tier (same continuation, admin allowed / user denied) — so the *integration* is
 proven, not just the component. The monitor also enforces per-call resource budgets (`maxArgsBytes` and
@@ -218,17 +222,17 @@ on every tier; `api.*` and `dom.*` are edges to resources owned by *other princi
 business, guarded by the monitor; the dom by the user, guarded by their browser). The framework is
 opinionated about the **contract** at that edge — `{ name, args, token }` in, verified principal,
 mandatory `authorize`, default-deny, a denial thrown *into* the continuation so a `try`/`catch`
-catches it across tiers (`makeApiExec` in `sidecar.mjs` is that adapter) — and agnostic about the
+catches it across tiers (`makeApiExec` in `sidecar.mts` is that adapter) — and agnostic about the
 **transport**: the pipe sidecar is the reference implementation; the same contract over HTTPS to a
 separately-deployed monitor is a small adapter. Concretely: the Tasks app's DB and endpoints live in
-`test/e2e/api/tasks-fns.mjs`, a separate trusted service the demos fork as a sidecar — the pump host holds
+`test/e2e/api/tasks-fns.mts`, a separate trusted service the demos fork as a sidecar — the pump host holds
 only a pipe client and a per-session token (reads `PUBLIC`, writes re-authorized per call), and the
-in-process shortcut is no longer expressible on the live path. `test/e2e/api-live.mjs` proves the default
+in-process shortcut is no longer expressible on the live path. `test/e2e/api-live.mts` proves the default
 path in `npm test`: the real compiled App on the runtime's own `pump`, every `api.*` over the pipe,
 anonymous `PUBLIC` reads standing while an unauthenticated or forged write is denied in the monitor's
 process and thrown across the tier, and the args budget rejecting an oversize call. An in-process
 resource host remains available as the labeled **degenerate mode** for single-process mechanics proofs
-(`verify.mjs`) and trusted single-tenant deployments — an explicit opt-out, never the default.
+(`verify.mts`) and trusted single-tenant deployments — an explicit opt-out, never the default.
 
 ## Why the transportable continuation is ours to build
 
@@ -255,7 +259,7 @@ These are deliberate trade-offs in the compiler, not accidental gaps:
   into a handle, so a read *past a hop* must re-check. A liveness pass keeps the first guard in
   each straight-line run and prunes the rest, re-guarding after any hop (a tier resource or a
   suspendable call) or control-flow join — so correctness is unchanged and the repeated
-  re-checks are gone (`test/probes/deref-liveness.mjs`).
+  re-checks are gone (`test/probes/deref-liveness.mts`).
 - **Write-back is a delta to the master** (`openSnapshot`/`diffSnapshot`/`applySnapshot`): it ships
   only the objects that changed in the snapshot — member edits and collection mutations alike, since
   the codec diffs the result, not the operation — applied in place under the same CAS, never larger than
@@ -267,5 +271,4 @@ These are deliberate trade-offs in the compiler, not accidental gaps:
 
 Broader open questions — broader language coverage and content-addressed code identity
 (the binary wire, delta capture, and the trust-boundary reference monitor are done) — are
-tracked in [`../ROADMAP.md`](../ROADMAP.md) and line up with the design doc's own open
-questions (`§10`).
+tracked in [`../ROADMAP.md`](../ROADMAP.md).

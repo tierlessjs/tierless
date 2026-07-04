@@ -13,7 +13,7 @@ export const PROGRAMS = {
       case 0:
         F.pc = 21; break;
       case 1:
-        return { op: "return", value: "(end)" };
+        return { op: "return", value: undefined };
       case 2:
         return { op: "return", value: "no detail" };
       case 3:

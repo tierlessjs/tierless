@@ -32,6 +32,7 @@ What to notice:
   plugin forks it as a **sidecar** and the server holds only a pipe and a session token.
   Delete the `login:` line in `vite.config.mjs` and the buy/sell click shows a live denial:
   reads still work (they're `PUBLIC`), the order placement is refused by the monitor.
-- Production shape: build the actions module with the same plugin, then mount
-  `attachTierless(yourHttpServer, { bundle, session })` from `tierless/server` — the dev
-  endpoint the plugin hosts is exactly that call.
+- Production shape: build the actions module with the same plugin, then serve it with
+  `serveApp({ bundle, session, staticRoot, page })` from `tierless/server` (as
+  [`server.prod.mjs`](./server.prod.mjs) does) — `serveApp` wraps `attachTierless`, the same
+  session endpoint the dev plugin hosts.
