@@ -95,6 +95,10 @@
     "./trace": {
       "types": "./types/trace.d.mts",
       "default": "./src/trace.mjs"
+    },
+    "./adapt": {
+      "types": "./types/adapt.d.mts",
+      "default": "./src/adapt.mjs"
     }
   },
   "bin": {

@@ -20,9 +20,9 @@
 //
 // The plugin is a plain object (no vite import), so it is unit-testable headless.
 import { createRequire } from "node:module";
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 import { WS_PATH } from "./ws-path.mjs";
 const require = createRequire(import.meta.url);
 const DIRECTIVE = /^(?:\s|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*["']use tierless["']\s*;?/;
@@ -68,11 +68,30 @@ export default function tierless(opts = {}) {
     path: wsPath, // session endpoint path (defaults to WS_PATH)
     compilerOptions = {}, // passed through to the transform (trackWrites, sourceMap, …)
     serverOutDir = "dist-tierless", // where `vite build` emits the server bundles + manifest
+    workflows, // route pattern -> workflow module (adapting an existing app)
+    apiUrl, // the existing backend restResources proxies to
      } = opts;
     const isTierlessModule = (code) => DIRECTIVE.test(code);
     let sidecar = null;
     const machines = new Map(); // moduleId -> compiled server machine + its relative imports
     let root = process.cwd(); // Vite root, captured in configResolved (for the build emit path)
+    const SHIM_ID = "\0tierless-shim";
+    // The shim virtual module: the compiled adapt-shim body plus this build's route table.
+    // Workflow modules load through dynamic import, so they pass through the transform above
+    // and land in dist-tierless like any mix module; the session socket carries the user's
+    // token (read at connect) as a query param the preview gateway forwards to the backend.
+    const shimSource = () => {
+        const body = readFileSync(fileURLToPath(new URL("./adapt-shim.mjs", import.meta.url)), "utf8");
+        const routes = Object.fromEntries(Object.entries(workflows).map(([p, m]) => [p, m.startsWith("/") ? m : "/" + m.replace(/^\.\//, "")]));
+        const loaders = Object.values(routes).map((m) => `${JSON.stringify(m)}: () => import(${JSON.stringify(m)})`).join(", ");
+        return [
+            `import { configureTierless } from ${JSON.stringify(runtime)};`,
+            `configureTierless({ url: (location.protocol === "https:" ? "wss" : "ws") + "://" + location.host + ${JSON.stringify(wsPath || WS_PATH)} + "?token=" + encodeURIComponent(localStorage.getItem("token") || "") });`,
+            `const __TIERLESS_ROUTES__ = ${JSON.stringify(routes)};`,
+            `const __TIERLESS_MODULES__ = { ${loaders} };`,
+            body,
+        ].join("\n");
+    };
     return {
         name: "tierless",
         enforce: "pre",
@@ -88,6 +107,7 @@ export default function tierless(opts = {}) {
                 `import { bindActions as __bindActions } from ${JSON.stringify(runtime)};`,
                 `export const __bundle = { PROGRAMS, __unwind };`,
                 `const __actions = __bindActions(__bundle, { module: ${JSON.stringify(id)} });`,
+                `export const __tierlessActions = __actions;`, // the module's ACTION surface, for the route shim (driver exports like run/__dispatch are not actions)
                 ...meta.exported.map((n) => `export const ${n} = __actions[${JSON.stringify(n)}];`),
             ].join("\n");
             // No debugger sourcemap: the compiler rewrites the module into a state machine (whole-program
@@ -120,6 +140,42 @@ export default function tierless(opts = {}) {
                 modules[id] = name;
             }
             writeFileSync(path.join(outDir, "tierless.manifest.json"), JSON.stringify({ path: wsPath || WS_PATH, modules }, null, 2) + "\n");
+        },
+        // ---- route workflows (adapting an existing app): the injected shim -----------------
+        resolveId(id) { return workflows && (id === "tierless-shim" || id === SHIM_ID) ? SHIM_ID : undefined; },
+        load(id) { return workflows && id === SHIM_ID ? shimSource() : undefined; },
+        // an INLINE module import, injected with order "pre" so vite's own html pipeline (which
+        // extracts and bundles inline module scripts) still runs after us — a bare src attribute
+        // or a post-ordered tag ships as literal text and never enters the module graph
+        transformIndexHtml: {
+            order: "pre",
+            handler(html) {
+                if (!workflows)
+                    return html;
+                return { html, tags: [{ tag: "script", attrs: { type: "module" }, children: 'import "tierless-shim";', injectTo: "head" }] };
+            },
+        },
+        // `vite preview` serves the built app; with workflows configured it also HOSTS the
+        // session endpoint, resolving machines from this build's dist-tierless manifest and
+        // servicing api.* against the existing backend (restResources), forwarding the token
+        // the shim put on the socket URL. The target app's diff stays the one config line.
+        async configurePreviewServer(server) {
+            if (!workflows)
+                return;
+            const s = server;
+            const { attachTierless, bundleResolverFromManifest } = await import("./server.mjs");
+            const { restResources } = await import("./adapt.mjs");
+            if (!apiUrl)
+                throw new Error("tierless: workflows need { apiUrl } (the backend restResources proxies to)");
+            const bundle = await bundleResolverFromManifest(path.join(root, serverOutDir, "tierless.manifest.json"));
+            attachTierless(s.httpServer, {
+                path: wsPath,
+                bundle,
+                session: async (req) => {
+                    const token = new URL(req.url || "/", "http://x").searchParams.get("token") || undefined;
+                    return { exec: restResources(apiUrl, { token }) };
+                },
+            });
         },
         // Dev server: fork the api sidecar and host the session endpoint on Vite's own http
         // server. Each module's continuations resolve their server copy via ssrLoadModule,

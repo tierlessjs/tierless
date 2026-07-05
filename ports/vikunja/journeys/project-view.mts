@@ -21,7 +21,9 @@ try {
     await page.locator(".menu-list-item, .menu .list-menu a, nav a", { hasText: "First Project" }).first().click();
     await page.locator(".tasks .task").first().waitFor({ timeout: 15_000 });
   }, {
-    ignore: (url) => !url.startsWith(API),                       // journey = API traffic; the SPA bundle is identical either way
+    // journey = the data path: API-origin HTTP plus the tierless session socket (AFTER
+    // builds route data over it). The SPA bundle is identical either way and excluded.
+    ignore: (url) => !url.startsWith(API) && !url.includes("/__tierless"),
     prepare: async (page) => {
       await page.addInitScript(([t, api]: string[]) => {
         window.localStorage.setItem("token", t);
@@ -31,10 +33,12 @@ try {
     },
   });
 
-  printReport("vikunja · open a project (20 tasks) · BEFORE (stock v1.0.0)", report);
+  const variant = report.ws.framesOut > 0 ? "AFTER (tierless route workflow)" : "BEFORE (stock v1.0.0)";
+  printReport(`vikunja · open a project (20 tasks) · ${variant}`, report);
   console.log(`  modeled network wait @ 80 ms RTT / 10 Mbps: ${modelWallMs(report).toFixed(0)} ms\n`);
   console.log("  the interaction's API waterfall:");
   for (const r of report.requests) console.log(`    ${r.method.padEnd(5)} ${r.url.replace(API, "")}  ${fmt(r.bytesOut)} out / ${fmt(r.bytesIn)} in`);
+  for (const s of report.sockets) console.log(`    WS    ${s.url.replace(/\?token=.*/, "?token=…")}  ${s.framesOut}->/${s.framesIn}<-  ${fmt(s.bytesOut)} out / ${fmt(s.bytesIn)} in`);
 } finally {
   app.close();
 }

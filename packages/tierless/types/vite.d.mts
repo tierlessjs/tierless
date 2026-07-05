@@ -21,6 +21,14 @@ export interface TierlessPluginOptions {
     /** Where `vite build` writes the server bundles + manifest (see writeBundle). Relative to the
      *  Vite root; kept OUT of the client outDir so server code is never served. Default `dist-tierless`. */
     serverOutDir?: string;
+    /** ROUTE WORKFLOWS — adapting an existing app (docs/corpus.md rung 3). Route pattern ->
+     *  "use tierless" module path (root-relative). On SPA navigation to a matching route the
+     *  injected shim runs the workflow over the session socket and answers the app's own
+     *  matching GET requests from the result — the app's components run untouched. */
+    workflows?: Record<string, string>;
+    /** The existing backend the workflows call: api.get/api.post paths are served against
+     *  this base URL by restResources (tierless/adapt), forwarding the user's bearer token. */
+    apiUrl?: string;
 }
 export interface TierlessPlugin {
     name: string;
@@ -34,6 +42,13 @@ export interface TierlessPlugin {
     }): void;
     buildStart(): void;
     writeBundle(): void;
+    resolveId(id: string): string | undefined;
+    load(id: string): string | undefined;
+    transformIndexHtml: {
+        order: "pre";
+        handler(html: string): unknown;
+    };
     configureServer(server: unknown): Promise<void>;
+    configurePreviewServer(server: unknown): Promise<void>;
 }
 export default function tierless(opts?: TierlessPluginOptions): TierlessPlugin;

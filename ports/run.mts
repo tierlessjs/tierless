@@ -82,10 +82,11 @@ if (!existsSync(src)) {
   execFileSync("mv", [top, src]);
   rmSync(path.join(work, "unzip"), { recursive: true, force: true }); rmSync(path.join(work, "src.zip"), { force: true });
   writeFileSync(path.join(work, "TRANSPORT"), fetched.kind + "\n");
+  writeFileSync(path.join(work, "TREEHASH"), treeHash(src) + "\n");   // hashed at extract time: reruns verify THIS (the tree is patched below)
 }
 
 const transport = readFileSync(path.join(work, "TRANSPORT"), "utf8").trim();
-const hash = treeHash(src);
+const hash = readFileSync(path.join(work, "TREEHASH"), "utf8").trim();
 const pinned = recipe.treeHash[transport];
 if (pinned === undefined || pinned === null) {
   console.log(`treeHash for transport "${transport}" (pin this in ${name}/recipe.json):\n  "${transport}": "${hash}"`);
@@ -96,8 +97,16 @@ if (pinned === undefined || pinned === null) {
   console.log(`tree verified (${transport}): ${hash.slice(0, 16)}… matches the recipe`);
 }
 
+const appliedFile = path.join(work, "APPLIED");
+const applied = new Set(existsSync(appliedFile) ? readFileSync(appliedFile, "utf8").split("\n").filter(Boolean) : []);
 for (const p of recipe.patches) {
-  execFileSync("git", ["apply", "--whitespace=nowarn", path.join(recipeDir, p)], { cwd: src, stdio: "inherit" });
+  if (applied.has(p)) { console.log(`already applied ${p}`); continue; }
+  // plain patch(1), NOT `git apply`: the work tree lives inside this repo (gitignored), and
+  // git apply silently no-ops (exit 0!) on paths under an ignored directory of the enclosing
+  // repository. patch -p1 is cwd-relative and repo-oblivious, and fails loudly.
+  execFileSync("patch", ["-p1", "--no-backup-if-mismatch", "-i", path.join(recipeDir, p)], { cwd: src, stdio: "inherit" });
+  applied.add(p);
+  writeFileSync(appliedFile, [...applied].join("\n") + "\n");
   console.log(`applied ${p}`);
 }
 if (!recipe.patches.length) console.log("no patches (baseline recipe)");
