@@ -33,6 +33,8 @@ export interface RequestRecord {
   method: string;
   bytesOut: number;                 // estimated: request line + headers + body
   bytesIn: number;                  // measured: encodedDataLength at loadingFinished
+  tStart: number;                   // ms since journey start (negative = pre-journey)
+  tEnd: number;
 }
 export interface WsRecord {
   kind: "ws";
@@ -41,6 +43,7 @@ export interface WsRecord {
   framesIn: number;
   bytesOut: number;                 // payload + per-frame overhead estimate
   bytesIn: number;
+  frames: { dir: "out" | "in"; t: number; bytes: number }[];   // per-frame timeline
 }
 export interface JourneyReport {
   http: { requests: number; bytesOut: number; bytesIn: number };
@@ -84,6 +87,8 @@ export async function measureJourney(
     const reqs = new Map<string, RequestRecord>();
     const sockets = new Map<string, WsRecord>();
     let recording = includeNavigation;
+    let t0 = Date.now();                                           // reset when the journey starts
+    const now = (): number => Date.now() - t0;
 
     cdp.on("Network.requestWillBeSent", (e: any) => {
       if (!recording || ignore(e.request.url)) return;
@@ -92,33 +97,36 @@ export async function measureJourney(
         kind: "http", url: e.request.url, method: e.request.method,
         bytesOut: `${e.request.method} ${new URL(e.request.url).pathname} HTTP/1.1\r\n`.length + headerBytes(e.request.headers) + 2 + body,
         bytesIn: 0,
+        tStart: now(), tEnd: 0,
       });
     });
     cdp.on("Network.loadingFinished", (e: any) => {
       const r = reqs.get(e.requestId);
-      if (r) r.bytesIn = e.encodedDataLength;                      // actual wire bytes, headers included
+      if (r) { r.bytesIn = e.encodedDataLength; r.tEnd = now(); }   // actual wire bytes, headers included
     });
     cdp.on("Network.webSocketCreated", (e: any) => {
       if (ignore(e.url)) return;
-      sockets.set(e.requestId, { kind: "ws", url: e.url, framesOut: 0, framesIn: 0, bytesOut: 0, bytesIn: 0 });
+      sockets.set(e.requestId, { kind: "ws", url: e.url, framesOut: 0, framesIn: 0, bytesOut: 0, bytesIn: 0, frames: [] });
     });
     cdp.on("Network.webSocketFrameSent", (e: any) => {
       const s = sockets.get(e.requestId);
       if (!s || !recording) return;
-      s.framesOut++; s.bytesOut += wsFrameBytes(e.response.payloadData.length, true);
+      const bytes = wsFrameBytes(e.response.payloadData.length, true);
+      s.framesOut++; s.bytesOut += bytes; s.frames.push({ dir: "out", t: now(), bytes });
     });
     cdp.on("Network.webSocketFrameReceived", (e: any) => {
       const s = sockets.get(e.requestId);
       if (!s || !recording) return;
       // binary frames arrive base64-encoded in CDP; text frames as-is
       const len = e.response.opcode === 2 ? Buffer.from(e.response.payloadData, "base64").length : Buffer.byteLength(e.response.payloadData);
-      s.framesIn++; s.bytesIn += wsFrameBytes(len, false);
+      const bytes = wsFrameBytes(len, false);
+      s.framesIn++; s.bytesIn += bytes; s.frames.push({ dir: "in", t: now(), bytes });
     });
 
     if (prepare) await prepare(page);
     await page.goto(url, { waitUntil: "networkidle" });
     recording = true;
-    const t0 = Date.now();
+    t0 = Date.now();
     await journey(page);
     const wallMs = Date.now() - t0;
 

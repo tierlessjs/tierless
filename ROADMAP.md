@@ -42,11 +42,18 @@ proven (38 executable proofs, `npm test`).
 
 - **The corpus program** (`docs/corpus.md`): a statistical claim over real apps —
   "median X× less network wait, Y% less IO across N apps' own e2e journeys."
-  Rung 1 (the measurement harness, `bench/harness/`) is built and verified
-  against socket ground truth. Open: the REST-proxy adapter + gateway recipe
-  (existing backends as `api.*`, no rewrite), the agent-assisted porting recipe
-  hardened on 2–3 real open-source apps, then the 10–20-app study reporting
-  medians and full distributions, losers included.
+  Rungs 1–3 are built (harness verified against socket ground truth; REST-proxy
+  adapter + route-workflow shim; Vikunja ported at a 2-line diff, 196/196 pass
+  parity, −60% trips / −28% median IO on their own 199-test suite). Open: the
+  10–20-app study reporting medians and full distributions, losers included.
+
+- **Cash the measured 486 ms data-path lead** (ports/vikunja README, timing
+  section). Under real 80 ms RTT the port delivers all route data at t=260 vs
+  stock's t=746, yet click-to-render is at parity (859 vs 870 ms) because the
+  code path forfeits the lead. In order: preload workflow modules at boot (the
+  lazy chunk costs the first RTT before the ws send); let the router's guard
+  fetch race the network instead of waiting on the workflow hold (first answer
+  wins); then profile the remaining ~380 ms render tail on the ported arm.
 
 ## Bigger swings
 

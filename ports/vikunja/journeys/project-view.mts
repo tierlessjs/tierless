@@ -9,32 +9,43 @@
 // task list renders is the journey. Only API-origin traffic counts (the frontend's
 // static assets are the SPA bundle, identical before and after any port).
 //
-//   node ports/vikunja/journeys/project-view.mts
+//   node ports/vikunja/journeys/project-view.mts [--baseline]
+//
+// TIERLESS_RTT_MS=80 routes the browser through the delay relays (latency-proxy.mts):
+// wallMs is then the interaction's REAL elapsed time under that RTT — the measured
+// counterpart to the modeled number, websocket shaped and all.
 import { measureJourney, printReport, modelWallMs, fmt } from "../../../bench/harness/measure.mts";
+import { delayProxy } from "../../latency-proxy.mts";
 import { bootVikunja, seedProjectWithTasks, API, FRONT } from "../boot.mts";
+
+const RTT = Number(process.env.TIERLESS_RTT_MS || 0);
+const FRONT_URL = RTT ? "http://127.0.0.1:14173" : FRONT;
+const API_URL = RTT ? "http://127.0.0.1:13456" : API;
+if (RTT) { delayProxy(14173, 4173, RTT / 2).unref(); delayProxy(13456, 3456, RTT / 2).unref(); }
 
 const app = await bootVikunja();
 try {
   const token = await seedProjectWithTasks(20);
 
-  const report = await measureJourney(FRONT, async (page) => {
+  const report = await measureJourney(FRONT_URL, async (page) => {
     await page.locator(".menu-list-item, .menu .list-menu a, nav a", { hasText: "First Project" }).first().click();
     await page.locator(".tasks .task").first().waitFor({ timeout: 15_000 });
   }, {
     // journey = the data path: API-origin HTTP plus the tierless session socket (AFTER
     // builds route data over it). The SPA bundle is identical either way and excluded.
-    ignore: (url) => !url.startsWith(API) && !url.includes("/__tierless"),
+    ignore: (url) => !url.startsWith(API_URL) && !url.includes("/__tierless"),
     prepare: async (page) => {
       await page.addInitScript(([t, api]: string[]) => {
         window.localStorage.setItem("token", t);
         window.localStorage.setItem("API_URL", api);
         (window as any).API_URL = api;
-      }, [token, API + "/api/v1"]);
+      }, [token, API_URL + "/api/v1"]);
     },
   });
 
   const variant = report.ws.framesOut > 0 ? "AFTER (tierless route workflow)" : "BEFORE (stock v1.0.0)";
   printReport(`vikunja · open a project (20 tasks) · ${variant}`, report);
+  if (RTT) console.log(`  REAL interaction wall under ${RTT} ms injected RTT: ${report.wallMs.toFixed(0)} ms`);
   console.log(`  modeled network wait @ 80 ms RTT / 10 Mbps: ${modelWallMs(report).toFixed(0)} ms\n`);
   console.log("  the interaction's API waterfall:");
   for (const r of report.requests) console.log(`    ${r.method.padEnd(5)} ${r.url.replace(API, "")}  ${fmt(r.bytesOut)} out / ${fmt(r.bytesIn)} in`);

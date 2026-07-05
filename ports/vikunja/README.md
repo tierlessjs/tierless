@@ -68,10 +68,10 @@ Journey: warm SPA, logged in, click a project with 20 tasks (the interaction beh
 their tests/e2e/project/project-view-list.spec.ts). Data-path traffic only (API origin
 + session socket); the SPA bundle is identical either way.
 
-    BEFORE (stock):    10 requests · 28.3 KB · modeled 823 ms @ 80 ms RTT, 10 Mbps
-    AFTER  (tierless):  1 trip     · 16.6 KB · modeled  94 ms
+    BEFORE (stock):    10 requests · 28.3 KB
+    AFTER  (tierless):  1 trip     · 16.6 KB
 
-    => 10x fewer round trips · 41% less IO · 8.7x less network wait
+    => 10x fewer round trips · 41% less IO
 
 The stock waterfall was a real-world mosaic: /user and the avatar each fetched twice,
 two CORS preflights (cross-origin API), then the dependent chain projects/1 ->
@@ -79,6 +79,25 @@ views/1/tasks. After: one websocket crossing (268 B out, 16.3 KB back) carries t
 whole workflow; preflights disappear (same-origin socket); the avatar refetches are
 served by the interaction memo (fetched once at page load, before the measured window —
 in the stock build every rerender refetched it for real).
+
+### Timing — measured under real injected RTT, and honest about it
+
+`TIERLESS_RTT_MS=80 node ports/vikunja/journeys/project-view.mts [--baseline]` routes
+the browser through a TCP delay relay (real 80 ms RTT on HTTP, preflights, AND the
+websocket — the case devtools throttling can't shape). Click-to-render, measured:
+
+    stock   870 ms        ported   859 ms        (parity — no wall-time win today)
+
+An earlier revision of this file claimed "8.7x less network wait" from a model that
+priced the stock waterfall serially (10 trips x 80 ms). Reality parallelizes: the
+stock app overlaps its chunk loads and fetch waves. The measured timeline shows the
+port delivering ALL route data at t=260 ms vs stock's last byte at t=746 ms — a real
+486 ms data-path lead — which the render then forfeits: the shim's hold delays the
+router's guard fetch until the workflow lands (~105 ms vs stock), the route's lazy
+component chunks only start after that, and a ~380 ms render tail (under diagnosis)
+finishes the leveling. Trip and byte reductions are measured facts; the latency win
+is currently a ceiling, not a result. The full 199-test suite under the same RTT
+agrees: per-test wall time is unchanged (median +2 ms) while trips drop 60%.
 
 ## Correctness — their own suite as the judge
 
@@ -102,8 +121,9 @@ process groups).
 
 ## Caveats (read before quoting)
 
-- Latency is MODELED from measured trips/bytes (declared RTT/bandwidth — CDP throttling
-  can't shape websockets); bytes and trips are real wire measurements.
+- Timing above is REAL elapsed time under relay-injected RTT (bandwidth unshaped;
+  connection handshakes undelayed — a keep-alive assumption that favors the stock arm).
+  Bytes and trips are real wire measurements.
 - The memo TTL is 10 s: a user idling longer between load and click pays one real
   avatar refetch (~1 trip). The workflow bundle is used within the navigation window
   only; misses always fall through to the real network unchanged.
