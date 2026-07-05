@@ -1,30 +1,36 @@
 // The no-vendor port runner — rung 3 of the corpus program (docs/corpus.md).
 //
-// A PORT is a committed recipe, never the target's code: a sha-pinned public zip URL
-// (no GitHub API, no auth — plain `codeload.github.com/OWNER/REPO/zip/<sha>`), a hash
-// of the EXTRACTED source tree (GitHub's generated archives aren't guaranteed
-// byte-stable forever, so content is pinned, not the zip), and a series of our patches.
-// Anyone reruns the port from the recipe alone:
+// A PORT is a committed recipe, never the target's code: a sha-pinned commit, one or
+// more PUBLIC zip transports for it (no API, no auth), a hash of the EXTRACTED source
+// tree per transport (content is pinned — archives aren't guaranteed byte-stable, and
+// different transports may legitimately differ in file set, e.g. a Go module zip strips
+// .git while matching the source tree), and a series of our patches. Anyone reruns the
+// port from the recipe alone:
 //
-//   node ports/run.mts <name>            fetch -> verify tree -> apply patches
+//   node ports/run.mts <name>            fetch (first reachable transport) -> verify -> patch
 //   node ports/run.mts <name> --refetch  discard the work dir and start over
 //
+// Transports:
+//   codeload   https://codeload.github.com/OWNER/REPO/zip/<sha>          (canonical)
+//   goproxy    https://proxy.golang.org/<module>/@v/<version>.zip        (Go-module apps;
+//              additionally verifiable against sum.golang.org)
+//
 // The target's source lands in ports/work/<name>/src (gitignored). Booting the app and
-// running its journeys stay per-recipe steps documented in ports/<name>/README.md — v1
-// keeps the runner to the reproducibility core: fetch, verify, patch.
+// running its journeys are per-recipe steps documented in ports/<name>/README.md.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+interface Source { kind: string; zip: string }
 interface Recipe {
   name: string;
-  repo: string;                       // owner/repo, for provenance display
+  repo: string;                       // owner/repo, provenance display
   sha: string;                        // the pinned commit
-  zip: string;                        // public sha-based zip URL (codeload)
-  treeHash: string | null;            // sha256 over the extracted tree; null = print-and-pin mode
-  patches: string[];                  // repo-relative to the recipe dir, git-apply format, applied in order
+  sources: Source[];                  // tried in order; first reachable wins
+  treeHash: Record<string, string | null>;   // per transport kind; null = print-and-pin mode
+  patches: string[];                  // recipe-dir-relative, git-apply format, in order
 }
 
 const ROOT = fileURLToPath(new URL(".", import.meta.url));
@@ -52,35 +58,48 @@ function treeHash(dir: string): string {
 if (flags.includes("--refetch")) rmSync(work, { recursive: true, force: true });
 
 if (!existsSync(src)) {
-  console.log(`fetching ${recipe.repo}@${recipe.sha.slice(0, 12)}\n  ${recipe.zip}`);
   mkdirSync(work, { recursive: true });
-  const zip = path.join(work, "src.zip");
-  // curl over fetch(): it honors HTTPS_PROXY/CA everywhere this runs, sandbox or laptop.
-  execFileSync("curl", ["-sSL", "--fail", "-o", zip, recipe.zip], { stdio: "inherit" });
-  execFileSync("unzip", ["-q", zip, "-d", path.join(work, "unzip")]);
-  const [top, ...rest] = readdirSync(path.join(work, "unzip"));
-  if (!top || rest.length) throw new Error("expected a single top-level directory in the archive");
-  execFileSync("mv", [path.join(work, "unzip", top), src]);
-  rmSync(path.join(work, "unzip"), { recursive: true }); rmSync(zip);
+  let fetched: Source | null = null;
+  for (const s of recipe.sources) {
+    const zip = path.join(work, "src.zip");
+    try {
+      console.log(`fetching ${recipe.repo}@${recipe.sha.slice(0, 12)} via ${s.kind}\n  ${s.zip}`);
+      // curl over fetch(): it honors HTTPS_PROXY/CA everywhere this runs, sandbox or laptop.
+      execFileSync("curl", ["-sSL", "--fail", "-o", zip, s.zip], { stdio: ["ignore", "inherit", "pipe"] });
+      fetched = s;
+      break;
+    } catch { console.log(`  ${s.kind} unreachable here — trying the next transport`); }
+  }
+  if (!fetched) { console.error("no transport reachable"); process.exit(1); }
+  execFileSync("unzip", ["-q", path.join(work, "src.zip"), "-d", path.join(work, "unzip")]);
+  // strip leading directories until the tree root (codeload: one dir; goproxy: module@version under host/owner dirs)
+  let top = path.join(work, "unzip");
+  for (;;) {
+    const entries = readdirSync(top, { withFileTypes: true });
+    if (entries.length === 1 && entries[0].isDirectory()) { top = path.join(top, entries[0].name); continue; }
+    break;
+  }
+  execFileSync("mv", [top, src]);
+  rmSync(path.join(work, "unzip"), { recursive: true, force: true }); rmSync(path.join(work, "src.zip"), { force: true });
+  writeFileSync(path.join(work, "TRANSPORT"), fetched.kind + "\n");
 }
 
+const transport = readFileSync(path.join(work, "TRANSPORT"), "utf8").trim();
 const hash = treeHash(src);
-if (recipe.treeHash === null) {
-  console.log(`treeHash (pin this in ${name}/recipe.json):\n  ${hash}`);
-} else if (hash !== recipe.treeHash) {
-  console.error(`TREE HASH MISMATCH — the fetched source is not the pinned content\n  expected ${recipe.treeHash}\n  got      ${hash}`);
+const pinned = recipe.treeHash[transport];
+if (pinned === undefined || pinned === null) {
+  console.log(`treeHash for transport "${transport}" (pin this in ${name}/recipe.json):\n  "${transport}": "${hash}"`);
+} else if (hash !== pinned) {
+  console.error(`TREE HASH MISMATCH (${transport}) — the fetched source is not the pinned content\n  expected ${pinned}\n  got      ${hash}`);
   process.exit(1);
 } else {
-  console.log(`tree verified: ${hash.slice(0, 16)}… matches the recipe`);
+  console.log(`tree verified (${transport}): ${hash.slice(0, 16)}… matches the recipe`);
 }
 
 for (const p of recipe.patches) {
-  const patch = path.join(recipeDir, p);
-  execFileSync("git", ["apply", "--whitespace=nowarn", patch], { cwd: src, stdio: "inherit" });
+  execFileSync("git", ["apply", "--whitespace=nowarn", path.join(recipeDir, p)], { cwd: src, stdio: "inherit" });
   console.log(`applied ${p}`);
 }
 if (!recipe.patches.length) console.log("no patches (baseline recipe)");
 console.log(`\nsource ready: ${path.relative(process.cwd(), src)}`);
-if (statSync(src).isDirectory() && existsSync(path.join(recipeDir, "README.md"))) {
-  console.log(`next steps: ports/${name}/README.md (boot + journeys)`);
-}
+if (existsSync(path.join(recipeDir, "README.md"))) console.log(`next steps: ports/${name}/README.md (boot + journeys)`);
