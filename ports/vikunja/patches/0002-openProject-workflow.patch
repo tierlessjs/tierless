@@ -16,7 +16,7 @@ new file mode 100644
 +  // view "0" (or absent) means "the project's default view" — resolve it like the app does
 +  let v = view;
 +  if (!v || v === "0") {
-+    v = project.views && project.views.length ? "" + project.views[0].id : "1";
++    v = project.body.views && project.body.views.length ? "" + project.body.views[0].id : "1";
 +  }
 +  const tasks = api.get("/api/v1/projects/" + id + "/views/" + v + "/tasks?" + TASKS_QUERY);
 +  const out = {};
