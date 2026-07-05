@@ -38,6 +38,16 @@ proven (38 executable proofs, `npm test`).
   instruments. Beyond that, Stip.js-style global search over the suspension graph
   (pre-placing or replicating pure helpers) remains the bigger swing.
 
+## Adoption & measurement
+
+- **The corpus program** (`docs/corpus.md`): a statistical claim over real apps —
+  "median X× less network wait, Y% less IO across N apps' own e2e journeys."
+  Rung 1 (the measurement harness, `bench/harness/`) is built and verified
+  against socket ground truth. Open: the REST-proxy adapter + gateway recipe
+  (existing backends as `api.*`, no rewrite), the agent-assisted porting recipe
+  hardened on 2–3 real open-source apps, then the 10–20-app study reporting
+  medians and full distributions, losers included.
+
 ## Bigger swings
 
 - **Durable continuations.** Persist a parked continuation and resume it after
