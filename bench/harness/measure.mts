@@ -65,13 +65,15 @@ export interface MeasureOpts {
   ignore?: (url: string) => boolean;
   /** Also measure the initial page load (default false: journeys measure INTERACTION). */
   includeNavigation?: boolean;
+  /** Runs before the initial navigation — auth setup (addInitScript with a token, cookies). */
+  prepare?: (page: any) => Promise<void>;
   headless?: boolean;
 }
 
 export async function measureJourney(
   url: string,
   journey: (page: any) => Promise<void>,
-  { ignore = () => false, includeNavigation = false, headless = true }: MeasureOpts = {},
+  { ignore = () => false, includeNavigation = false, prepare, headless = true }: MeasureOpts = {},
 ): Promise<JourneyReport> {
   const browser = await chromium.launch({ headless });
   try {
@@ -113,6 +115,7 @@ export async function measureJourney(
       s.framesIn++; s.bytesIn += wsFrameBytes(len, false);
     });
 
+    if (prepare) await prepare(page);
     await page.goto(url, { waitUntil: "networkidle" });
     recording = true;
     const t0 = Date.now();

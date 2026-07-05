@@ -9,5 +9,5 @@
     "types": ["node"],
     "verbatimModuleSyntax": true
   },
-  "include": ["test/**/*.mts", "bench/**/*.mts", "ports/*.mts"]
+  "include": ["test/**/*.mts", "bench/**/*.mts", "ports/**/*.mts"]
 }
