@@ -20,6 +20,7 @@
 // dependency-free and browser-only. The plugin substitutes __TIERLESS_ROUTES__ (pattern ->
 // module id), and the shim imports each workflow module (already transformed: its exports
 // are bound actions).
+type Envelope = { status?: number; headers?: Record<string, string>; body?: unknown };
 type Bundle = Record<string, unknown>;
 
 declare const __TIERLESS_ROUTES__: Record<string, string>;   // route pattern -> module id (import key)
@@ -108,7 +109,7 @@ const OPEN = RealXHR.prototype.open, SEND = RealXHR.prototype.send;
 // Interaction-scoped memoization of identical API GETs: the same URL requested N times
 // within the window rides ONE network request (the SWR-style dedupe apps accrete ad hoc —
 // here the adapter provides it). Replays respect the original response value/contentType.
-interface Memo { status: number; contentType: string | null; value: unknown }
+interface Memo { status: number; headers: string; contentType: string | null; value: unknown }
 const memo = new Map<string, { at: number; p: Promise<Memo> }>();
 const MEMO_MS = 10_000;
 
@@ -118,8 +119,8 @@ const replay = (xhr: XMLHttpRequest, m: Memo): void => {
   Object.defineProperty(xhr, "statusText", { value: m.status === 200 ? "OK" : String(m.status), configurable: true });
   Object.defineProperty(xhr, "response", { value: m.value, configurable: true });
   if (typeof m.value === "string") Object.defineProperty(xhr, "responseText", { value: m.value, configurable: true });
-  Object.defineProperty(xhr, "getAllResponseHeaders", { value: () => (m.contentType ? `content-type: ${m.contentType}\r\n` : ""), configurable: true });
-  Object.defineProperty(xhr, "getResponseHeader", { value: (h: string) => (h.toLowerCase() === "content-type" ? m.contentType : null), configurable: true });
+  Object.defineProperty(xhr, "getAllResponseHeaders", { value: () => m.headers, configurable: true });
+  Object.defineProperty(xhr, "getResponseHeader", { value: (h: string) => { const rx = new RegExp("^" + h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ": (.*)$", "im"); const g = rx.exec(m.headers); return g ? g[1].trim() : null; }, configurable: true });
   xhr.dispatchEvent(new Event("readystatechange"));
   xhr.dispatchEvent(new ProgressEvent("load"));
   xhr.dispatchEvent(new ProgressEvent("loadend"));
@@ -130,7 +131,7 @@ const sendMemoized = (xhr: XMLHttpRequest, url: string, body: Document | XMLHttp
   memo.set(url, {
     at: Date.now(),
     p: new Promise<Memo>((resolve, reject) => {
-      xhr.addEventListener("load", () => resolve({ status: xhr.status, contentType: xhr.getResponseHeader("content-type"), value: xhr.response }));
+      xhr.addEventListener("load", () => resolve({ status: xhr.status, headers: xhr.getAllResponseHeaders(), contentType: xhr.getResponseHeader("content-type"), value: xhr.response }));
       xhr.addEventListener("error", () => { memo.delete(url); reject(new Error("network")); });
       xhr.addEventListener("abort", () => { memo.delete(url); reject(new Error("abort")); });
     }),
@@ -178,14 +179,18 @@ RealXHR.prototype.send = function (this: XMLHttpRequest & { __t?: { method: stri
     const hit = Object.prototype.hasOwnProperty.call(bundle, key) ? bundle[key] : undefined;
     dbg(hit === undefined ? "miss" : "serve", key, hit === undefined ? Object.keys(bundle) : "");
     if (hit === undefined) return sendViaMemo(this, t!.url, body ?? null);   // miss: the real network (deduped), unchanged
-    const text = JSON.stringify(hit);
+    // workflow entries are restResources envelopes ({status, headers, body}) or raw values
+    const env: Envelope = hit !== null && typeof hit === "object" && "body" in (hit as object) && ("headers" in (hit as object) || "status" in (hit as object)) ? hit as Envelope : { body: hit };
+    const headers: Record<string, string> = { "content-type": "application/json", ...(env.headers || {}) };
+    const headerBlock = Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join("\r\n") + "\r\n";
+    const text = JSON.stringify(env.body);
     Object.defineProperty(this, "readyState", { value: 4, configurable: true });
-    Object.defineProperty(this, "status", { value: 200, configurable: true });
+    Object.defineProperty(this, "status", { value: env.status ?? 200, configurable: true });
     Object.defineProperty(this, "statusText", { value: "OK", configurable: true });
     Object.defineProperty(this, "responseText", { value: text, configurable: true });
     Object.defineProperty(this, "response", { value: text, configurable: true });
-    Object.defineProperty(this, "getAllResponseHeaders", { value: () => "content-type: application/json\r\n", configurable: true });
-    Object.defineProperty(this, "getResponseHeader", { value: (h: string) => (h.toLowerCase() === "content-type" ? "application/json" : null), configurable: true });
+    Object.defineProperty(this, "getAllResponseHeaders", { value: () => headerBlock, configurable: true });
+    Object.defineProperty(this, "getResponseHeader", { value: (h: string) => headers[h.toLowerCase()] ?? null, configurable: true });
     this.dispatchEvent(new Event("readystatechange"));
     this.dispatchEvent(new ProgressEvent("load"));
     this.dispatchEvent(new ProgressEvent("loadend"));

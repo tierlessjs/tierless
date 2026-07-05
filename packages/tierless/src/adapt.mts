@@ -26,8 +26,10 @@ export interface RestResourcesOpts {
 }
 
 /** An Exec servicing `api.get(path)` / `api.post(path, body)` against a real REST base URL.
- *  Resolves to the response body (JSON-parsed when the response is JSON); non-2xx throws,
- *  unwinding into the workflow's own try/catch like any resource error. */
+ *  Resolves to an ENVELOPE { status, headers, body } — apps read semantics from custom
+ *  response headers (pagination counts, permission levels), so they must migrate with the
+ *  body. `headers` carries content-type and every x-* header. Non-2xx throws, unwinding
+ *  into the workflow's own try/catch like any resource error. */
 export function restResources(baseUrl: string, { token, headers = {}, fetchImpl = fetch }: RestResourcesOpts = {}): Exec {
   const base = baseUrl.replace(/\/$/, "");
   return async (req: ResourceRequest) => {
@@ -48,6 +50,8 @@ export function restResources(baseUrl: string, { token, headers = {}, fetchImpl 
     const text = await r.text();
     const isJson = (r.headers.get("content-type") || "").includes("json");
     if (!r.ok) throw new Error(`api.${m[1]} ${path}: ${r.status} ${text.slice(0, 200)}`);
-    return isJson ? JSON.parse(text) : text;
+    const hdrs: Record<string, string> = {};
+    r.headers.forEach((v, k) => { if (k === "content-type" || k.startsWith("x-")) hdrs[k] = v; });
+    return { status: r.status, headers: hdrs, body: isJson ? JSON.parse(text) : text };
   };
 }
