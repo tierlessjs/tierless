@@ -23,7 +23,8 @@ const defaultUrl = (): string => {
 };
 
 export interface ConnectOpts {
-  url?: string;
+  url?: string | (() => string);     // thunk: evaluated at CONNECT time, so a session
+                                     // token read from storage is current, not page-load stale
   /** Services browser-pinned resources (dom.commit in the full-tierless mode, ui.* if pinned). */
   exec?: Exec;
   bundle?: Bundle;
@@ -38,7 +39,7 @@ export interface Connection {
 }
 
 export function connect({ url, exec, bundle, tier = "browser" }: ConnectOpts = {}): Connection {
-  const ws = new WebSocket(url || defaultUrl());
+  const ws = new WebSocket((typeof url === "function" ? url() : url) || defaultUrl());
   const peer = makePeer(wsPort(ws));
   const ready: Promise<void> = new Promise((res, rej) => {
     onEvent(ws, "open", () => res());
@@ -76,7 +77,13 @@ let sharedOpts: ConnectOpts = {};
 let shared: Connection | null = null;
 // Optional page-level configuration (url, exec for browser-pinned resources). Call before
 // the first action fires; the first bindActions() call materializes the connection.
-export function configureTierless(opts: ConnectOpts): void { sharedOpts = opts || {}; shared = null; }
+// preconnect opens the socket NOW, during app bootstrap, instead of lazily inside the
+// first action — on a fresh page the TCP+upgrade handshake (~2 RTT) otherwise lands on
+// the first navigation's critical path and cancels most of what the migration saves.
+export function configureTierless(opts: ConnectOpts & { preconnect?: boolean }): void {
+  sharedOpts = opts || {}; shared = null;
+  if (opts?.preconnect) sharedConn();
+}
 const sharedConn = (): Connection => (shared || (shared = connect(sharedOpts)));
 
 export function bindActions(bundle: Bundle, { module = "" }: { module?: string } = {}): Record<string, (...args: unknown[]) => Promise<unknown>> {

@@ -86,7 +86,10 @@ export default function tierless(opts = {}) {
         const loaders = Object.values(routes).map((m) => `${JSON.stringify(m)}: () => import(${JSON.stringify(m)})`).join(", ");
         return [
             `import { configureTierless } from ${JSON.stringify(runtime)};`,
-            `configureTierless({ url: (location.protocol === "https:" ? "wss" : "ws") + "://" + location.host + ${JSON.stringify(wsPath || WS_PATH)} + "?token=" + encodeURIComponent(localStorage.getItem("token") || "") });`,
+            // url is a thunk (token read at connect time, not page load); preconnect only when a
+            // session already exists — the handshake then overlaps app bootstrap instead of
+            // landing on the first navigation's critical path. Fresh visitors stay lazy.
+            `configureTierless({ url: () => (location.protocol === "https:" ? "wss" : "ws") + "://" + location.host + ${JSON.stringify(wsPath || WS_PATH)} + "?token=" + encodeURIComponent(localStorage.getItem("token") || ""), preconnect: !!localStorage.getItem("token") });`,
             `const __TIERLESS_ROUTES__ = ${JSON.stringify(routes)};`,
             `const __TIERLESS_MODULES__ = { ${loaders} };`,
             body,

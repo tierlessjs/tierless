@@ -21,7 +21,7 @@ const defaultUrl = () => {
     return (location.protocol === "https:" ? "wss://" : "ws://") + location.host + WS_PATH;
 };
 export function connect({ url, exec, bundle, tier = "browser" } = {}) {
-    const ws = new WebSocket(url || defaultUrl());
+    const ws = new WebSocket((typeof url === "function" ? url() : url) || defaultUrl());
     const peer = makePeer(wsPort(ws));
     const ready = new Promise((res, rej) => {
         onEvent(ws, "open", () => res());
@@ -60,7 +60,15 @@ let sharedOpts = {};
 let shared = null;
 // Optional page-level configuration (url, exec for browser-pinned resources). Call before
 // the first action fires; the first bindActions() call materializes the connection.
-export function configureTierless(opts) { sharedOpts = opts || {}; shared = null; }
+// preconnect opens the socket NOW, during app bootstrap, instead of lazily inside the
+// first action — on a fresh page the TCP+upgrade handshake (~2 RTT) otherwise lands on
+// the first navigation's critical path and cancels most of what the migration saves.
+export function configureTierless(opts) {
+    sharedOpts = opts || {};
+    shared = null;
+    if (opts?.preconnect)
+        sharedConn();
+}
 const sharedConn = () => (shared || (shared = connect(sharedOpts)));
 export function bindActions(bundle, { module = "" } = {}) {
     const out = {};

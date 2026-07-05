@@ -1,6 +1,6 @@
 import type { Bundle, Exec, Host } from "./types.mjs";
 export interface ConnectOpts {
-    url?: string;
+    url?: string | (() => string);
     /** Services browser-pinned resources (dom.commit in the full-tierless mode, ui.* if pinned). */
     exec?: Exec;
     bundle?: Bundle;
@@ -14,7 +14,9 @@ export interface Connection {
     close(): void;
 }
 export declare function connect({ url, exec, bundle, tier }?: ConnectOpts): Connection;
-export declare function configureTierless(opts: ConnectOpts): void;
+export declare function configureTierless(opts: ConnectOpts & {
+    preconnect?: boolean;
+}): void;
 export declare function bindActions(bundle: Bundle, { module }?: {
     module?: string;
 }): Record<string, (...args: unknown[]) => Promise<unknown>>;
