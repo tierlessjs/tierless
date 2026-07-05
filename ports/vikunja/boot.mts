@@ -37,12 +37,17 @@ async function waitFor(url: string, ms = 60_000): Promise<void> {
 export async function bootVikunja(): Promise<{ close(): void }> {
   if (!existsSync(path.join(SRC, "vikunja"))) throw new Error("backend not built — see ports/vikunja/README.md");
   if (!existsSync(path.join(SRC, "frontend/dist/index.html"))) throw new Error("frontend not built — see ports/vikunja/README.md");
+  // detached process GROUPS: pnpm/vite spawn children of their own, and killing only the
+  // wrapper leaves a stale preview owning the port while the next boot binds elsewhere —
+  // every probe then talks to old code. kill(-pid) takes the whole group down.
   const procs: ChildProcess[] = [
-    spawn(path.join(SRC, "vikunja"), [], { cwd: SRC, env: ENV, stdio: "ignore" }),
-    spawn("corepack", ["pnpm", "run", "preview"], { cwd: path.join(SRC, "frontend"), env: { ...process.env, COREPACK_ENABLE_DOWNLOAD_PROMPT: "0" }, stdio: "ignore" }),
+    spawn(path.join(SRC, "vikunja"), [], { cwd: SRC, env: ENV, stdio: "ignore", detached: true }),
+    spawn("corepack", ["pnpm", "run", "preview"], { cwd: path.join(SRC, "frontend"), env: { ...process.env, COREPACK_ENABLE_DOWNLOAD_PROMPT: "0" }, stdio: "ignore", detached: true }),
   ];
   await Promise.all([waitFor(API + "/api/v1/info"), waitFor(FRONT)]);
-  return { close: () => procs.forEach((p) => p.kill()) };
+  const close = (): void => procs.forEach((p) => { try { process.kill(-p.pid!, "SIGTERM"); } catch { p.kill(); } });
+  process.on("exit", close);
+  return { close };
 }
 
 // ---- their seed + login mechanics (tests/support/factory.ts, authenticateUser.ts) -------
