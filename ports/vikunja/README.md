@@ -29,6 +29,21 @@ had). Components, stores, and services run untouched.
     cd .. && go build -o vikunja .
     node ports/vikunja/journeys/project-view.mts    # boots, seeds, measures
 
+## Suite benchmark — their whole e2e suite, before vs after
+
+Two arms, identical test patches (measure fixture + transport-agnostic waits), one
+command each; the ported arm needs the build above, the baseline arm a stock build
+(`node ports/run.mts vikunja --baseline`, then install + build WITHOUT `pnpm add
+tierless`, backend binary is byte-identical so copy it):
+
+    node ports/vikunja/suite.mts --baseline         # -> ports/work/vikunja-baseline/measure.jsonl
+    node ports/vikunja/suite.mts                    # -> ports/work/vikunja/measure.jsonl
+    node ports/report.mts ports/work/vikunja-baseline/measure.jsonl ports/work/vikunja/measure.jsonl
+
+The report pairs tests by id, drops pairs that don't pass in BOTH arms (listed, never
+silent), and prints suite-wide totals plus the covered subset — the tests whose
+interaction actually crosses the session socket.
+
 ## Measured — the same journey, same seed, same harness
 
 Journey: warm SPA, logged in, click a project with 20 tasks (the interaction behind
