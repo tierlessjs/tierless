@@ -3,13 +3,14 @@
 // the testing seed API enabled by VIKUNJA_SERVICE_TESTINGTOKEN, CORS on, frontend on
 // :4173, API on :3456. Exports bootVikunja() for journeys; run directly to boot and hold.
 //
-//   node ports/vikunja/boot.mts          (build first: see README.md)
+//   node ports/vikunja/boot.mts [--baseline]     (build first: see README.md)
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SRC = fileURLToPath(new URL("../work/vikunja/src/", import.meta.url));
+const VARIANT = process.argv.includes("--baseline") ? "vikunja-baseline" : "vikunja";
+const SRC = fileURLToPath(new URL(`../work/${VARIANT}/src/`, import.meta.url));
 export const API = "http://127.0.0.1:3456";
 export const FRONT = "http://127.0.0.1:4173";
 export const TESTING_TOKEN = "averyLongSecretToSe33dtheDB";   // their CI's value — the seed API only exists when set

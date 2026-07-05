@@ -19,5 +19,8 @@
   "patches": [
     "patches/0001-vite-config.patch",
     "patches/0002-openProject-workflow.patch"
+  ],
+  "measurePatches": [
+    "patches/0003-measure-fixture.patch"
   ]
 }

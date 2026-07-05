@@ -8,6 +8,9 @@
 // port from the recipe alone:
 //
 //   node ports/run.mts <name>            fetch (first reachable transport) -> verify -> patch
+//   node ports/run.mts <name> --baseline stock variant: measurement patches ONLY, in
+//                                        ports/work/<name>-baseline (the control arm —
+//                                        same tree, same collector, no port)
 //   node ports/run.mts <name> --refetch  discard the work dir and start over
 //
 // Transports:
@@ -30,15 +33,17 @@ interface Recipe {
   sha: string;                        // the pinned commit
   sources: Source[];                  // tried in order; first reachable wins
   treeHash: Record<string, string | null>;   // per transport kind; null = print-and-pin mode
-  patches: string[];                  // recipe-dir-relative, git-apply format, in order
+  patches: string[];                  // the port itself, recipe-dir-relative, in order
+  measurePatches?: string[];          // test-side instrumentation, applied to BOTH variants
 }
 
 const ROOT = fileURLToPath(new URL(".", import.meta.url));
 const [name, ...flags] = process.argv.slice(2);
-if (!name) { console.error("usage: node ports/run.mts <name> [--refetch]"); process.exit(2); }
+if (!name) { console.error("usage: node ports/run.mts <name> [--baseline] [--refetch]"); process.exit(2); }
+const baseline = flags.includes("--baseline");
 const recipeDir = path.join(ROOT, name);
 const recipe: Recipe = JSON.parse(readFileSync(path.join(recipeDir, "recipe.json"), "utf8"));
-const work = path.join(ROOT, "work", name);
+const work = path.join(ROOT, "work", baseline ? name + "-baseline" : name);
 const src = path.join(work, "src");
 
 // sha256 over the extracted tree: every file, sorted by relative path, as
@@ -97,9 +102,10 @@ if (pinned === undefined || pinned === null) {
   console.log(`tree verified (${transport}): ${hash.slice(0, 16)}… matches the recipe`);
 }
 
+const toApply = [...(baseline ? [] : recipe.patches), ...(recipe.measurePatches ?? [])];
 const appliedFile = path.join(work, "APPLIED");
 const applied = new Set(existsSync(appliedFile) ? readFileSync(appliedFile, "utf8").split("\n").filter(Boolean) : []);
-for (const p of recipe.patches) {
+for (const p of toApply) {
   if (applied.has(p)) { console.log(`already applied ${p}`); continue; }
   // plain patch(1), NOT `git apply`: the work tree lives inside this repo (gitignored), and
   // git apply silently no-ops (exit 0!) on paths under an ignored directory of the enclosing
@@ -109,6 +115,6 @@ for (const p of recipe.patches) {
   writeFileSync(appliedFile, [...applied].join("\n") + "\n");
   console.log(`applied ${p}`);
 }
-if (!recipe.patches.length) console.log("no patches (baseline recipe)");
-console.log(`\nsource ready: ${path.relative(process.cwd(), src)}`);
+if (!toApply.length) console.log("no patches to apply");
+console.log(`\nsource ready (${baseline ? "baseline" : "ported"}): ${path.relative(process.cwd(), src)}`);
 if (existsSync(path.join(recipeDir, "README.md"))) console.log(`next steps: ports/${name}/README.md (boot + journeys)`);

@@ -29,6 +29,25 @@ population of other people's apps can. Four rungs, each independently useful:
    losers included. A journey dominated by backend compute won't move; showing that is
    what makes the rest credible.
 
+## Run protocol (three runs, one job each)
+
+A port is benchmarked by running the target's own e2e suite three times, never mixing
+roles within a run:
+
+1. **Baseline** — stock build + the measurement patch only (`ports/run.mts <name>
+   --baseline`, separate work tree). Emits the per-test control JSONL.
+2. **Profile** — ported build with tracing on. Its job is emitting the trajectory
+   profile that prices the workflow's suffixes; its numbers are DISCARDED (tracing
+   rides the wire, and cold-start placement decisions aren't the steady state we
+   claim). Skipped until trajectory decide() is in the adapter path — today the
+   adapter always migrates the whole workflow, so there is nothing to warm.
+3. **Comparison** — ported build, tracing off, profile loaded. Emits the measured
+   JSONL that `ports/report.mts` joins against the baseline.
+
+Measurement and certification never share a stack: each run gets a freshly booted
+app (`boot.mts` kills whole process groups) and nothing else may touch its database
+mid-run — a stray seed invalidates every test that was live.
+
 ## Honesty constraints (bind all rungs)
 
 - **Bytes and trips are measured; latency is modeled.** CDP's network throttling does

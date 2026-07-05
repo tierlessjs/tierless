@@ -1,0 +1,92 @@
+--- a/frontend/tests/support/fixtures.ts
++++ b/frontend/tests/support/fixtures.ts
+@@ -1,13 +1,23 @@
+ import {test as base, type APIRequestContext, type Page} from '@playwright/test'
+ import {Factory} from './factory'
+ import {login, createFakeUser} from './authenticateUser'
++import {startWireCounts, writeWireCounts} from './tierlessMeasure'
+ 
+ export const test = base.extend<{
+ 	apiContext: APIRequestContext;
+ 	authenticatedPage: Page;
+ 	currentUser: any;
+ 	userToken: string;
++	tierlessMeasure: void;
+ }>({
++	tierlessMeasure: [async ({page}, use, testInfo) => {
++		const out = process.env.TIERLESS_MEASURE_OUT
++		if (!out) return use()
++		const counts = await startWireCounts(page)
++		await use()
++		writeWireCounts(out, counts, testInfo)
++	}, {auto: true}],
++
+ 	apiContext: async ({playwright}, use) => {
+ 		const baseURL = process.env.API_URL || 'http://localhost:3456/api/v1/'
+ 		const apiContext = await playwright.request.newContext({
+--- /dev/null	2026-07-02 21:16:57.364783073 +0000
++++ b/frontend/tests/support/tierlessMeasure.ts
+@@ -0,0 +1,63 @@
++// Per-test wire measurement over CDP. Inactive unless TIERLESS_MEASURE_OUT names a
++// JSONL file; then every test attempt appends one line. Counts DATA-PATH traffic only —
++// the API origin plus the tierless session socket — because the SPA bundle is identical
++// between stock and ported builds and would drown the signal. Accounting mirrors the
++// journey harness: HTTP = encodedDataLength at loadingFinished (wire bytes, headers
++// included); ws = payload + RFC 6455 frame header (+4 mask on client frames).
++import fs from 'node:fs'
++import type {Page, TestInfo} from '@playwright/test'
++
++// same default as authenticateUser.ts — the URL the BROWSER calls (not the node-side one)
++const API_ORIGIN = new URL(process.env.API_URL || 'http://127.0.0.1:3456/api/v1').origin
++
++export interface WireCounts {
++	requests: number,
++	httpBytes: number,
++	wsFramesOut: number,
++	wsFramesIn: number,
++	wsBytesOut: number,
++	wsBytesIn: number,
++}
++
++const wsFrameBytes = (payloadLen: number, masked: boolean): number =>
++	payloadLen + 2 + (payloadLen >= 65536 ? 8 : payloadLen >= 126 ? 2 : 0) + (masked ? 4 : 0)
++
++export async function startWireCounts(page: Page): Promise<WireCounts> {
++	const m: WireCounts = {requests: 0, httpBytes: 0, wsFramesOut: 0, wsFramesIn: 0, wsBytesOut: 0, wsBytesIn: 0}
++	const cdp = await page.context().newCDPSession(page)
++	await cdp.send('Network.enable')
++	const tracked = new Set<string>()          // API-origin requestIds (incl. CORS preflights)
++	const sockets = new Set<string>()          // tierless session sockets
++	cdp.on('Network.requestWillBeSent', e => {
++		if (e.request.url.startsWith(API_ORIGIN)) { tracked.add(e.requestId); m.requests++ }
++	})
++	cdp.on('Network.loadingFinished', e => {
++		if (tracked.has(e.requestId)) m.httpBytes += e.encodedDataLength
++	})
++	cdp.on('Network.webSocketCreated', e => {
++		if (e.url.includes('/__tierless')) sockets.add(e.requestId)
++	})
++	cdp.on('Network.webSocketFrameSent', e => {
++		if (!sockets.has(e.requestId)) return
++		m.wsFramesOut++
++		m.wsBytesOut += wsFrameBytes(e.response.payloadData.length, true)
++	})
++	cdp.on('Network.webSocketFrameReceived', e => {
++		if (!sockets.has(e.requestId)) return
++		// binary frames arrive base64-encoded in CDP; text frames as-is
++		const len = e.response.opcode === 2 ? Buffer.from(e.response.payloadData, 'base64').length : Buffer.byteLength(e.response.payloadData)
++		m.wsFramesIn++
++		m.wsBytesIn += wsFrameBytes(len, false)
++	})
++	return m
++}
++
++export function writeWireCounts(out: string, m: WireCounts, testInfo: TestInfo) {
++	const rec = {
++		id: testInfo.file.slice(testInfo.file.indexOf('tests/e2e/')) + ':' + testInfo.line + ' › ' + testInfo.titlePath.slice(1).join(' › '),
++		status: testInfo.status ?? 'unknown',
++		retry: testInfo.retry,
++		...m,
++	}
++	fs.appendFileSync(out, JSON.stringify(rec) + '\n')
++}
