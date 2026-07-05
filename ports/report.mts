@@ -22,6 +22,7 @@ import { readFileSync } from "node:fs";
 
 interface Rec {
   id: string; status: string; retry: number;
+  durationMs?: number;                // wall clock; meaningful only under injected RTT
   requests: number; httpBytes: number;
   wsFramesOut: number; wsFramesIn: number; wsBytesOut: number; wsBytesIn: number;
 }
@@ -78,6 +79,21 @@ console.log(`\n== suite-wide (${counted.length} pass-parity pairs; ${covered.len
 console.log(`  total bytes   ${(totB / 1024).toFixed(1)} KB -> ${(totP / 1024).toFixed(1)} KB   (${pct(totB, totP)} less IO)`);
 console.log(`  total trips   ${trpB} -> ${trpP}   (${pct(trpB, trpP)} fewer)`);
 console.log(`  median per-test bytes saved   ${medianSaved(counted, bytes)}`);
+
+// timing is asserted only when BOTH arms measured under the same conditions worth
+// asserting — i.e. an injected-RTT run where durationMs reflects network wait, not
+// localhost noise. The suite driver only produces paired -rtt<N> files, so presence
+// of durationMs on both sides is that signal.
+if (counted.length && counted.every(({ b, p }) => b.durationMs !== undefined && p.durationMs !== undefined)) {
+  const db = sum(counted.map(({ b }) => b.durationMs!)), dp = sum(counted.map(({ p }) => p.durationMs!));
+  console.log(`\n== elapsed time (real, wall clock of each test; compare only same-RTT runs) ==`);
+  console.log(`  total   ${(db / 60000).toFixed(1)} min -> ${(dp / 60000).toFixed(1)} min   (${pct(db, dp)} less)`);
+  console.log(`  median per-test time saved   ${medianSaved(counted, (r) => r.durationMs!)}`);
+  if (covered.length) {
+    const cdb = sum(covered.map(({ b }) => b.durationMs!)), cdp = sum(covered.map(({ p }) => p.durationMs!));
+    console.log(`  covered subset: total ${(cdb / 60000).toFixed(1)} -> ${(cdp / 60000).toFixed(1)} min (${pct(cdb, cdp)} less), median per-test ${medianSaved(covered, (r) => r.durationMs!)} less`);
+  }
+}
 
 if (covered.length) {
   const cb = sum(covered.map(({ b }) => bytes(b))), cp = sum(covered.map(({ p }) => bytes(p)));

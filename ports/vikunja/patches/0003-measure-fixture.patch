@@ -1,6 +1,6 @@
 --- a/frontend/tests/support/fixtures.ts
 +++ b/frontend/tests/support/fixtures.ts
-@@ -1,13 +1,23 @@
+@@ -1,13 +1,24 @@
  import {test as base, type APIRequestContext, type Page} from '@playwright/test'
  import {Factory} from './factory'
  import {login, createFakeUser} from './authenticateUser'
@@ -16,17 +16,18 @@
 +	tierlessMeasure: [async ({page}, use, testInfo) => {
 +		const out = process.env.TIERLESS_MEASURE_OUT
 +		if (!out) return use()
++		const t0 = Date.now()
 +		const counts = await startWireCounts(page)
 +		await use()
-+		writeWireCounts(out, counts, testInfo)
++		writeWireCounts(out, counts, testInfo, Date.now() - t0)
 +	}, {auto: true}],
 +
  	apiContext: async ({playwright}, use) => {
  		const baseURL = process.env.API_URL || 'http://localhost:3456/api/v1/'
  		const apiContext = await playwright.request.newContext({
---- /dev/null	2026-07-02 21:16:57.364783073 +0000
+--- /dev/null
 +++ b/frontend/tests/support/tierlessMeasure.ts
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,64 @@
 +// Per-test wire measurement over CDP. Inactive unless TIERLESS_MEASURE_OUT names a
 +// JSONL file; then every test attempt appends one line. Counts DATA-PATH traffic only —
 +// the API origin plus the tierless session socket — because the SPA bundle is identical
@@ -81,11 +82,12 @@
 +	return m
 +}
 +
-+export function writeWireCounts(out: string, m: WireCounts, testInfo: TestInfo) {
++export function writeWireCounts(out: string, m: WireCounts, testInfo: TestInfo, durationMs: number) {
 +	const rec = {
 +		id: testInfo.file.slice(testInfo.file.indexOf('tests/e2e/')) + ':' + testInfo.line + ' › ' + testInfo.titlePath.slice(1).join(' › '),
 +		status: testInfo.status ?? 'unknown',
 +		retry: testInfo.retry,
++		durationMs,
 +		...m,
 +	}
 +	fs.appendFileSync(out, JSON.stringify(rec) + '\n')

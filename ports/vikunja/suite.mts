@@ -6,15 +6,23 @@
 //   node ports/vikunja/suite.mts --baseline     -> ports/work/vikunja-baseline/measure.jsonl
 //   node ports/vikunja/suite.mts                -> ports/work/vikunja/measure.jsonl
 //   node ports/report.mts ports/work/vikunja-baseline/measure.jsonl ports/work/vikunja/measure.jsonl
+//
+// TIERLESS_RTT_MS=80 injects REAL round-trip latency via a TCP delay relay in front of
+// both origins (ports/latency-proxy.mts) — websocket included, which CDP throttling
+// can't do. The gateway->backend hop stays undelayed localhost, as deployed. Output
+// goes to measure-rtt<N>.jsonl; per-test durationMs is then elapsed time under that
+// RTT (bandwidth unshaped), not a model.
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { bootVikunja, TESTING_TOKEN } from "./boot.mts";
+import { delayProxy } from "../latency-proxy.mts";
 
 const VARIANT = process.argv.includes("--baseline") ? "vikunja-baseline" : "vikunja";
+const RTT = Number(process.env.TIERLESS_RTT_MS || 0);
 const SRC = fileURLToPath(new URL(`../work/${VARIANT}/src/`, import.meta.url));
-const OUT = fileURLToPath(new URL(`../work/${VARIANT}/measure.jsonl`, import.meta.url));
+const OUT = fileURLToPath(new URL(`../work/${VARIANT}/measure${RTT ? `-rtt${RTT}` : ""}.jsonl`, import.meta.url));
 
 // their CI injects window.TESTING=true into the BUILT index.html (test.yml, "Inject
 // testing flag"); the app gates test-only behavior on it and a dozen specs fail on any
@@ -25,8 +33,15 @@ if (!html.includes("window.TESTING")) writeFileSync(idx, html.replace("<head>", 
 
 rmSync(OUT, { force: true });
 const app = await bootVikunja();
+if (RTT) {
+  delayProxy(14173, 4173, RTT / 2).unref();   // frontend origin (SPA + tierless ws)
+  delayProxy(13456, 3456, RTT / 2).unref();   // API origin (XHR + CORS preflights)
+  console.log(`RTT injection: ${RTT} ms via 127.0.0.1:14173 -> 4173, 127.0.0.1:13456 -> 3456`);
+}
 try {
-  execFileSync("corepack", ["pnpm", "exec", "playwright", "test", "--reporter=line"], {
+  // the shaped run gets a raised per-test timeout (both arms equally): the stock arm's
+  // request-heavy tests spend up to ~10 s of pure injected RTT
+  execFileSync("corepack", ["pnpm", "exec", "playwright", "test", "--reporter=line", ...(RTT ? ["--timeout=90000"] : [])], {
     cwd: path.join(SRC, "frontend"),
     stdio: "inherit",
     env: {
@@ -40,6 +55,7 @@ try {
       TEST_SECRET: TESTING_TOKEN,
       VIKUNJA_SERVICE_TESTINGTOKEN: TESTING_TOKEN,
       TIERLESS_MEASURE_OUT: OUT,
+      ...(RTT ? { BASE_URL: "http://127.0.0.1:14173", API_URL: "http://127.0.0.1:13456/api/v1" } : {}),
     },
   });
 } catch { /* nonzero exit = some tests failed; every attempt is in the JSONL regardless */ }
