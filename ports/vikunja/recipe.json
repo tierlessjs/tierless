@@ -20,7 +20,8 @@
     "patches/0001-vite-config.patch",
     "patches/0002-openProject-workflow.patch"
   ],
-  "measurePatches": [
-    "patches/0003-measure-fixture.patch"
+  "testPatches": [
+    "patches/0003-measure-fixture.patch",
+    "patches/0004-transport-agnostic-waits.patch"
   ]
 }

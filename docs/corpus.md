@@ -48,6 +48,16 @@ Measurement and certification never share a stack: each run gets a freshly boote
 app (`boot.mts` kills whole process groups) and nothing else may touch its database
 mid-run — a stray seed invalidates every test that was live.
 
+**Test accommodations.** Some upstream tests assert the transport, not the UI —
+`waitForResponse(...)` for a request the port eliminates can never fire. Rather than
+maintaining an allow-list of expected failures, each such test gets a patch in the
+recipe's `testPatches` that replaces the network wait with the equivalent UI wait
+(e.g. "the task row is rendered"). Rules: applied to BOTH arms; may relocate a wait
+but never weaken what the test asserts about the page; each hunk carries a comment
+saying why. Failures that remain (e.g. a login provider whose container we don't
+run) fail identically in both arms and fall out of the report's pass-parity gate,
+listed with both statuses.
+
 ## Honesty constraints (bind all rungs)
 
 - **Bytes and trips are measured; latency is modeled.** CDP's network throttling does

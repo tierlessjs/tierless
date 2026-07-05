@@ -8,7 +8,7 @@
 // port from the recipe alone:
 //
 //   node ports/run.mts <name>            fetch (first reachable transport) -> verify -> patch
-//   node ports/run.mts <name> --baseline stock variant: measurement patches ONLY, in
+//   node ports/run.mts <name> --baseline stock variant: test patches ONLY, in
 //                                        ports/work/<name>-baseline (the control arm —
 //                                        same tree, same collector, no port)
 //   node ports/run.mts <name> --refetch  discard the work dir and start over
@@ -34,7 +34,9 @@ interface Recipe {
   sources: Source[];                  // tried in order; first reachable wins
   treeHash: Record<string, string | null>;   // per transport kind; null = print-and-pin mode
   patches: string[];                  // the port itself, recipe-dir-relative, in order
-  measurePatches?: string[];          // test-side instrumentation, applied to BOTH variants
+  testPatches?: string[];             // test-side only, applied to BOTH variants: the
+                                      // measurement fixture + transport-agnostic wait
+                                      // accommodations (docs/corpus.md, run protocol)
 }
 
 const ROOT = fileURLToPath(new URL(".", import.meta.url));
@@ -102,7 +104,7 @@ if (pinned === undefined || pinned === null) {
   console.log(`tree verified (${transport}): ${hash.slice(0, 16)}… matches the recipe`);
 }
 
-const toApply = [...(baseline ? [] : recipe.patches), ...(recipe.measurePatches ?? [])];
+const toApply = [...(baseline ? [] : recipe.patches), ...(recipe.testPatches ?? [])];
 const appliedFile = path.join(work, "APPLIED");
 const applied = new Set(existsSync(appliedFile) ? readFileSync(appliedFile, "utf8").split("\n").filter(Boolean) : []);
 for (const p of toApply) {

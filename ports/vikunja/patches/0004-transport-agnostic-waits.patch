@@ -1,0 +1,67 @@
+--- a/frontend/tests/e2e/task/task.spec.ts
++++ b/frontend/tests/e2e/task/task.spec.ts
+@@ -143,43 +143,39 @@
+ 	})
+ 
+ 	test('Should show a task description icon if the task has a description', async ({authenticatedPage: page}) => {
+-		const loadTasksPromise = page.waitForResponse(response =>
+-			response.url().includes('/projects/1/views/') && response.url().includes('/tasks'),
+-		)
+ 		await TaskFactory.create(1, {
+ 			description: 'Lorem Ipsum',
+ 		})
+ 
+ 		await page.goto('/projects/1/1')
+-		await loadTasksPromise
++		// wait for the task list to render (transport-agnostic: the tasks request may be
++		// served without touching the network)
++		await expect(page.locator('.tasks .task')).toBeVisible()
+ 
+ 		await expect(page.locator('.tasks .task .project-task-icon .fa-align-left')).toBeVisible()
+ 	})
+ 
+ 	test('Should not show a task description icon if the task has an empty description', async ({authenticatedPage: page}) => {
+-		const loadTasksPromise = page.waitForResponse(response =>
+-			response.url().includes('/projects/1/views/') && response.url().includes('/tasks'),
+-		)
+ 		await TaskFactory.create(1, {
+ 			description: '',
+ 		})
+ 
+ 		await page.goto('/projects/1/1')
+-		await loadTasksPromise
++		// the task row must be rendered BEFORE asserting the icon's absence, or the
++		// assertion passes vacuously on an empty page
++		await expect(page.locator('.tasks .task')).toBeVisible()
+ 
+ 		await expect(page.locator('.tasks .task .project-task-icon .fa-align-left')).not.toBeVisible()
+ 	})
+ 
+ 	test('Should not show a task description icon if the task has a description containing only an empty p tag', async ({authenticatedPage: page}) => {
+-		const loadTasksPromise = page.waitForResponse(response =>
+-			response.url().includes('/projects/1/views/') && response.url().includes('/tasks'),
+-		)
+ 		await TaskFactory.create(1, {
+ 			description: '<p></p>',
+ 		})
+ 
+ 		await page.goto('/projects/1/1')
+-		await loadTasksPromise
++		// same: render first, then assert absence
++		await expect(page.locator('.tasks .task')).toBeVisible()
+ 
+ 		await expect(page.locator('.tasks .task .project-task-icon .fa-align-left')).not.toBeVisible()
+ 	})
+@@ -193,11 +189,8 @@
+ 
+ 		test('provides back navigation to the project in the list view', async ({authenticatedPage: page}) => {
+ 			const tasks = await TaskFactory.create(1)
+-			const loadTasksPromise = page.waitForResponse(response =>
+-				response.url().includes('/projects/1/views/') && response.url().includes('/tasks'),
+-			)
+ 			await page.goto('/projects/1/1')
+-			await loadTasksPromise
++			// locator.click() below auto-waits for the rendered task row (transport-agnostic)
+ 			await page.locator('.list-view .task').first().locator('a.task-link').click()
+ 			await expect(page.locator('.task-view .back-button')).toBeVisible()
+ 			await page.locator('.task-view .back-button').click()
