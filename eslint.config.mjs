@@ -9,6 +9,7 @@ export default [
   {
     ignores: [
       "node_modules/**",
+      "ports/work/**",   // fetched third-party source (no-vendor port work dir)
       // Compiler INPUTS (.src.js): plain developer code with free tier globals (api/commit) by design.
       "test/e2e/app/App.src.js",
       "test/e2e/cf-fixtures.src.js",

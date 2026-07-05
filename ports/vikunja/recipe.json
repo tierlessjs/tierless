@@ -1,0 +1,8 @@
+{
+  "name": "vikunja",
+  "repo": "go-vikunja/vikunja",
+  "sha": "28b537837f9808dc106c9058b5829c65759fddf2",
+  "zip": "https://codeload.github.com/go-vikunja/vikunja/zip/28b537837f9808dc106c9058b5829c65759fddf2",
+  "treeHash": null,
+  "patches": []
+}

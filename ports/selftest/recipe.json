@@ -1,0 +1,10 @@
+{
+  "name": "selftest",
+  "repo": "tierlessjs/tierless",
+  "sha": "900d855f79ec1a8b7a8c8c57e9b1010a5c450e6b",
+  "zip": "https://codeload.github.com/tierlessjs/tierless/zip/900d855f79ec1a8b7a8c8c57e9b1010a5c450e6b",
+  "treeHash": "fb13e1fda2074a1e0a304cef69e67a35236aea10e36badfdba4d7d145bfca443",
+  "patches": [
+    "patches/0001-marker.patch"
+  ]
+}

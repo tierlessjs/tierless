@@ -11,3 +11,4 @@ examples/*/package-lock.json
 
 # tsc fixture written by test/probes/types.mjs
 test/.types-fixture/
+ports/work/
