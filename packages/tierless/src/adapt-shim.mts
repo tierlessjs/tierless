@@ -158,6 +158,11 @@ RealXHR.prototype.open = function (this: XMLHttpRequest & { __t?: { method: stri
 RealXHR.prototype.send = function (this: XMLHttpRequest & { __t?: { method: string; url: string } }, body?: Document | XMLHttpRequestBodyInit | null) {
   const t = this.__t;
   const api = API_ORIGIN();
+  // WRITES INVALIDATE: any mutation to the API origin clears the memo and the workflow
+  // bundle — a held GET after a POST must see the world the POST made, not a cached one.
+  if (t && t.method !== "GET" && t.method !== "OPTIONS" && (t.url.startsWith(api) || t.url.startsWith("/"))) {
+    memo.clear(); inflight = null; inflightKey = ""; dbg("invalidate", t.method, t.url);
+  }
   const interceptable = t && t.method === "GET" && inflight !== null && Date.now() < inflightUntil &&
     (t.url.startsWith(api) || t.url.startsWith("/"));
   const isApiGet = t && t.method === "GET" && (t.url.startsWith(api) || t.url.startsWith("/"));
