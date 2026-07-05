@@ -42,7 +42,25 @@ tierless`, backend binary is byte-identical so copy it):
 
 The report pairs tests by id, drops pairs that don't pass in BOTH arms (listed, never
 silent), and prints suite-wide totals plus the covered subset — the tests whose
-interaction actually crosses the session socket.
+interaction actually crosses the session socket. Both arms' JSONL is committed under
+`results/`, so the report reruns without the two 9-minute suite runs.
+
+Measured 2026-07-05 (both arms 196/199, identical exclusions — the two drag tests
+upstream's own CI retries for, and the Dex login we don't run):
+
+    suite-wide (196 paired tests)   51% fewer round trips (6376 -> 3144)
+                                    27% median per-test IO reduction (6% of total
+                                    bytes — the total is dominated by one 899 KB
+                                    attachment-upload spec)
+    covered subset (82 tests)       42% fewer trips · 26% median IO reduction
+
+Two mechanisms, same 2-line diff. (1) Route workflows: /projects/:id navigations run
+as one migrating continuation. (2) Interaction-scoped GET dedupe with write
+invalidation — it applies on every route, which is why 114 tests that never touch the
+workflow still improve: their worst antipattern collapses (the comment-pagination spec
+refetches the author avatar per comment, 126 API requests -> 19). Losers included:
+8 covered tests pay up to +4 KB (kanban wants buckets first; the workflow ships the
+list-view task page it won't use), all 8 still make fewer trips.
 
 ## Measured — the same journey, same seed, same harness
 
@@ -64,25 +82,23 @@ in the stock build every rerender refetched it for real).
 
 ## Correctness — their own suite as the judge
 
-Full suite (31 files, 199 tests) against the ported build: **194 pass**, 5 fail — every
-failure explained, none a behavior bug:
+Full suite (31 files, 199 tests), stock and ported arms run identically: **196 pass on
+both, and the 3 failures are the same 3 tests in both arms** — the two drag-to-project
+specs that upstream's own CI retries for (`retries: process.env.CI ? 2 : 0`; both pass
+in isolation on both builds), and the OpenID login that needs the Dex container their
+CI boots. Nothing fails on the ported build that passes on stock.
 
-- 4 are `page.waitForResponse(...tasks...)` waits in task.spec.ts for the exact HTTP
-  request the port eliminates (served from the workflow bundle, so it never reaches the
-  network). The failure screenshots show the task list fully and correctly rendered —
-  the tests assert the transport, not the UI. This is a permanent exclusion category
-  for ports: a test that requires the request to exist can't pass once the request is
-  optimized away.
-- 1 (OpenID login) needs the Dex identity-provider container their CI boots; we don't
-  run it. Environmental, unrelated to the port.
+Four task.spec.ts tests originally failed on the ported build by waiting on
+`page.waitForResponse(...tasks...)` — the exact HTTP request the port eliminates. Their
+screenshots showed correct UI; the accommodation patch (0004, applied to both arms)
+replaces the network wait with the equivalent UI wait, and all four now pass on both.
 
-The 59 project-directory specs — the ones that exercise the shimmed routes hardest —
-pass 59/59 in the same wall time as stock (2.0 vs 2.1 min). The suite caught three real
-adapter bugs on the way (each fixed in tierless, not worked around): stale caches after
-mutations (writes now invalidate), response-header semantics (x-max-permission gates UI
-capability, x-pagination-* drives paging — HTTP now migrates as {status, headers, body}
-envelopes), and a test-infrastructure bug where a zombie preview process served pre-fix
-code to two diagnostic runs (boot now kills process groups).
+The suite caught three real adapter bugs on the way (each fixed in tierless, not worked
+around): stale caches after mutations (writes now invalidate), response-header
+semantics (x-max-permission gates UI capability, x-pagination-* drives paging — HTTP
+now migrates as {status, headers, body} envelopes), and a test-infrastructure bug where
+a zombie preview process served pre-fix code to two diagnostic runs (boot now kills
+process groups).
 
 ## Caveats (read before quoting)
 
