@@ -49,14 +49,25 @@ in the stock build every rerender refetched it for real).
 
 ## Correctness — their own suite as the judge
 
-The ported build passes all 59 of their project-directory Playwright specs — the ones
-that exercise the shimmed routes hardest — in the same wall time as stock (2.0 vs 2.1
-min). The suite caught three real adapter bugs on the way (each fixed in tierless, not
-worked around): stale caches after mutations (writes now invalidate), response-header
-semantics (x-max-permission gates UI capability, x-pagination-* drives paging — HTTP now
-migrates as {status, headers, body} envelopes), and a test-infrastructure bug where a
-zombie preview process served pre-fix code to two diagnostic runs (boot now kills
-process groups).
+Full suite (31 files, 199 tests) against the ported build: **194 pass**, 5 fail — every
+failure explained, none a behavior bug:
+
+- 4 are `page.waitForResponse(...tasks...)` waits in task.spec.ts for the exact HTTP
+  request the port eliminates (served from the workflow bundle, so it never reaches the
+  network). The failure screenshots show the task list fully and correctly rendered —
+  the tests assert the transport, not the UI. This is a permanent exclusion category
+  for ports: a test that requires the request to exist can't pass once the request is
+  optimized away.
+- 1 (OpenID login) needs the Dex identity-provider container their CI boots; we don't
+  run it. Environmental, unrelated to the port.
+
+The 59 project-directory specs — the ones that exercise the shimmed routes hardest —
+pass 59/59 in the same wall time as stock (2.0 vs 2.1 min). The suite caught three real
+adapter bugs on the way (each fixed in tierless, not worked around): stale caches after
+mutations (writes now invalidate), response-header semantics (x-max-permission gates UI
+capability, x-pagination-* drives paging — HTTP now migrates as {status, headers, body}
+envelopes), and a test-infrastructure bug where a zombie preview process served pre-fix
+code to two diagnostic runs (boot now kills process groups).
 
 ## Caveats (read before quoting)
 
