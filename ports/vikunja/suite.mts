@@ -12,7 +12,7 @@
 // can't do. The gateway->backend hop stays undelayed localhost, as deployed. Output
 // goes to measure-rtt<N>.jsonl; per-test durationMs is then elapsed time under that
 // RTT (bandwidth unshaped), not a model.
-import { execFileSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,26 +38,26 @@ if (RTT) {
   delayProxy(13456, 3456, RTT / 2).unref();   // API origin (XHR + CORS preflights)
   console.log(`RTT injection: ${RTT} ms via 127.0.0.1:14173 -> 4173, 127.0.0.1:13456 -> 3456`);
 }
-try {
-  // the shaped run gets a raised per-test timeout (both arms equally): the stock arm's
-  // request-heavy tests spend up to ~10 s of pure injected RTT
-  execFileSync("corepack", ["pnpm", "exec", "playwright", "test", "--reporter=line", ...(RTT ? ["--timeout=90000"] : [])], {
-    cwd: path.join(SRC, "frontend"),
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
-      PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS: "1",
-      // their playwright.config honors this; needed where the pinned @playwright/test
-      // version doesn't match the locally installed browsers
-      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || existsSync("/opt/pw-browsers/chromium")
-        ? { PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ?? "/opt/pw-browsers/chromium" } : {}),
-      TEST_SECRET: TESTING_TOKEN,
-      VIKUNJA_SERVICE_TESTINGTOKEN: TESTING_TOKEN,
-      TIERLESS_MEASURE_OUT: OUT,
-      ...(RTT ? { BASE_URL: "http://127.0.0.1:14173", API_URL: "http://127.0.0.1:13456/api/v1" } : {}),
-    },
-  });
-} catch { /* nonzero exit = some tests failed; every attempt is in the JSONL regardless */ }
+// spawn, NOT execFileSync: the delay relays run in THIS process, and a synchronous
+// child would block the event loop — the proxies would bind but never accept, and
+// every shaped connection dies ECONNREFUSED.
+const suite = spawn("corepack", ["pnpm", "exec", "playwright", "test", "--reporter=line", ...(RTT ? ["--timeout=90000"] : [])], {
+  cwd: path.join(SRC, "frontend"),
+  stdio: "inherit",
+  env: {
+    ...process.env,
+    COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
+    PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS: "1",
+    // their playwright.config honors this; needed where the pinned @playwright/test
+    // version doesn't match the locally installed browsers
+    ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || existsSync("/opt/pw-browsers/chromium")
+      ? { PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ?? "/opt/pw-browsers/chromium" } : {}),
+    TEST_SECRET: TESTING_TOKEN,
+    VIKUNJA_SERVICE_TESTINGTOKEN: TESTING_TOKEN,
+    TIERLESS_MEASURE_OUT: OUT,
+    ...(RTT ? { BASE_URL: "http://127.0.0.1:14173", API_URL: "http://127.0.0.1:13456/api/v1" } : {}),
+  },
+});
+await new Promise<void>((resolve) => suite.on("exit", () => resolve()));   // nonzero = some tests failed; every attempt is in the JSONL regardless
 app.close();
 console.log(`\nmeasured arm (${VARIANT}): ${path.relative(process.cwd(), OUT)}`);
