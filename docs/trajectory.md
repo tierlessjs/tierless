@@ -34,14 +34,23 @@ stateless per message; it costs ~49 B/hop when on and exactly 0 when off. The
 stack-carried `seq` gives both tiers' records one global order with no synchronized
 clocks. Per traced run: every resource touch (site `(fn, pc, resource)`, argument
 features, result bytes) and every crossing (real shipped wire bytes, the choice made).
-Configure per host: `makeHost({ ..., trace: { rate, force, sink } })`; per call:
-`host.run(peer, entry, args, { trace: true })`.
+Configure per host: `makeHost({ ..., trace: { rate, force, sink } })` (or pass a
+pre-built `makeRecorder(...)` to keep a handle on it); per call:
+`host.run(peer, entry, args, { trace: true })`. A sink that throws is contained and
+counted (`recorder.dropped`), never propagated — observability must not change the
+observed run's outcome, and an uncontained sink bug would fault exactly the sampled
+fraction of traffic (`test/e2e/sink-throw.mts`).
 
 **Profile** — `buildProfile(records, BUNDLE_HASH)`, derived offline. Per site: a size
 model bucketed by argument features, the continuation bytes observed at its crossings,
 the distribution of ordered same-tier suffixes seen after it with their summed fetch
 cost, and a stability fraction. Truncated runs (no `end` record) feed size models but are
-excluded from trajectory statistics.
+excluded from trajectory statistics; error-ended runs are treated the same (note: an
+error on the *driving* tier propagates out of `run()` with no end marker at all, so it
+reads as truncated — same handling, zero profile effect). A suffix containing an
+unserializable result is marked `fetchable: false` — the fetch path cannot traverse it
+at all, so `decide()` forces migrate there rather than pricing the unfetchable touch at
+0 (which would bias toward fetch, the wrong direction).
 
 **Bundle identity** — every compiled bundle exports `BUNDLE_HASH` (hashed over the
 emitted machine code, identical on both tiers). Site identity is `(fn, pc)` and pcs

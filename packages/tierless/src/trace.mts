@@ -101,6 +101,9 @@ export interface Recorder {
   /** Run completion. Takes the FLAG (capture it with flagOf BEFORE pumping — a finished
    *  pump has popped every frame, so the stack no longer carries it). */
   end(flag: TraceFlag | null, outcome: "done" | "error"): void;
+  /** Records dropped because the sink threw. Observability must never change the observed
+   *  run's outcome, so a sink error is swallowed and counted, never propagated. */
+  readonly dropped: number;
 }
 
 export interface RecorderOpts {
@@ -111,6 +114,13 @@ export interface RecorderOpts {
 
 export function makeRecorder({ rate = 0, force = [], sink }: RecorderOpts): Recorder {
   const forced = new Set(force);
+  let dropped = 0;
+  // Sinks are user-written callbacks in every deployment; a sink that throws must not
+  // become a fault injector for exactly the sampled fraction of traffic (a heisencrash
+  // that vanishes when tracing turns off). A throw here would even route through the
+  // pump's error unwinding and could be CAUGHT BY APP CODE as a fake resource failure.
+  // So: swallow and count, never propagate.
+  const emit: TraceSink = (r) => { try { sink(r); } catch { dropped++; } };
   const top = (stack: { [k: string]: unknown }[]): { fn: string; pc: number } => stack[stack.length - 1] as unknown as { fn: string; pc: number };
   const flagOf = (stack: { [k: string]: unknown }[]): TraceFlag | null => {
     const f = stack.length && (stack[0] as { __trace?: TraceFlag }).__trace;
@@ -130,7 +140,7 @@ export function makeRecorder({ rate = 0, force = [], sink }: RecorderOpts): Reco
       const f = flagOf(stack);
       if (!f) return;
       const { fn, pc } = top(stack);
-      sink({ t: "res", id: f.id, hop: f.hop, seq: f.seq++, fn, pc, resource: req.name, tier: req.tier, argFeatures: argFeatures(req.args), resultBytes: resultBytes(result) });
+      emit({ t: "res", id: f.id, hop: f.hop, seq: f.seq++, fn, pc, resource: req.name, tier: req.tier, argFeatures: argFeatures(req.args), resultBytes: resultBytes(result) });
     },
     ship(stack, req, encode, choice) {
       const f = flagOf(stack);
@@ -139,13 +149,14 @@ export function makeRecorder({ rate = 0, force = [], sink }: RecorderOpts): Reco
       const hop = f.hop, seq = f.seq;
       f.hop++; f.seq++;                                            // bump BEFORE encoding: the wire carries the advanced counters, so the peer's records sort after this one
       const wire = encode();
-      sink({ t: "hop", id: f.id, hop, seq, fn, pc, resource: req.name, contBytes: wire.length, ...(choice ? { choice } : {}) });
+      emit({ t: "hop", id: f.id, hop, seq, fn, pc, resource: req.name, contBytes: wire.length, ...(choice ? { choice } : {}) });
       return wire;
     },
     end(flag, outcome) {
       if (!flag) return;
-      sink({ t: "end", id: flag.id, hop: flag.hop, seq: flag.seq++, outcome });
+      emit({ t: "end", id: flag.id, hop: flag.hop, seq: flag.seq++, outcome });
     },
+    get dropped() { return dropped; },
   };
 }
 
@@ -167,8 +178,12 @@ export interface SiteProfile {
   sizes: Record<string, SizeBucket>;                // per argFeatures bucket — the §1.2 fix
   contMean: number;                                 // mean continuation bytes observed at this site's crossings
   contN: number;
-  /** Ordered same-tier suffix distributions observed after this site (complete runs only). */
-  suffixes: Record<string, { n: number; fetchSum: number }>;   // sig -> count + mean summed fetch bytes
+  /** Ordered same-tier suffix distributions observed after this site (complete runs only).
+   *  fetchable=false marks a suffix that contained an unserializable result: the fetch path
+   *  cannot traverse it AT ALL, so it must never be priced (a 0 would bias toward fetch —
+   *  the wrong direction). fetchSum is the mean over the `priced` (fully fetchable)
+   *  occurrences; n counts every occurrence (the shape statistics behind modal/stability). */
+  suffixes: Record<string, { n: number; priced: number; fetchSum: number; fetchable: boolean }>;
   modal: string | null;                             // the most common suffix signature
   stability: number;                                // fraction of complete runs sharing the modal suffix
   complete: number;                                 // complete-run occurrences behind the trajectory stats
@@ -223,10 +238,15 @@ export function buildProfile(records: TraceRecord[], bundle: string): Profile {
       const s = site(siteKey(r.fn, r.pc, r.resource));
       const suffix = touches.slice(i + 1).filter((x) => x.tier === r.tier);   // future SAME-tier resources
       const sig = suffix.map((x) => siteKey(x.fn, x.pc, x.resource)).join(">");
-      const sum = suffix.reduce((acc, x) => acc + Math.max(0, x.resultBytes), 0);
-      const e = (s.suffixes[sig] ||= { n: 0, fetchSum: 0 });
-      e.fetchSum += (sum - e.fetchSum) / (e.n + 1);
-      e.n++;
+      const e = (s.suffixes[sig] ||= { n: 0, priced: 0, fetchSum: 0, fetchable: true });
+      if (suffix.every((x) => x.resultBytes >= 0)) {                // a fully fetchable occurrence prices the suffix
+        const sum = suffix.reduce((acc, x) => acc + x.resultBytes, 0);
+        e.fetchSum += (sum - e.fetchSum) / (e.priced + 1);
+        e.priced++;
+      } else {
+        e.fetchable = false;                                        // one unserializable result: fetch cannot traverse this suffix
+      }
+      e.n++;                                                        // shape statistics (modal/stability) count every occurrence
       s.complete++;
     }
   }
@@ -279,7 +299,9 @@ export function decide(contBytes: number, key: string, profile: Profile | null, 
   const here = expectedFetch(s, argFeatures);
   let fetchSide = here, how = "greedy: this fetch";
   if (mode === "trajectory" && s.modal !== null && s.stability >= stability) {
-    fetchSide = here + s.suffixes[s.modal].fetchSum;
+    const m = s.suffixes[s.modal];
+    if (!m.fetchable) return { choice: "migrate", why: "trajectory: the suffix holds an unserializable result — fetch cannot traverse it", fetchSide: Infinity };
+    fetchSide = here + m.fetchSum;
     how = `trajectory: this fetch + suffix (stability ${(s.stability * 100).toFixed(0)}%)`;
   } else if (mode === "trajectory") {
     how = s.complete ? `greedy: suffix unstable (${(s.stability * 100).toFixed(0)}% < ${(stability * 100).toFixed(0)}%)` : "greedy: no complete trajectories";

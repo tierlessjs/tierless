@@ -77,6 +77,18 @@ export const resultBytes = (v) => {
 };
 export function makeRecorder({ rate = 0, force = [], sink }) {
     const forced = new Set(force);
+    let dropped = 0;
+    // Sinks are user-written callbacks in every deployment; a sink that throws must not
+    // become a fault injector for exactly the sampled fraction of traffic (a heisencrash
+    // that vanishes when tracing turns off). A throw here would even route through the
+    // pump's error unwinding and could be CAUGHT BY APP CODE as a fake resource failure.
+    // So: swallow and count, never propagate.
+    const emit = (r) => { try {
+        sink(r);
+    }
+    catch {
+        dropped++;
+    } };
     const top = (stack) => stack[stack.length - 1];
     const flagOf = (stack) => {
         const f = stack.length && stack[0].__trace;
@@ -99,7 +111,7 @@ export function makeRecorder({ rate = 0, force = [], sink }) {
             if (!f)
                 return;
             const { fn, pc } = top(stack);
-            sink({ t: "res", id: f.id, hop: f.hop, seq: f.seq++, fn, pc, resource: req.name, tier: req.tier, argFeatures: argFeatures(req.args), resultBytes: resultBytes(result) });
+            emit({ t: "res", id: f.id, hop: f.hop, seq: f.seq++, fn, pc, resource: req.name, tier: req.tier, argFeatures: argFeatures(req.args), resultBytes: resultBytes(result) });
         },
         ship(stack, req, encode, choice) {
             const f = flagOf(stack);
@@ -110,14 +122,15 @@ export function makeRecorder({ rate = 0, force = [], sink }) {
             f.hop++;
             f.seq++; // bump BEFORE encoding: the wire carries the advanced counters, so the peer's records sort after this one
             const wire = encode();
-            sink({ t: "hop", id: f.id, hop, seq, fn, pc, resource: req.name, contBytes: wire.length, ...(choice ? { choice } : {}) });
+            emit({ t: "hop", id: f.id, hop, seq, fn, pc, resource: req.name, contBytes: wire.length, ...(choice ? { choice } : {}) });
             return wire;
         },
         end(flag, outcome) {
             if (!flag)
                 return;
-            sink({ t: "end", id: flag.id, hop: flag.hop, seq: flag.seq++, outcome });
+            emit({ t: "end", id: flag.id, hop: flag.hop, seq: flag.seq++, outcome });
         },
+        get dropped() { return dropped; },
     };
 }
 /** Collect records in memory (tests, small runs). Real deployments pass their own sink (e.g. JSONL appends). */
@@ -172,10 +185,16 @@ export function buildProfile(records, bundle) {
             const s = site(siteKey(r.fn, r.pc, r.resource));
             const suffix = touches.slice(i + 1).filter((x) => x.tier === r.tier); // future SAME-tier resources
             const sig = suffix.map((x) => siteKey(x.fn, x.pc, x.resource)).join(">");
-            const sum = suffix.reduce((acc, x) => acc + Math.max(0, x.resultBytes), 0);
-            const e = (s.suffixes[sig] ||= { n: 0, fetchSum: 0 });
-            e.fetchSum += (sum - e.fetchSum) / (e.n + 1);
-            e.n++;
+            const e = (s.suffixes[sig] ||= { n: 0, priced: 0, fetchSum: 0, fetchable: true });
+            if (suffix.every((x) => x.resultBytes >= 0)) { // a fully fetchable occurrence prices the suffix
+                const sum = suffix.reduce((acc, x) => acc + x.resultBytes, 0);
+                e.fetchSum += (sum - e.fetchSum) / (e.priced + 1);
+                e.priced++;
+            }
+            else {
+                e.fetchable = false; // one unserializable result: fetch cannot traverse this suffix
+            }
+            e.n++; // shape statistics (modal/stability) count every occurrence
             s.complete++;
         }
     }
@@ -219,7 +238,10 @@ export function decide(contBytes, key, profile, { fetchable = true, mode = "traj
     const here = expectedFetch(s, argFeatures);
     let fetchSide = here, how = "greedy: this fetch";
     if (mode === "trajectory" && s.modal !== null && s.stability >= stability) {
-        fetchSide = here + s.suffixes[s.modal].fetchSum;
+        const m = s.suffixes[s.modal];
+        if (!m.fetchable)
+            return { choice: "migrate", why: "trajectory: the suffix holds an unserializable result — fetch cannot traverse it", fetchSide: Infinity };
+        fetchSide = here + m.fetchSum;
         how = `trajectory: this fetch + suffix (stability ${(s.stability * 100).toFixed(0)}%)`;
     }
     else if (mode === "trajectory") {

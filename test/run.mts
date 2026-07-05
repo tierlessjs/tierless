@@ -48,6 +48,7 @@ const cases: Case[] = [
   { file: "test/e2e/policy-live.mts",    needs: ["informed FETCH", "priced migrate vs fetch from real bytes and steered the socket"] },
   { file: "test/probes/trace.mts",       needs: ["run-level sampling, a wire-borne trace flag with one cross-tier order, truncation-safe profiles with per-feature size models, and a stability-gated trajectory rule over a greedy floor"] },
   { file: "test/e2e/trio-live.mts",      needs: ["traces recorded through the real host priced fetchA's whole suffix and flipped a locally-losing hop", "the hash gate refuses stale history"] },
+  { file: "test/e2e/sink-throw.mts",     needs: ["a throwing sink is contained and counted: observability never changes the observed run's outcome"] },
   { file: "test/e2e/delta-live.mts",     needs: ["bounce + min(delta,full) + §5 excision + deref all compose, end to end"] },
 ];
 

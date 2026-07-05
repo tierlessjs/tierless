@@ -111,6 +111,18 @@ const END = (id: string, seq: number): TraceRecord => ({ t: "end", id, hop: 1, s
   check("an unserializable result does not skew the site mean", opaque.sites[siteKey("Go", 4, "api.a")].meanSize === 7000);
   check("a site with only unserializable results stays cold", decide(50, siteKey("Go", 4, "api.x"), opaque).why.includes("cold"));
 
+  // a SUFFIX holding an unserializable result cannot be traversed by fetching at all —
+  // pricing it at 0 would bias toward fetch, the wrong direction. It must force migrate.
+  const unfetchable = buildProfile([
+    R("f1", 0, "api.a", ["300"], 7000), R("f1", 1, "api.b", ["300"], -1), END("f1", 2),
+    R("f2", 0, "api.a", ["300"], 7000), R("f2", 1, "api.b", ["300"], 9000), END("f2", 2),
+  ], "cafe0001");
+  const fa = unfetchable.sites[siteKey("Go", 4, "api.a")];
+  check("one unserializable occurrence marks the whole suffix unfetchable; fetchSum means over the priced rest",
+    fa.suffixes[fa.modal!].fetchable === false && fa.suffixes[fa.modal!].fetchSum === 9000 && fa.suffixes[fa.modal!].n === 2, fa.suffixes);
+  const forced = decide(50_000, siteKey("Go", 4, "api.a"), unfetchable, { mode: "trajectory", argFeatures: ["300"] });
+  check("an unfetchable suffix forces MIGRATE however big the continuation", forced.choice === "migrate" && forced.why.includes("cannot traverse"), forced.why);
+
   // the bundle-identity gate
   check("loadProfile accepts the matching bundle", loadProfile(p, "cafe0001") === p);
   check("loadProfile refuses a mismatched bundle (stale = silent misattribution)", loadProfile(p, "cafe0002") === null);

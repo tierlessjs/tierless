@@ -15,6 +15,8 @@
 import { makePump, initialStack } from "./runtime.mjs";
 import { encodeWireBinary, decodeWireBinary, encodeArgs, decodeArgs } from "./wire-binary.mjs";
 import { makeRecorder, type RecorderOpts, type Recorder } from "./trace.mjs";
+
+const isRecorder = (t: RecorderOpts | Recorder): t is Recorder => typeof (t as Recorder).ship === "function";
 import type { Bundle, Frame, Exec, ResourceRequest, Peer, Host, HostReply, Pump } from "./types.mjs";
 
 export type { Bundle, Frame, MachineResult, ResourceRequest, Exec, Peer, Host } from "./types.mjs";
@@ -30,14 +32,15 @@ export interface MakeHostOpts {
   owns?: (tier: string) => boolean;
   meta?: Record<string, unknown>;
   /** Trace recording (trajectory design §3): head-sampled per run, the flag rides the
-   *  continuation itself (F0.__trace), records stream to the sink. Absent = zero cost. */
-  trace?: RecorderOpts;
+   *  continuation itself (F0.__trace), records stream to the sink. Absent = zero cost.
+   *  Pass a pre-built Recorder to keep a handle on it (e.g. its `dropped` counter). */
+  trace?: RecorderOpts | Recorder;
 }
 
 export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }: MakeHostOpts): Host {
   const pump = makePump(bundle);
   const ownsHere: (tier: string) => boolean = owns || ((t) => t === tier);
-  const rec: Recorder | null = trace ? makeRecorder(trace) : null;
+  const rec: Recorder | null = trace ? (isRecorder(trace) ? trace : makeRecorder(trace)) : null;
 
   // A traced run measures every resource touch (site + argument features + result size —
   // the ordered sequence the trajectory profile is built from). Only when a recorder is

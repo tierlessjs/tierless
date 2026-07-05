@@ -77,6 +77,9 @@ export interface Recorder {
     /** Run completion. Takes the FLAG (capture it with flagOf BEFORE pumping — a finished
      *  pump has popped every frame, so the stack no longer carries it). */
     end(flag: TraceFlag | null, outcome: "done" | "error"): void;
+    /** Records dropped because the sink threw. Observability must never change the observed
+     *  run's outcome, so a sink error is swallowed and counted, never propagated. */
+    readonly dropped: number;
 }
 export interface RecorderOpts {
     rate?: number;
@@ -101,10 +104,16 @@ export interface SiteProfile {
     sizes: Record<string, SizeBucket>;
     contMean: number;
     contN: number;
-    /** Ordered same-tier suffix distributions observed after this site (complete runs only). */
+    /** Ordered same-tier suffix distributions observed after this site (complete runs only).
+     *  fetchable=false marks a suffix that contained an unserializable result: the fetch path
+     *  cannot traverse it AT ALL, so it must never be priced (a 0 would bias toward fetch —
+     *  the wrong direction). fetchSum is the mean over the `priced` (fully fetchable)
+     *  occurrences; n counts every occurrence (the shape statistics behind modal/stability). */
     suffixes: Record<string, {
         n: number;
+        priced: number;
         fetchSum: number;
+        fetchable: boolean;
     }>;
     modal: string | null;
     stability: number;

@@ -15,10 +15,11 @@
 import { makePump, initialStack } from "./runtime.mjs";
 import { encodeWireBinary, decodeWireBinary, encodeArgs, decodeArgs } from "./wire-binary.mjs";
 import { makeRecorder } from "./trace.mjs";
+const isRecorder = (t) => typeof t.ship === "function";
 export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }) {
     const pump = makePump(bundle);
     const ownsHere = owns || ((t) => t === tier);
-    const rec = trace ? makeRecorder(trace) : null;
+    const rec = trace ? (isRecorder(trace) ? trace : makeRecorder(trace)) : null;
     // A traced run measures every resource touch (site + argument features + result size —
     // the ordered sequence the trajectory profile is built from). Only when a recorder is
     // configured does exec get wrapped; the wrapper itself no-ops on untraced stacks.
