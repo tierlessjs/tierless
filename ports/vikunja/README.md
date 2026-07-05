@@ -47,6 +47,17 @@ whole workflow; preflights disappear (same-origin socket); the avatar refetches 
 served by the interaction memo (fetched once at page load, before the measured window —
 in the stock build every rerender refetched it for real).
 
+## Correctness — their own suite as the judge
+
+The ported build passes all 59 of their project-directory Playwright specs — the ones
+that exercise the shimmed routes hardest — in the same wall time as stock (2.0 vs 2.1
+min). The suite caught three real adapter bugs on the way (each fixed in tierless, not
+worked around): stale caches after mutations (writes now invalidate), response-header
+semantics (x-max-permission gates UI capability, x-pagination-* drives paging — HTTP now
+migrates as {status, headers, body} envelopes), and a test-infrastructure bug where a
+zombie preview process served pre-fix code to two diagnostic runs (boot now kills
+process groups).
+
 ## Caveats (read before quoting)
 
 - Latency is MODELED from measured trips/bytes (declared RTT/bandwidth — CDP throttling
