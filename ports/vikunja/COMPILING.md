@@ -31,7 +31,8 @@ their real files through the transform; this file tracks what it finds.
 
 ## Status
 
-- Patch 0005 (axios adapter at the I/O bottom) applied; suite parity run pending —
-  the adapter must be behaviorally invisible before any compilation lands.
+- Patch 0005 (axios adapter at the I/O bottom) CERTIFIED behaviorally invisible:
+  full suite 196/199, identical failure set to stock (the two drag flakes upstream
+  retries for + Dex), zero session-socket traffic, same wall time (8.5 min).
 - Patches 0001/0002 (route workflow + shim) removed from the recipe: superseded.
   The measured shadow-port results live in git history and the README's record.
