@@ -80,12 +80,25 @@ const DEFAULT_RESOURCES = { api: "server", commit: "browser" };
 let TIER_OF = { ...DEFAULT_RESOURCES };
 function allowlist(ast) {
     traverse(ast, { CallExpression(p) {
+            // class bodies are handled per-method by compileClassMethods (which re-runs this pass
+            // on the isolated method); an uncompiled method must keep its RAW calls, not yields
+            if (p.findParent((q) => q.isClassBody()))
+                return;
             const c = p.node.callee;
             let tier = null, name = null;
             const args = p.node.arguments;
             if (t.isMemberExpression(c) && t.isIdentifier(c.object) && TIER_OF[c.object.name] && t.isIdentifier(c.property)) {
                 tier = TIER_OF[c.object.name];
                 name = c.object.name + "." + c.property.name; // api.getTasks(...)
+            }
+            else if (t.isMemberExpression(c) && t.isMemberExpression(c.object) && t.isIdentifier(c.property)
+                && (t.isThisExpression(c.object.object) || (t.isIdentifier(c.object.object) && c.object.object.name === "__self"))
+                && t.isIdentifier(c.object.property) && TIER_OF["this." + c.object.property.name]) {
+                // this.http.get(...) — an instance-held resource (config key "this.http"). The
+                // receiver is dropped from the request: the namespace is bound per tier by the
+                // exec, not carried as data (the instance itself never crosses for the call).
+                tier = TIER_OF["this." + c.object.property.name];
+                name = c.object.property.name + "." + c.property.name;
             }
             else if (t.isIdentifier(c) && TIER_OF[c.name]) {
                 tier = TIER_OF[c.name];
@@ -99,7 +112,11 @@ function allowlist(ast) {
                 return; // (tier and name are always set together — this just proves it to tsc)
             const y = t.yieldExpression(t.callExpression(t.identifier("R"), [t.stringLiteral(tier), t.stringLiteral(name), ...args]));
             y.loc = p.node.loc; // keep the call site for analyze()/--source-map reporting
-            p.replaceWith(y);
+            // real code writes `await this.http.get(...)` — the await IS the suspension, absorb it
+            if (p.parentPath.isAwaitExpression())
+                p.parentPath.replaceWith(y);
+            else
+                p.replaceWith(y);
             // no p.skip(): keep traversing so nested tier calls in the args (e.g. api.f(api.g())) get rewritten too
         } });
 }
@@ -1191,6 +1208,84 @@ function relativeImports(rest) {
     }
     return [...new Set(specs)];
 }
+// ---- top-level class methods as PROGRAMS ------------------------------------------------
+// The unit real apps actually write is the class method (service layers), so each method
+// of a top-level named class that makes tier calls compiles into a PROGRAM named
+// Cls$method, with the receiver as frame arg 0 (`this` -> __self, arrow-aware). The kept
+// class's method becomes a stub routing through the module's bound method host
+// (__bindTierlessMethods) and falling back to the untouched original — an unbound bundle
+// behaves stock, byte for byte. Per-method and graceful: a method the compiler can't
+// carry stays original and is reported in meta.methods with the reason.
+function compileClassMethods(ast, progs, meta) {
+    for (const top of ast.program.body) {
+        const cls = t.isClassDeclaration(top) ? top
+            : (t.isExportNamedDeclaration(top) || t.isExportDefaultDeclaration(top)) && t.isClassDeclaration(top.declaration) ? top.declaration
+                : null;
+        if (!cls)
+            continue;
+        if (!cls.id) {
+            meta.methods.push({ class: "(default)", method: "*", program: null, error: "anonymous default-export class — name it to compile its methods" });
+            continue;
+        }
+        const clsName = cls.id.name;
+        for (const m of [...cls.body.body]) {
+            if (!t.isClassMethod(m) || m.kind !== "method" || m.static || m.computed || !t.isIdentifier(m.key))
+                continue;
+            const mName = m.key.name;
+            const progName = clsName + "$" + mName;
+            try {
+                const prog = lowerMethod(clsName, mName, m, progName);
+                if (!prog)
+                    continue; // no tier calls — stays a plain method
+                progs.push(prog);
+                meta.programs.push(progName);
+                meta.methods.push({ class: clsName, method: mName, program: progName });
+                // keep the original under a mangled name; the visible method becomes the stub
+                cls.body.body.push(t.classMethod("method", t.identifier("__tierless_orig_" + mName), m.params, m.body, false, false, false, m.async));
+                m.params = []; // stub reads `arguments`; original params would re-evaluate defaults
+                m.body = t.blockStatement([t.returnStatement(t.conditionalExpression(t.binaryExpression("===", t.unaryExpression("typeof", t.identifier("__TIERLESS_METHOD__")), t.stringLiteral("function")), t.callExpression(t.identifier("__TIERLESS_METHOD__"), [t.stringLiteral(progName), t.thisExpression(),
+                        t.callExpression(t.memberExpression(t.identifier("Array"), t.identifier("from")), [t.identifier("arguments")])]), t.callExpression(t.memberExpression(t.thisExpression(), t.identifier("__tierless_orig_" + mName)), [t.spreadElement(t.identifier("arguments"))])))]);
+            }
+            catch (e) {
+                meta.methods.push({ class: clsName, method: mName, program: null, error: e.message.split("\n")[0] });
+            }
+        }
+    }
+}
+// Lower ONE method in isolation: synthesize `function Cls$m(__self, ...params) { body }`
+// in its own File, rewrite `this` (through arrows — they share the method's this; not
+// through nested functions — they have their own), run the allow-list on it (which also
+// absorbs `await` around tier calls), and reject what can't migrate with a precise
+// reason. Returns null when the method makes no tier calls at all.
+function lowerMethod(clsName, mName, m, progName) {
+    const fnNode = t.functionDeclaration(t.identifier(progName), [t.identifier("__self"), ...m.params.map((x) => t.cloneNode(x, true))], t.cloneNode(m.body, true));
+    const file = t.file(t.program([fnNode]));
+    allowlist(file); // recognizes both this.<ns> and __self.<ns>, so it can run before the this-rewrite
+    let yields = 0;
+    traverse(file, { YieldExpression(yp) { if (isResYield(yp.node))
+            yields++; } });
+    if (!yields)
+        return null; // no tier calls: not a compilation candidate, no report either
+    traverse(file, { Super(sp) {
+            throw new Error(`tierless: ${clsName}.${mName} uses super (line ${sp.node.loc?.start.line ?? "?"}) — super dispatch can't be carried by the frame yet; the method stays uncompiled`);
+        } });
+    traverse(file, { ThisExpression(tp) {
+            let f = tp.getFunctionParent(); // arrows share the enclosing this
+            while (f && f.isArrowFunctionExpression())
+                f = f.getFunctionParent();
+            if (f && f.node === fnNode)
+                tp.replaceWith(t.identifier("__self"));
+        } });
+    traverse(file, { AwaitExpression(ap) {
+            throw new Error(`tierless: ${clsName}.${mName} awaits a non-resource value (line ${ap.node.loc?.start.line ?? "?"}) — a pending native promise can't migrate; the method stays uncompiled`);
+        } });
+    let path = null;
+    traverse(file, { FunctionDeclaration(p) { if (p.node.id?.name === progName) {
+            path = p;
+            p.stop();
+        } } });
+    return lower(path);
+}
 function compile(src, preamble) {
     const ast = parser.parse(src, { sourceType: "module" });
     allowlist(ast);
@@ -1200,7 +1295,7 @@ function compile(src, preamble) {
     fnSites = {};
     const { fnPaths, rest, susp } = collectProgram(ast);
     suspSet = susp;
-    const pure = [], progs = [], meta = { programs: [], exported: [], pure: [], imports: relativeImports(rest) };
+    const pure = [], progs = [], meta = { programs: [], exported: [], pure: [], imports: relativeImports(rest), methods: [] };
     for (const [name, { p, exported }] of fnPaths) { // pure single-tier fns run wholesale (lower() handles suspendable ones)
         if (suspSet.has(name)) {
             progs.push(lower(p));
@@ -1215,6 +1310,7 @@ function compile(src, preamble) {
             meta.pure.push(name);
         } // a pure helper can still mutate continuation state
     }
+    compileClassMethods(ast, progs, meta); // class methods with tier calls (their nodes sit in `rest` — the stub swap lands in `kept`)
     const head = preamble + (TRACK_WRITES ? "\n" + TRACK_PREAMBLE : "");
     const kept = rest.length ? rest.map(gen).join("\n") + "\n" : ""; // imports / top-level state the module declared
     // for-of/for-in and object-rest emit a tiny pure helper — but ONLY when a source actually uses
@@ -1308,6 +1404,11 @@ export function __unwind(stack, err) {
   while (stack.length) { const tpc = __dispatch(stack[stack.length - 1], err); if (tpc != null) { stack[stack.length - 1].pc = tpc; return true; } stack.pop(); }
   return false;
 }
+// Real-code seam: compiled class-method stubs route through this binding when a page or
+// runtime set it (a function (program, thisArg, args) -> Promise); unbound, every stub
+// falls back to the kept original method — the bundle behaves stock.
+export let __TIERLESS_METHOD__ = null;
+export function __bindTierlessMethods(fn) { __TIERLESS_METHOD__ = fn; }
 // Single-tier driver: step the machine, push sub-frames for calls, stop at every resource
 // request. The two-tier runtime (../runtime.mjs) drives PROGRAMS directly and only stops
 // at resources THIS tier doesn't own; this local driver keeps the bundle runnable alone.

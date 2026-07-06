@@ -30,12 +30,13 @@ for (const rel of TARGETS) {
   const src = '"use tierless";\n' + js;
   process.stdout.write(`\n== ${rel} (${js.split("\n").length} lines after type-strip) ==\n`);
   try {
-    const { meta } = compile(src, { filename: rel });
-    console.log(`  compiles: programs=[${meta.programs.join(", ")}] pure=[${meta.pure.slice(0, 8).join(", ")}${meta.pure.length > 8 ? ", …" : ""}]`);
+    const { meta } = compile(src, { filename: rel, resources: { "this.http": "server" } });
+    console.log(`  programs=[${meta.programs.join(", ") || "-"}]`);
+    for (const m of meta.methods) console.log(`  ${m.program ? "compiled " : "KEPT     "} ${m.class}.${m.method}${m.error ? " — " + m.error : ""}`);
     try {
-      const report = analyze(src, { filename: rel });
+      const report = analyze(src, { filename: rel, resources: { "this.http": "server" } });
       for (const f of report.functions.filter((f: { suspendable: boolean }) => f.suspendable))
-        console.log(`  suspendable: ${f.name} (${f.suspensions.length} suspension site(s))`);
+        console.log(`  suspendable fn: ${f.name} (${f.suspensions.length} suspension site(s))`);
     } catch { /* analyze is best-effort on top of a successful compile */ }
   } catch (e) {
     console.log(`  BLOCKED: ${(e as Error).message.split("\n")[0]}`);

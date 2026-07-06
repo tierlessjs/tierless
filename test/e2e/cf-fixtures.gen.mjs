@@ -1071,6 +1071,11 @@ export function __unwind(stack, err) {
   while (stack.length) { const tpc = __dispatch(stack[stack.length - 1], err); if (tpc != null) { stack[stack.length - 1].pc = tpc; return true; } stack.pop(); }
   return false;
 }
+// Real-code seam: compiled class-method stubs route through this binding when a page or
+// runtime set it (a function (program, thisArg, args) -> Promise); unbound, every stub
+// falls back to the kept original method — the bundle behaves stock.
+export let __TIERLESS_METHOD__ = null;
+export function __bindTierlessMethods(fn) { __TIERLESS_METHOD__ = fn; }
 // Single-tier driver: step the machine, push sub-frames for calls, stop at every resource
 // request. The two-tier runtime (../runtime.mjs) drives PROGRAMS directly and only stops
 // at resources THIS tier doesn't own; this local driver keeps the bundle runnable alone.
@@ -1085,4 +1090,4 @@ export function run(stack) {
   }
 }
 export const start = (fn, args = []) => run([{ fn, pc: 0, args }]);
-export const BUNDLE_HASH = "5c7d9e88";
+export const BUNDLE_HASH = "c1173a85";

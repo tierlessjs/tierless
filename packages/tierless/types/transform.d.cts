@@ -15,6 +15,14 @@ interface CompileMeta {
     pure: string[];
     /** Top-level relative import/export-from specifiers, in source form (for server-emit rewriting). */
     imports: string[];
+    /** Per-method outcome for top-level classes: compiled into `program`, or kept
+     *  original with the blocking `error`. Methods without tier calls aren't listed. */
+    methods: Array<{
+        class: string;
+        method: string;
+        program: string | null;
+        error?: string;
+    }>;
 }
 interface FunctionReport {
     name: string;

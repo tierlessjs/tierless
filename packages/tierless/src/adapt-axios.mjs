@@ -15,7 +15,9 @@ function serializeParams(params) {
     }
     return q.toString();
 }
-const pinned = (c) => !!(c.onUploadProgress || c.onDownloadProgress || c.responseType === "blob" || c.responseType === "stream" || c.responseType === "arraybuffer");
+const pinned = (c) => !!(c.onUploadProgress || c.onDownloadProgress || c.responseType === "blob" || c.responseType === "stream" || c.responseType === "arraybuffer"
+    || (typeof FormData !== "undefined" && c.data instanceof FormData)
+    || (typeof Blob !== "undefined" && c.data instanceof Blob));
 export function axiosAdapter({ exec, fallback }) {
     return async function tierlessAxiosAdapter(config) {
         if (pinned(config)) {

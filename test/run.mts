@@ -51,6 +51,7 @@ const cases: Case[] = [
   { file: "test/e2e/sink-throw.mts",     needs: ["a throwing sink is contained and counted: observability never changes the observed run's outcome"] },
   { file: "test/e2e/delta-live.mts",     needs: ["bounce + min(delta,full) + §5 excision + deref all compose, end to end"] },
   { file: "test/probes/axios-adapter.mts", needs: ["all adapter translations hold"] },
+  { file: "test/probes/method-compile.mts", needs: ["class methods compile, park, and fall back correctly"] },
 ];
 
 let failed = 0;
