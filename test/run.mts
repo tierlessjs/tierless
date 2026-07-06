@@ -50,6 +50,7 @@ const cases: Case[] = [
   { file: "test/e2e/trio-live.mts",      needs: ["traces recorded through the real host priced fetchA's whole suffix and flipped a locally-losing hop", "the hash gate refuses stale history"] },
   { file: "test/e2e/sink-throw.mts",     needs: ["a throwing sink is contained and counted: observability never changes the observed run's outcome"] },
   { file: "test/e2e/delta-live.mts",     needs: ["bounce + min(delta,full) + §5 excision + deref all compose, end to end"] },
+  { file: "test/probes/axios-adapter.mts", needs: ["all adapter translations hold"] },
 ];
 
 let failed = 0;

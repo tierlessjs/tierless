@@ -2,7 +2,7 @@
   "name": "tierless",
   "version": "0.2.1",
   "type": "module",
-  "description": "Tierless continuation migration — one program that runs across browser and server, with the runtime moving live execution between tiers as serializable continuations.",
+  "description": "Tierless continuation migration \u2014 one program that runs across browser and server, with the runtime moving live execution between tiers as serializable continuations.",
   "keywords": [
     "continuation",
     "migration",
@@ -99,6 +99,10 @@
     "./adapt": {
       "types": "./types/adapt.d.mts",
       "default": "./src/adapt.mjs"
+    },
+    "./adapt-axios": {
+      "types": "./types/adapt-axios.d.mts",
+      "default": "./src/adapt-axios.mjs"
     }
   },
   "bin": {
