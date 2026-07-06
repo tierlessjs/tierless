@@ -15,7 +15,7 @@
 import { makeHost, answerWith } from "./host.mjs";
 import { makePeer, wsPort, onEvent } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
-import { httpResources, httpPins } from "./adapt.mjs";
+import { httpResources, httpPins, crossHttpRequest } from "./adapt.mjs";
 import type { Bundle, Exec, Host } from "./types.mjs";
 
 const defaultUrl = (): string => {
@@ -39,7 +39,7 @@ export interface Connection {
   /** Run entry(...args) HERE; foreign resources are fetched over the session (the frame
    *  never ships — the compiled-class-method path, see bindMethods). opts.exec serves
    *  pinned requests on this tier; opts.pins adds the resource family's declared pins. */
-  runLocal(entry: string, args?: unknown[], module?: string, opts?: { exec?: Exec; pins?: (req: import("./types.mjs").ResourceRequest) => boolean }): Promise<unknown>;
+  runLocal(entry: string, args?: unknown[], module?: string, opts?: { exec?: Exec; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest) => import("./types.mjs").ResourceRequest | null }): Promise<unknown>;
   close(): void;
 }
 
@@ -73,7 +73,7 @@ export function connect({ url, exec, bundle, tier = "browser" }: ConnectOpts = {
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
       return h.call(peer, entry, args);
     },
-    runLocal: async (entry: string, args: unknown[] = [], module: string = "", opts?: { exec?: Exec; pins?: (req: import("./types.mjs").ResourceRequest) => boolean }): Promise<unknown> => {
+    runLocal: async (entry: string, args: unknown[] = [], module: string = "", opts?: { exec?: Exec; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest) => import("./types.mjs").ResourceRequest | null }): Promise<unknown> => {
       await ready;
       const h = hosts.get(module || "");
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
@@ -120,9 +120,16 @@ export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (pro
     conn.register(module, bundle);
     // pinned requests (declared: blob/stream responses; owned values: callbacks,
     // FormData) run on the instance's OWN http — the same object the uncompiled method
-    // would have used — so uploads and downloads behave stock while plain-data requests
-    // ride the session
+    // would have used — so uploads and downloads behave stock. Crossing requests are
+    // prepared by crossHttpRequest: the instance's request-interceptor chain (app code —
+    // auth headers, model→DTO transforms, casing) runs HERE, and the post-chain wire
+    // config crosses — exactly what axios would hand its adapter. An async chain
+    // returns null and the request pins to the instance instead.
     const own = (self as { http?: Record<string, unknown> } | null)?.http;
-    return conn.runLocal(prog, [self, ...args], module, own ? { exec: httpResources(own), pins: httpPins } : { pins: httpPins });
+    return conn.runLocal(prog, [self, ...args], module, {
+      pins: httpPins,
+      map: (req) => crossHttpRequest(own as Parameters<typeof crossHttpRequest>[0], req),
+      ...(own ? { exec: httpResources(own) } : {}),
+    });
   });
 }

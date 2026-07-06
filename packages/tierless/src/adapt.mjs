@@ -27,6 +27,13 @@ import { serializeParams } from "./adapt-axios.mjs";
 export function twinHttp(baseUrl, { token, headers = {}, fetchImpl = fetch } = {}) {
     const base = baseUrl.replace(/\/$/, "");
     const call = async (method, url, data, config = {}) => {
+        // absolute URLs (the browser-side instance's baseURL applied by bindMethods) are
+        // RE-HOMED: path + query onto the twin's own base — the gateway reaches the same
+        // backend under its local address, whatever origin the page used
+        if (/^https?:\/\//.test(url)) {
+            const u = new URL(url);
+            url = u.pathname + u.search;
+        }
         let path = url.startsWith("/") ? base + url : url;
         if (config.params && Object.keys(config.params).length)
             path += (path.includes("?") ? "&" : "?") + serializeParams(config.params);
@@ -85,6 +92,54 @@ export function httpPins(req) {
     const rt = cfg?.responseType;
     return rt === "blob" || rt === "stream" || rt === "arraybuffer";
 }
+/** Prepare an http.* request for CROSSING: run the instance's own request-interceptor
+ *  chain (app code — auth headers, model→DTO transforms, casing) right here, where it
+ *  was written to run, and emit the post-chain wire config — exactly what axios would
+ *  hand its adapter. Returns null when the chain can't run synchronously (an async
+ *  interceptor): the caller pins the request to the local instance, where axios runs
+ *  the chain itself. Interceptors execute in axios's order (reverse registration). */
+export function crossHttpRequest(instance, req) {
+    const m = /^http\.(get|post|put|patch|delete|head|options)$/.exec(req.name);
+    if (!m)
+        return req;
+    const verb = m[1];
+    const hasBody = verb === "post" || verb === "put" || verb === "patch";
+    const [url, a1, a2] = req.args;
+    const extra = (hasBody ? a2 : a1);
+    let config = {
+        method: verb, url,
+        baseURL: instance?.defaults?.baseURL,
+        headers: { ...(instance?.defaults?.headers?.common || {}) },
+        ...(hasBody ? { data: a1 } : {}),
+        ...(extra || {}),
+    };
+    const handlers = [];
+    instance?.interceptors?.request?.forEach((h) => handlers.push(h));
+    for (const h of handlers.reverse()) { // axios runs request interceptors LIFO
+        if (h.runWhen && !h.runWhen(config))
+            continue;
+        const r = h.fulfilled ? h.fulfilled(config) : config;
+        if (r && typeof r.then === "function")
+            return null; // async chain: pin to the instance
+        config = r || config;
+    }
+    const cUrl = String(config.url || url);
+    const abs = /^https?:\/\//.test(cUrl) ? cUrl : (config.baseURL ? String(config.baseURL).replace(/\/$/, "") + cUrl : cUrl);
+    const rawHeaders = config.headers?.toJSON ? config.headers.toJSON() : { ...(config.headers || {}) };
+    const headers = {};
+    for (const [k, v] of Object.entries(rawHeaders))
+        if (v !== undefined && v !== null && typeof v !== "function" && typeof v !== "object")
+            headers[k.toLowerCase()] = String(v);
+    const cfg = { headers };
+    if (config.params)
+        cfg.params = wireJson(config.params);
+    return { ...req, args: hasBody ? [abs, wireJson(config.data), cfg] : [abs, cfg] };
+}
+// What crosses is EXACTLY axios's JSON pass: toJSON honored (models serialize
+// themselves), Dates -> ISO strings, undefined and functions dropped — the wire body
+// is byte-identical to what the stock adapter would have sent. Never applied to
+// pinned requests (FormData/Blob run locally and never reach here).
+const wireJson = (v) => (v === undefined || v === null ? v : JSON.parse(JSON.stringify(v)));
 export function httpResources(instance) {
     return async (req) => {
         const m = /^http\.(get|post|put|patch|delete|head|options|request)$/.exec(req.name);

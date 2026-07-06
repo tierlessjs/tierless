@@ -72,7 +72,7 @@ export interface Host {
    *  and the path compiled class methods run on. A PINNED request — the family's
    *  declared semantics (opts.pins) or args closing over tier-owned values (callbacks,
    *  host objects) — executes here through opts.exec instead of crossing. */
-  runLocal(peer: Peer, entry: string, args?: unknown[], opts?: { exec?: Exec; pins?: (req: ResourceRequest) => boolean }): Promise<unknown>;
+  runLocal(peer: Peer, entry: string, args?: unknown[], opts?: { exec?: Exec; pins?: (req: ResourceRequest) => boolean; map?: (req: ResourceRequest) => ResourceRequest | null }): Promise<unknown>;
   handleStart(payload: any, bin: Uint8Array | null): Promise<{ obj: HostReply; bin?: Uint8Array }>;
   handleResume(payload: any, bin: Uint8Array | null): Promise<{ obj: HostReply; bin?: Uint8Array }>;
   /** Serve one fetched resource for a peer's runLocal. */

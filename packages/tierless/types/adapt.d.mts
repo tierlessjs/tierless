@@ -46,5 +46,27 @@ export interface RestResourcesOpts {
  *  callbacks act on live UI. Serializable configs that no ownership scan could flag.
  *  (Callbacks and FormData/Blob values are caught by the host's generic scan.) */
 export declare function httpPins(req: ResourceRequest): boolean;
+/** Prepare an http.* request for CROSSING: run the instance's own request-interceptor
+ *  chain (app code — auth headers, model→DTO transforms, casing) right here, where it
+ *  was written to run, and emit the post-chain wire config — exactly what axios would
+ *  hand its adapter. Returns null when the chain can't run synchronously (an async
+ *  interceptor): the caller pins the request to the local instance, where axios runs
+ *  the chain itself. Interceptors execute in axios's order (reverse registration). */
+export declare function crossHttpRequest(instance: {
+    defaults?: {
+        baseURL?: string;
+        headers?: {
+            common?: Record<string, unknown>;
+        };
+    };
+    interceptors?: {
+        request?: {
+            forEach: (fn: (h: {
+                fulfilled?: (c: unknown) => unknown;
+                runWhen?: (c: unknown) => boolean;
+            }) => void) => void;
+        };
+    };
+} | null | undefined, req: ResourceRequest): ResourceRequest | null;
 export declare function httpResources(instance: Record<string, unknown>): Exec;
 export declare function restResources(baseUrl: string, { token, headers, fetchImpl, envelopeErrors }?: RestResourcesOpts): Exec;

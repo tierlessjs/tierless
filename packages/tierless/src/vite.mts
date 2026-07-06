@@ -284,7 +284,11 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
           const rest = restResources(apiUrl, { token });
           // the twin of the app's own axios instance: http.* from compiled class methods
           const twin = httpResources(twinHttp(apiUrl, { token }));
-          return { exec: (r) => (r.name.startsWith("http.") ? twin(r) : rest(r)) };
+          const log = !!process.env.TIERLESS_LOG_EXEC;
+          return { exec: (r) => {
+            if (log) console.log("[tierless exec]", r.name, JSON.stringify(r.args).slice(0, 3000));
+            return r.name.startsWith("http.") ? twin(r) : rest(r);
+          } };
         },
       });
     },

@@ -17,6 +17,7 @@ export interface Connection {
     runLocal(entry: string, args?: unknown[], module?: string, opts?: {
         exec?: Exec;
         pins?: (req: import("./types.mjs").ResourceRequest) => boolean;
+        map?: (req: import("./types.mjs").ResourceRequest) => import("./types.mjs").ResourceRequest | null;
     }): Promise<unknown>;
     close(): void;
 }

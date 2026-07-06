@@ -132,7 +132,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }) {
         // (No trace recording yet: the recorder prices shipped stacks; fetch-hop records land
         // with the §6 decide-loop integration.)
         runLocal: async (peer, entry, args = [], opts = {}) => {
-            const { exec: overrideExec, pins } = opts;
+            const { exec: overrideExec, pins, map } = opts;
             const localExec = overrideExec || exec;
             const stack = initialStack(entry, args);
             let request = null;
@@ -149,18 +149,39 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }) {
                     return res.value;
                 request = res.request;
                 // pinned = the family's declared semantics (opts.pins) OR args closing over
-                // tier-owned values — executes here, on this run's local exec
-                if ((pins && pins(res.request)) || ownsValues(res.request.args)) {
+                // tier-owned values — executes here on the ORIGINAL request (the local exec is
+                // the app's own instance; it applies its own request-time config exactly once)
+                const localFallback = async () => {
                     try {
-                        carry = { value: await localExec(res.request) };
+                        carry = { value: await localExec(request) };
                     }
                     catch (e) {
                         carry = { error: e };
                     }
+                };
+                if ((pins && pins(request)) || ownsValues(request.args)) {
+                    await localFallback();
                     continue;
                 }
-                const { obj } = await peer.request({ type: "exec", tier: res.request.tier, ...meta }, encodeArgs([res.request.name, res.request.args]));
-                carry = obj.type === "error" ? { error: new Error(obj.message) } : { value: obj.value };
+                // opts.map prepares the CROSSING form — request-time config the compiled path
+                // bypassed (interceptor chains, baseURL); null = the chain can't run here, pin
+                const req = map ? map(request) : request;
+                if (!req) {
+                    await localFallback();
+                    continue;
+                }
+                const { obj } = await peer.request({ type: "exec", tier: req.tier, ...meta }, encodeArgs([req.name, req.args]));
+                if (obj.type === "error") {
+                    const err = new Error(obj.message);
+                    if (obj.response) { // HTTP-semantics failure: app code reads error.response.data
+                        err.response = obj.response;
+                        err.isAxiosError = true;
+                        err.code = obj.response.status >= 500 ? "ERR_BAD_RESPONSE" : "ERR_BAD_REQUEST";
+                    }
+                    carry = { error: err };
+                }
+                else
+                    carry = { value: obj.value };
             }
         },
         // The answering half, exposed as plain handlers so a dispatcher can route by meta.
@@ -172,6 +193,8 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }) {
         },
         handleResume: (payload, bin) => { const { stack, request } = decodeWireBinary(bin); return step(stack, request); },
         // Serve one fetched resource for a peer's runLocal: no stack arrives and none returns.
+        // An HTTP-semantics failure keeps its response (status, headers, body) — app code
+        // reads error.response.data for its own error handling, on either tier.
         handleExec: async (payload, bin) => {
             try {
                 const [name, rargs] = decodeArgs(bin);
@@ -179,7 +202,9 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }) {
                 return { obj: { type: "done", value } };
             }
             catch (e) {
-                return { obj: { type: "error", message: String((e && e.message) || e) } };
+                const r = e?.response;
+                return { obj: { type: "error", message: String((e && e.message) || e),
+                        ...(r ? { response: { status: r.status, statusText: r.statusText ?? "", headers: r.headers ?? {}, data: r.data } } : {}) } };
             }
         },
         // Convenience: answer starts/resumes on a peer when this host is the only one on it.

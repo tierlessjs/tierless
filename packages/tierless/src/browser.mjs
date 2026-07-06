@@ -15,7 +15,7 @@
 import { makeHost, answerWith } from "./host.mjs";
 import { makePeer, wsPort, onEvent } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
-import { httpResources, httpPins } from "./adapt.mjs";
+import { httpResources, httpPins, crossHttpRequest } from "./adapt.mjs";
 const defaultUrl = () => {
     if (typeof location === "undefined")
         throw new Error("tierless: no location — pass { url } (or call actions from the browser)");
@@ -101,9 +101,16 @@ export function bindMethods(bundle, { module = "" } = {}) {
         conn.register(module, bundle);
         // pinned requests (declared: blob/stream responses; owned values: callbacks,
         // FormData) run on the instance's OWN http — the same object the uncompiled method
-        // would have used — so uploads and downloads behave stock while plain-data requests
-        // ride the session
+        // would have used — so uploads and downloads behave stock. Crossing requests are
+        // prepared by crossHttpRequest: the instance's request-interceptor chain (app code —
+        // auth headers, model→DTO transforms, casing) runs HERE, and the post-chain wire
+        // config crosses — exactly what axios would hand its adapter. An async chain
+        // returns null and the request pins to the instance instead.
         const own = self?.http;
-        return conn.runLocal(prog, [self, ...args], module, own ? { exec: httpResources(own), pins: httpPins } : { pins: httpPins });
+        return conn.runLocal(prog, [self, ...args], module, {
+            pins: httpPins,
+            map: (req) => crossHttpRequest(own, req),
+            ...(own ? { exec: httpResources(own) } : {}),
+        });
     });
 }

@@ -85,6 +85,7 @@ export interface Host {
     runLocal(peer: Peer, entry: string, args?: unknown[], opts?: {
         exec?: Exec;
         pins?: (req: ResourceRequest) => boolean;
+        map?: (req: ResourceRequest) => ResourceRequest | null;
     }): Promise<unknown>;
     handleStart(payload: any, bin: Uint8Array | null): Promise<{
         obj: HostReply;
