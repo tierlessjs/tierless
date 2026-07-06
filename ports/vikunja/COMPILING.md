@@ -74,3 +74,19 @@ permessage-deflate on the session socket. The structural fix is the §6 migrate
 arm: batching a method's chain into one crossing — the shadow port's
 amortization, earned back for real code.
 
+## Streaming compression + the wire-truth instrument (2026-07-06)
+
+The session socket now negotiates permessage-deflate WITH context takeover: the
+deflate window persists across messages, so every crossing compresses against the
+whole session's history — cross-request redundancy per-response HTTP gzip cannot
+reach. Measured at the SOCKET (counting TCP relays — CDP reports ws frames
+post-inflate and cannot see this), same warm open-project interaction:
+
+    stock    24.1 KB on the wire (4,491 out / 19,630 in, gzip included)
+    ported    6.2 KB on the wire — the session data path itself: 284 BYTES
+
+Scope: the 284 B is repeat-navigation best case (the window had seen the shape;
+stock re-pays ~20 KB for the same revisit). Instrument correction: the CDP suite
+numbers count inflated payloads and now UNDERCOUNT the ported arm severely —
+socket-level counting is the byte instrument of record from here.
+

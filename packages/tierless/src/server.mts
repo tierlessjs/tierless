@@ -48,7 +48,17 @@ export interface AttachOptions {
 // Mount the session endpoint on an EXISTING http server (Express/Fastify/Vite — anything
 // that emits 'upgrade'); co-mountable with other websocket handlers.
 export function attachTierless(httpServer: HttpServer, { bundle, tier = "server", session, path: wsPath = WS_PATH }: AttachOptions): { close(): void } {
-  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: { threshold: 512 } });   // stock HTTP responses ride gzip; session frames must too, or byte parity is lost by transport choice
+  // STREAMING compression, not per-message: with context takeover the deflate window
+  // persists across messages, so every exec's headers, URL prefixes, and JSON field
+  // names compress against the whole session's history — cross-request redundancy that
+  // per-response HTTP gzip structurally cannot reach. Each message still SYNC_FLUSHes at
+  // its boundary: no buffering latency, only ~µs of CPU. Low threshold on purpose: the
+  // shared window makes even small messages worth compressing.
+  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: {
+    threshold: 64,
+    serverNoContextTakeover: false, clientNoContextTakeover: false,
+    zlibDeflateOptions: { level: 6 },
+  } });
   const resolveBundle = typeof bundle === "function" ? bundle : () => bundle;
 
   const onUpgrade = (req: IncomingMessage, socket: any, head: any): void => {
