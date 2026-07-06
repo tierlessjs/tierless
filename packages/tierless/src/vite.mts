@@ -180,8 +180,11 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
       // needs the exec), which also sidesteps app-alias imports (@/…) in Node.
       const cleanId = id.split("?")[0];
       if (hasCompile && compileTargets.has(path.resolve(cleanId))) {
-        const { transformWithEsbuild } = await import(/* vite is the host process; not a dependency of this package */ "vite" as string) as { transformWithEsbuild: (code: string, id: string, opts: object) => Promise<{ code: string }> };
-        const stripped = await transformWithEsbuild(code, cleanId, { target: "es2022" });
+        // strip types with the APP's own esbuild (resolved from the Vite root, not from
+        // this package — under pnpm's strict linking we can't see the app's deps)
+        const appRequire = createRequire(path.join(root, "package.json"));
+        const esbuild = appRequire("esbuild") as { transformSync: (code: string, opts: object) => { code: string } };
+        const stripped = esbuild.transformSync(code, { loader: "ts", format: "esm", target: "es2022", sourcefile: cleanId });
         const { compile } = require("./transform.cjs");
         const { code: compiled, meta } = compile(stripped.code, { ...compilerOptions, resources: { "this.http": "server", ...(resources || {}) }, filename: id, preamble: "" });
         for (const m of meta.methods) if (m.error) this?.warn?.(`tierless: ${m.class}.${m.method} kept original — ${m.error}`);

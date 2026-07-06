@@ -17,7 +17,8 @@
     "goproxy": "26c77fd8875a11f93f1fbbffcacb9b2493a9ec8df6c0f16d54c00cd8d0569a5e"
   },
   "patches": [
-    "patches/0005-tierless-axios-adapter.patch"
+    "patches/0005-tierless-axios-adapter.patch",
+    "patches/0006-compile-services.patch"
   ],
   "testPatches": [
     "patches/0003-measure-fixture.patch",
