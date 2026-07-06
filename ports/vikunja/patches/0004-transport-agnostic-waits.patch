@@ -198,9 +198,54 @@
  		// Wait for UI to update before reloading
  		await page.waitForTimeout(500)
 
+--- a/frontend/tests/e2e/task/overview.spec.ts
++++ b/frontend/tests/e2e/task/overview.spec.ts
+@@ -94,10 +94,10 @@
+ 
+ 		await page.goto(`/projects/${tasks[0].project_id}/1`)
+ 		await page.waitForLoadState('networkidle')
+-		const taskResponsePromise = page.waitForResponse('**/api/v1/projects/*/tasks')
+ 		await page.locator('.task-add textarea').fill(newTaskTitle)
+ 		await page.locator('.task-add textarea').press('Enter')
+-		await taskResponsePromise
++		// the create crosses the tierless session — the task RENDERED is the completion signal
++		await expect(page.locator('.tasks')).toContainText(newTaskTitle)
+ 		await page.goto('/')
+ 		await page.waitForLoadState('networkidle')
+ 		await expect(page.locator('[data-cy="showTasks"]')).not.toContainText(newTaskTitle)
+@@ -143,14 +143,8 @@
+ 
+ 		await addTaskInput.fill(newTaskTitle)
+ 
+-		// Wait for the task creation request to complete
+-		const createTaskPromise = page.waitForResponse(response =>
+-			response.url().includes('/projects/') &&
+-			response.url().includes('/tasks') &&
+-			response.request().method() === 'PUT',
+-		)
+ 		await addTaskInput.press('Enter')
+-		await createTaskPromise
++		// the create crosses the tierless session; the rendered assertion below is the completion signal
+ 
+ 		// Wait for the task to appear in the list (no due date tasks appear at the bottom)
+ 		await expect(page.locator('[data-cy="showTasks"] .card .task').last()).toContainText(newTaskTitle, {timeout: 10000})
+
 --- a/frontend/tests/e2e/task/task.spec.ts
 +++ b/frontend/tests/e2e/task/task.spec.ts
-@@ -143,43 +143,39 @@
+@@ -131,55 +131,47 @@
+ 		const favoriteButton = page.locator('.tasks .task .favorite').first()
+ 		await expect(favoriteButton).toBeVisible({timeout: 10000})
+ 
+-		// Wait for the favorite API response
+-		const favoritePromise = page.waitForResponse(response =>
+-			response.url().includes('/tasks/') && response.request().method() === 'POST',
+-		)
++		// the mutation crosses the tierless session, not the network — wait on the UI it produces
+ 		await favoriteButton.click()
+-		await favoritePromise
+ 
+ 		// The Favorites menu item should appear after a task is favorited
+ 		await expect(page.locator('.menu-container')).toContainText('Favorites', {timeout: 10000})
  	})
  
  	test('Should show a task description icon if the task has a description', async ({authenticatedPage: page}) => {
@@ -252,7 +297,7 @@
  
  		await expect(page.locator('.tasks .task .project-task-icon .fa-align-left')).not.toBeVisible()
  	})
-@@ -193,11 +189,8 @@
+@@ -193,11 +185,8 @@
  
  		test('provides back navigation to the project in the list view', async ({authenticatedPage: page}) => {
  			const tasks = await TaskFactory.create(1)
@@ -263,5 +308,18 @@
 -			await loadTasksPromise
 +			// locator.click() below auto-waits for the rendered task row (transport-agnostic)
  			await page.locator('.list-view .task').first().locator('a.task-link').click()
+ 			await expect(page.locator('.task-view .back-button')).toBeVisible()
+ 			await page.locator('.task-view .back-button').click()
+@@ -206,11 +195,8 @@
+ 
+ 		test('provides back navigation to the project in the table view', async ({authenticatedPage: page}) => {
+ 			const tasks = await TaskFactory.create(1)
+-			const loadTasksPromise = page.waitForResponse(response =>
+-				response.url().includes('/projects/1/views/') && response.url().includes('/tasks'),
+-			)
+ 			await page.goto('/projects/1/3')
+-			await loadTasksPromise
++			// locator.click() auto-waits for the rendered row (tasks arrive over the tierless session)
+ 			await page.locator('tbody tr').first().locator('a').first().click()
  			await expect(page.locator('.task-view .back-button')).toBeVisible()
  			await page.locator('.task-view .back-button').click()
