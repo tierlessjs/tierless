@@ -192,7 +192,7 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
         const binder = [
           `import { bindMethods as __tlBindMethods } from ${JSON.stringify(runtime)};`,
           `export const __bundle = { PROGRAMS, __unwind, __bindTierlessMethods };`,
-          `__tlBindMethods(__bundle, { module: ${JSON.stringify(id)} });`,
+          `__tlBindMethods(__bundle, { module: ${JSON.stringify("m:" + shortHash(cleanId))} });`   // wire id: a hash, not the ~85 B source path — it rides EVERY exec message (app modules resolve to the exec-only host, so any stable id works),
         ].join("\n");
         return { code: compiled + "\n" + binder + "\n", map: null };
       }

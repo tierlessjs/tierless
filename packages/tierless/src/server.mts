@@ -48,7 +48,7 @@ export interface AttachOptions {
 // Mount the session endpoint on an EXISTING http server (Express/Fastify/Vite — anything
 // that emits 'upgrade'); co-mountable with other websocket handlers.
 export function attachTierless(httpServer: HttpServer, { bundle, tier = "server", session, path: wsPath = WS_PATH }: AttachOptions): { close(): void } {
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: { threshold: 512 } });   // stock HTTP responses ride gzip; session frames must too, or byte parity is lost by transport choice
   const resolveBundle = typeof bundle === "function" ? bundle : () => bundle;
 
   const onUpgrade = (req: IncomingMessage, socket: any, head: any): void => {

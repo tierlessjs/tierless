@@ -51,7 +51,9 @@ export function twinHttp(baseUrl: string, { token, headers = {}, fetchImpl = fet
     });
     const text = await r.text();
     const isJson = (r.headers.get("content-type") || "").includes("json");
-    const res: TwinResponse = { data: isJson && text ? JSON.parse(text) : text, status: r.status, statusText: r.statusText, headers: Object.fromEntries(r.headers as unknown as Iterable<[string, string]>) };
+    const hdrs: Record<string, string> = {};
+    r.headers.forEach((v, k) => { if (k === "content-type" || k.startsWith("x-")) hdrs[k] = v; });   // all the app reads (pagination, permissions) — date/vary/server would be dead wire weight
+    const res: TwinResponse = { data: isJson && text ? JSON.parse(text) : text, status: r.status, statusText: r.statusText, headers: hdrs };
     if (r.status < 200 || r.status >= 300) {
       const err = new Error("Request failed with status code " + r.status) as Error & { response: TwinResponse; isAxiosError: boolean; code: string };
       err.response = res; err.isAxiosError = true; err.code = r.status >= 500 ? "ERR_BAD_RESPONSE" : "ERR_BAD_REQUEST";
