@@ -3,7 +3,7 @@ import { Heap, type Channel, type LocalTier } from "./fetch.mjs";
 import { type Session, type DeltaFrame, type DeltaRequest } from "./wire-delta.mjs";
 import { type Store } from "./store.mjs";
 export { Channel, makeHost } from "./fetch.mjs";
-export { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_CAP, type Store, type MaybePromise } from "./store.mjs";
+export { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_BYTES, type Store, type LruOpts, type MaybePromise } from "./store.mjs";
 export interface Tier extends LocalTier, EncodeTier {
     heapGet(hid: string): unknown;
 }

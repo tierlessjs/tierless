@@ -19,9 +19,9 @@
 // compare-and-set — is layered on top in src/heap.mjs.
 
 import { encodeGraph, decodeGraph, isHandle, type Handle } from "./graph.mjs";
-import { makeLruStore, DEFAULT_CACHE_CAP, type Store } from "./store.mjs";
+import { makeLruStore, DEFAULT_CACHE_BYTES, type Store } from "./store.mjs";
 
-export { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_CAP, type Store, type MaybePromise } from "./store.mjs";
+export { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_BYTES, type Store, type LruOpts, type MaybePromise } from "./store.mjs";
 
 export interface TierEntry {
   heap: Heap;
@@ -78,12 +78,13 @@ export interface FetchHost {
 // A deref host for the interpreter running on `localTier`, with a read-through,
 // version-invalidated cache. Plug into run(tier, frames, host). The cache lives behind
 // an injected `store` so its retention policy is replaceable; the default is a bounded
-// LRU that caps resident entries within a long session (release across sessions is
-// already provided by the per-socket host lifetime in server.mts). The served cache is
-// safe to evict — the master is on the owner tier, so an eviction costs at most a
-// refetch — so the cap is the only parameter.
-type CacheEntry = { version: number; copy: unknown };
-export function makeHost(localTier: LocalTier, channel: Channel, store: Store<CacheEntry> = makeLruStore<CacheEntry>(DEFAULT_CACHE_CAP)): FetchHost {
+// LRU weighed by BYTES (each entry carries its fetched wire size), capping retained
+// memory within a long session (release across sessions is already provided by the
+// per-socket host lifetime in server.mts). The served cache is safe to evict — the
+// master is on the owner tier, so an eviction costs at most a refetch — so the byte
+// budget is the only parameter.
+type CacheEntry = { version: number; copy: unknown; bytes: number };
+export function makeHost(localTier: LocalTier, channel: Channel, store: Store<CacheEntry> = makeLruStore<CacheEntry>({ max: DEFAULT_CACHE_BYTES, weigh: (e) => e.bytes })): FetchHost {
   const stats: HostStats = { fetches: 0, hits: 0, localUses: 0, bytes: 0 };
   return {
     stats,
@@ -99,8 +100,9 @@ export function makeHost(localTier: LocalTier, channel: Channel, store: Store<Ca
       if (c && c.version === current) { stats.hits++; return c.copy; }                       // coherent cache hit
       const before = channel.bytes;
       const { copy, version } = channel.fetch(h);                                            // fetch the snapshot
-      store.set(h.id, { version, copy });
-      stats.fetches++; stats.bytes += channel.bytes - before;
+      const bytes = channel.bytes - before;                                                  // wire size of this snapshot — the entry's memory weight
+      store.set(h.id, { version, copy, bytes });
+      stats.fetches++; stats.bytes += bytes;
       return copy;
     },
   };

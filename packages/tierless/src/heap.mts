@@ -16,7 +16,7 @@ import { rootsOf, rebuildStack } from "./wire-io.mjs";
 import { makeUnboundedStore, type Store } from "./store.mjs";
 
 export { Channel, makeHost } from "./fetch.mjs";
-export { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_CAP, type Store, type MaybePromise } from "./store.mjs";
+export { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_BYTES, type Store, type LruOpts, type MaybePromise } from "./store.mjs";
 
 // A tier with a versioned heap. heapPut/heapGet adapt Heap to the codec's §5 excision
 // hook (encodeGraph calls tier.heapPut(v) and stamps {owner: tier.id, id}).

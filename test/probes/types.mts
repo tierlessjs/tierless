@@ -39,7 +39,7 @@ import {
   openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot,
 } from "tierless/delta";
 import { makeTier, encodeWire, decodeWire, wireHandles, writeBack, commitWrite, makeCoherentHost } from "tierless/heap";
-import { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_CAP, type Store, type MaybePromise } from "tierless/store";
+import { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_BYTES, type Store, type MaybePromise } from "tierless/store";
 
 const bundle: Bundle = { PROGRAMS: {}, __unwind: () => false };
 const pump = makePump(bundle);
@@ -132,8 +132,9 @@ const cw = commitWrite(hChannel, hHandle, (copy) => { void copy; }, { tries: 3 }
 void cw.ok; void cw.tries;
 const chost = makeCoherentHost(hTier, hChannel);
 void chost.stats.fetches; void chost.deref(hHandle); void chost.writeBack({});
-const lru: Store<{ version: number; copy: unknown }> = makeLruStore(DEFAULT_CACHE_CAP);
-void lru.get("x"); void lru.set("x", { version: 1, copy: 1 }); void lru.evict("x");
+const lru: Store<{ version: number; copy: unknown }> = makeLruStore({ max: 4096 });   // default unit weight -> a count cap
+const byteLru = makeLruStore<{ bytes: number }>({ max: DEFAULT_CACHE_BYTES, weigh: (e) => e.bytes });   // a memory budget
+void lru.get("x"); void lru.set("x", { version: 1, copy: 1 }); void lru.evict("x"); void byteLru;
 const mp: MaybePromise<number> = Promise.resolve(1); void mp;   // the store contract is possibly-async by design
 void makeUnboundedStore<number>();                                        // the non-evicting default, also public
 void makeCoherentHost(hTier, hChannel, { cache: lru });                   // per-namespace policy: the cache store is injectable

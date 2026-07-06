@@ -15,7 +15,7 @@ import { openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot } from "./wire
 import { rootsOf, rebuildStack } from "./wire-io.mjs";
 import { makeUnboundedStore } from "./store.mjs";
 export { Channel, makeHost } from "./fetch.mjs";
-export { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_CAP } from "./store.mjs";
+export { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_BYTES } from "./store.mjs";
 export function makeTier(id) {
     const heap = new Heap(id);
     return { id, heap, heapPut: (v) => heap.put(v).id, heapGet: (hid) => heap.get(hid) };

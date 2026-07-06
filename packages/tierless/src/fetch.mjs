@@ -18,8 +18,8 @@
 // WRITE path — a reader proposing its mutated snapshot back to the master under a
 // compare-and-set — is layered on top in src/heap.mjs.
 import { encodeGraph, decodeGraph, isHandle } from "./graph.mjs";
-import { makeLruStore, DEFAULT_CACHE_CAP } from "./store.mjs";
-export { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_CAP } from "./store.mjs";
+import { makeLruStore, DEFAULT_CACHE_BYTES } from "./store.mjs";
+export { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_BYTES } from "./store.mjs";
 // A tier-local heap of versioned objects. The owner is the single writer.
 export class Heap {
     tierId;
@@ -50,7 +50,7 @@ export class Channel {
         return { copy, version: owner.heap.version(handle.id) };
     }
 }
-export function makeHost(localTier, channel, store = makeLruStore(DEFAULT_CACHE_CAP)) {
+export function makeHost(localTier, channel, store = makeLruStore({ max: DEFAULT_CACHE_BYTES, weigh: (e) => e.bytes })) {
     const stats = { fetches: 0, hits: 0, localUses: 0, bytes: 0 };
     return {
         stats,
@@ -73,9 +73,10 @@ export function makeHost(localTier, channel, store = makeLruStore(DEFAULT_CACHE_
             } // coherent cache hit
             const before = channel.bytes;
             const { copy, version } = channel.fetch(h); // fetch the snapshot
-            store.set(h.id, { version, copy });
+            const bytes = channel.bytes - before; // wire size of this snapshot — the entry's memory weight
+            store.set(h.id, { version, copy, bytes });
             stats.fetches++;
-            stats.bytes += channel.bytes - before;
+            stats.bytes += bytes;
             return copy;
         },
     };
