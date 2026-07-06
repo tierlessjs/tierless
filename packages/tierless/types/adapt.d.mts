@@ -16,4 +16,12 @@ export interface RestResourcesOpts {
  *  body. `headers` carries content-type and every x-* header. Non-2xx throws unless
  *  envelopeErrors. `path` may be a full URL only on the base's own origin — this exec
  *  must never become an open proxy. */
+/** An Exec servicing `http.<method>` — the compiled form of a service's own
+ *  `await this.http.get(...)` (instance-held resource, resources {"this.http":"server"}).
+ *  `instance` is the tier's twin of the app's own axios instance: on the server, built
+ *  by the app's OWN factory with the tierless axios adapter at the bottom, so the app's
+ *  interceptors run there too. Resolves to the axios-response subset real service code
+ *  reads: { data, status, headers, statusText } — plain data, wire-safe. AxiosError-
+ *  shaped rejections cross as errors and unwind into the compiled code's own try/catch. */
+export declare function httpResources(instance: Record<string, unknown>): Exec;
 export declare function restResources(baseUrl: string, { token, headers, fetchImpl, envelopeErrors }?: RestResourcesOpts): Exec;

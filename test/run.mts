@@ -52,6 +52,7 @@ const cases: Case[] = [
   { file: "test/e2e/delta-live.mts",     needs: ["bounce + min(delta,full) + §5 excision + deref all compose, end to end"] },
   { file: "test/probes/axios-adapter.mts", needs: ["all adapter translations hold"] },
   { file: "test/probes/method-compile.mts", needs: ["class methods compile, park, and fall back correctly"] },
+  { file: "test/e2e/method-live.mts",      needs: ["frame and instance stay put, resources fetch, errors unwind, unbound falls back"] },
 ];
 
 let failed = 0;

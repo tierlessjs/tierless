@@ -66,7 +66,14 @@ export interface Host {
   run(peer: Peer, entry: string, args?: unknown[], opts?: { trace?: boolean }): Promise<unknown>;
   /** Ask the PEER to start entry(...args) over there; service any bounces back here. */
   call(peer: Peer, entry: string, args?: unknown[], opts?: { trace?: boolean }): Promise<unknown>;
+  /** Run entry(...args) entirely on THIS tier; foreign resources are FETCHED (only the
+   *  request and result cross — the stack never ships). The frame may therefore hold
+   *  unserializable values (live class instances, reactive proxies): the §6 fetch arm,
+   *  and the path compiled class methods run on. */
+  runLocal(peer: Peer, entry: string, args?: unknown[]): Promise<unknown>;
   handleStart(payload: any, bin: Uint8Array | null): Promise<{ obj: HostReply; bin?: Uint8Array }>;
   handleResume(payload: any, bin: Uint8Array | null): Promise<{ obj: HostReply; bin?: Uint8Array }>;
+  /** Serve one fetched resource for a peer's runLocal. */
+  handleExec(payload: any, bin: Uint8Array | null): Promise<{ obj: HostReply; bin?: Uint8Array }>;
   answer(peer: Peer): Host;
 }

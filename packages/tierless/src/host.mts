@@ -113,6 +113,29 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }: MakeHos
       const id = rec?.spawn(entry, opts.trace);
       return drive(peer, await settle(await peer.request({ type: "start", entry, ...(id ? { __trace: id } : {}), ...meta }, encodeArgs(args))));
     },
+    // The FETCH arm: the stack stays HERE for the whole run; a park at a foreign resource
+    // sends only (name, args) and resumes with the value. Errors re-enter through the
+    // pump's service() path, so the compiled code's own try/catch/finally see them. The
+    // frame never serializes — compiled class methods (whose arg 0 is a live instance,
+    // often a reactive proxy) run on this path, mutating the real object in place.
+    // (No trace recording yet: the recorder prices shipped stacks; fetch-hop records land
+    // with the §6 decide-loop integration.)
+    runLocal: async (peer, entry, args = []) => {
+      const stack = initialStack(entry, args);
+      let request: ResourceRequest | null = null;
+      let carry: { value: unknown } | { error: unknown } | null = null;
+      for (;;) {
+        const c = carry; carry = null;
+        // one-shot exec: the first service() call consumes the fetched result (or throws
+        // the fetch error INTO the machine); anything else this tier owns runs normally
+        const localExec: Exec = (r) => { if (c) return "error" in c ? (() => { throw c.error; })() : c.value; return exec(r); };
+        const res = await pump(stack, ownsHere, localExec, request);
+        if (res.done) return res.value;
+        const { obj } = await peer.request({ type: "exec", tier: res.request.tier, ...meta }, encodeArgs([res.request.name, res.request.args]));
+        request = res.request;
+        carry = obj.type === "error" ? { error: new Error(obj.message) } : { value: obj.value };
+      }
+    },
     // The answering half, exposed as plain handlers so a dispatcher can route by meta.
     handleStart: (payload, bin) => {
       const stack = initialStack(payload.entry, decodeArgs(bin!));
@@ -120,8 +143,16 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }: MakeHos
       return step(stack, null);
     },
     handleResume: (payload, bin) => { const { stack, request } = decodeWireBinary(bin!); return step(stack as Frame[], request as ResourceRequest | null); },
+    // Serve one fetched resource for a peer's runLocal: no stack arrives and none returns.
+    handleExec: async (payload, bin) => {
+      try {
+        const [name, rargs] = decodeArgs(bin!) as [string, unknown[]];
+        const value = await exec({ op: "resource", tier: payload.tier || tier, name, args: rargs });
+        return { obj: { type: "done", value } };
+      } catch (e: any) { return { obj: { type: "error", message: String((e && e.message) || e) } }; }
+    },
     // Convenience: answer starts/resumes on a peer when this host is the only one on it.
-    answer(peer) { peer.on("start", host.handleStart); peer.on("resume", host.handleResume); return host; },
+    answer(peer) { peer.on("start", host.handleStart); peer.on("resume", host.handleResume); peer.on("exec", host.handleExec); return host; },
   };
   return host;
 }
@@ -133,4 +164,5 @@ export function answerWith(peer: Peer, hostFor: (id: string) => Host | Promise<H
   const pick = async (payload: any): Promise<Host> => hostFor((payload && payload[field]) || "");
   peer.on("start", async (p, bin) => (await pick(p)).handleStart(p, bin));
   peer.on("resume", async (p, bin) => (await pick(p)).handleResume(p, bin));
+  peer.on("exec", async (p, bin) => (await pick(p)).handleExec(p, bin));
 }

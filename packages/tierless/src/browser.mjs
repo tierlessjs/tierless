@@ -52,6 +52,13 @@ export function connect({ url, exec, bundle, tier = "browser" } = {}) {
                 throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
             return h.call(peer, entry, args);
         },
+        runLocal: async (entry, args = [], module = "") => {
+            await ready;
+            const h = hosts.get(module || "");
+            if (!h)
+                throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
+            return h.runLocal(peer, entry, args);
+        },
         close: () => ws.close(),
     };
 }
@@ -80,4 +87,17 @@ export function bindActions(bundle, { module = "" } = {}) {
         };
     }
     return out;
+}
+/** Route a compiled module's class-method stubs (real app code — service layers) through
+ *  the shared connection. Methods run on the FETCH path: the frame — whose arg 0 is the
+ *  live instance, often a framework proxy — stays in the browser and mutates the real
+ *  object; only resource requests and results cross. Call once per compiled module. */
+export function bindMethods(bundle, { module = "" } = {}) {
+    if (typeof bundle.__bindTierlessMethods !== "function")
+        throw new Error("tierless: bundle has no compiled class methods (rebuild with a compiler that emits __bindTierlessMethods)");
+    bundle.__bindTierlessMethods((prog, self, args) => {
+        const conn = sharedConn();
+        conn.register(module, bundle);
+        return conn.runLocal(prog, [self, ...args], module);
+    });
 }

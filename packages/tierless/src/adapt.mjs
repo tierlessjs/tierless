@@ -5,6 +5,25 @@
  *  body. `headers` carries content-type and every x-* header. Non-2xx throws unless
  *  envelopeErrors. `path` may be a full URL only on the base's own origin — this exec
  *  must never become an open proxy. */
+/** An Exec servicing `http.<method>` — the compiled form of a service's own
+ *  `await this.http.get(...)` (instance-held resource, resources {"this.http":"server"}).
+ *  `instance` is the tier's twin of the app's own axios instance: on the server, built
+ *  by the app's OWN factory with the tierless axios adapter at the bottom, so the app's
+ *  interceptors run there too. Resolves to the axios-response subset real service code
+ *  reads: { data, status, headers, statusText } — plain data, wire-safe. AxiosError-
+ *  shaped rejections cross as errors and unwind into the compiled code's own try/catch. */
+export function httpResources(instance) {
+    return async (req) => {
+        const m = /^http\.(get|post|put|patch|delete|head|options|request)$/.exec(req.name);
+        if (!m)
+            throw new Error("httpResources: unknown resource " + req.name);
+        const fn = instance[m[1]];
+        if (typeof fn !== "function")
+            throw new Error("httpResources: instance has no ." + m[1]);
+        const r = await fn.apply(instance, req.args);
+        return { data: r.data, status: r.status, statusText: r.statusText ?? "", headers: r.headers?.toJSON ? r.headers.toJSON() : { ...r.headers } };
+    };
+}
 export function restResources(baseUrl, { token, headers = {}, fetchImpl = fetch, envelopeErrors = false } = {}) {
     const base = baseUrl.replace(/\/$/, "");
     return async (req) => {

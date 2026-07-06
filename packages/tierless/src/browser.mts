@@ -35,6 +35,9 @@ export interface Connection {
   register(module: string, bundle: Bundle): Host;
   /** Start entry(...args) on the SERVER; bounces back here are serviced by `exec`. */
   call(entry: string, args?: unknown[], module?: string): Promise<unknown>;
+  /** Run entry(...args) HERE; foreign resources are fetched over the session (the frame
+   *  never ships — the compiled-class-method path, see bindMethods). */
+  runLocal(entry: string, args?: unknown[], module?: string): Promise<unknown>;
   close(): void;
 }
 
@@ -68,6 +71,12 @@ export function connect({ url, exec, bundle, tier = "browser" }: ConnectOpts = {
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
       return h.call(peer, entry, args);
     },
+    runLocal: async (entry: string, args: unknown[] = [], module: string = ""): Promise<unknown> => {
+      await ready;
+      const h = hosts.get(module || "");
+      if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
+      return h.runLocal(peer, entry, args);
+    },
     close: () => ws.close(),
   };
 }
@@ -96,4 +105,17 @@ export function bindActions(bundle: Bundle, { module = "" }: { module?: string }
     };
   }
   return out;
+}
+
+/** Route a compiled module's class-method stubs (real app code — service layers) through
+ *  the shared connection. Methods run on the FETCH path: the frame — whose arg 0 is the
+ *  live instance, often a framework proxy — stays in the browser and mutates the real
+ *  object; only resource requests and results cross. Call once per compiled module. */
+export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (prog: string, self: unknown, args: unknown[]) => Promise<unknown>) => void }, { module = "" }: { module?: string } = {}): void {
+  if (typeof bundle.__bindTierlessMethods !== "function") throw new Error("tierless: bundle has no compiled class methods (rebuild with a compiler that emits __bindTierlessMethods)");
+  bundle.__bindTierlessMethods((prog, self, args) => {
+    const conn = sharedConn();
+    conn.register(module, bundle);
+    return conn.runLocal(prog, [self, ...args], module);
+  });
 }
