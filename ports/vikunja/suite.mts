@@ -16,10 +16,12 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createServer } from "node:http";
 import { bootVikunja, TESTING_TOKEN } from "./boot.mts";
-import { delayProxy } from "../latency-proxy.mts";
+import { delayProxy, type WireCounter } from "../latency-proxy.mts";
 
 const VARIANT = process.argv.includes("--baseline") ? "vikunja-baseline" : "vikunja";
+const TRUTH = !!process.env.TIERLESS_WIRE_TRUTH;
 const RTT = Number(process.env.TIERLESS_RTT_MS || 0);
 const SRC = fileURLToPath(new URL(`../work/${VARIANT}/src/`, import.meta.url));
 const OUT = fileURLToPath(new URL(`../work/${VARIANT}/measure${RTT ? `-rtt${RTT}` : ""}.jsonl`, import.meta.url));
@@ -33,6 +35,16 @@ if (!html.includes("window.TESTING")) writeFileSync(idx, html.replace("<head>", 
 
 rmSync(OUT, { force: true });
 const app = await bootVikunja();
+if (TRUTH) {
+  // TCP-true byte accounting: the BROWSER's API traffic goes through a counting relay
+  // (per-test deltas read by the fixture at :14990); node-side seeding/login stays on
+  // the direct :3456 and is never counted. Session ws bytes are counted INSIDE the
+  // gateway (TCP-level, deflate included) at /__tierless/wire. Assets bypass both.
+  const api: WireCounter = { toServer: 0, toClient: 0 };
+  delayProxy(23456, 3456, 0, api).unref();
+  createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(api)); }).listen(14990, "127.0.0.1").unref();
+  console.log("wire truth: browser api via counting relay :23456, counters :14990, ws bytes at /__tierless/wire");
+}
 if (RTT) {
   delayProxy(14173, 4173, RTT / 2).unref();   // frontend origin (SPA + tierless ws)
   delayProxy(13456, 3456, RTT / 2).unref();   // API origin (XHR + CORS preflights)
@@ -56,6 +68,7 @@ const suite = spawn("corepack", ["pnpm", "exec", "playwright", "test", "--report
     VIKUNJA_SERVICE_TESTINGTOKEN: TESTING_TOKEN,
     TIERLESS_MEASURE_OUT: OUT,
     ...(RTT ? { BASE_URL: "http://127.0.0.1:14173", API_URL: "http://127.0.0.1:13456/api/v1" } : {}),
+    ...(TRUTH ? { TIERLESS_BROWSER_API_URL: "http://127.0.0.1:23456/api/v1" } : {}),   // browser data path through the counter; seeding stays direct
   },
 });
 await new Promise<void>((resolve) => suite.on("exit", () => resolve()));   // nonzero = some tests failed; every attempt is in the JSONL regardless

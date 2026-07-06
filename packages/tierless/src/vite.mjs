@@ -204,8 +204,13 @@ export default function tierless(opts = {}) {
             if (!workflows && !hasCompile)
                 return;
             const s = server;
-            const { attachTierless, bundleResolverFromManifest } = await import("./server.mjs");
+            const { attachTierless, bundleResolverFromManifest, makeWireStats } = await import("./server.mjs");
             const { restResources, httpResources, twinHttp } = await import("./adapt.mjs");
+            // TCP-true session byte counter for measured runs (suite truth protocol): CDP sees
+            // ws frames post-inflate, so the gateway itself is the only honest place to count
+            const wire = process.env.TIERLESS_WIRE_TRUTH ? makeWireStats() : undefined;
+            if (wire)
+                s.middlewares.use("/__tierless/wire", (_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(wire.read())); });
             if (!apiUrl)
                 throw new Error("tierless: workflows/compile need { apiUrl } (the backend the gateway calls)");
             // compiled APP modules have no server emit (the fetch arm runs no machine here) —
@@ -221,6 +226,7 @@ export default function tierless(opts = {}) {
             const EXEC_ONLY = { PROGRAMS: {}, __unwind: () => false };
             attachTierless(s.httpServer, {
                 path: wsPath,
+                wire,
                 bundle: async (id) => {
                     if (fromManifest) {
                         try {

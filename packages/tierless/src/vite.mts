@@ -263,9 +263,13 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
     // the shim put on the socket URL. The target app's diff stays the one config line.
     async configurePreviewServer(server: unknown): Promise<void> {
       if (!workflows && !hasCompile) return;
-      const s = server as { httpServer: HttpServer };
-      const { attachTierless, bundleResolverFromManifest } = await import("./server.mjs");
+      const s = server as { httpServer: HttpServer; middlewares: { use(route: string, fn: (req: unknown, res: { setHeader(n: string, v: string): void; end(s: string): void }) => void): void } };
+      const { attachTierless, bundleResolverFromManifest, makeWireStats } = await import("./server.mjs");
       const { restResources, httpResources, twinHttp } = await import("./adapt.mjs");
+      // TCP-true session byte counter for measured runs (suite truth protocol): CDP sees
+      // ws frames post-inflate, so the gateway itself is the only honest place to count
+      const wire = process.env.TIERLESS_WIRE_TRUTH ? makeWireStats() : undefined;
+      if (wire) s.middlewares.use("/__tierless/wire", (_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(wire.read())); });
       if (!apiUrl) throw new Error("tierless: workflows/compile need { apiUrl } (the backend the gateway calls)");
       // compiled APP modules have no server emit (the fetch arm runs no machine here) —
       // their sessions get an exec-only host; workflow modules resolve from the manifest
@@ -275,6 +279,7 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
       const EXEC_ONLY = { PROGRAMS: {}, __unwind: () => false };
       attachTierless(s.httpServer, {
         path: wsPath,
+        wire,
         bundle: async (id: string) => {
           if (fromManifest) { try { return await fromManifest(id) as never; } catch { /* an app module: exec-only */ } }
           return EXEC_ONLY as never;

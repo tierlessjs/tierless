@@ -43,11 +43,34 @@ export interface AttachOptions {
   path?: string;
   /** Per-connection: log in, hold the token, return the monitor-backed exec. */
   session: (req: IncomingMessage) => SessionSetup | Promise<SessionSetup>;
+  /** Count session-socket bytes at the TCP level (deflate included) — see makeWireStats. */
+  wire?: WireStats;
+}
+
+// TCP-true session byte accounting. CDP and 'message' handlers both see ws frames
+// AFTER inflate, so any instrument above the socket over-reports a compressed session.
+// socket.bytesRead/bytesWritten are what actually crossed the wire; closed sockets'
+// totals are folded in so read() is monotonic across reconnects.
+export interface WireStats { track(socket: { bytesRead: number; bytesWritten: number; once(ev: "close", fn: () => void): void }): void; read(): { wsIn: number; wsOut: number } }
+export function makeWireStats(): WireStats {
+  let closedIn = 0, closedOut = 0;
+  const live = new Set<{ bytesRead: number; bytesWritten: number }>();
+  return {
+    track(s) {
+      live.add(s);
+      s.once("close", () => { closedIn += s.bytesRead; closedOut += s.bytesWritten; live.delete(s); });
+    },
+    read() {
+      let wsIn = closedIn, wsOut = closedOut;
+      for (const s of live) { wsIn += s.bytesRead; wsOut += s.bytesWritten; }
+      return { wsIn, wsOut };
+    },
+  };
 }
 
 // Mount the session endpoint on an EXISTING http server (Express/Fastify/Vite — anything
 // that emits 'upgrade'); co-mountable with other websocket handlers.
-export function attachTierless(httpServer: HttpServer, { bundle, tier = "server", session, path: wsPath = WS_PATH }: AttachOptions): { close(): void } {
+export function attachTierless(httpServer: HttpServer, { bundle, tier = "server", session, path: wsPath = WS_PATH, wire }: AttachOptions): { close(): void } {
   // STREAMING compression, not per-message: with context takeover the deflate window
   // persists across messages, so every exec's headers, URL prefixes, and JSON field
   // names compress against the whole session's history — cross-request redundancy that
@@ -76,6 +99,7 @@ export function attachTierless(httpServer: HttpServer, { bundle, tier = "server"
 
   wss.on("connection", async (ws: any, req: IncomingMessage) => {
     ws.on("error", () => {});                                    // a client socket error (reset, etc.) must not throw out of the emitter and crash the host
+    if (wire && ws._socket) wire.track(ws._socket);
     try {
       const { exec, entry, args = [], onDone } = await session(req);
       const peer = makePeer(wsPort(ws));

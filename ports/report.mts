@@ -25,6 +25,9 @@ interface Rec {
   durationMs?: number;                // wall clock; meaningful only under injected RTT
   requests: number; httpBytes: number;
   wsFramesOut: number; wsFramesIn: number; wsBytesOut: number; wsBytesIn: number;
+  // TCP-true counters (TIERLESS_WIRE_TRUTH runs) — deflate included; the byte
+  // measurement of record when present (CDP reports ws frames post-inflate)
+  wireWsIn?: number; wireWsOut?: number; wireApiIn?: number; wireApiOut?: number;
 }
 
 const [baseFile, portFile] = process.argv.slice(2);
@@ -42,7 +45,10 @@ function load(file: string): Map<string, Rec> {
   return out;
 }
 
-const bytes = (r: Rec): number => r.httpBytes + r.wsBytesOut + r.wsBytesIn;
+const hasWire = (r: Rec): boolean => r.wireApiIn !== undefined;
+const bytes = (r: Rec): number => hasWire(r)
+  ? (r.wireApiIn! + r.wireApiOut! + r.wireWsIn! + r.wireWsOut!)
+  : r.httpBytes + r.wsBytesOut + r.wsBytesIn;
 const trips = (r: Rec): number => r.requests + r.wsFramesOut;
 const median = (xs: number[]): number => { const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
 const pct = (before: number, after: number): string => before === 0 ? "n/a" : `${(100 * (before - after) / before).toFixed(0)}%`;
@@ -64,6 +70,10 @@ const counted = pairs.filter(({ b, p }) => b.status === "passed" && p.status ===
 const covered = counted.filter(({ p }) => p.wsFramesOut > 0);
 
 console.log(`\npaired ${pairs.length} tests (${base.size} baseline, ${port.size} ported)`);
+const wireTrue = pairs.length > 0 && pairs.every(({ b, p }) => hasWire(b) && hasWire(p));
+console.log(wireTrue
+  ? "bytes are TCP-TRUE (socket-level, compression included; browser data path only — node-side seeding excluded)"
+  : "bytes are CDP-level (ws frames post-inflate — UNDERCOUNTS a compressed ported arm)");
 if (onlyBase.length) console.log(`  only in baseline (${onlyBase.length}): ${onlyBase.slice(0, 5).join("; ")}${onlyBase.length > 5 ? " …" : ""}`);
 if (onlyPort.length) console.log(`  only in ported (${onlyPort.length}): ${onlyPort.slice(0, 5).join("; ")}${onlyPort.length > 5 ? " …" : ""}`);
 if (parityFail.length) {

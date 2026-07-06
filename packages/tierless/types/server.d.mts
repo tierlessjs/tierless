@@ -16,8 +16,22 @@ export interface AttachOptions {
     path?: string;
     /** Per-connection: log in, hold the token, return the monitor-backed exec. */
     session: (req: IncomingMessage) => SessionSetup | Promise<SessionSetup>;
+    /** Count session-socket bytes at the TCP level (deflate included) — see makeWireStats. */
+    wire?: WireStats;
 }
-export declare function attachTierless(httpServer: HttpServer, { bundle, tier, session, path: wsPath }: AttachOptions): {
+export interface WireStats {
+    track(socket: {
+        bytesRead: number;
+        bytesWritten: number;
+        once(ev: "close", fn: () => void): void;
+    }): void;
+    read(): {
+        wsIn: number;
+        wsOut: number;
+    };
+}
+export declare function makeWireStats(): WireStats;
+export declare function attachTierless(httpServer: HttpServer, { bundle, tier, session, path: wsPath, wire }: AttachOptions): {
     close(): void;
 };
 export interface ServeAppOpts extends AttachOptions {

@@ -38,6 +38,12 @@ async function waitFor(url: string, ms = 60_000): Promise<void> {
 export async function bootVikunja(): Promise<{ close(): void }> {
   if (!existsSync(path.join(SRC, "vikunja"))) throw new Error("backend not built — see ports/vikunja/README.md");
   if (!existsSync(path.join(SRC, "frontend/dist/index.html"))) throw new Error("frontend not built — see ports/vikunja/README.md");
+  // refuse ports that are already up: waitFor() would otherwise "succeed" against a
+  // stale stack from an earlier run and every measurement would silently test old code
+  for (const url of [API + "/api/v1/info", FRONT]) {
+    const alive = await fetch(url).then((r) => r.ok, () => false);
+    if (alive) throw new Error(`${url} is already serving — a stale stack owns the port; kill it before booting`);
+  }
   // detached process GROUPS: pnpm/vite spawn children of their own, and killing only the
   // wrapper leaves a stale preview owning the port while the next boot binds elsewhere —
   // every probe then talks to old code. kill(-pid) takes the whole group down.

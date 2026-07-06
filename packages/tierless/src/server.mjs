@@ -23,9 +23,27 @@ import { makePeer, wsPort } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
 const { WebSocketServer } = createRequire(import.meta.url)("ws");
 export { WS_PATH };
+export function makeWireStats() {
+    let closedIn = 0, closedOut = 0;
+    const live = new Set();
+    return {
+        track(s) {
+            live.add(s);
+            s.once("close", () => { closedIn += s.bytesRead; closedOut += s.bytesWritten; live.delete(s); });
+        },
+        read() {
+            let wsIn = closedIn, wsOut = closedOut;
+            for (const s of live) {
+                wsIn += s.bytesRead;
+                wsOut += s.bytesWritten;
+            }
+            return { wsIn, wsOut };
+        },
+    };
+}
 // Mount the session endpoint on an EXISTING http server (Express/Fastify/Vite — anything
 // that emits 'upgrade'); co-mountable with other websocket handlers.
-export function attachTierless(httpServer, { bundle, tier = "server", session, path: wsPath = WS_PATH }) {
+export function attachTierless(httpServer, { bundle, tier = "server", session, path: wsPath = WS_PATH, wire }) {
     // STREAMING compression, not per-message: with context takeover the deflate window
     // persists across messages, so every exec's headers, URL prefixes, and JSON field
     // names compress against the whole session's history — cross-request redundancy that
@@ -56,6 +74,8 @@ export function attachTierless(httpServer, { bundle, tier = "server", session, p
     httpServer.on("upgrade", onUpgrade);
     wss.on("connection", async (ws, req) => {
         ws.on("error", () => { }); // a client socket error (reset, etc.) must not throw out of the emitter and crash the host
+        if (wire && ws._socket)
+            wire.track(ws._socket);
         try {
             const { exec, entry, args = [], onDone } = await session(req);
             const peer = makePeer(wsPort(ws));
