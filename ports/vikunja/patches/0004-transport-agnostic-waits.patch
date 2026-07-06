@@ -1,3 +1,203 @@
+
+--- a/frontend/tests/e2e/project/project-history.spec.ts
++++ b/frontend/tests/e2e/project/project-history.spec.ts
+@@ -14,17 +14,15 @@
+ 			}, false)
+ 		}
+ 
+-		const loadProjectArrayPromise = page.waitForResponse('**/api/v1/projects*')
+ 		await page.goto('/')
+-		await loadProjectArrayPromise
++		// the projects arrive over the tierless session — wait for the page CONTENT, then assert absence
++		await expect(page.locator('main.app-content')).toBeVisible()
++		await expect(page.locator('body')).toContainText(projects[0].title, {timeout: 10000})
+ 		await expect(page.locator('body')).not.toContainText('Last viewed')
+ 
+ 		for (let i = 0; i < projects.length; i++) {
+-			const loadProjectPromise = page.waitForResponse(response =>
+-				response.url().includes(`/projects/${projects[i].id}`) && response.request().method() === 'GET',
+-			)
+ 			await page.goto(`/projects/${projects[i].id}/${projects[i].id}`)
+-			await loadProjectPromise
++			// the localStorage waitForFunction below is the real condition; the network wait was redundant
+ 			// Wait for history to be saved to localStorage
+ 			await page.waitForFunction(
+ 				(projectId) => {
+
+--- a/frontend/tests/e2e/project/project-view-gantt.spec.ts
++++ b/frontend/tests/e2e/project/project-view-gantt.spec.ts
+@@ -62,10 +62,6 @@
+ 	test('Drags a task around', async ({authenticatedPage: page}) => {
+ 		await ProjectFactory.create(1)
+ 		await ProjectViewFactory.create(1, {id: 2, project_id: 1, view_kind: 1})
+-		const taskUpdatePromise = page.waitForResponse(response =>
+-			response.url().includes('/tasks/') && response.request().method() === 'POST',
+-		)
+-
+ 		const now = new Date()
+ 		await TaskFactory.create(1, {
+ 			start_date: now.toISOString(),
+@@ -88,7 +84,14 @@
+ 			await bar.dispatchEvent('pointerup', {clientX: startX + 150, clientY: startY, pointerId: 1})
+ 		}
+ 
+-		await taskUpdatePromise
++		// the update crosses the tierless session; assert the PERSISTED effect instead of the request:
++		// after a reload the bar must still sit right of where it started (the drag moved its dates)
++		await page.waitForTimeout(500)
++		await page.reload()
++		const barAfter = page.locator('.gantt-rows .gantt-row-bars .gantt-bar').first()
++		await expect(barAfter).toBeVisible()
++		const boxAfter = await barAfter.boundingBox()
++		expect(boxAfter!.x).toBeGreaterThan(barBox!.x + 50)
+ 	})
+ 
+ 	test('Should change the query parameters when selecting a date range', async ({authenticatedPage: page}) => {
+
+--- a/frontend/tests/e2e/project/project-view-kanban.spec.ts
++++ b/frontend/tests/e2e/project/project-view-kanban.spec.ts
+@@ -224,12 +224,9 @@
+ 		const {task, view} = await createSingleTaskInBucket(1, {
+ 			description: 'Lorem Ipsum',
+ 		})
+-		const loadTasksPromise = page.waitForResponse(response =>
+-			response.url().includes('/projects/1/views/') && response.url().includes('/tasks'),
+-		)
+-
+ 		await page.goto(`/projects/${task.project_id}/${view.id}`)
+-		await loadTasksPromise
++		// the card must be rendered before asserting its icon (absence would pass vacuously)
++		await expect(page.locator('.bucket .tasks .task').first()).toBeVisible()
+ 
+ 		await expect(page.locator('.bucket .tasks .task .footer .icon svg')).toBeVisible()
+ 	})
+@@ -238,12 +235,9 @@
+ 		const {task, view} = await createSingleTaskInBucket(1, {
+ 			description: '',
+ 		})
+-		const loadTasksPromise = page.waitForResponse(response =>
+-			response.url().includes('/projects/1/views/') && response.url().includes('/tasks'),
+-		)
+-
+ 		await page.goto(`/projects/${task.project_id}/${view.id}`)
+-		await loadTasksPromise
++		// the card must be rendered before asserting its icon (absence would pass vacuously)
++		await expect(page.locator('.bucket .tasks .task').first()).toBeVisible()
+ 
+ 		await expect(page.locator('.bucket .tasks .task .footer .icon svg')).not.toBeVisible()
+ 	})
+@@ -252,12 +246,9 @@
+ 		const {task, view} = await createSingleTaskInBucket(1, {
+ 			description: '<p></p>',
+ 		})
+-		const loadTasksPromise = page.waitForResponse(response =>
+-			response.url().includes('/projects/1/views/') && response.url().includes('/tasks'),
+-		)
+-
+ 		await page.goto(`/projects/${task.project_id}/${view.id}`)
+-		await loadTasksPromise
++		// the card must be rendered before asserting its icon (absence would pass vacuously)
++		await expect(page.locator('.bucket .tasks .task').first()).toBeVisible()
+ 
+ 		await expect(page.locator('.bucket .tasks .task .footer .icon svg')).not.toBeVisible()
+ 	})
+
+--- a/frontend/tests/e2e/project/project-view-table.spec.ts
++++ b/frontend/tests/e2e/project/project-view-table.spec.ts
+@@ -20,11 +20,9 @@
+ 		await TaskFactory.create(1, {
+ 			project_id: 1,
+ 		})
+-		const loadTasksPromise = page.waitForResponse(response =>
+-			response.url().includes('/projects/1/views/') && response.url().includes('/tasks'),
+-		)
+ 		await page.goto('/projects/1/3')
+-		await loadTasksPromise
++		// tasks arrive over the tierless session — wait for them RENDERED
++		await expect(page.locator('.project-table table.table tbody tr').first()).toBeVisible()
+ 
+ 		// Click the Columns button to open the column selector
+ 		await page.locator('.project-table .filter-container .button').filter({hasText: 'Columns'}).click()
+@@ -53,11 +51,9 @@
+ 			id: '{increment}',
+ 			project_id: 1,
+ 		})
+-		const loadTasksPromise = page.waitForResponse(response =>
+-			response.url().includes('/projects/1/views/') && response.url().includes('/tasks'),
+-		)
+ 		await page.goto('/projects/1/3')
+-		await loadTasksPromise
++		// tasks arrive over the tierless session — wait for them RENDERED
++		await expect(page.locator('.project-table table.table tbody tr').first()).toBeVisible()
+ 
+ 		await page.locator('.project-table table.table tbody tr').first().locator('a').first().click()
+ 
+
+--- a/frontend/tests/e2e/project/project.spec.ts
++++ b/frontend/tests/e2e/project/project.spec.ts
+@@ -31,15 +31,10 @@
+ 	test('Should redirect to a specific project view after visited', async ({authenticatedPage: page}) => {
+ 		const projectId = projects[0].id
+ 		const kanbanViewId = projects[0].views[3].id
+-		const loadBucketsPromise = page.waitForResponse(response =>
+-			response.url().includes(`/projects/${projectId}/`) &&
+-			response.url().includes('/views/') &&
+-			response.url().includes('/tasks'),
+-		)
+-
+ 		await page.goto(`/projects/${projectId}/${kanbanViewId}`)
+ 		await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/${kanbanViewId}`))
+-		await loadBucketsPromise
++		// the visit must register (board rendered) — the data crosses the tierless session, not the network
++		await expect(page.locator('.kanban')).toBeVisible()
+ 		await page.goto(`/projects/${projectId}`)
+ 		await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/${kanbanViewId}`))
+ 	})
+
+--- a/frontend/tests/e2e/project/saved-filter-favorite.spec.ts
++++ b/frontend/tests/e2e/project/saved-filter-favorite.spec.ts
+@@ -28,11 +28,8 @@
+ 		await expect(favoriteButton).toBeVisible()
+ 
+ 		// Click to mark as favorite
+-		const favoritePromise = page.waitForResponse(response =>
+-			response.url().includes('/filters/') && response.request().method() === 'POST',
+-		)
++		// the mutation crosses the tierless session, not the network — wait on the UI it produces
+ 		await favoriteButton.click()
+-		await favoritePromise
+ 
+ 		await expect(filterItem.locator('.favorite.is-favorite').nth(0)).toBeVisible()
+ 		await expect(filterItem.locator('.favorite.is-favorite').nth(1)).toBeVisible()
+@@ -63,11 +60,8 @@
+ 		await expect(favoriteButton).toBeVisible()
+ 
+ 		// Click to remove from favorites
+-		const unfavoritePromise = page.waitForResponse(response =>
+-			response.url().includes('/filters/') && response.request().method() === 'POST',
+-		)
++		// the mutation crosses the tierless session, not the network — wait on the UI it produces
+ 		await favoriteButton.click()
+-		await unfavoritePromise
+ 
+ 		// After unfavoriting, the star should be outline (not filled)
+ 		// Wait for UI to update with longer timeout
+@@ -92,11 +86,10 @@
+ 		const filterItem = page.locator('.menu-container').getByRole('listitem').filter({hasText: 'Persistent Filter'})
+ 		await filterItem.hover()
+ 
+-		const favoritePromise = page.waitForResponse(response =>
+-			response.url().includes('/filters/') && response.request().method() === 'POST',
+-		)
++		// the mutation crosses the tierless session, not the network — wait on the UI it produces
+ 		await filterItem.locator('.favorite').click()
+-		await favoritePromise
++		// the favorited state must RENDER before we reload — stronger than waiting on the request
++		await expect(filterItem.locator('.favorite.is-favorite').first()).toBeVisible()
+ 
+ 		// Wait for UI to update before reloading
+ 		await page.waitForTimeout(500)
+
 --- a/frontend/tests/e2e/task/task.spec.ts
 +++ b/frontend/tests/e2e/task/task.spec.ts
 @@ -143,43 +143,39 @@
