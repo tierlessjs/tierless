@@ -67,8 +67,8 @@ console.log("Probe: the Vite plugin — \"use tierless\" modules become monitor-
 
 // ---- transform hook --------------------------------------------------------------------
 const plugin = makePlugin({ login: { user: "ana", pass: "demo" } });
-check("non-tierless modules are untouched", plugin.transform("export const x = 1;", "/app/x.mjs") === null);
-const out = plugin.transform(ACTIONS, actionsId);
+check("non-tierless modules are untouched", (await plugin.transform("export const x = 1;", "/app/x.mjs")) === null);
+const out = await plugin.transform(ACTIONS, actionsId);
 check("a \"use tierless\" module compiles to a machine + bound action exports",
   out !== null && out.code.includes("export const PROGRAMS") && out.code.includes("export const rebalance = __actions[\"rebalance\"]"), out && out.code.slice(0, 80));
 check("pure exports pass through still exported", out!.code.includes("export function fmt"));
@@ -82,7 +82,7 @@ export function priceCheck(sym: string): Quote {
   return { sym, price };
 }
 `;
-const tsOut = plugin.transform(TS_ACTIONS, join(dir, "actions.ts"));
+const tsOut = await plugin.transform(TS_ACTIONS, join(dir, "actions.ts"));
 check("a \"use tierless\" .ts module strips types and compiles (Vite dev-mode entry point)",
   tsOut !== null && tsOut.code.includes("export const PROGRAMS") && tsOut.code.includes("export const priceCheck = __actions[\"priceCheck\"]"), tsOut && tsOut.code.slice(0, 80));
 check("the compiled output carries no leftover TS syntax", tsOut !== null && !/:\s*(string|number)\b/.test(tsOut.code) && !tsOut.code.includes("interface Quote"));

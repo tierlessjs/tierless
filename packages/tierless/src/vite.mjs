@@ -70,8 +70,11 @@ export default function tierless(opts = {}) {
     serverOutDir = "dist-tierless", // where `vite build` emits the server bundles + manifest
     workflows, // route pattern -> workflow module (adapting an existing app)
     apiUrl, // the existing backend restResources proxies to
+    compile: compileList, // app files whose class methods compile (real-code port)
      } = opts;
     const isTierlessModule = (code) => DIRECTIVE.test(code);
+    const hasCompile = !!(compileList && compileList.length);
+    let compileTargets = new Set(); // absolute paths, resolved once root is known
     let sidecar = null;
     const machines = new Map(); // moduleId -> compiled server machine + its relative imports
     let root = process.cwd(); // Vite root, captured in configResolved (for the build emit path)
@@ -81,15 +84,20 @@ export default function tierless(opts = {}) {
     // and land in dist-tierless like any mix module; the session socket carries the user's
     // token (read at connect) as a query param the preview gateway forwards to the backend.
     const shimSource = () => {
-        const body = readFileSync(fileURLToPath(new URL("./adapt-shim.mjs", import.meta.url)), "utf8");
-        const routes = Object.fromEntries(Object.entries(workflows).map(([p, m]) => [p, m.startsWith("/") ? m : "/" + m.replace(/^\.\//, "")]));
-        const loaders = Object.values(routes).map((m) => `${JSON.stringify(m)}: () => import(${JSON.stringify(m)})`).join(", ");
-        return [
+        const configure = [
             `import { configureTierless } from ${JSON.stringify(runtime)};`,
             // url is a thunk (token read at connect time, not page load); preconnect only when a
             // session already exists — the handshake then overlaps app bootstrap instead of
             // landing on the first navigation's critical path. Fresh visitors stay lazy.
             `configureTierless({ url: () => (location.protocol === "https:" ? "wss" : "ws") + "://" + location.host + ${JSON.stringify(wsPath || WS_PATH)} + "?token=" + encodeURIComponent(localStorage.getItem("token") || ""), preconnect: !!localStorage.getItem("token") });`,
+        ];
+        if (!workflows)
+            return configure.join("\n"); // compile-only: session config, no route/XHR machinery
+        const body = readFileSync(fileURLToPath(new URL("./adapt-shim.mjs", import.meta.url)), "utf8");
+        const routes = Object.fromEntries(Object.entries(workflows).map(([p, m]) => [p, m.startsWith("/") ? m : "/" + m.replace(/^\.\//, "")]));
+        const loaders = Object.values(routes).map((m) => `${JSON.stringify(m)}: () => import(${JSON.stringify(m)})`).join(", ");
+        return [
+            ...configure,
             `const __TIERLESS_ROUTES__ = ${JSON.stringify(routes)};`,
             `const __TIERLESS_MODULES__ = { ${loaders} };`,
             body,
@@ -98,7 +106,31 @@ export default function tierless(opts = {}) {
     return {
         name: "tierless",
         enforce: "pre",
-        transform(code, id) {
+        async transform(code, id) {
+            // real-code compilation: a configured app file (TypeScript, classes) — strip types
+            // with Vite's own esbuild, compile class methods, self-bind to the session. No
+            // server emit: the fetch arm never runs the machine server-side (handleExec only
+            // needs the exec), which also sidesteps app-alias imports (@/…) in Node.
+            const cleanId = id.split("?")[0];
+            if (hasCompile && compileTargets.has(path.resolve(cleanId))) {
+                const { transformWithEsbuild } = await import(/* vite is the host process; not a dependency of this package */ "vite");
+                const stripped = await transformWithEsbuild(code, cleanId, { target: "es2022" });
+                const { compile } = require("./transform.cjs");
+                const { code: compiled, meta } = compile(stripped.code, { ...compilerOptions, resources: { "this.http": "server", ...(resources || {}) }, filename: id, preamble: "" });
+                for (const m of meta.methods)
+                    if (m.error)
+                        this?.warn?.(`tierless: ${m.class}.${m.method} kept original — ${m.error}`);
+                if (!meta.methods.some((m) => m.program)) {
+                    this?.warn?.(`tierless: ${id} is in compile[] but no method compiled`);
+                    return null;
+                }
+                const binder = [
+                    `import { bindMethods as __tlBindMethods } from ${JSON.stringify(runtime)};`,
+                    `export const __bundle = { PROGRAMS, __unwind, __bindTierlessMethods };`,
+                    `__tlBindMethods(__bundle, { module: ${JSON.stringify(id)} });`,
+                ].join("\n");
+                return { code: compiled + "\n" + binder + "\n", map: null };
+            }
             if (id.includes("node_modules") || !isTierlessModule(code))
                 return null;
             const { compile } = require("./transform.cjs");
@@ -118,8 +150,11 @@ export default function tierless(opts = {}) {
             // Vite. (The compiler's own `--source-map` is a runtime frame→line table, unrelated to this.)
             return { code: compiled + "\n" + wrappers + "\n", map: null };
         },
-        configResolved(config) { if (config?.root)
-            root = config.root; },
+        configResolved(config) {
+            if (config?.root)
+                root = config.root;
+            compileTargets = new Set((compileList || []).map((p) => path.resolve(root, p)));
+        },
         buildStart() { machines.clear(); }, // fresh build: transform repopulates the map
         // Build: emit the server side of what the client build just produced. For every "use tierless"
         // module the transform compiled, write its machine (byte-identical to `tierless build --bare` —
@@ -144,16 +179,16 @@ export default function tierless(opts = {}) {
             }
             writeFileSync(path.join(outDir, "tierless.manifest.json"), JSON.stringify({ path: wsPath || WS_PATH, modules }, null, 2) + "\n");
         },
-        // ---- route workflows (adapting an existing app): the injected shim -----------------
-        resolveId(id) { return workflows && (id === "tierless-shim" || id === SHIM_ID) ? SHIM_ID : undefined; },
-        load(id) { return workflows && id === SHIM_ID ? shimSource() : undefined; },
+        // ---- injected page glue: session config (+ the route shim when workflows are on) ----
+        resolveId(id) { return (workflows || hasCompile) && (id === "tierless-shim" || id === SHIM_ID) ? SHIM_ID : undefined; },
+        load(id) { return (workflows || hasCompile) && id === SHIM_ID ? shimSource() : undefined; },
         // an INLINE module import, injected with order "pre" so vite's own html pipeline (which
         // extracts and bundles inline module scripts) still runs after us — a bare src attribute
         // or a post-ordered tag ships as literal text and never enters the module graph
         transformIndexHtml: {
             order: "pre",
             handler(html) {
-                if (!workflows)
+                if (!workflows && !hasCompile)
                     return html;
                 return { html, tags: [{ tag: "script", attrs: { type: "module" }, children: 'import "tierless-shim";', injectTo: "head" }] };
             },
@@ -163,20 +198,41 @@ export default function tierless(opts = {}) {
         // servicing api.* against the existing backend (restResources), forwarding the token
         // the shim put on the socket URL. The target app's diff stays the one config line.
         async configurePreviewServer(server) {
-            if (!workflows)
+            if (!workflows && !hasCompile)
                 return;
             const s = server;
             const { attachTierless, bundleResolverFromManifest } = await import("./server.mjs");
-            const { restResources } = await import("./adapt.mjs");
+            const { restResources, httpResources, twinHttp } = await import("./adapt.mjs");
             if (!apiUrl)
-                throw new Error("tierless: workflows need { apiUrl } (the backend restResources proxies to)");
-            const bundle = await bundleResolverFromManifest(path.join(root, serverOutDir, "tierless.manifest.json"));
+                throw new Error("tierless: workflows/compile need { apiUrl } (the backend the gateway calls)");
+            // compiled APP modules have no server emit (the fetch arm runs no machine here) —
+            // their sessions get an exec-only host; workflow modules resolve from the manifest
+            let fromManifest = null;
+            try {
+                fromManifest = await bundleResolverFromManifest(path.join(root, serverOutDir, "tierless.manifest.json"));
+            }
+            catch (e) {
+                if (workflows)
+                    throw e;
+            }
+            const EXEC_ONLY = { PROGRAMS: {}, __unwind: () => false };
             attachTierless(s.httpServer, {
                 path: wsPath,
-                bundle,
+                bundle: async (id) => {
+                    if (fromManifest) {
+                        try {
+                            return await fromManifest(id);
+                        }
+                        catch { /* an app module: exec-only */ }
+                    }
+                    return EXEC_ONLY;
+                },
                 session: async (req) => {
                     const token = new URL(req.url || "/", "http://x").searchParams.get("token") || undefined;
-                    return { exec: restResources(apiUrl, { token }) };
+                    const rest = restResources(apiUrl, { token });
+                    // the twin of the app's own axios instance: http.* from compiled class methods
+                    const twin = httpResources(twinHttp(apiUrl, { token }));
+                    return { exec: (r) => (r.name.startsWith("http.") ? twin(r) : rest(r)) };
                 },
             });
         },

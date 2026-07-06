@@ -29,11 +29,20 @@ export interface TierlessPluginOptions {
     /** The existing backend the workflows call: api.get/api.post paths are served against
      *  this base URL by restResources (tierless/adapt), forwarding the user's bearer token. */
     apiUrl?: string;
+    /** REAL-CODE COMPILATION (ports/vikunja/COMPILING.md): root-relative app files whose
+     *  top-level class methods with tier calls compile into PROGRAMS. The kept classes run
+     *  untouched; compiled methods route through the session's fetch arm (frame and
+     *  instance stay in the browser; `this.http.*` requests are served by the preview
+     *  gateway's twin against apiUrl). No shadow modules, no route table. */
+    compile?: string[];
 }
 export interface TierlessPlugin {
     name: string;
     enforce: "pre";
-    transform(code: string, id: string): {
+    transform(code: string, id: string): Promise<{
+        code: string;
+        map: null;
+    } | null> | {
         code: string;
         map: null;
     } | null;

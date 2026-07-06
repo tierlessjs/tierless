@@ -76,14 +76,14 @@ console.log("Probe: the Vite build emit — one compile, a manifest, a prod moun
 const plugin = tierless({ api: "api.server.mjs", runtime: pathToFileURL(join(SRC_DIR, "browser.mjs")).href });
 
 // ---- the client build: transform stamps the module id, writes the browser module ------------
-const out = plugin.transform(ACTIONS, actionsId);
+const out = await plugin.transform(ACTIONS, actionsId);
 if (!out) throw new Error("transform returned null for a \"use tierless\" module");
 writeFileSync(actionsId, out.code);
-const out2 = plugin.transform(WITHIMPORT, withImportId);
+const out2 = await plugin.transform(WITHIMPORT, withImportId);
 if (!out2) throw new Error("transform returned null for the helper-importing module");
 writeFileSync(withImportId, out2.code);
 for (const [src, id] of [[FORMAT, formatId], [REPORT, reportId]] as const) {
-  const o = plugin.transform(src, id);
+  const o = await plugin.transform(src, id);
   if (!o) throw new Error("transform returned null for " + id);
   writeFileSync(id, o.code);
 }
