@@ -36,13 +36,19 @@ roles within a run:
 
 1. **Baseline** — stock build + the measurement patch only (`ports/run.mts <name>
    --baseline`, separate work tree). Emits the per-test control JSONL.
-2. **Profile** — ported build with tracing on. Its job is emitting the trajectory
-   profile that prices the workflow's suffixes; its numbers are DISCARDED (tracing
-   rides the wire, and cold-start placement decisions aren't the steady state we
-   claim). Skipped until trajectory decide() is in the adapter path — today the
-   adapter always migrates the whole workflow, so there is nothing to warm.
-3. **Comparison** — ported build, tracing off, profile loaded. Emits the measured
-   JSONL that `ports/report.mts` joins against the baseline.
+2. **Profile** — ported build with recording on. This run gathers ALL adaptive
+   evidence: the trajectory profile that prices workflow suffixes, and the shim's
+   route evidence (which keys each route's envelope contains, when the app's XHRs
+   fire relative to navigation, measured crossing times). Exploration policies —
+   e.g. racing a held XHR against the network to learn which wins — are allowed in
+   THIS run only. Its numbers are DISCARDED.
+3. **Comparison** — ported build, recording off, exploration off. Every adaptive
+   decision (hold vs network per key, migrate vs fetch) is FROZEN from the loaded
+   profile artifact; a key the profile doesn't cover takes the deterministic
+   fallback (straight to network — behaves like stock, never manufactures a wait).
+   No racing, no learning, nothing self-modifying: two comparison runs of the same
+   build and profile make the same decisions. Emits the measured JSONL that
+   `ports/report.mts` joins against the baseline.
 
 Measurement and certification never share a stack: each run gets a freshly booted
 app (`boot.mts` kills whole process groups) and nothing else may touch its database
