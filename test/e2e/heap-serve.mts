@@ -14,6 +14,7 @@ import { serveApp, WS_PATH } from "tierless/server";
 import { connect } from "tierless/browser";
 import { makePeer, wsPort } from "tierless/transport";
 import * as bundle from "./heap-auto.gen.mjs";
+import * as wbBundle from "./heap-write.gen.mjs";
 import { makeCheck } from "../lib/check.mts";
 import type { MachineResult } from "tierless/runtime";
 import type { Handle } from "tierless/graph";
@@ -113,6 +114,24 @@ async function wsPair(): Promise<[import("tierless/transport").Peer, import("tie
     })().catch(reject);
   });
   check("serveApp + connect ran the deref app end to end (coherence auto-enabled from the bundle)", value === "Article 2");
+}
+
+// ===== Part 5: the unserved write-back path fails CLOSED, with a clear diagnostic =========
+// The live host does not serve "@writeback" yet (docs/memory.md). Without the guard, the
+// request migrates and dies in the OTHER tier's app exec as a baffling "no resource
+// writeback" — verified before the guard existed. Prove the guard converts that into a
+// named, documented error at the tier that hit it.
+{
+  const [serverPeer, browserPeer, closeSockets] = await wsPair();
+  const serverCoh = makeCoherence("server");
+  const serverHost = makeHost({ bundle: wbBundle, tier: "server", exec: apiExec, coherence: serverCoh });
+  const browserHost = makeHost({ bundle: wbBundle, tier: "browser", exec: ((req: ResourceReq) => { if (req.name === "dom.commit") return { idx: 3, score: 999 }; throw new Error("no resource " + req.name); }) as (req: ResourceReq) => unknown, coherence: makeCoherence("browser") });
+  serverCoh.serve(serverPeer);
+  browserHost.answer(browserPeer);
+  const outcome = await serverHost.run(serverPeer, "Edit").then(() => "resolved", (e: any) => String(e && e.message));
+  check("an --auto-writeback bundle fails closed with the documented diagnostic (not a confusing app-exec error)",
+    outcome.includes("write-back path is not served") && !outcome.includes("no resource writeback"), `(got: ${outcome.slice(0, 80)})`);
+  closeSockets();
 }
 
 console.log(ok()

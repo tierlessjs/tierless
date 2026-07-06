@@ -27,6 +27,11 @@ import { makeLruStore, DEFAULT_CACHE_BYTES } from "./store.mjs";
 // The pseudo-tier the --auto-deref compiler stamps on a handle read (see the compiled
 // machines: `{ op:"resource", tier:"@deref", name:"deref", args:[local] }`).
 export const DEREF_TIER = "@deref";
+// The pseudo-tier --auto-writeback stamps on a mutation. NOT yet served on the live path
+// (the CAS write-back over the socket is designed but unbuilt — docs/memory.md). The host
+// owns it only to fail with a clear diagnostic instead of bouncing the request into the
+// app's exec on the other tier, which reads as a missing app resource.
+export const WRITEBACK_TIER = "@writeback";
 // Whether a compiled bundle was built with --auto-deref: the pass exports an `isHandle`
 // guard onto the module. The host uses this to auto-enable coherence for the apps that
 // need it, leaving ordinary apps (no handles, no deref) exactly as they were.

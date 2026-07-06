@@ -1,4 +1,4 @@
-import type { Coherence } from "./coherence.mjs";
+import { type Coherence } from "./coherence.mjs";
 import type { Bundle, Exec, Peer, Host } from "./types.mjs";
 export type { Bundle, Frame, MachineResult, ResourceRequest, Exec, Peer, Host } from "./types.mjs";
 export type { Coherence } from "./coherence.mjs";

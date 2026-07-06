@@ -15,7 +15,7 @@
 import { makePump, initialStack } from "./runtime.mjs";
 import { encodeWireBinary, decodeWireBinary, encodeArgs, decodeArgs } from "./wire-binary.mjs";
 import type { EncodeOptions } from "./graph.mjs";
-import type { Coherence } from "./coherence.mjs";
+import { WRITEBACK_TIER, type Coherence } from "./coherence.mjs";
 import type { Bundle, Frame, Exec, ResourceRequest, Peer, Host, HostReply, Pump } from "./types.mjs";
 
 export type { Bundle, Frame, MachineResult, ResourceRequest, Exec, Peer, Host } from "./types.mjs";
@@ -40,14 +40,21 @@ export interface MakeHostOpts {
 export function makeHost({ bundle, tier, exec, owns, meta = {}, coherence }: MakeHostOpts): Host {
   const pump = makePump(bundle);
   const ownsBase: (tier: string) => boolean = owns || ((t) => t === tier);
-  // The host also owns "@deref": a handle read is serviced HERE (this tier), never migrated.
-  const ownsHere: (tier: string) => boolean = coherence ? ((t) => ownsBase(t) || coherence.ownsDeref(t)) : ownsBase;
+  // The host also owns the heap pseudo-tiers: "@deref" is serviced HERE (this tier), never
+  // migrated; "@writeback" is owned only to fail with a clear diagnostic (below).
+  const ownsHere: (tier: string) => boolean = coherence ? ((t) => ownsBase(t) || coherence.ownsDeref(t) || t === WRITEBACK_TIER) : ownsBase;
   const encOpts: EncodeOptions = coherence ? coherence.encodeOpts : {};
   // The exec the pump runs, bound to the peer the current message rides: an "@deref" is
   // serviced by the coherence host (a fetch back over `peer` on a cache miss); every other
   // owned resource goes to the app exec. With no coherence this is just the app exec.
+  // "@writeback" fails closed: the live CAS write-back isn't built yet, and without this
+  // the request migrates and dies in the OTHER tier's app exec as "no resource writeback".
   const execOn: (peer: Peer | undefined) => Exec = coherence
-    ? (peer) => (req) => (coherence.ownsDeref(req.tier) ? coherence.deref(peer as Peer, req.args[0]) : exec(req))
+    ? (peer) => (req) => {
+        if (coherence.ownsDeref(req.tier)) return coherence.deref(peer as Peer, req.args[0]);
+        if (req.tier === WRITEBACK_TIER) throw new Error("tierless: the §5 write-back path is not served on the live host yet — this bundle was compiled with --auto-writeback; its writes cannot propagate (see docs/memory.md)");
+        return exec(req);
+      }
     : () => exec;
 
   // Interpret a peer reply: done -> final value; suspend -> pump the migrated stack here

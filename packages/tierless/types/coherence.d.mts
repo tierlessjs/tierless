@@ -3,6 +3,7 @@ import { type Tier } from "./heap.mjs";
 import { type Store } from "./store.mjs";
 import type { Peer } from "./types.mjs";
 export declare const DEREF_TIER = "@deref";
+export declare const WRITEBACK_TIER = "@writeback";
 export declare const usesHeap: (bundle: unknown) => boolean;
 type CacheEntry = {
     version: number;
