@@ -48,5 +48,13 @@ their real files through the transform; this file tracks what it finds.
 - Patch 0005 (axios adapter at the I/O bottom) CERTIFIED behaviorally invisible:
   full suite 196/199, identical failure set to stock (the two drag flakes upstream
   retries for + Dex), zero session-socket traffic, same wall time (8.5 min).
+- Patch 0006 (compile AbstractService): **project suite 59/59 in stock wall time
+  (2.1 min)** — their real compiled getAll/create/post/delete running reads AND
+  writes over the session's fetch arm. Three boundary defects found and fixed by
+  their suite on the way (each in tierless, never worked around): the service's
+  own request-interceptor chain now runs browser-side with the post-chain config
+  crossing (= what axios hands its adapter); the wire body is literally axios's
+  JSON pass (toJSON/Dates); exec errors carry error.response whole. Eleven more
+  network-wait accommodations joined 0004 (writes cross the session now too).
 - Patches 0001/0002 (route workflow + shim) removed from the recipe: superseded.
   The measured shadow-port results live in git history and the README's record.
