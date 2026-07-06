@@ -58,3 +58,19 @@ their real files through the transform; this file tracks what it finds.
   network-wait accommodations joined 0004 (writes cross the session now too).
 - Patches 0001/0002 (route workflow + shim) removed from the recipe: superseded.
   The measured shadow-port results live in git history and the README's record.
+
+## First compiled-native measurement (2026-07-06, results/native-*.jsonl)
+
+196/196 pass parity (identical exclusions), **186 pairs through the session**.
+Trips: 15% fewer suite-wide, 22% median per test (preflights gone). Bytes:
+median 32% MORE per test — every request is its own crossing today, paying the
+module path (~85 B), envelope framing, and UNCOMPRESSED JSON (stock rides gzip)
+on each one; large payloads still win big (a gantt spec: 892 KB -> 29 KB).
+Wall time on localhost: ~0% (as always; shaped runs are the timing instrument).
+
+The overhead fixes are mechanical: hash the module id on the wire, trim
+envelope headers to content-type + x-* (all their code reads), enable
+permessage-deflate on the session socket. The structural fix is the §6 migrate
+arm: batching a method's chain into one crossing — the shadow port's
+amortization, earned back for real code.
+
