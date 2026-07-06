@@ -1,4 +1,4 @@
-import type { Exec } from "./types.mjs";
+import type { Exec, ResourceRequest } from "./types.mjs";
 export interface TwinResponse {
     data: unknown;
     status: number;
@@ -41,5 +41,10 @@ export interface RestResourcesOpts {
  *  interceptors run there too. Resolves to the axios-response subset real service code
  *  reads: { data, status, headers, statusText } — plain data, wire-safe. AxiosError-
  *  shaped rejections cross as errors and unwind into the compiled code's own try/catch. */
+/** The http family's DECLARED pins — requests whose axios config makes them browser-
+ *  bound by MEANING, not by transport: a blob/stream response can't cross, progress
+ *  callbacks act on live UI. Serializable configs that no ownership scan could flag.
+ *  (Callbacks and FormData/Blob values are caught by the host's generic scan.) */
+export declare function httpPins(req: ResourceRequest): boolean;
 export declare function httpResources(instance: Record<string, unknown>): Exec;
 export declare function restResources(baseUrl: string, { token, headers, fetchImpl, envelopeErrors }?: RestResourcesOpts): Exec;

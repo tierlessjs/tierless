@@ -15,7 +15,7 @@
 import { makeHost, answerWith } from "./host.mjs";
 import { makePeer, wsPort, onEvent } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
-import { httpResources } from "./adapt.mjs";
+import { httpResources, httpPins } from "./adapt.mjs";
 import type { Bundle, Exec, Host } from "./types.mjs";
 
 const defaultUrl = (): string => {
@@ -37,9 +37,9 @@ export interface Connection {
   /** Start entry(...args) on the SERVER; bounces back here are serviced by `exec`. */
   call(entry: string, args?: unknown[], module?: string): Promise<unknown>;
   /** Run entry(...args) HERE; foreign resources are fetched over the session (the frame
-   *  never ships — the compiled-class-method path, see bindMethods). localExec serves
-   *  requests whose args can't cross (FormData, callbacks) on this tier. */
-  runLocal(entry: string, args?: unknown[], module?: string, localExec?: Exec): Promise<unknown>;
+   *  never ships — the compiled-class-method path, see bindMethods). opts.exec serves
+   *  pinned requests on this tier; opts.pins adds the resource family's declared pins. */
+  runLocal(entry: string, args?: unknown[], module?: string, opts?: { exec?: Exec; pins?: (req: import("./types.mjs").ResourceRequest) => boolean }): Promise<unknown>;
   close(): void;
 }
 
@@ -73,11 +73,11 @@ export function connect({ url, exec, bundle, tier = "browser" }: ConnectOpts = {
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
       return h.call(peer, entry, args);
     },
-    runLocal: async (entry: string, args: unknown[] = [], module: string = "", localExec?: Exec): Promise<unknown> => {
+    runLocal: async (entry: string, args: unknown[] = [], module: string = "", opts?: { exec?: Exec; pins?: (req: import("./types.mjs").ResourceRequest) => boolean }): Promise<unknown> => {
       await ready;
       const h = hosts.get(module || "");
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
-      return h.runLocal(peer, entry, args, localExec ? { exec: localExec } : undefined);
+      return h.runLocal(peer, entry, args, opts);
     },
     close: () => ws.close(),
   };
@@ -118,10 +118,11 @@ export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (pro
   bundle.__bindTierlessMethods(async (prog, self, args) => {
     const conn = sharedConn();
     conn.register(module, bundle);
-    // pinned (unserializable-arg) requests run on the instance's OWN http — the same
-    // object the uncompiled method would have used — so uploads with progress callbacks
-    // behave stock while everything serializable rides the session
+    // pinned requests (declared: blob/stream responses; owned values: callbacks,
+    // FormData) run on the instance's OWN http — the same object the uncompiled method
+    // would have used — so uploads and downloads behave stock while plain-data requests
+    // ride the session
     const own = (self as { http?: Record<string, unknown> } | null)?.http;
-    return conn.runLocal(prog, [self, ...args], module, own ? httpResources(own) : undefined);
+    return conn.runLocal(prog, [self, ...args], module, own ? { exec: httpResources(own), pins: httpPins } : { pins: httpPins });
   });
 }

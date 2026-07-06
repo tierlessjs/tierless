@@ -15,7 +15,7 @@
 import { makeHost, answerWith } from "./host.mjs";
 import { makePeer, wsPort, onEvent } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
-import { httpResources } from "./adapt.mjs";
+import { httpResources, httpPins } from "./adapt.mjs";
 const defaultUrl = () => {
     if (typeof location === "undefined")
         throw new Error("tierless: no location — pass { url } (or call actions from the browser)");
@@ -53,12 +53,12 @@ export function connect({ url, exec, bundle, tier = "browser" } = {}) {
                 throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
             return h.call(peer, entry, args);
         },
-        runLocal: async (entry, args = [], module = "", localExec) => {
+        runLocal: async (entry, args = [], module = "", opts) => {
             await ready;
             const h = hosts.get(module || "");
             if (!h)
                 throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
-            return h.runLocal(peer, entry, args, localExec ? { exec: localExec } : undefined);
+            return h.runLocal(peer, entry, args, opts);
         },
         close: () => ws.close(),
     };
@@ -99,10 +99,11 @@ export function bindMethods(bundle, { module = "" } = {}) {
     bundle.__bindTierlessMethods(async (prog, self, args) => {
         const conn = sharedConn();
         conn.register(module, bundle);
-        // pinned (unserializable-arg) requests run on the instance's OWN http — the same
-        // object the uncompiled method would have used — so uploads with progress callbacks
-        // behave stock while everything serializable rides the session
+        // pinned requests (declared: blob/stream responses; owned values: callbacks,
+        // FormData) run on the instance's OWN http — the same object the uncompiled method
+        // would have used — so uploads and downloads behave stock while plain-data requests
+        // ride the session
         const own = self?.http;
-        return conn.runLocal(prog, [self, ...args], module, own ? httpResources(own) : undefined);
+        return conn.runLocal(prog, [self, ...args], module, own ? { exec: httpResources(own), pins: httpPins } : { pins: httpPins });
     });
 }

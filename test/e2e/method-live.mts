@@ -51,7 +51,16 @@ export class Svc {
     const r = await this.http.post("/upload", payload, { onUploadProgress: onProgress });
     return r.status;
   }
-}`;
+  async save(model) {
+    const r = await this.http.put("/things/1", model);
+    return r.data;
+  }
+  async download() {
+    const r = await this.http.get("/file", { responseType: "blob" });
+    return r.status;
+  }
+}
+export class Model { constructor(title) { this.title = title; this.maxPermission = null; } }`;
 const { code } = compile(SRC, { resources: { "this.http": "server" }, filename: "svc.js" });
 const dir = mkdtempSync(join(tmpdir(), "tlml-"));
 writeFileSync(join(dir, "svc.mjs"), code);
@@ -64,6 +73,10 @@ const twin = {
     served.push({ url, cfg });
     if (url === "/boom") { const e = new Error("Request failed with status code 500") as Error & { isAxiosError: boolean }; e.isAxiosError = true; throw e; }
     return { data: [{ id: 1 }, { id: 2 }], status: 200, statusText: "OK", headers: { "x-total": "3" } };
+  },
+  put: async (url: string, data: unknown) => {
+    served.push({ url, cfg: data });
+    return { data: { echoed: data }, status: 200, statusText: "OK", headers: {} };
   },
 };
 const wss = new WebSocketServer({ port: 0 });
@@ -81,16 +94,19 @@ const browser = makeHost({ bundle, tier: "browser", exec: (() => { throw new Err
 console.log("LIVE compiled class methods — the frame stays with the live instance, resources fetch\n");
 
 // wire the compiled stubs to the fetch path, exactly as tierless/browser bindMethods does:
-// pinned (unserializable-arg) requests fall back to the instance's OWN http
-const { httpResources: httpRes } = await import("tierless/adapt");
+// pinned requests (declared blob pins + owned-value scan) fall back to the instance's OWN http
+const { httpResources: httpRes, httpPins } = await import("tierless/adapt");
 const localPins: string[] = [];
 bundle.__bindTierlessMethods((prog: string, self: { http?: Record<string, unknown> }, args: unknown[]) =>
-  browser.runLocal(peer, prog, [self, ...args], self?.http ? { exec: (r: { name: string }) => { localPins.push(r.name); return httpRes(self.http!)(r as never); } } : undefined));
+  browser.runLocal(peer, prog, [self, ...args], { pins: httpPins, exec: (r: { name: string }) => { localPins.push(r.name); return httpRes(self.http!)(r as never); } }));
 
 // a "reactive" stand-in: a Proxy that counts writes, like a framework proxy would observe.
 // Its own http serves only PINNED requests (the get must not reach it while bound).
 const ownHttp = {
-  get: async () => { throw new Error("stub must not use the browser axios when bound"); },
+  get: async (url: string, cfg?: { responseType?: string }) => {
+    if (cfg?.responseType === "blob") return { data: "blob-here", status: 206, statusText: "Partial", headers: {} };
+    throw new Error("stub must not use the browser axios when bound");
+  },
   post: async (url: string, payload: unknown, cfg: { onUploadProgress?: () => void }) => {
     cfg.onUploadProgress?.();
     return { data: null, status: 201, statusText: "Created", headers: {} };
@@ -115,8 +131,17 @@ check("finally ran on the happy path too (done set before return)", inst.done ==
 // on the instance's OWN http (the callback fires) and never reach the server twin
 let progressed = 0;
 const status = await inst.upload({ big: "blob-ish" }, () => { progressed++; });
-check("unserializable-arg request pinned to the browser: own http served it, callback fired", status === 201 && progressed === 1 && localPins.includes("http.post"), JSON.stringify({ status, progressed, localPins }));
+check("owned-value request (progress callback) pinned: own http served it, callback fired", status === 201 && progressed === 1 && localPins.includes("http.post"), JSON.stringify({ status, progressed, localPins }));
 check("the server twin never saw the pinned request", !served.some((s) => s.url === "/upload"), JSON.stringify(served.map((s) => s.url)));
+
+// ownership, not serializability: a prototyped MODEL instance is plain data in motion —
+// it must CROSS (as axios itself would JSON it), not pin
+const saved = await inst.save(new bundle.Model("hello"));
+check("a model instance crosses to the twin as structural data", (saved as { echoed: { title: string } }).echoed.title === "hello" && served.some((s) => s.url === "/things/1"), JSON.stringify(saved));
+
+// declared pin: responseType blob is perfectly serializable and MUST still pin
+const dl = await inst.download();
+check("declared pin (responseType blob): served locally, twin never saw /file", dl === 206 && !served.some((s) => s.url === "/file"), JSON.stringify({ dl, urls: served.map((s) => s.url) }));
 
 // unbound parity: a second module instance falls back to the original method wholesale
 const bundle2 = await import(pathToFileURL(join(dir, "svc.mjs")).href + "?fresh");

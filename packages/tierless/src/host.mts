@@ -37,11 +37,16 @@ export interface MakeHostOpts {
   trace?: RecorderOpts | Recorder;
 }
 
-// A fetched request's args must survive the wire; the codec silently SKIPS what it
-// can't carry (functions, host objects), so pinning needs an explicit scan — the
-// runtime mirror of the axios adapter's pinned() test. Depth-limited: a pathological
-// value should pin (safe), not hang.
-function hasUnserializable(v: unknown, depth = 0): boolean {
+// OWNERSHIP scan — the generic half of request pinning (a resource family adds its
+// declared pins via opts.pins, e.g. axios's responseType:"blob"). A request is pinned
+// when its args close over values whose identity or effects belong to THIS tier:
+// functions (their effect lives in this heap), host objects (FormData/Blob wrap this
+// tier's memory). Plain data — INCLUDING prototyped model instances, which axios itself
+// would JSON-serialize — crosses structurally, exactly as it would have gone on the
+// wire anyway. NOT a serializability test: that is a codec capability, changes with the
+// codec, and can't see semantic pins at all. Depth-limited: pathological values pin
+// (fail closed), never hang.
+function ownsValues(v: unknown, depth = 0): boolean {
   if (depth > 6) return true;
   if (v === null || v === undefined) return false;
   const t = typeof v;
@@ -49,10 +54,9 @@ function hasUnserializable(v: unknown, depth = 0): boolean {
   if (t !== "object") return false;
   if (typeof FormData !== "undefined" && v instanceof FormData) return true;
   if (typeof Blob !== "undefined" && v instanceof Blob) return true;
-  if (Array.isArray(v)) return v.some((x) => hasUnserializable(x, depth + 1));
   if (v instanceof Date || v instanceof Uint8Array) return false;
-  if (Object.getPrototypeOf(v) !== Object.prototype && Object.getPrototypeOf(v) !== null) return true;   // class instances, proxies-of-classes, streams
-  return Object.values(v).some((x) => hasUnserializable(x, depth + 1));
+  if (Array.isArray(v)) return v.some((x) => ownsValues(x, depth + 1));
+  return Object.values(v as object).some((x) => ownsValues(x, depth + 1));   // own enumerable props — what crosses; prototypes stay home like axios's JSON pass
 }
 
 export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }: MakeHostOpts): Host {
@@ -142,7 +146,8 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }: MakeHos
     // (No trace recording yet: the recorder prices shipped stacks; fetch-hop records land
     // with the §6 decide-loop integration.)
     runLocal: async (peer, entry, args = [], opts = {}) => {
-      const localExec = (opts as { exec?: Exec }).exec || exec;
+      const { exec: overrideExec, pins } = opts as { exec?: Exec; pins?: (req: ResourceRequest) => boolean };
+      const localExec = overrideExec || exec;
       const stack = initialStack(entry, args);
       let request: ResourceRequest | null = null;
       let carry: { value: unknown } | { error: unknown } | null = null;
@@ -154,7 +159,9 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }: MakeHos
         const res = await pump(stack, ownsHere, onceExec, request);
         if (res.done) return res.value;
         request = res.request;
-        if (hasUnserializable(res.request.args)) {                 // pinned by construction — the codec would silently strip these
+        // pinned = the family's declared semantics (opts.pins) OR args closing over
+        // tier-owned values — executes here, on this run's local exec
+        if ((pins && pins(res.request)) || ownsValues(res.request.args)) {
           try { carry = { value: await localExec(res.request) }; } catch (e) { carry = { error: e }; }
           continue;
         }

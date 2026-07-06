@@ -76,6 +76,15 @@ export function twinHttp(baseUrl, { token, headers = {}, fetchImpl = fetch } = {
  *  interceptors run there too. Resolves to the axios-response subset real service code
  *  reads: { data, status, headers, statusText } — plain data, wire-safe. AxiosError-
  *  shaped rejections cross as errors and unwind into the compiled code's own try/catch. */
+/** The http family's DECLARED pins — requests whose axios config makes them browser-
+ *  bound by MEANING, not by transport: a blob/stream response can't cross, progress
+ *  callbacks act on live UI. Serializable configs that no ownership scan could flag.
+ *  (Callbacks and FormData/Blob values are caught by the host's generic scan.) */
+export function httpPins(req) {
+    const cfg = req.args.find((a) => a !== null && typeof a === "object" && ("responseType" in a || "onUploadProgress" in a || "onDownloadProgress" in a));
+    const rt = cfg?.responseType;
+    return rt === "blob" || rt === "stream" || rt === "arraybuffer";
+}
 export function httpResources(instance) {
     return async (req) => {
         const m = /^http\.(get|post|put|patch|delete|head|options|request)$/.exec(req.name);

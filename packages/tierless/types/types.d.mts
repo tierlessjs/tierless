@@ -79,10 +79,12 @@ export interface Host {
     /** Run entry(...args) entirely on THIS tier; foreign resources are FETCHED (only the
      *  request and result cross — the stack never ships). The frame may therefore hold
      *  unserializable values (live class instances, reactive proxies): the §6 fetch arm,
-     *  and the path compiled class methods run on. A request whose args can't serialize
-     *  executes locally through opts.exec (pinned by construction). */
+     *  and the path compiled class methods run on. A PINNED request — the family's
+     *  declared semantics (opts.pins) or args closing over tier-owned values (callbacks,
+     *  host objects) — executes here through opts.exec instead of crossing. */
     runLocal(peer: Peer, entry: string, args?: unknown[], opts?: {
         exec?: Exec;
+        pins?: (req: ResourceRequest) => boolean;
     }): Promise<unknown>;
     handleStart(payload: any, bin: Uint8Array | null): Promise<{
         obj: HostReply;
