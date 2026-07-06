@@ -1,6 +1,6 @@
 --- a/frontend/tests/support/fixtures.ts
 +++ b/frontend/tests/support/fixtures.ts
-@@ -1,15 +1,26 @@
+@@ -1,15 +1,27 @@
  import {test as base, type APIRequestContext, type Page} from '@playwright/test'
  import {Factory} from './factory'
  import {login, createFakeUser} from './authenticateUser'
@@ -17,8 +17,9 @@
 +		const out = process.env.TIERLESS_MEASURE_OUT
 +		if (!out) return use()
 +		const t0 = Date.now()
-+		const counts = await startWireCounts(page)
++		const {counts, stop} = await startWireCounts(page)
 +		await use()
++		await stop()
 +		writeWireCounts(out, counts, testInfo, Date.now() - t0)
 +	}, {auto: true}],
 +
@@ -30,7 +31,7 @@
  		})
 --- /dev/null
 +++ b/frontend/tests/support/tierlessMeasure.ts
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,66 @@
 +// Per-test wire measurement over CDP. Inactive unless TIERLESS_MEASURE_OUT names a
 +// JSONL file; then every test attempt appends one line. Counts DATA-PATH traffic only —
 +// the API origin plus the tierless session socket — because the SPA bundle is identical
@@ -55,7 +56,7 @@
 +const wsFrameBytes = (payloadLen: number, masked: boolean): number =>
 +	payloadLen + 2 + (payloadLen >= 65536 ? 8 : payloadLen >= 126 ? 2 : 0) + (masked ? 4 : 0)
 +
-+export async function startWireCounts(page: Page): Promise<WireCounts> {
++export async function startWireCounts(page: Page): Promise<{ counts: WireCounts; stop: () => Promise<void> }> {
 +	const m: WireCounts = {requests: 0, httpBytes: 0, wsFramesOut: 0, wsFramesIn: 0, wsBytesOut: 0, wsBytesIn: 0}
 +	const cdp = await page.context().newCDPSession(page)
 +	await cdp.send('Network.enable')
@@ -82,7 +83,9 @@
 +		m.wsFramesIn++
 +		m.wsBytesIn += wsFrameBytes(len, false)
 +	})
-+	return m
++	// the session MUST be detached at teardown: 199 accumulated CDP sessions on one
++	// browser add event-routing overhead that times out late request-heavy tests
++	return { counts: m, stop: async () => { try { await cdp.detach() } catch { /* page already gone */ } } }
 +}
 +
 +export function writeWireCounts(out: string, m: WireCounts, testInfo: TestInfo, durationMs: number) {
