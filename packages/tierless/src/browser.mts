@@ -13,6 +13,7 @@
 // first call. `exec` services browser-pinned resources (dom.commit in the full-tierless
 // mode, ui.* if you pin some); actions that never touch one simply run out on the server.
 import { makeHost, answerWith } from "./host.mjs";
+import { makeCoherence, usesHeap, type Coherence } from "./coherence.mjs";
 import { makePeer, wsPort, onEvent } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
 import type { Bundle, Exec, Host } from "./types.mjs";
@@ -28,6 +29,9 @@ export interface ConnectOpts {
   exec?: Exec;
   bundle?: Bundle;
   tier?: string;
+  /** Enable §5 heap coherence (deref a server-owned handle over the socket; serve
+   *  browser-owned handles back). Defaults on for --auto-deref bundles, off otherwise. */
+  heap?: boolean;
 }
 export interface Connection {
   ready: Promise<void>;
@@ -37,7 +41,7 @@ export interface Connection {
   close(): void;
 }
 
-export function connect({ url, exec, bundle, tier = "browser" }: ConnectOpts = {}): Connection {
+export function connect({ url, exec, bundle, tier = "browser", heap }: ConnectOpts = {}): Connection {
   const ws = new WebSocket(url || defaultUrl());
   const peer = makePeer(wsPort(ws));
   const ready: Promise<void> = new Promise((res, rej) => {
@@ -45,10 +49,19 @@ export function connect({ url, exec, bundle, tier = "browser" }: ConnectOpts = {
     onEvent(ws, "error", (e: any) => rej(new Error("tierless: websocket error" + (e && e.message ? ": " + e.message : ""))));
   });
 
+  // §5 heap coherence for this connection, created once the first heap-using bundle is
+  // known (or if opted in). serve() lets the server fetch browser-owned handles back.
+  let coherence: Coherence | undefined;
+  const enableCoherence = (b?: Bundle): void => {
+    if (coherence) return;
+    if (heap ?? (b ? usesHeap(b) : false)) { coherence = makeCoherence(tier); coherence.serve(peer); }
+  };
+  enableCoherence(bundle);
+
   const hosts = new Map<string, Host>();                          // moduleId -> host
   const register = (module: string, b: Bundle): Host => {
     const id = module || "";
-    if (!hosts.has(id)) hosts.set(id, makeHost({ bundle: b, tier, exec: exec as Exec, meta: id ? { module: id } : {} }));   // exec is optional here (actions-only pages never own a resource); makeHost only calls it when one is
+    if (!hosts.has(id)) { enableCoherence(b); hosts.set(id, makeHost({ bundle: b, tier, exec: exec as Exec, meta: id ? { module: id } : {}, coherence })); }   // exec is optional here (actions-only pages never own a resource); makeHost only calls it when one is
     return hosts.get(id)!;
   };
   if (bundle) register("", bundle);

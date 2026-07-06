@@ -64,7 +64,9 @@ export interface Host {
   run(peer: Peer, entry: string, args?: unknown[]): Promise<unknown>;
   /** Ask the PEER to start entry(...args) over there; service any bounces back here. */
   call(peer: Peer, entry: string, args?: unknown[]): Promise<unknown>;
-  handleStart(payload: any, bin: Uint8Array | null): Promise<{ obj: HostReply; bin?: Uint8Array }>;
-  handleResume(payload: any, bin: Uint8Array | null): Promise<{ obj: HostReply; bin?: Uint8Array }>;
+  // `peer` is the socket the message arrived on; the host services any §5 deref back over
+  // it (needed only when heap coherence is configured — omit it and derefs aren't served).
+  handleStart(payload: any, bin: Uint8Array | null, peer?: Peer): Promise<{ obj: HostReply; bin?: Uint8Array }>;
+  handleResume(payload: any, bin: Uint8Array | null, peer?: Peer): Promise<{ obj: HostReply; bin?: Uint8Array }>;
   answer(peer: Peer): Host;
 }

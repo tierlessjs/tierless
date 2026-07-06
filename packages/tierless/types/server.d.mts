@@ -16,8 +16,12 @@ export interface AttachOptions {
     path?: string;
     /** Per-connection: log in, hold the token, return the monitor-backed exec. */
     session: (req: IncomingMessage) => SessionSetup | Promise<SessionSetup>;
+    /** Enable §5 heap coherence (excision + deref-over-socket, bounded cache). Defaults to
+     *  on when the bundle was compiled with --auto-deref (it needs the deref plumbing) and
+     *  off otherwise, so ordinary apps are unaffected. */
+    heap?: boolean;
 }
-export declare function attachTierless(httpServer: HttpServer, { bundle, tier, session, path: wsPath }: AttachOptions): {
+export declare function attachTierless(httpServer: HttpServer, { bundle, tier, session, path: wsPath, heap }: AttachOptions): {
     close(): void;
 };
 export interface ServeAppOpts extends AttachOptions {

@@ -18,15 +18,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { makeHost, answerWith } from "./host.mjs";
+import { makeCoherence, usesHeap } from "./coherence.mjs";
 import { makePeer, wsPort } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
 const { WebSocketServer } = createRequire(import.meta.url)("ws");
 export { WS_PATH };
 // Mount the session endpoint on an EXISTING http server (Express/Fastify/Vite — anything
 // that emits 'upgrade'); co-mountable with other websocket handlers.
-export function attachTierless(httpServer, { bundle, tier = "server", session, path: wsPath = WS_PATH }) {
+export function attachTierless(httpServer, { bundle, tier = "server", session, path: wsPath = WS_PATH, heap }) {
     const wss = new WebSocketServer({ noServer: true });
     const resolveBundle = typeof bundle === "function" ? bundle : () => bundle;
+    const heapEnabled = heap ?? (typeof bundle !== "function" && usesHeap(bundle)); // auto-deref bundles get the deref path; ordinary ones don't
     const onUpgrade = (req, socket, head) => {
         let pathname = "";
         try {
@@ -48,10 +50,16 @@ export function attachTierless(httpServer, { bundle, tier = "server", session, p
         try {
             const { exec, entry, args = [], onDone } = await session(req);
             const peer = makePeer(wsPort(ws));
+            // §5 heap coherence is per-connection: one heap for excised locals, one bounded
+            // reader cache, shared across this socket's module-hosts. serve() answers the other
+            // tier's fetch requests from that heap.
+            const coherence = heapEnabled ? makeCoherence(tier) : undefined;
+            if (coherence)
+                coherence.serve(peer);
             const hosts = new Map(); // moduleId -> host (stateless; cached per socket)
             const hostFor = async (id) => {
                 if (!hosts.has(id))
-                    hosts.set(id, makeHost({ bundle: await resolveBundle(id), tier, exec, meta: id ? { module: id } : {} }));
+                    hosts.set(id, makeHost({ bundle: await resolveBundle(id), tier, exec, meta: id ? { module: id } : {}, coherence }));
                 return hosts.get(id);
             };
             answerWith(peer, hostFor); // browser-started sessions (actions) + bounces

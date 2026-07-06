@@ -5,6 +5,9 @@ export interface ConnectOpts {
     exec?: Exec;
     bundle?: Bundle;
     tier?: string;
+    /** Enable §5 heap coherence (deref a server-owned handle over the socket; serve
+     *  browser-owned handles back). Defaults on for --auto-deref bundles, off otherwise. */
+    heap?: boolean;
 }
 export interface Connection {
     ready: Promise<void>;
@@ -13,7 +16,7 @@ export interface Connection {
     call(entry: string, args?: unknown[], module?: string): Promise<unknown>;
     close(): void;
 }
-export declare function connect({ url, exec, bundle, tier }?: ConnectOpts): Connection;
+export declare function connect({ url, exec, bundle, tier, heap }?: ConnectOpts): Connection;
 export declare function configureTierless(opts: ConnectOpts): void;
 export declare function bindActions(bundle: Bundle, { module }?: {
     module?: string;

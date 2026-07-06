@@ -40,6 +40,7 @@ import {
 } from "tierless/delta";
 import { makeTier, encodeWire, decodeWire, wireHandles, writeBack, commitWrite, makeCoherentHost } from "tierless/heap";
 import { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_BYTES, type Store, type MaybePromise } from "tierless/store";
+import { makeCoherence, usesHeap, type Coherence } from "tierless/coherence";
 
 const bundle: Bundle = { PROGRAMS: {}, __unwind: () => false };
 const pump = makePump(bundle);
@@ -138,6 +139,8 @@ void lru.get("x"); void lru.set("x", { version: 1, copy: 1 }); void lru.evict("x
 const mp: MaybePromise<number> = Promise.resolve(1); void mp;   // the store contract is possibly-async by design
 void makeUnboundedStore<number>();                                        // the non-evicting default, also public
 void makeCoherentHost(hTier, hChannel, { cache: lru });                   // per-namespace policy: the cache store is injectable
+const coh: Coherence = makeCoherence("server");                           // the live-path deref coherence (excision + fetch-over-socket)
+void coh.encodeOpts; void coh.ownsDeref("@deref"); void coh.stats.fetches; void usesHeap(bundle);
 `);
 const ok = tsc([join("test", ".types-fixture", "ok.ts")]);
 check("a consumer exercising every main entry type-checks under --strict", ok.status === 0, (ok.stdout || "").split("\n").slice(0, 3).join(" | "));

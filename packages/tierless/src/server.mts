@@ -18,6 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { makeHost, answerWith } from "./host.mjs";
+import { makeCoherence, usesHeap } from "./coherence.mjs";
 import { makePeer, wsPort } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
 import type { Bundle, Exec, ResourceRequest } from "./types.mjs";
@@ -42,13 +43,18 @@ export interface AttachOptions {
   path?: string;
   /** Per-connection: log in, hold the token, return the monitor-backed exec. */
   session: (req: IncomingMessage) => SessionSetup | Promise<SessionSetup>;
+  /** Enable §5 heap coherence (excision + deref-over-socket, bounded cache). Defaults to
+   *  on when the bundle was compiled with --auto-deref (it needs the deref plumbing) and
+   *  off otherwise, so ordinary apps are unaffected. */
+  heap?: boolean;
 }
 
 // Mount the session endpoint on an EXISTING http server (Express/Fastify/Vite — anything
 // that emits 'upgrade'); co-mountable with other websocket handlers.
-export function attachTierless(httpServer: HttpServer, { bundle, tier = "server", session, path: wsPath = WS_PATH }: AttachOptions): { close(): void } {
+export function attachTierless(httpServer: HttpServer, { bundle, tier = "server", session, path: wsPath = WS_PATH, heap }: AttachOptions): { close(): void } {
   const wss = new WebSocketServer({ noServer: true });
   const resolveBundle = typeof bundle === "function" ? bundle : () => bundle;
+  const heapEnabled = heap ?? (typeof bundle !== "function" && usesHeap(bundle));   // auto-deref bundles get the deref path; ordinary ones don't
 
   const onUpgrade = (req: IncomingMessage, socket: any, head: any): void => {
     let pathname = "";
@@ -68,9 +74,14 @@ export function attachTierless(httpServer: HttpServer, { bundle, tier = "server"
     try {
       const { exec, entry, args = [], onDone } = await session(req);
       const peer = makePeer(wsPort(ws));
+      // §5 heap coherence is per-connection: one heap for excised locals, one bounded
+      // reader cache, shared across this socket's module-hosts. serve() answers the other
+      // tier's fetch requests from that heap.
+      const coherence = heapEnabled ? makeCoherence(tier) : undefined;
+      if (coherence) coherence.serve(peer);
       const hosts = new Map<string, import("./types.mjs").Host>();  // moduleId -> host (stateless; cached per socket)
       const hostFor = async (id: string) => {
-        if (!hosts.has(id)) hosts.set(id, makeHost({ bundle: await resolveBundle(id), tier, exec, meta: id ? { module: id } : {} }));
+        if (!hosts.has(id)) hosts.set(id, makeHost({ bundle: await resolveBundle(id), tier, exec, meta: id ? { module: id } : {}, coherence }));
         return hosts.get(id)!;
       };
       answerWith(peer, hostFor);                                   // browser-started sessions (actions) + bounces

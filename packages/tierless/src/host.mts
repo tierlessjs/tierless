@@ -14,9 +14,12 @@
 // correlation ids keep their bounces apart.
 import { makePump, initialStack } from "./runtime.mjs";
 import { encodeWireBinary, decodeWireBinary, encodeArgs, decodeArgs } from "./wire-binary.mjs";
+import type { EncodeOptions } from "./graph.mjs";
+import type { Coherence } from "./coherence.mjs";
 import type { Bundle, Frame, Exec, ResourceRequest, Peer, Host, HostReply, Pump } from "./types.mjs";
 
 export type { Bundle, Frame, MachineResult, ResourceRequest, Exec, Peer, Host } from "./types.mjs";
+export type { Coherence } from "./coherence.mjs";
 
 // What settle()/step() work with — the value a Pump's promise resolves to. Named here so
 // it isn't spelled out three times.
@@ -28,36 +31,51 @@ export interface MakeHostOpts {
   exec: Exec;
   owns?: (tier: string) => boolean;
   meta?: Record<string, unknown>;
+  /** §5 heap coherence for this connection (excision + deref-over-socket, bounded cache).
+   *  When set, the host owns the "@deref" pseudo-tier and excises big locals on the wire.
+   *  Omit it and the host behaves exactly as before — no handles, no deref servicing. */
+  coherence?: Coherence;
 }
 
-export function makeHost({ bundle, tier, exec, owns, meta = {} }: MakeHostOpts): Host {
+export function makeHost({ bundle, tier, exec, owns, meta = {}, coherence }: MakeHostOpts): Host {
   const pump = makePump(bundle);
-  const ownsHere: (tier: string) => boolean = owns || ((t) => t === tier);
+  const ownsBase: (tier: string) => boolean = owns || ((t) => t === tier);
+  // The host also owns "@deref": a handle read is serviced HERE (this tier), never migrated.
+  const ownsHere: (tier: string) => boolean = coherence ? ((t) => ownsBase(t) || coherence.ownsDeref(t)) : ownsBase;
+  const encOpts: EncodeOptions = coherence ? coherence.encodeOpts : {};
+  // The exec the pump runs, bound to the peer the current message rides: an "@deref" is
+  // serviced by the coherence host (a fetch back over `peer` on a cache miss); every other
+  // owned resource goes to the app exec. With no coherence this is just the app exec.
+  const execOn: (peer: Peer | undefined) => Exec = coherence
+    ? (peer) => (req) => (coherence.ownsDeref(req.tier) ? coherence.deref(peer as Peer, req.args[0]) : exec(req))
+    : () => exec;
 
   // Interpret a peer reply: done -> final value; suspend -> pump the migrated stack here
   // (which may end done, or park at another foreign resource for the caller to bounce).
-  async function settle({ obj: reply, bin }: { obj: HostReply; bin: Uint8Array | null }): Promise<PumpResult> {
+  async function settle(peer: Peer, { obj: reply, bin }: { obj: HostReply; bin: Uint8Array | null }): Promise<PumpResult> {
     if (reply.type === "error") throw new Error(reply.message);
     if (reply.type === "done") return { done: true, value: reply.value };
     const { stack, request } = decodeWireBinary(bin!);
-    return pump(stack as Frame[], ownsHere, exec, request as ResourceRequest | null);   // a "suspend" reply's bin always decodes to what the sender's PumpResult shipped — a real continuation stack + ResourceRequest
+    return pump(stack as Frame[], ownsHere, execOn(peer), request as ResourceRequest | null);   // a "suspend" reply's bin always decodes to what the sender's PumpResult shipped — a real continuation stack + ResourceRequest
   }
 
   // Bounce a local result with the peer until the session completes: every time the
   // continuation parks at a foreign resource, ship it; every time it comes back, pump it.
   async function drive(peer: Peer, res: PumpResult): Promise<unknown> {
     while (!res.done) {
-      res = await settle(await peer.request({ type: "resume", ...meta }, encodeWireBinary(res.stack, res.request)));
+      res = await settle(peer, await peer.request({ type: "resume", ...meta }, encodeWireBinary(res.stack, res.request, encOpts)));
     }
     return res.value;
   }
 
   // Serve one migrated-in step: pump from where the peer left off, reply done/suspend.
-  async function step(stack: Frame[], incoming: ResourceRequest | null): Promise<{ obj: HostReply; bin?: Uint8Array }> {
+  // `peer` is the socket the step arrived on — used to fetch a §5 handle back if the
+  // continuation derefs one here.
+  async function step(peer: Peer | undefined, stack: Frame[], incoming: ResourceRequest | null): Promise<{ obj: HostReply; bin?: Uint8Array }> {
     try {
-      const res = await pump(stack, ownsHere, exec, incoming);
+      const res = await pump(stack, ownsHere, execOn(peer), incoming);
       if (res.done) return { obj: { type: "done", value: res.value } };
-      return { obj: { type: "suspend" }, bin: encodeWireBinary(res.stack, res.request) };
+      return { obj: { type: "suspend" }, bin: encodeWireBinary(res.stack, res.request, encOpts) };
     } catch (e: any) {
       return { obj: { type: "error", message: String((e && e.message) || e) } };
     }
@@ -66,15 +84,21 @@ export function makeHost({ bundle, tier, exec, owns, meta = {} }: MakeHostOpts):
   const host: Host = {
     pump,
     // Start entry(...args) on THIS tier and drive it to completion with the peer.
-    run: async (peer, entry, args = []) => drive(peer, await pump(initialStack(entry, args), ownsHere, exec)),
+    run: async (peer, entry, args = []) => drive(peer, await pump(initialStack(entry, args), ownsHere, execOn(peer))),
     // Ask the PEER to start entry(...args) over there; service any bounces back here.
     call: async (peer, entry, args = []) =>
-      drive(peer, await settle(await peer.request({ type: "start", entry, ...meta }, encodeArgs(args)))),
+      drive(peer, await settle(peer, await peer.request({ type: "start", entry, ...meta }, encodeArgs(args)))),
     // The answering half, exposed as plain handlers so a dispatcher can route by meta.
-    handleStart: (payload, bin) => step(initialStack(payload.entry, decodeArgs(bin!)), null),
-    handleResume: (payload, bin) => { const { stack, request } = decodeWireBinary(bin!); return step(stack as Frame[], request as ResourceRequest | null); },
-    // Convenience: answer starts/resumes on a peer when this host is the only one on it.
-    answer(peer) { peer.on("start", host.handleStart); peer.on("resume", host.handleResume); return host; },
+    handleStart: (payload, bin, peer) => step(peer, initialStack(payload.entry, decodeArgs(bin!)), null),
+    handleResume: (payload, bin, peer) => { const { stack, request } = decodeWireBinary(bin!); return step(peer, stack as Frame[], request as ResourceRequest | null); },
+    // Convenience: answer starts/resumes on a peer when this host is the only one on it —
+    // and serve this connection's §5 heap so the other tier can fetch its handles back.
+    answer(peer) {
+      peer.on("start", (p, bin) => host.handleStart(p, bin, peer));
+      peer.on("resume", (p, bin) => host.handleResume(p, bin, peer));
+      if (coherence) coherence.serve(peer);
+      return host;
+    },
   };
   return host;
 }
@@ -84,6 +108,6 @@ export function makeHost({ bundle, tier, exec, owns, meta = {} }: MakeHostOpts):
 // mix-module's host stamps its id into `meta`, and the other side dispatches on it.
 export function answerWith(peer: Peer, hostFor: (id: string) => Host | Promise<Host>, field: string = "module"): void {
   const pick = async (payload: any): Promise<Host> => hostFor((payload && payload[field]) || "");
-  peer.on("start", async (p, bin) => (await pick(p)).handleStart(p, bin));
-  peer.on("resume", async (p, bin) => (await pick(p)).handleResume(p, bin));
+  peer.on("start", async (p, bin) => (await pick(p)).handleStart(p, bin, peer));   // thread the peer so a §5 deref can fetch back over it
+  peer.on("resume", async (p, bin) => (await pick(p)).handleResume(p, bin, peer));
 }
