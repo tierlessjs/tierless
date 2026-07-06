@@ -16,6 +16,32 @@ import { makePump, initialStack } from "./runtime.mjs";
 import { encodeWireBinary, decodeWireBinary, encodeArgs, decodeArgs } from "./wire-binary.mjs";
 import { makeRecorder } from "./trace.mjs";
 const isRecorder = (t) => typeof t.ship === "function";
+// A fetched request's args must survive the wire; the codec silently SKIPS what it
+// can't carry (functions, host objects), so pinning needs an explicit scan — the
+// runtime mirror of the axios adapter's pinned() test. Depth-limited: a pathological
+// value should pin (safe), not hang.
+function hasUnserializable(v, depth = 0) {
+    if (depth > 6)
+        return true;
+    if (v === null || v === undefined)
+        return false;
+    const t = typeof v;
+    if (t === "function" || t === "symbol")
+        return true;
+    if (t !== "object")
+        return false;
+    if (typeof FormData !== "undefined" && v instanceof FormData)
+        return true;
+    if (typeof Blob !== "undefined" && v instanceof Blob)
+        return true;
+    if (Array.isArray(v))
+        return v.some((x) => hasUnserializable(x, depth + 1));
+    if (v instanceof Date || v instanceof Uint8Array)
+        return false;
+    if (Object.getPrototypeOf(v) !== Object.prototype && Object.getPrototypeOf(v) !== null)
+        return true; // class instances, proxies-of-classes, streams
+    return Object.values(v).some((x) => hasUnserializable(x, depth + 1));
+}
 export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }) {
     const pump = makePump(bundle);
     const ownsHere = owns || ((t) => t === tier);
@@ -97,9 +123,13 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }) {
         // pump's service() path, so the compiled code's own try/catch/finally see them. The
         // frame never serializes — compiled class methods (whose arg 0 is a live instance,
         // often a reactive proxy) run on this path, mutating the real object in place.
+        // A request whose ARGS can't serialize (FormData, a progress callback in the config)
+        // is intrinsically local: it executes here through opts.exec — the runtime mirror of
+        // the axios adapter's pinned() test, with serializability itself as the signal.
         // (No trace recording yet: the recorder prices shipped stacks; fetch-hop records land
         // with the §6 decide-loop integration.)
-        runLocal: async (peer, entry, args = []) => {
+        runLocal: async (peer, entry, args = [], opts = {}) => {
+            const localExec = opts.exec || exec;
             const stack = initialStack(entry, args);
             let request = null;
             let carry = null;
@@ -108,13 +138,22 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }) {
                 carry = null;
                 // one-shot exec: the first service() call consumes the fetched result (or throws
                 // the fetch error INTO the machine); anything else this tier owns runs normally
-                const localExec = (r) => { if (c)
-                    return "error" in c ? (() => { throw c.error; })() : c.value; return exec(r); };
-                const res = await pump(stack, ownsHere, localExec, request);
+                const onceExec = (r) => { if (c)
+                    return "error" in c ? (() => { throw c.error; })() : c.value; return localExec(r); };
+                const res = await pump(stack, ownsHere, onceExec, request);
                 if (res.done)
                     return res.value;
-                const { obj } = await peer.request({ type: "exec", tier: res.request.tier, ...meta }, encodeArgs([res.request.name, res.request.args]));
                 request = res.request;
+                if (hasUnserializable(res.request.args)) { // pinned by construction — the codec would silently strip these
+                    try {
+                        carry = { value: await localExec(res.request) };
+                    }
+                    catch (e) {
+                        carry = { error: e };
+                    }
+                    continue;
+                }
+                const { obj } = await peer.request({ type: "exec", tier: res.request.tier, ...meta }, encodeArgs([res.request.name, res.request.args]));
                 carry = obj.type === "error" ? { error: new Error(obj.message) } : { value: obj.value };
             }
         },

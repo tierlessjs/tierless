@@ -1,7 +1,7 @@
 /** axios-compatible default param serialization: null/undefined skipped, arrays as
  *  repeated `key[]`, Dates as ISO strings. Standard percent-encoding (the backend
  *  parses url-encoding; axios's cosmetic un-escaping of [,] etc. is not semantic). */
-function serializeParams(params) {
+export function serializeParams(params) {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) {
         if (v === null || v === undefined)

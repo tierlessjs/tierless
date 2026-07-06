@@ -15,6 +15,7 @@
 import { makeHost, answerWith } from "./host.mjs";
 import { makePeer, wsPort, onEvent } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
+import { httpResources } from "./adapt.mjs";
 import type { Bundle, Exec, Host } from "./types.mjs";
 
 const defaultUrl = (): string => {
@@ -36,8 +37,9 @@ export interface Connection {
   /** Start entry(...args) on the SERVER; bounces back here are serviced by `exec`. */
   call(entry: string, args?: unknown[], module?: string): Promise<unknown>;
   /** Run entry(...args) HERE; foreign resources are fetched over the session (the frame
-   *  never ships — the compiled-class-method path, see bindMethods). */
-  runLocal(entry: string, args?: unknown[], module?: string): Promise<unknown>;
+   *  never ships — the compiled-class-method path, see bindMethods). localExec serves
+   *  requests whose args can't cross (FormData, callbacks) on this tier. */
+  runLocal(entry: string, args?: unknown[], module?: string, localExec?: Exec): Promise<unknown>;
   close(): void;
 }
 
@@ -71,11 +73,11 @@ export function connect({ url, exec, bundle, tier = "browser" }: ConnectOpts = {
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
       return h.call(peer, entry, args);
     },
-    runLocal: async (entry: string, args: unknown[] = [], module: string = ""): Promise<unknown> => {
+    runLocal: async (entry: string, args: unknown[] = [], module: string = "", localExec?: Exec): Promise<unknown> => {
       await ready;
       const h = hosts.get(module || "");
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
-      return h.runLocal(peer, entry, args);
+      return h.runLocal(peer, entry, args, localExec ? { exec: localExec } : undefined);
     },
     close: () => ws.close(),
   };
@@ -113,9 +115,13 @@ export function bindActions(bundle: Bundle, { module = "" }: { module?: string }
  *  object; only resource requests and results cross. Call once per compiled module. */
 export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (prog: string, self: unknown, args: unknown[]) => Promise<unknown>) => void }, { module = "" }: { module?: string } = {}): void {
   if (typeof bundle.__bindTierlessMethods !== "function") throw new Error("tierless: bundle has no compiled class methods (rebuild with a compiler that emits __bindTierlessMethods)");
-  bundle.__bindTierlessMethods((prog, self, args) => {
+  bundle.__bindTierlessMethods(async (prog, self, args) => {
     const conn = sharedConn();
     conn.register(module, bundle);
-    return conn.runLocal(prog, [self, ...args], module);
+    // pinned (unserializable-arg) requests run on the instance's OWN http — the same
+    // object the uncompiled method would have used — so uploads with progress callbacks
+    // behave stock while everything serializable rides the session
+    const own = (self as { http?: Record<string, unknown> } | null)?.http;
+    return conn.runLocal(prog, [self, ...args], module, own ? httpResources(own) : undefined);
   });
 }

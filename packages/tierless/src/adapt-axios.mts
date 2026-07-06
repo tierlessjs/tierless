@@ -44,7 +44,7 @@ export interface AxiosAdapterOpts {
 /** axios-compatible default param serialization: null/undefined skipped, arrays as
  *  repeated `key[]`, Dates as ISO strings. Standard percent-encoding (the backend
  *  parses url-encoding; axios's cosmetic un-escaping of [,] etc. is not semantic). */
-function serializeParams(params: Record<string, unknown>): string {
+export function serializeParams(params: Record<string, unknown>): string {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v === null || v === undefined) continue;

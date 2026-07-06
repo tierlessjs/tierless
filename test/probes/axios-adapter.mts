@@ -53,5 +53,27 @@ canned = { status: 200, headers: {}, body: null };
 await adapter({ method: "get", baseURL: "http://x.test/api/v1", url: "/f", params: { a: 1 }, paramsSerializer: { serialize: () => "custom=1" }, headers: {} });
 check("config paramsSerializer wins", (seen!.args as [string])[0].endsWith("/f?custom=1"));
 
+// --- twinHttp: the server-side twin speaks the axios surface over fetch ------------------
+const { twinHttp } = await import("../../packages/tierless/src/adapt.mts");
+const { createServer } = await import("node:http");
+const srv = createServer((req, res) => {
+  if (req.url?.startsWith("/api/v1/miss")) { res.writeHead(404, { "content-type": "application/json" }); res.end('{"message":"nope"}'); return; }
+  res.writeHead(200, { "content-type": "application/json", "x-echo-auth": req.headers.authorization || "", "x-echo-url": req.url || "" });
+  res.end(JSON.stringify({ m: req.method }));
+});
+await new Promise<void>((r) => srv.listen(0, r));
+const port = (srv.address() as { port: number }).port;
+const twin = twinHttp(`http://127.0.0.1:${port}/api/v1`, { token: "tok9" }) as Record<string, (...a: unknown[]) => Promise<{ data: { m: string }; status: number; headers: Record<string, string> }>>;
+
+const g = await twin.get("/tasks/all", { params: { "sort_by": ["position"], page: 2 } });
+check("twin GET hits base+path with axios-style params", g.status === 200 && g.headers["x-echo-url"] === "/api/v1/tasks/all?sort_by%5B%5D=position&page=2", g.headers["x-echo-url"]);
+check("twin carries the session token as Bearer", g.headers["x-echo-auth"] === "Bearer tok9");
+const p = await twin.put("/tasks/1", { title: "t" });
+check("twin PUT sends body", p.data.m === "PUT");
+let terr: (Error & { isAxiosError?: boolean; response?: { status: number; data: { message: string } } }) | null = null;
+try { await twin.get("/miss"); } catch (e) { terr = e as typeof terr; }
+check("twin non-2xx rejects AxiosError-shaped", terr?.isAxiosError === true && terr?.response?.status === 404 && terr?.response?.data.message === "nope");
+srv.close();
+
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
 console.log("\nall adapter translations hold");

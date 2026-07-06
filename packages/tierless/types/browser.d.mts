@@ -12,8 +12,9 @@ export interface Connection {
     /** Start entry(...args) on the SERVER; bounces back here are serviced by `exec`. */
     call(entry: string, args?: unknown[], module?: string): Promise<unknown>;
     /** Run entry(...args) HERE; foreign resources are fetched over the session (the frame
-     *  never ships — the compiled-class-method path, see bindMethods). */
-    runLocal(entry: string, args?: unknown[], module?: string): Promise<unknown>;
+     *  never ships — the compiled-class-method path, see bindMethods). localExec serves
+     *  requests whose args can't cross (FormData, callbacks) on this tier. */
+    runLocal(entry: string, args?: unknown[], module?: string, localExec?: Exec): Promise<unknown>;
     close(): void;
 }
 export declare function connect({ url, exec, bundle, tier }?: ConnectOpts): Connection;

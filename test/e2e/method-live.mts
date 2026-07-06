@@ -47,6 +47,10 @@ export class Svc {
       return "caught: " + e.message;
     }
   }
+  async upload(payload, onProgress) {
+    const r = await this.http.post("/upload", payload, { onUploadProgress: onProgress });
+    return r.status;
+  }
 }`;
 const { code } = compile(SRC, { resources: { "this.http": "server" }, filename: "svc.js" });
 const dir = mkdtempSync(join(tmpdir(), "tlml-"));
@@ -76,12 +80,24 @@ const browser = makeHost({ bundle, tier: "browser", exec: (() => { throw new Err
 
 console.log("LIVE compiled class methods — the frame stays with the live instance, resources fetch\n");
 
-// wire the compiled stubs to the fetch path, exactly as tierless/browser bindMethods does
-bundle.__bindTierlessMethods((prog: string, self: unknown, args: unknown[]) => browser.runLocal(peer, prog, [self, ...args]));
+// wire the compiled stubs to the fetch path, exactly as tierless/browser bindMethods does:
+// pinned (unserializable-arg) requests fall back to the instance's OWN http
+const { httpResources: httpRes } = await import("tierless/adapt");
+const localPins: string[] = [];
+bundle.__bindTierlessMethods((prog: string, self: { http?: Record<string, unknown> }, args: unknown[]) =>
+  browser.runLocal(peer, prog, [self, ...args], self?.http ? { exec: (r: { name: string }) => { localPins.push(r.name); return httpRes(self.http!)(r as never); } } : undefined));
 
-// a "reactive" stand-in: a Proxy that counts writes, like a framework proxy would observe
+// a "reactive" stand-in: a Proxy that counts writes, like a framework proxy would observe.
+// Its own http serves only PINNED requests (the get must not reach it while bound).
+const ownHttp = {
+  get: async () => { throw new Error("stub must not use the browser axios when bound"); },
+  post: async (url: string, payload: unknown, cfg: { onUploadProgress?: () => void }) => {
+    cfg.onUploadProgress?.();
+    return { data: null, status: 201, statusText: "Created", headers: {} };
+  },
+};
 const writes: string[] = [];
-const inst = new Proxy(new bundle.Svc({ get: async () => { throw new Error("stub must not use the browser axios when bound"); } }), {
+const inst = new Proxy(new bundle.Svc(ownHttp), {
   set(target, prop, value) { writes.push(String(prop)); return Reflect.set(target, prop, value); },
 });
 
@@ -94,6 +110,13 @@ check("suffix ran in the BROWSER on the real object (mutations observed by the p
 const caught = await inst.fragile();
 check("a failed fetch unwinds into the compiled method's own try/catch", caught === "caught: Request failed with status code 500", caught);
 check("finally ran on the happy path too (done set before return)", inst.done === true);
+
+// pinned path: a progress callback makes the args unserializable — the request must run
+// on the instance's OWN http (the callback fires) and never reach the server twin
+let progressed = 0;
+const status = await inst.upload({ big: "blob-ish" }, () => { progressed++; });
+check("unserializable-arg request pinned to the browser: own http served it, callback fired", status === 201 && progressed === 1 && localPins.includes("http.post"), JSON.stringify({ status, progressed, localPins }));
+check("the server twin never saw the pinned request", !served.some((s) => s.url === "/upload"), JSON.stringify(served.map((s) => s.url)));
 
 // unbound parity: a second module instance falls back to the original method wholesale
 const bundle2 = await import(pathToFileURL(join(dir, "svc.mjs")).href + "?fresh");

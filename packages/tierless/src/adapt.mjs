@@ -1,3 +1,67 @@
+// Adapting EXISTING apps — the corpus program's rung 3 (docs/corpus.md).
+//
+// An existing app's backend is never rewritten: its REST endpoints become the resource
+// space directly. A workflow module calls paths, not schema entries —
+//
+//   "use tierless";
+//   export function openProject(id, view) {
+//     const user = api.get("/user");
+//     const project = api.get("/projects/" + id);
+//     const tasks = api.get("/projects/" + id + "/views/" + view + "/tasks?...");
+//     return { "/user": user, ["/projects/" + id]: project, ... };
+//   }
+//
+// — and restResources() is the server-side exec that services api.get/api.post by
+// calling the real backend over localhost, forwarding the end user's bearer token. The
+// gateway holds NO authority of its own: every request is authorized by the backend
+// exactly as if the browser had sent it. (The reference-monitor api service remains the
+// trust model for apps that own their backend; this adapter is the no-rewrite seam.)
+import { serializeParams } from "./adapt-axios.mjs";
+/** The server-side TWIN of an app's own axios instance: the same call surface
+ *  (`get(url, config)`, `post(url, data, config)`, …) over fetch against the backend's
+ *  local base URL, resolving to { data, status, headers, statusText } and rejecting
+ *  AxiosError-shaped on non-2xx. Interim stand-in for building the twin from the app's
+ *  OWN factory (which needs the pinned-global leases — ports/vikunja/COMPILING.md):
+ *  the interceptors' observable effects (Content-Type, Authorization) are reproduced
+ *  from the session's token. Params serialize axios-style (arrays as key[]). */
+export function twinHttp(baseUrl, { token, headers = {}, fetchImpl = fetch } = {}) {
+    const base = baseUrl.replace(/\/$/, "");
+    const call = async (method, url, data, config = {}) => {
+        let path = url.startsWith("/") ? base + url : url;
+        if (config.params && Object.keys(config.params).length)
+            path += (path.includes("?") ? "&" : "?") + serializeParams(config.params);
+        const r = await fetchImpl(path, {
+            method: method.toUpperCase(),
+            headers: {
+                ...(data !== undefined ? { "content-type": "application/json" } : {}),
+                ...(token ? { authorization: token.startsWith("Bearer ") ? token : "Bearer " + token } : {}),
+                ...headers,
+                ...(config.headers || {}),
+            },
+            ...(data !== undefined ? { body: typeof data === "string" ? data : JSON.stringify(data) } : {}),
+        });
+        const text = await r.text();
+        const isJson = (r.headers.get("content-type") || "").includes("json");
+        const res = { data: isJson && text ? JSON.parse(text) : text, status: r.status, statusText: r.statusText, headers: Object.fromEntries(r.headers) };
+        if (r.status < 200 || r.status >= 300) {
+            const err = new Error("Request failed with status code " + r.status);
+            err.response = res;
+            err.isAxiosError = true;
+            err.code = r.status >= 500 ? "ERR_BAD_RESPONSE" : "ERR_BAD_REQUEST";
+            throw err;
+        }
+        return res;
+    };
+    return {
+        get: (url, c) => call("get", url, undefined, c),
+        delete: (url, c) => call("delete", url, undefined, c),
+        head: (url, c) => call("head", url, undefined, c),
+        options: (url, c) => call("options", url, undefined, c),
+        post: (url, data, c) => call("post", url, data, c),
+        put: (url, data, c) => call("put", url, data, c),
+        patch: (url, data, c) => call("patch", url, data, c),
+    };
+}
 /** An Exec servicing `api.get(path)` / `api.post(path, body)` — and per-request headers
  *  via `api.get(path, undefined, {headers})` — against a real REST base URL.
  *  Resolves to an ENVELOPE { status, headers, body } — apps read semantics from custom

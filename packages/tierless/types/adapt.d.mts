@@ -1,4 +1,22 @@
 import type { Exec } from "./types.mjs";
+export interface TwinResponse {
+    data: unknown;
+    status: number;
+    statusText: string;
+    headers: Record<string, string>;
+}
+/** The server-side TWIN of an app's own axios instance: the same call surface
+ *  (`get(url, config)`, `post(url, data, config)`, …) over fetch against the backend's
+ *  local base URL, resolving to { data, status, headers, statusText } and rejecting
+ *  AxiosError-shaped on non-2xx. Interim stand-in for building the twin from the app's
+ *  OWN factory (which needs the pinned-global leases — ports/vikunja/COMPILING.md):
+ *  the interceptors' observable effects (Content-Type, Authorization) are reproduced
+ *  from the session's token. Params serialize axios-style (arrays as key[]). */
+export declare function twinHttp(baseUrl: string, { token, headers, fetchImpl }?: {
+    token?: string;
+    headers?: Record<string, string>;
+    fetchImpl?: typeof fetch;
+}): Record<string, unknown>;
 export interface RestResourcesOpts {
     /** Bearer token forwarded as Authorization (the end user's — from the session). */
     token?: string;

@@ -79,8 +79,11 @@ export interface Host {
     /** Run entry(...args) entirely on THIS tier; foreign resources are FETCHED (only the
      *  request and result cross — the stack never ships). The frame may therefore hold
      *  unserializable values (live class instances, reactive proxies): the §6 fetch arm,
-     *  and the path compiled class methods run on. */
-    runLocal(peer: Peer, entry: string, args?: unknown[]): Promise<unknown>;
+     *  and the path compiled class methods run on. A request whose args can't serialize
+     *  executes locally through opts.exec (pinned by construction). */
+    runLocal(peer: Peer, entry: string, args?: unknown[], opts?: {
+        exec?: Exec;
+    }): Promise<unknown>;
     handleStart(payload: any, bin: Uint8Array | null): Promise<{
         obj: HostReply;
         bin?: Uint8Array;
