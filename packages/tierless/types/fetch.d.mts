@@ -1,4 +1,6 @@
 import { type Handle } from "./graph.mjs";
+import { type Store } from "./store.mjs";
+export { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_CAP, type Store, type MaybePromise } from "./store.mjs";
 export interface TierEntry {
     heap: Heap;
 }
@@ -39,4 +41,8 @@ export interface FetchHost {
     stats: HostStats;
     deref(h: unknown): unknown;
 }
-export declare function makeHost(localTier: LocalTier, channel: Channel): FetchHost;
+type CacheEntry = {
+    version: number;
+    copy: unknown;
+};
+export declare function makeHost(localTier: LocalTier, channel: Channel, store?: Store<CacheEntry>): FetchHost;

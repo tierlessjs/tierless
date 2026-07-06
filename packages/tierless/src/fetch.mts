@@ -19,6 +19,9 @@
 // compare-and-set — is layered on top in src/heap.mjs.
 
 import { encodeGraph, decodeGraph, isHandle, type Handle } from "./graph.mjs";
+import { makeLruStore, DEFAULT_CACHE_CAP, type Store } from "./store.mjs";
+
+export { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_CAP, type Store, type MaybePromise } from "./store.mjs";
 
 export interface TierEntry {
   heap: Heap;
@@ -73,9 +76,14 @@ export interface FetchHost {
 }
 
 // A deref host for the interpreter running on `localTier`, with a read-through,
-// version-invalidated cache. Plug into run(tier, frames, host).
-export function makeHost(localTier: LocalTier, channel: Channel): FetchHost {
-  const cache = new Map<string, { version: number; copy: unknown }>(); // id -> { version, copy }
+// version-invalidated cache. Plug into run(tier, frames, host). The cache lives behind
+// an injected `store` so its retention policy is replaceable; the default is a bounded
+// LRU that caps resident entries within a long session (release across sessions is
+// already provided by the per-socket host lifetime in server.mts). The served cache is
+// safe to evict — the master is on the owner tier, so an eviction costs at most a
+// refetch — so the cap is the only parameter.
+type CacheEntry = { version: number; copy: unknown };
+export function makeHost(localTier: LocalTier, channel: Channel, store: Store<CacheEntry> = makeLruStore<CacheEntry>(DEFAULT_CACHE_CAP)): FetchHost {
   const stats: HostStats = { fetches: 0, hits: 0, localUses: 0, bytes: 0 };
   return {
     stats,
@@ -83,11 +91,15 @@ export function makeHost(localTier: LocalTier, channel: Channel): FetchHost {
       if (!isHandle(h)) return h;
       if (h.owner === localTier.id) { stats.localUses++; return localTier.heap.get(h.id); } // use the master
       const current = channel.currentVersion(h);
-      const c = cache.get(h.id);
+      // deref is a synchronous hot path (the auto-deref machine consumes its return
+      // synchronously); the default store resolves synchronously. The Store contract is
+      // typed possibly-async so an async store can be injected without a signature
+      // change — such a store would require an async deref, layered on top later.
+      const c = store.get(h.id) as CacheEntry | undefined;
       if (c && c.version === current) { stats.hits++; return c.copy; }                       // coherent cache hit
       const before = channel.bytes;
       const { copy, version } = channel.fetch(h);                                            // fetch the snapshot
-      cache.set(h.id, { version, copy });
+      store.set(h.id, { version, copy });
       stats.fetches++; stats.bytes += channel.bytes - before;
       return copy;
     },

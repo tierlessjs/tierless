@@ -13,7 +13,9 @@ import { encodeGraph, decodeGraph, isHandle } from "./graph.mjs";
 import { Heap } from "./fetch.mjs";
 import { openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot } from "./wire-delta.mjs";
 import { rootsOf, rebuildStack } from "./wire-io.mjs";
+import { makeUnboundedStore } from "./store.mjs";
 export { Channel, makeHost } from "./fetch.mjs";
+export { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_CAP } from "./store.mjs";
 export function makeTier(id) {
     const heap = new Heap(id);
     return { id, heap, heapPut: (v) => heap.put(v).id, heapGet: (hid) => heap.get(hid) };
@@ -80,9 +82,9 @@ export function commitWrite(channel, handle, mutator, { tries = 5 } = {}) {
 // optimistic CAS). On the owning tier the master is edited in place and writeBack just bumps
 // the version so other tiers' caches invalidate.
 const PROV = Symbol("tierless.provenance");
-export function makeCoherentHost(localTier, channel) {
-    const cache = new Map(); // id -> { version, copy }
-    const sessions = new Map(); // id -> a delta session baselined at fetch, so a write-back ships only the change
+export function makeCoherentHost(localTier, channel, stores = {}) {
+    const cache = stores.cache ?? makeUnboundedStore(); // id -> { version, copy }
+    const sessions = stores.sessions ?? makeUnboundedStore(); // id -> a delta session baselined at fetch, so a write-back ships only the change
     const stats = { fetches: 0, hits: 0, localUses: 0, writeBacks: 0, conflicts: 0, wire: 0, whole: 0 };
     const tag = (obj, owner, id, version) => {
         if (obj && typeof obj === "object" && Object.isExtensible(obj))
@@ -99,6 +101,9 @@ export function makeCoherentHost(localTier, channel) {
                 return tag(localTier.heap.get(h.id), h.owner, h.id, localTier.heap.version(h.id));
             } // master in place
             const current = channel.currentVersion(h);
+            // deref/writeBack are synchronous; the default stores resolve synchronously. The
+            // Store contract is typed possibly-async so an alternative store can be injected
+            // without a signature change (an async store would require an async host).
             const c = cache.get(h.id);
             if (c && c.version === current) {
                 stats.hits++;

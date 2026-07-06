@@ -1,7 +1,9 @@
 import { type Handle, type EncodeTier } from "./graph.mjs";
 import { Heap, type Channel, type LocalTier } from "./fetch.mjs";
-import { type DeltaFrame, type DeltaRequest } from "./wire-delta.mjs";
+import { type Session, type DeltaFrame, type DeltaRequest } from "./wire-delta.mjs";
+import { type Store } from "./store.mjs";
 export { Channel, makeHost } from "./fetch.mjs";
+export { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_CAP, type Store, type MaybePromise } from "./store.mjs";
 export interface Tier extends LocalTier, EncodeTier {
     heapGet(hid: string): unknown;
 }
@@ -47,4 +49,11 @@ export interface CoherentHost {
     deref(h: unknown): unknown;
     writeBack(obj: unknown): unknown;
 }
-export declare function makeCoherentHost(localTier: LocalTier, channel: Channel): CoherentHost;
+export interface CoherentHostStores {
+    cache?: Store<{
+        version: number;
+        copy: unknown;
+    }>;
+    sessions?: Store<Session>;
+}
+export declare function makeCoherentHost(localTier: LocalTier, channel: Channel, stores?: CoherentHostStores): CoherentHost;
