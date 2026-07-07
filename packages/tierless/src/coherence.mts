@@ -54,6 +54,13 @@ export const WRITEBACK_TIER = "@writeback";
 export const usesHeap = (bundle: unknown): boolean =>
   !!bundle && typeof (bundle as { isHandle?: unknown }).isHandle === "function";
 
+// The deref reply ships its graph as the transport's BINARY payload, not inside the JSON
+// envelope: the owner serializes it exactly once, and the reader weighs the cache entry
+// by bin.byteLength — the true wire size in bytes (a string .length would count UTF-16
+// code units and under-count multi-byte payloads against the byte budget).
+const te = new TextEncoder();
+const td = new TextDecoder();
+
 // Fetched-copy provenance: which master this snapshot came from and the version it was
 // read at. Non-enumerable Symbol, so it never serializes or travels.
 const PROV = Symbol("tierless.provenance");
@@ -140,11 +147,11 @@ export function makeCoherence(tierId: string, { threshold = 8192, store }: Coher
       if (h.owner === tier.id) { stats.localUses++; return tag(tier.heap.get(h.id), h.owner, h.id, tier.heap.version(h.id)); }   // we own the master — use it in place
       // Consult the owner with the version we hold; it ships the graph only on a miss.
       const cached = (await cache.get(h.id)) as CacheEntry | undefined;
-      const { obj } = await peer.request({ type: "deref", id: h.id, have: cached ? cached.version : -1 });
+      const { obj, bin } = await peer.request({ type: "deref", id: h.id, have: cached ? cached.version : -1 });
       if (obj.type === "error") throw new Error("tierless: deref failed: " + obj.message);
       if (obj.type === "same") { stats.hits++; return (cached as CacheEntry).copy; }        // version match — the cached copy is still coherent
-      const copy = decodeGraph(obj.graph)[0];                                               // identity/cycle-safe snapshot
-      const bytes = JSON.stringify(obj.graph).length;                                       // wire size — the entry's memory weight
+      const bytes = bin!.byteLength;                                                        // exact wire size — the entry's memory weight (a fetchResult always carries bin)
+      const copy = decodeGraph(JSON.parse(td.decode(bin!)))[0];                             // identity/cycle-safe snapshot
       tag(copy, h.owner, h.id, obj.version);
       await cache.set(h.id, { version: obj.version, copy, bytes, session: openSnapshot(tier.id, copy) });   // baseline for a future write-back delta
       stats.fetches++; stats.bytes += bytes;
@@ -200,7 +207,7 @@ export function makeCoherence(tierId: string, { threshold = 8192, store }: Coher
         const version = tier.heap.version(req.id);
         if (version === undefined) return { obj: { type: "error", message: "no such master " + req.id + " on " + tier.id + " (released or never excised)" } };
         if (req.have === version) return { obj: { type: "same", version } };
-        return { obj: { type: "fetchResult", version, graph: encodeGraph([tier.heapGet(req.id)]) } };
+        return { obj: { type: "fetchResult", version }, bin: te.encode(JSON.stringify(encodeGraph([tier.heapGet(req.id)]))) };
       });
       // The owner-side CAS: accept the write iff the master is still at the version the
       // reader read. On success the version bumps, invalidating every other reader's cache.
