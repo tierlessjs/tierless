@@ -124,3 +124,27 @@ suite-wide / 22% median covered. The honest read: per-request crossings pay
 per-request RTTs — the trip savings that exist today (preflights, dependent
 refetches) are real but small against UI-bound test time. Chain batching
 (§6 migrate arm) is where trips-fewer becomes seconds-faster.
+
+## The §6 verdict for this app (2026-07-07, profile from their whole suite)
+
+The three-run protocol closed: profiling run (196/199, traced fetch arm, 5,042
+records, 3,916 complete method runs) -> locked profile -> comparison. The store
+surface compiled (22 setup-store functions + all 10 abstractService methods,
+delegation wrappers included, certified 196/199), so same-run chains COULD form
+and be shipped. The profile's answer: of 3,916 complete runs, THREE are
+multi-touch chains (the saved-filter favorite toggle: getM -> post). Every
+(fn, pc, resource) site's modal suffix is empty; the rare chains are <2% at
+their shared sites, far under the 90% stability gate.
+
+methodMigrate therefore ships NOTHING — the frozen comparison arm is
+behaviorally identical to the certified fetch arm (zero migrations), and its
+numbers are the certified ones: bytes -35% median at the socket, trips -14%
+suite / -22% median, wall time ±2% under real 80 ms RTT, 196/196 pass parity.
+
+That is the finding, stated plainly: THIS app, driven by ITS OWN test suite,
+has no stable request chains to batch — its interactions are single-call, and
+its one real multi-call flow is too rare at shared sites to ship profitably.
+The §6 machinery works end to end (fixtures prove N-call chains collapse to
+one crossing when they exist); this corpus program simply doesn't have them.
+Wall-time wins here would need the session-twin registry on flows the suite
+doesn't exercise, or an app whose orchestration layer actually chains.
