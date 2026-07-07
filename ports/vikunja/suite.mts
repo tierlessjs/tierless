@@ -23,6 +23,14 @@ import { delayProxy, type WireCounter } from "../latency-proxy.mts";
 const VARIANT = process.argv.includes("--baseline") ? "vikunja-baseline" : "vikunja";
 const TRUTH = !!process.env.TIERLESS_WIRE_TRUTH;
 const RTT = Number(process.env.TIERLESS_RTT_MS || 0);
+// Run protocol (docs/corpus.md): TIERLESS_PROFILE_RUN=1 makes this a PROFILING run
+// (browser traces every method run to the gateway, appended to trace.jsonl); setting
+// TIERLESS_PROFILE=<profile.json> makes it a frozen COMPARISON run (the locked profile
+// drives §6 migrate). Both wire the page via an injected global, like window.TESTING.
+const PROFILE_RUN = !!process.env.TIERLESS_PROFILE_RUN;
+const PROFILE = process.env.TIERLESS_PROFILE || "";
+if (PROFILE_RUN && PROFILE) { console.error("pick one: TIERLESS_PROFILE_RUN (profiling) or TIERLESS_PROFILE (comparison)"); process.exit(2); }
+const TRACE_OUT = fileURLToPath(new URL(`../work/${VARIANT}/trace.jsonl`, import.meta.url));
 const SRC = fileURLToPath(new URL(`../work/${VARIANT}/src/`, import.meta.url));
 const OUT = fileURLToPath(new URL(`../work/${VARIANT}/measure${RTT ? `-rtt${RTT}` : ""}.jsonl`, import.meta.url));
 
@@ -30,10 +38,16 @@ const OUT = fileURLToPath(new URL(`../work/${VARIANT}/measure${RTT ? `-rtt${RTT}
 // testing flag"); the app gates test-only behavior on it and a dozen specs fail on any
 // build without it — stock included.
 const idx = path.join(SRC, "frontend/dist/index.html");
-const html = readFileSync(idx, "utf8");
-if (!html.includes("window.TESTING")) writeFileSync(idx, html.replace("<head>", "<head><script>window.TESTING=true;</script>"));
+let html = readFileSync(idx, "utf8");
+if (!html.includes("window.TESTING")) html = html.replace("<head>", "<head><script>window.TESTING=true;</script>");
+// run-mode flag: strip any previous run's, then inject this run's (idempotent per mode)
+html = html.replace(/<script data-tierless-run>[^<]*<\/script>/, "");
+if (PROFILE_RUN) html = html.replace("<head>", "<head><script data-tierless-run>window.__TIERLESS_TRACE__=\"/__tierless/trace\";</script>");
+if (PROFILE) html = html.replace("<head>", "<head><script data-tierless-run>window.__TIERLESS_PROFILE__=\"/__tierless/profile\";</script>");
+writeFileSync(idx, html);
 
 rmSync(OUT, { force: true });
+if (PROFILE_RUN) { rmSync(TRACE_OUT, { force: true }); process.env.TIERLESS_TRACE_OUT = TRACE_OUT; }   // the preview inherits these
 const app = await bootVikunja();
 if (TRUTH) {
   // TCP-true byte accounting: the BROWSER's API traffic goes through a counting relay

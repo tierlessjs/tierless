@@ -1345,8 +1345,14 @@ function compileClassMethods(ast, progs, meta, rest) {
 // Residual awaits of MEMBER CALLS become dynamic call parks (docs/migrate-arm.md
 // slice 3): `await x.m(a)` -> `yield D(x, "m", a)` — resolved at RUNTIME by the pump.
 // Shared by the method and store-function lowerings; awaits that survive it reject.
-function rewriteDynAwaits(file) {
+// Only awaits BELONGING to the lowered function rewrite (an await's owner is its nearest
+// enclosing function, arrows included) — an await inside a nested function is that
+// closure's own suspension: it stays plain JS, runs wherever its segment runs, and any
+// escaping promise is ownedUnit, so the §5 stop rule fences it.
+function rewriteDynAwaits(file, fnNode) {
     traverse(file, { AwaitExpression(ap) {
+            if (ap.getFunctionParent()?.node !== fnNode)
+                return;
             const arg = ap.node.argument;
             if (t.isCallExpression(arg) && t.isMemberExpression(arg.callee) && !arg.callee.computed && t.isIdentifier(arg.callee.property) && !arg.arguments.some((x) => t.isSpreadElement(x))) {
                 const y = t.yieldExpression(t.callExpression(t.identifier("D"), [arg.callee.object, t.stringLiteral(arg.callee.property.name), ...arg.arguments]));
@@ -1381,8 +1387,13 @@ function compileStoreFunctions(ast, progs, meta) {
                 const fnName = stmtPath.node.id.name;
                 const progName = storeKey + "$" + fnName;
                 try {
-                    // free setup-scope bindings — the caps; an ASSIGNMENT to one can't be carried
-                    // (the caps object is a snapshot of bindings, not the bindings themselves)
+                    // free bindings — the caps. EVERYTHING bound outside the function captures:
+                    // setup-scope refs and services, and MODULE-scope imports/consts alike. Module
+                    // singletons (a router, i18n, a base store) are browser-owned live values the
+                    // slot rule couldn't fence as imports — through the caps handle they fence like
+                    // any owned slot, and the machine's server bundle needs (almost) no app imports.
+                    // An ASSIGNMENT to a captured binding can't be carried (the caps object is a
+                    // snapshot of bindings, not the bindings themselves) — the function stays original.
                     const captures = [];
                     const seen = new Set();
                     const within = (p, anc) => p === anc || !!p.findParent((q) => q === anc);
@@ -1392,9 +1403,7 @@ function compileStoreFunctions(ast, progs, meta) {
                                 return;
                             const b = ip.scope.getBinding(name);
                             if (!b || within(b.scope.path, stmtPath))
-                                return; // fn-local or unbound (module import): stays as-is
-                            if (!within(b.scope.path, setup))
-                                return; // module scope: the kept import serves both copies
+                                return; // fn-local or a true global: stays as-is
                             seen.add(name);
                             captures.push(name);
                             for (const v of b.constantViolations)
@@ -1413,7 +1422,7 @@ function compileStoreFunctions(ast, progs, meta) {
                             ip.replaceWith(t.memberExpression(t.identifier("__caps"), t.identifier(ip.node.name)));
                         } });
                     allowlist(file);
-                    rewriteDynAwaits(file);
+                    rewriteDynAwaits(file, fnNode);
                     let yields = 0;
                     traverse(file, { YieldExpression(yp) { if (isResYield(yp.node) || isDynYield(yp.node))
                             yields++; } });
@@ -1423,6 +1432,8 @@ function compileStoreFunctions(ast, progs, meta) {
                             throw new Error(`tierless: ${storeKey}.${fnName} uses \`this\` (line ${tp.node.loc?.start.line ?? "?"}) — setup-store functions have no instance; the function stays uncompiled`);
                         } });
                     traverse(file, { AwaitExpression(ap) {
+                            if (ap.getFunctionParent()?.node !== fnNode)
+                                return; // a nested closure's own await: plain JS, stays
                             throw new Error(`tierless: ${storeKey}.${fnName} awaits a non-call value (line ${ap.node.loc?.start.line ?? "?"}) — a pending native promise can't migrate; the function stays uncompiled`);
                         } });
                     let mpath = null;
@@ -1461,7 +1472,7 @@ function lowerMethod(clsName, mName, m, progName) {
     const fnNode = t.functionDeclaration(t.identifier(progName), [t.identifier("__self"), ...m.params.map((x) => t.cloneNode(x, true))], t.cloneNode(m.body, true));
     const file = t.file(t.program([fnNode]));
     allowlist(file); // recognizes both this.<ns> and __self.<ns>, so it can run before the this-rewrite
-    rewriteDynAwaits(file); // awaited member calls -> dynamic parks; bare awaits still reject below
+    rewriteDynAwaits(file, fnNode); // awaited member calls -> dynamic parks; bare awaits still reject below
     let yields = 0;
     traverse(file, { YieldExpression(yp) { if (isResYield(yp.node) || isDynYield(yp.node))
             yields++; } });
@@ -1478,6 +1489,8 @@ function lowerMethod(clsName, mName, m, progName) {
                 tp.replaceWith(t.identifier("__self"));
         } });
     traverse(file, { AwaitExpression(ap) {
+            if (ap.getFunctionParent()?.node !== fnNode)
+                return; // a nested closure's own await: plain JS, stays
             throw new Error(`tierless: ${clsName}.${mName} awaits a non-resource value (line ${ap.node.loc?.start.line ?? "?"}) — a pending native promise can't migrate; the method stays uncompiled`);
         } });
     let path = null;
@@ -1541,7 +1554,10 @@ function compile(src, preamble) {
     // machine never misses them. Same BUNDLE_HASH: it names the MACHINE, which is shared.
     if (meta.methods.some((m) => m.program)) {
         const machineText = progs.join(",\n") + "\n" + pure.join("\n");
-        const refd = (name) => new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(machineText);
+        // NOT preceded by '.' or a word char: `__caps.router` is a property walk through the
+        // caps handle, not a reference to the router import — keeping it would drag the
+        // whole browser graph into the server bundle
+        const refd = (name) => new RegExp(`(?<![.\\w$])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(machineText);
         const keptImports = rest
             .filter((n) => t.isImportDeclaration(n))
             .filter((n) => n.specifiers.some((s) => refd(s.local.name)))

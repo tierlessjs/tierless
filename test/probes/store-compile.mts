@@ -109,7 +109,7 @@ const reset = (): void => { twinServed.length = 0; for (const k of Object.keys(c
 
 // what the stub would pass: a call-time caps snapshot from a live store instance
 const store2 = mod.useThings();
-const caps = { state: store2.state, svc: store2.svc };
+const caps = { state: store2.state, svc: store2.svc, Svc: mod.Svc };   // what the stub snapshots: setup AND module bindings
 
 reset();
 const r2 = await bhost.runLocal(peer, "things$toggleAndReload", [caps, { t: "y" }], {});
@@ -118,7 +118,7 @@ check("fetch arm: state mutations landed on the live store", store2.state.flips 
 
 reset();
 const store3 = mod.useThings();
-const r3 = await bhost.runLocal(peer, "things$toggleAndReload", [{ state: store3.state, svc: store3.svc }, { t: "z" }], { migrate: () => true });
+const r3 = await bhost.runLocal(peer, "things$toggleAndReload", [{ state: store3.state, svc: store3.svc, Svc: mod.Svc }, { t: "z" }], { migrate: () => true });
 check("migrate: the 2-method store chain is ONE crossing", r3 === "42:3" && counts.resume === 1 && !counts.exec, JSON.stringify({ r3, counts }));
 check("migrate: both calls served server-side; live state still mutated at home", twinServed.join(",") === "http.put:/things,http.get:/things" && store3.state.flips === 1 && store3.state.items.length === 3, JSON.stringify({ twinServed, state: store3.state }));
 

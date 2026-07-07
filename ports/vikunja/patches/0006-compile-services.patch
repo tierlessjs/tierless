@@ -12,7 +12,7 @@
  		},
  		plugins: [
  			vue(),
-+			tierless({apiUrl: process.env.TIERLESS_API_URL || 'http://127.0.0.1:3456', compile: ['src/services/abstractService.ts']}),
++			tierless({apiUrl: process.env.TIERLESS_API_URL || 'http://127.0.0.1:3456', compile: ['src/services/abstractService.ts', 'src/stores/tasks.ts', 'src/stores/projects.ts', 'src/stores/kanban.ts']}),
  			svgLoader({
  				// Since the svgs are already manually optimized via https://jakearchibald.github.io/svgomg/
  				// we don't need to optimize them again.
