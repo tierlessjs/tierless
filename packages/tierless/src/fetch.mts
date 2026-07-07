@@ -39,6 +39,7 @@ export class Heap {
   get(id: string): unknown { return this.objs.get(id); }
   version(id: string): number { return this.ver.get(id) as number; }
   mutate(id: string, fn: (obj: unknown) => void): void { fn(this.objs.get(id)); this.ver.set(id, (this.ver.get(id) as number) + 1); } // single-writer; invalidates readers
+  drop(id: string): void { this.objs.delete(id); this.ver.delete(id); } // release a master (owner-side heap bounding — coherence.mjs releases a continuation's excisions when it completes)
 }
 
 // The wire between tiers. fetch() serializes the master on the owner with the

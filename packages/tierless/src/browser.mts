@@ -29,8 +29,9 @@ export interface ConnectOpts {
   exec?: Exec;
   bundle?: Bundle;
   tier?: string;
-  /** Enable §5 heap coherence (deref a server-owned handle over the socket; serve
-   *  browser-owned handles back). Defaults on for --auto-deref bundles, off otherwise. */
+  /** Enable §5 heap coherence (deref a server-owned handle over the socket, write a
+   *  mutation back under CAS, serve browser-owned handles). Defaults on for
+   *  --auto-deref/--auto-writeback bundles, off otherwise. */
   heap?: boolean;
 }
 export interface Connection {

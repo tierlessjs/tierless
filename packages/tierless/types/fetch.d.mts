@@ -15,6 +15,7 @@ export declare class Heap {
     get(id: string): unknown;
     version(id: string): number;
     mutate(id: string, fn: (obj: unknown) => void): void;
+    drop(id: string): void;
 }
 export declare class Channel {
     tiers: Tiers;

@@ -32,13 +32,25 @@ export const DEFAULT_CACHE_BYTES = 64 * 1024 * 1024;
 // the most-recent end, and the first key is always the least-recent. A parallel `sizes`
 // map tracks each entry's weight so `total` stays exact across overwrite and eviction.
 export function makeLruStore(opts) {
-    const { max, weigh = () => 1 } = opts;
+    const { max, weigh = () => 1, evictable = () => true } = opts;
     if (!Number.isFinite(max) || max < 1)
         throw new RangeError(`LRU max must be a finite number >= 1, got ${max}`);
     const m = new Map();
     const sizes = new Map();
     let total = 0;
     const drop = (id) => { total -= sizes.get(id) ?? 0; sizes.delete(id); m.delete(id); };
+    const shrink = (keep) => {
+        if (total <= max)
+            return;
+        for (const [id, v] of m) { // least-recent first; skip pinned entries
+            if (id === keep || !evictable(v))
+                continue; // never the just-set entry
+            drop(id);
+            if (total <= max)
+                return;
+        }
+        // only pinned weight remains over budget — allowed transiently (a pin is a pending write-back)
+    };
     return {
         get(id) {
             if (!m.has(id))
@@ -57,8 +69,7 @@ export function makeLruStore(opts) {
             m.set(id, value);
             sizes.set(id, w);
             total += w;
-            while (total > max)
-                drop(m.keys().next().value); // evict least-recent until within budget (never the just-set entry: w <= max)
+            shrink(id); // evict least-recent evictable until within budget
         },
         evict(id) { drop(id); },
     };

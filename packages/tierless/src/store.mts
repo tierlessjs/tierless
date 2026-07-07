@@ -41,6 +41,11 @@ export interface LruOpts<V> {
   /** Per-entry weight. Default 1 per entry, i.e. `max` is an entry count. Return byte
    *  size for a memory budget (the served cache weighs each entry by its fetched size). */
   weigh?: (value: V) => number;
+  /** Eviction gate: return false to PIN an entry (skipped by budget eviction; `evict(id)`
+   *  still removes it). The §5 coherence pins an entry whose snapshot has an unshipped
+   *  mutation — evicting it would drop the baseline its write-back diffs against. Pinned
+   *  weight can push the store over budget transiently. Default: everything evictable. */
+  evictable?: (value: V) => boolean;
 }
 
 // Bounded LRU (synchronous), weighted. Retained weight is capped at `max`, evicting the
@@ -54,12 +59,21 @@ export interface LruOpts<V> {
 // the most-recent end, and the first key is always the least-recent. A parallel `sizes`
 // map tracks each entry's weight so `total` stays exact across overwrite and eviction.
 export function makeLruStore<V>(opts: LruOpts<V>): Store<V> {
-  const { max, weigh = () => 1 } = opts;
+  const { max, weigh = () => 1, evictable = () => true } = opts;
   if (!Number.isFinite(max) || max < 1) throw new RangeError(`LRU max must be a finite number >= 1, got ${max}`);
   const m = new Map<string, V>();
   const sizes = new Map<string, number>();
   let total = 0;
   const drop = (id: string): void => { total -= sizes.get(id) ?? 0; sizes.delete(id); m.delete(id); };
+  const shrink = (keep: string): void => {
+    if (total <= max) return;
+    for (const [id, v] of m) {                                    // least-recent first; skip pinned entries
+      if (id === keep || !evictable(v)) continue;                 // never the just-set entry
+      drop(id);
+      if (total <= max) return;
+    }
+    // only pinned weight remains over budget — allowed transiently (a pin is a pending write-back)
+  };
   return {
     get(id: string): V | undefined {
       if (!m.has(id)) return undefined;
@@ -72,7 +86,7 @@ export function makeLruStore<V>(opts: LruOpts<V>): Store<V> {
       if (m.has(id)) drop(id);                                    // remove any stale entry for this id first
       if (w > max) return;                                        // larger than the whole budget: bypass — don't evict the cache to hold one object
       m.set(id, value); sizes.set(id, w); total += w;
-      while (total > max) drop(m.keys().next().value as string);  // evict least-recent until within budget (never the just-set entry: w <= max)
+      shrink(id);                                                 // evict least-recent evictable until within budget
     },
     evict(id: string): void { drop(id); },
   };

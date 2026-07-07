@@ -525,6 +525,15 @@ export function openSnapshot(tierId: string, value: unknown): Session {
   return session;
 }
 
+// Reader side: has the snapshot changed since its baseline? Pure query — unlike diffSnapshot it does
+// NOT advance the baseline, so a retention policy can ask it repeatedly (an entry with an unshipped
+// mutation must not be evicted; see coherence.mjs).
+export function dirtySnapshot(session: Session, value: unknown): boolean {
+  const { reach, ver } = scan(session, [value]);
+  for (const id of reach.keys()) if (session.peerVer!.get(id) !== ver.get(id)) return true;
+  return false;
+}
+
 // Reader side: diff the (now-mutated) snapshot against its baseline and emit the changed objects. The
 // baseline advances, so a second write-back from the same snapshot ships only what changed since the first.
 export function diffSnapshot(session: Session, value: unknown): Uint8Array {

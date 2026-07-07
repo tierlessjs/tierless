@@ -40,6 +40,25 @@ const sync = <T,>(v: T | Promise<T>): T => v as T;
   check("a large entry evicts as many small ones as its bytes require (a count cap would not)", sync(s.get("x1")) === undefined && sync(s.get("x2")) === undefined && sync(s.get("x3"))?.w === 10 && sync(s.get("big"))?.w === 90);
 }
 
+// The evictable() gate: a pinned entry survives budget pressure (the §5 coherence pins a
+// snapshot with an unshipped mutation — evicting its baseline would degrade the write-back);
+// explicit evict(id) still removes it, and unpinning makes it evictable again.
+{
+  const s = makeLruStore<{ w: number; pinned: boolean }>({ max: 100, weigh: (v) => v.w, evictable: (v) => !v.pinned });
+  const a = { w: 60, pinned: true }, b = { w: 30, pinned: false };
+  s.set("a", a); s.set("b", b);
+  s.set("c", { w: 40, pinned: false });                                    // 130 > 100: LRU order is a,b — a is pinned, so b evicts
+  check("budget eviction skips a pinned entry and takes the next least-recent", sync(s.get("a"))?.w === 60 && sync(s.get("b")) === undefined && sync(s.get("c"))?.w === 40);
+  s.set("d", { w: 40, pinned: false });                                    // 140 > 100: c (LRU after a) evicts; a stays pinned over budget
+  check("only pinned weight may exceed the budget, transiently", sync(s.get("a"))?.w === 60 && sync(s.get("c")) === undefined && sync(s.get("d"))?.w === 40);
+  a.pinned = false;                                                        // the write-back landed: unpin
+  s.set("e", { w: 40, pinned: false });                                    // 140 > 100: a is now evictable -> dropped
+  check("an unpinned entry becomes evictable again", sync(s.get("a")) === undefined && sync(s.get("d"))?.w === 40 && sync(s.get("e"))?.w === 40);
+  const p = { w: 10, pinned: true };
+  s.set("p", p); s.evict("p");
+  check("explicit evict(id) removes even a pinned entry", sync(s.get("p")) === undefined);
+}
+
 // Unit weight (the default) is a plain count cap; a budget below 1 is rejected.
 {
   const c = makeLruStore<number>({ max: 2 });
