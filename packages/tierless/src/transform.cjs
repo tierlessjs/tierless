@@ -1553,11 +1553,29 @@ function compile(src, preamble) {
     // the stop rule guarantees segments touching the live instance run at home, so the
     // machine never misses them. Same BUNDLE_HASH: it names the MACHINE, which is shared.
     if (meta.methods.some((m) => m.program)) {
-        const machineText = progs.join(",\n") + "\n" + pure.join("\n");
-        // NOT preceded by '.' or a word char: `__caps.router` is a property walk through the
-        // caps handle, not a reference to the router import — keeping it would drag the
-        // whole browser graph into the server bundle
-        const refd = (name) => new RegExp(`(?<![.\\w$])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(machineText);
+        // Module helper functions ride ONLY if machine text (transitively) references them:
+        // an app file's unrelated helpers routinely touch browser graphs (services, vue,
+        // routers) that must never load in Node. Fixpoint over the pure list; imports then
+        // filter against exactly what ships. The reference test requires the name NOT be
+        // preceded by '.' or a word char: `__caps.router` is a property walk through the
+        // caps handle, not a use of the router import.
+        // not preceded by . (property walk), a word char, or a quote (a dyn park's member
+        // STRING names the callee — it is data, not a binding reference)
+        const refdIn = (name, text) => new RegExp(`(?<![.\\w$"'])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text);
+        let machineText = progs.join(",\n");
+        const included = new Set();
+        for (let changed = true; changed;) {
+            changed = false;
+            meta.pure.forEach((name, i) => {
+                if (!included.has(i) && refdIn(name, machineText)) {
+                    included.add(i);
+                    machineText += "\n" + pure[i];
+                    changed = true;
+                }
+            });
+        }
+        const keptPure = [...included].sort((a, b) => a - b).map((i) => pure[i]);
+        const refd = (name) => refdIn(name, machineText);
         const keptImports = rest
             .filter((n) => t.isImportDeclaration(n))
             .filter((n) => n.specifiers.some((s) => refd(s.local.name)))
@@ -1565,7 +1583,7 @@ function compile(src, preamble) {
         meta.serverCode = [
             ...keptImports,
             helpers.trimEnd(),
-            ...pure,
+            ...keptPure,
             "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};",
             slotsOut.trimEnd(),
             DRIVER,
