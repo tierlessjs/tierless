@@ -36,7 +36,7 @@ import {
   makeDeltaSession, encodeDelta, applyDelta,
   makeTrackedSession, touch, planDelta, encodeDeltaTracked, applyDeltaTracked,
   adoptBaseline, subForFullWire, exciseForCapture,
-  openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot,
+  openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot, dirtySnapshot,
 } from "tierless/delta";
 import { makeTier, encodeWire, decodeWire, wireHandles, writeBack, commitWrite, makeCoherentHost } from "tierless/heap";
 import { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_BYTES, type Store, type MaybePromise } from "tierless/store";
@@ -101,7 +101,7 @@ void store.get(h); void store.has(h); void store.hashFor({ a: 1 });
 const peer = newPeerView(); peer.add(h);   // 0-arg factory returning a Set, not newPeerView(store)
 void hashOf({ a: 1 });
 const heap = new Heap("t1");
-const handle = heap.put({ a: 1 }); void heap.get(handle.id); void heap.version(handle.id);
+const handle = heap.put({ a: 1 }); void heap.get(handle.id); void heap.version(handle.id); heap.drop(handle.id);
 void new Channel({ t1: { heap } });
 const dA = makeDeltaSession("server");
 const dStack = [{ fn: "F", pc: 0, x: 1 }];
@@ -117,6 +117,7 @@ const rebuilt = subForFullWire(dB, dStack, null);
 void rebuilt.stack; void rebuilt.request;
 exciseForCapture(dB, dStack, null, { id: "server", heapPut: () => "h1" }, 1024);
 const snap = openSnapshot("server", { a: 1 });
+const isDirty: boolean = dirtySnapshot(snap, { a: 2 }); void isDirty;   // the pure query — no baseline advance
 void diffSnapshot(snap, { a: 2 }).byteLength;
 const wholeBytes = wholeSnapshot(snap, { a: 1 });
 void applySnapshot("server", { a: 1 }, wholeBytes);
