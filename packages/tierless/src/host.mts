@@ -15,7 +15,7 @@
 import { makePump, initialStack } from "./runtime.mjs";
 import { encodeWireBinary, decodeWireBinary, encodeArgs, decodeArgs } from "./wire-binary.mjs";
 import type { EncodeOptions } from "./graph.mjs";
-import { DEREF_TIER, type Coherence } from "./coherence.mjs";
+import { DEREF_TIER, usesHeap, type Coherence } from "./coherence.mjs";
 import type { Bundle, Frame, Exec, ResourceRequest, Peer, Host, HostReply, Pump } from "./types.mjs";
 
 export type { Bundle, Frame, MachineResult, ResourceRequest, Exec, Peer, Host } from "./types.mjs";
@@ -31,16 +31,20 @@ export interface MakeHostOpts {
   exec: Exec;
   owns?: (tier: string) => boolean;
   meta?: Record<string, unknown>;
-  /** §5 heap coherence for this connection (excision + deref-over-socket, bounded cache).
-   *  When set, the host owns the "@deref" pseudo-tier and excises big locals on the wire.
-   *  Omit it and the host behaves exactly as before — no handles, no deref servicing. */
+  /** §5 heap coherence for this connection (excision, deref and CAS write-back over the
+   *  socket, bounded cache). Applied PER BUNDLE: it takes effect only when this host's
+   *  bundle was compiled for the heap (--auto-deref/--auto-writeback — excision without
+   *  the compiled guards would hand the machine a handle where it expects data), so the
+   *  same connection-wide coherence can be passed to every module-host on a socket and
+   *  only the heap-compiled ones excise and service §5 ops. */
   coherence?: Coherence;
 }
 
 let nextSid = 1;
 
-export function makeHost({ bundle, tier, exec, owns, meta = {}, coherence }: MakeHostOpts): Host {
+export function makeHost({ bundle, tier, exec, owns, meta = {}, coherence: coherenceIn }: MakeHostOpts): Host {
   const pump = makePump(bundle);
+  const coherence = coherenceIn && usesHeap(bundle) ? coherenceIn : undefined;   // per-bundle gate (see MakeHostOpts.coherence)
   const ownsBase: (tier: string) => boolean = owns || ((t) => t === tier);
   // The host also owns the heap pseudo-tiers ("@deref"/"@writeback"): a handle read or a
   // mutation's propagation is serviced HERE (this tier), never migrated.

@@ -18,7 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { makeHost, answerWith } from "./host.mjs";
-import { makeCoherence, usesHeap } from "./coherence.mjs";
+import { makeCoherence } from "./coherence.mjs";
 import { makePeer, wsPort } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
 import type { Bundle, Exec, ResourceRequest } from "./types.mjs";
@@ -43,18 +43,18 @@ export interface AttachOptions {
   path?: string;
   /** Per-connection: log in, hold the token, return the monitor-backed exec. */
   session: (req: IncomingMessage) => SessionSetup | Promise<SessionSetup>;
-  /** Enable §5 heap coherence (excision, deref and CAS write-back over the socket, bounded
-   *  cache, per-continuation release). Defaults to on when the bundle was compiled with
-   *  --auto-deref/--auto-writeback and off otherwise, so ordinary apps are unaffected. */
+  /** §5 heap coherence (excision, deref and CAS write-back over the socket, bounded cache,
+   *  per-continuation release). On by default; it takes effect per module — only bundles
+   *  compiled with --auto-deref/--auto-writeback excise and service §5 ops, so ordinary
+   *  bundles (including a resolver's) are unaffected. false disables it entirely. */
   heap?: boolean;
 }
 
 // Mount the session endpoint on an EXISTING http server (Express/Fastify/Vite — anything
 // that emits 'upgrade'); co-mountable with other websocket handlers.
-export function attachTierless(httpServer: HttpServer, { bundle, tier = "server", session, path: wsPath = WS_PATH, heap }: AttachOptions): { close(): void } {
+export function attachTierless(httpServer: HttpServer, { bundle, tier = "server", session, path: wsPath = WS_PATH, heap = true }: AttachOptions): { close(): void } {
   const wss = new WebSocketServer({ noServer: true });
   const resolveBundle = typeof bundle === "function" ? bundle : () => bundle;
-  const heapEnabled = heap ?? (typeof bundle !== "function" && usesHeap(bundle));   // auto-deref bundles get the deref path; ordinary ones don't
 
   const onUpgrade = (req: IncomingMessage, socket: any, head: any): void => {
     let pathname = "";
@@ -75,9 +75,10 @@ export function attachTierless(httpServer: HttpServer, { bundle, tier = "server"
       const { exec, entry, args = [], onDone } = await session(req);
       const peer = makePeer(wsPort(ws));
       // §5 heap coherence is per-connection: one heap for excised locals, one bounded
-      // reader cache, shared across this socket's module-hosts. serve() answers the other
-      // tier's fetch requests from that heap.
-      const coherence = heapEnabled ? makeCoherence(tier) : undefined;
+      // reader cache, shared across this socket's module-hosts (each host applies it only
+      // if its own bundle is heap-compiled). serve() answers the other tier's fetch,
+      // write-back, and release requests against that heap.
+      const coherence = heap ? makeCoherence(tier) : undefined;
       if (coherence) coherence.serve(peer);
       const hosts = new Map<string, import("./types.mjs").Host>();  // moduleId -> host (stateless; cached per socket)
       const hostFor = async (id: string) => {

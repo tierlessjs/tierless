@@ -16,9 +16,10 @@ export interface AttachOptions {
     path?: string;
     /** Per-connection: log in, hold the token, return the monitor-backed exec. */
     session: (req: IncomingMessage) => SessionSetup | Promise<SessionSetup>;
-    /** Enable §5 heap coherence (excision, deref and CAS write-back over the socket, bounded
-     *  cache, per-continuation release). Defaults to on when the bundle was compiled with
-     *  --auto-deref/--auto-writeback and off otherwise, so ordinary apps are unaffected. */
+    /** §5 heap coherence (excision, deref and CAS write-back over the socket, bounded cache,
+     *  per-continuation release). On by default; it takes effect per module — only bundles
+     *  compiled with --auto-deref/--auto-writeback excise and service §5 ops, so ordinary
+     *  bundles (including a resolver's) are unaffected. false disables it entirely. */
     heap?: boolean;
 }
 export declare function attachTierless(httpServer: HttpServer, { bundle, tier, session, path: wsPath, heap }: AttachOptions): {

@@ -18,7 +18,7 @@ import { makePeer, wsPort } from "tierless/transport";
 import * as bundle from "./heap-auto.gen.mjs";
 import * as wbBundle from "./heap-write.gen.mjs";
 import { makeCheck } from "../lib/check.mts";
-import type { MachineResult } from "tierless/runtime";
+import type { Bundle, Frame, MachineResult } from "tierless/runtime";
 import type { Handle } from "tierless/graph";
 
 const { WebSocketServer, WebSocket } = createRequire(import.meta.url)("ws");
@@ -218,7 +218,52 @@ async function wsPair(): Promise<[import("tierless/transport").Peer, import("tie
   check("serveApp + connect ran the write-back app end to end (transparent edit, propagated and returned)", value === 777);
 }
 
+// ===== Part 8: a MIXED-MODULE resolver endpoint — coherence applies per bundle ==============
+// One socket serves two modules through a bundle RESOLVER: "wb" is heap-compiled
+// (--auto-writeback), "plain" is an ordinary bundle whose big array local must travel
+// INLINE — if coherence excision were applied connection-wide instead of per bundle, that
+// local would arrive on the browser as a §5 handle and `.length` on it would be garbage.
+{
+  const plainBundle: Bundle = {
+    PROGRAMS: {
+      Plain(F: Frame): MachineResult {
+        switch (F.pc) {
+          case 0: F.data = Array.from({ length: 2000 }, (_, i) => i); F.pc = 1; return { op: "resource", tier: "browser", name: "ui.echo", args: ["hi"] };   // the big local rides the migrate
+          case 1: return { op: "return", value: (F.data as number[]).length };   // read it ON THE BROWSER — a handle here would not have .length 2000
+          default: throw new RangeError("bad pc " + F.pc);
+        }
+      },
+    },
+    __unwind: () => false,
+  };
+  const servedWb: Row[][] = [];
+  const wbApiExec = (req: ResourceReq): unknown => { if (req.name === "api.getRows") { const rows = ROWS.map((r) => ({ ...r })); servedWb.push(rows); return rows; } throw new Error("no resource " + req.name); };
+
+  const app = await serveApp({
+    bundle: async (id: string) => (id === "wb" ? (wbBundle as unknown as Bundle) : plainBundle),   // the resolver shape — no bundle to inspect at attach time
+    tier: "server",
+    session: () => ({ exec: wbApiExec }),                        // actions mode: the browser starts the entries
+  });
+  const conn = connect({
+    url: `ws://localhost:${app.port}${WS_PATH}`, tier: "browser",
+    exec: (req: ResourceReq): unknown => {
+      if (req.name === "dom.commit") return { idx: 3, score: 999 };
+      if (req.name === "ui.echo") return req.args[0];
+      throw new Error("no resource " + req.name);
+    },
+  });
+  conn.register("plain", plainBundle);                           // an ordinary module registered FIRST —
+  conn.register("wb", wbBundle as unknown as Bundle);            // per-bundle gating must not depend on order
+  await conn.ready;
+
+  const edited = await conn.call("Edit", [], "wb");
+  check("the heap module on a resolver endpoint works: transparent edit propagated over the socket", edited === 999 && servedWb.length === 1 && servedWb[0][3].score === 999);
+  const len = await conn.call("Plain", [], "plain");
+  check("the plain module on the SAME socket shipped its big local inline (no wrongful excision)", len === 2000);
+  conn.close(); app.close();
+}
+
 console.log(ok()
-  ? "PASS — the full §5 heap is wired into the real serving path: excision, deref-over-socket, CAS write-back in place, byte-bounded pinned cache, per-continuation owner-heap release — all through makeHost/serveApp/connect"
+  ? "PASS — the full §5 heap is wired into the real serving path: excision, deref-over-socket, CAS write-back in place, byte-bounded pinned cache, per-continuation owner-heap release, per-bundle gating on mixed endpoints — all through makeHost/serveApp/connect"
   : "FAIL");
 process.exit(ok() ? 0 : 1);

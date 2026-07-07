@@ -14,10 +14,11 @@
 // correlation ids keep their bounces apart.
 import { makePump, initialStack } from "./runtime.mjs";
 import { encodeWireBinary, decodeWireBinary, encodeArgs, decodeArgs } from "./wire-binary.mjs";
-import { DEREF_TIER } from "./coherence.mjs";
+import { DEREF_TIER, usesHeap } from "./coherence.mjs";
 let nextSid = 1;
-export function makeHost({ bundle, tier, exec, owns, meta = {}, coherence }) {
+export function makeHost({ bundle, tier, exec, owns, meta = {}, coherence: coherenceIn }) {
     const pump = makePump(bundle);
+    const coherence = coherenceIn && usesHeap(bundle) ? coherenceIn : undefined; // per-bundle gate (see MakeHostOpts.coherence)
     const ownsBase = owns || ((t) => t === tier);
     // The host also owns the heap pseudo-tiers ("@deref"/"@writeback"): a handle read or a
     // mutation's propagation is serviced HERE (this tier), never migrated.

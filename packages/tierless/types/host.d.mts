@@ -8,10 +8,13 @@ export interface MakeHostOpts {
     exec: Exec;
     owns?: (tier: string) => boolean;
     meta?: Record<string, unknown>;
-    /** §5 heap coherence for this connection (excision + deref-over-socket, bounded cache).
-     *  When set, the host owns the "@deref" pseudo-tier and excises big locals on the wire.
-     *  Omit it and the host behaves exactly as before — no handles, no deref servicing. */
+    /** §5 heap coherence for this connection (excision, deref and CAS write-back over the
+     *  socket, bounded cache). Applied PER BUNDLE: it takes effect only when this host's
+     *  bundle was compiled for the heap (--auto-deref/--auto-writeback — excision without
+     *  the compiled guards would hand the machine a handle where it expects data), so the
+     *  same connection-wide coherence can be passed to every module-host on a socket and
+     *  only the heap-compiled ones excise and service §5 ops. */
     coherence?: Coherence;
 }
-export declare function makeHost({ bundle, tier, exec, owns, meta, coherence }: MakeHostOpts): Host;
+export declare function makeHost({ bundle, tier, exec, owns, meta, coherence: coherenceIn }: MakeHostOpts): Host;
 export declare function answerWith(peer: Peer, hostFor: (id: string) => Host | Promise<Host>, field?: string): void;

@@ -45,7 +45,7 @@ const cases: Case[] = [
   { file: "test/e2e/heap-write.mts",     needs: ["transparent write-back: an ordinary member assignment propagated to the owning master"] },
   { file: "test/e2e/heap-write-delta.mts", needs: ["a §5 write-back ships only the changed objects (member edits and collection mutations alike), far smaller than the whole snapshot, and min(delta, whole) is never larger"] },
   { file: "test/e2e/evict-safety.mts",   needs: ["the served cache is byte-bounded: a long session of distinct derefs stays within a memory budget, LRU-evicts by recency, and every eviction costs at most a correct refetch"] },
-  { file: "test/e2e/heap-serve.mts",     needs: ["the full §5 heap is wired into the real serving path: excision, deref-over-socket, CAS write-back in place, byte-bounded pinned cache, per-continuation owner-heap release — all through makeHost/serveApp/connect"] },
+  { file: "test/e2e/heap-serve.mts",     needs: ["the full §5 heap is wired into the real serving path: excision, deref-over-socket, CAS write-back in place, byte-bounded pinned cache, per-continuation owner-heap release, per-bundle gating on mixed endpoints — all through makeHost/serveApp/connect"] },
   { file: "test/e2e/policy-live.mts",    needs: ["informed FETCH", "priced migrate vs fetch from real bytes and steered the socket"] },
   { file: "test/e2e/delta-live.mts",     needs: ["bounce + min(delta,full) + §5 excision + deref all compose, end to end"] },
 ];
