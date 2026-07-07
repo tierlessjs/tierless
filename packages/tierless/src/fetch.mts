@@ -19,6 +19,9 @@
 // compare-and-set — is layered on top in src/heap.mjs.
 
 import { encodeGraph, decodeGraph, isHandle, type Handle } from "./graph.mjs";
+import { makeLruStore, DEFAULT_CACHE_BYTES, type Store } from "./store.mjs";
+
+export { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_BYTES, type Store, type LruOpts, type MaybePromise } from "./store.mjs";
 
 export interface TierEntry {
   heap: Heap;
@@ -36,6 +39,7 @@ export class Heap {
   get(id: string): unknown { return this.objs.get(id); }
   version(id: string): number { return this.ver.get(id) as number; }
   mutate(id: string, fn: (obj: unknown) => void): void { fn(this.objs.get(id)); this.ver.set(id, (this.ver.get(id) as number) + 1); } // single-writer; invalidates readers
+  drop(id: string): void { this.objs.delete(id); this.ver.delete(id); } // release a master (owner-side heap bounding — coherence.mjs releases a continuation's excisions when it completes)
 }
 
 // The wire between tiers. fetch() serializes the master on the owner with the
@@ -73,9 +77,15 @@ export interface FetchHost {
 }
 
 // A deref host for the interpreter running on `localTier`, with a read-through,
-// version-invalidated cache. Plug into run(tier, frames, host).
-export function makeHost(localTier: LocalTier, channel: Channel): FetchHost {
-  const cache = new Map<string, { version: number; copy: unknown }>(); // id -> { version, copy }
+// version-invalidated cache. Plug into run(tier, frames, host). The cache lives behind
+// an injected `store` so its retention policy is replaceable; the default is a bounded
+// LRU weighed by BYTES (each entry carries its fetched wire size), capping retained
+// memory within a long session (release across sessions is already provided by the
+// per-socket host lifetime in server.mts). The served cache is safe to evict — the
+// master is on the owner tier, so an eviction costs at most a refetch — so the byte
+// budget is the only parameter.
+type CacheEntry = { version: number; copy: unknown; bytes: number };
+export function makeHost(localTier: LocalTier, channel: Channel, store: Store<CacheEntry> = makeLruStore<CacheEntry>({ max: DEFAULT_CACHE_BYTES, weigh: (e) => e.bytes })): FetchHost {
   const stats: HostStats = { fetches: 0, hits: 0, localUses: 0, bytes: 0 };
   return {
     stats,
@@ -83,12 +93,17 @@ export function makeHost(localTier: LocalTier, channel: Channel): FetchHost {
       if (!isHandle(h)) return h;
       if (h.owner === localTier.id) { stats.localUses++; return localTier.heap.get(h.id); } // use the master
       const current = channel.currentVersion(h);
-      const c = cache.get(h.id);
+      // deref is a synchronous hot path (the auto-deref machine consumes its return
+      // synchronously); the default store resolves synchronously. The Store contract is
+      // typed possibly-async so an async store can be injected without a signature
+      // change — such a store would require an async deref, layered on top later.
+      const c = store.get(h.id) as CacheEntry | undefined;
       if (c && c.version === current) { stats.hits++; return c.copy; }                       // coherent cache hit
       const before = channel.bytes;
       const { copy, version } = channel.fetch(h);                                            // fetch the snapshot
-      cache.set(h.id, { version, copy });
-      stats.fetches++; stats.bytes += channel.bytes - before;
+      const bytes = channel.bytes - before;                                                  // wire size of this snapshot — the entry's memory weight
+      store.set(h.id, { version, copy, bytes });
+      stats.fetches++; stats.bytes += bytes;
       return copy;
     },
   };

@@ -71,10 +71,13 @@ export function wsPort(ws) {
     };
 }
 // RPC correlation over a port: request() awaits a matching reply; inbound requests are
-// dispatched to type handlers. A handler returns { obj, bin? }.
+// dispatched to type handlers. A handler returns { obj, bin? }. When the port closes,
+// every in-flight request REJECTS — a dropped socket settles the awaiting session (its
+// error unwinds, cleanup like the §5 heap release runs) instead of hanging it forever.
 export function makePeer(port) {
     let nextId = 1;
-    const pending = new Map(); // id -> resolve({ obj, bin })
+    let closed = false;
+    const pending = new Map(); // id -> settle({ obj, bin }) | reject
     const handlers = new Map(); // type -> (payload, bin) => { obj, bin? } | Promise<...>
     port.onMessage((m, bin) => {
         if (!m || typeof m !== "object")
@@ -83,7 +86,7 @@ export function makePeer(port) {
             const r = pending.get(m.id);
             if (r) {
                 pending.delete(m.id);
-                r({ obj: m.payload, bin });
+                r.res({ obj: m.payload, bin });
             }
             return;
         }
@@ -92,8 +95,29 @@ export function makePeer(port) {
             .then((res) => port.send({ kind: "reply", id: m.id, payload: res.obj }, res.bin))
             .catch((e) => port.send({ kind: "reply", id: m.id, payload: { type: "error", message: String((e && e.message) || e) } }));
     });
+    port.onClose(() => {
+        closed = true;
+        const waiting = [...pending.values()];
+        pending.clear();
+        for (const p of waiting)
+            p.rej(new Error("tierless: connection closed with the request in flight"));
+    });
     return {
-        request(payload, bin) { const id = nextId++; return new Promise((res) => { pending.set(id, res); port.send({ kind: "request", id, payload }, bin); }); },
+        request(payload, bin) {
+            if (closed)
+                return Promise.reject(new Error("tierless: connection closed"));
+            const id = nextId++;
+            return new Promise((res, rej) => {
+                pending.set(id, { res, rej });
+                try {
+                    port.send({ kind: "request", id, payload }, bin);
+                }
+                catch (e) {
+                    pending.delete(id);
+                    rej(e);
+                } // a send on a dying socket must reject, not strand the entry
+            });
+        },
         on(type, handler) { handlers.set(type, handler); },
         close() { port.close(); },
     };

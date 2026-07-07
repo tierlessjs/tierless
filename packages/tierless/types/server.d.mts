@@ -18,6 +18,17 @@ export interface AttachOptions {
     session: (req: IncomingMessage) => SessionSetup | Promise<SessionSetup>;
     /** Count session-socket bytes at the TCP level (deflate included) — see makeWireStats. */
     wire?: WireStats;
+    /** §5 heap coherence (excision, deref and CAS write-back over the socket, bounded cache,
+     *  per-continuation release). On by default; it takes effect per module — only bundles
+     *  compiled with --auto-deref/--auto-writeback excise and service §5 ops, so ordinary
+     *  bundles (including a resolver's) are unaffected. false disables it entirely. */
+    heap?: boolean;
+    /** Live-connection cap. The count is PER PROCESS — every tierless endpoint in the
+     *  process draws from one pool — so per-connection budgets (the §5 cache, socket
+     *  buffers) have a finite process-wide ceiling. A connection beyond the cap is refused
+     *  at the upgrade with 503; established sessions are untouched. Default
+     *  DEFAULT_MAX_CONNECTIONS (100). */
+    maxConnections?: number;
 }
 export interface WireStats {
     track(socket: {
@@ -31,7 +42,8 @@ export interface WireStats {
     };
 }
 export declare function makeWireStats(): WireStats;
-export declare function attachTierless(httpServer: HttpServer, { bundle, tier, session, path: wsPath, wire }: AttachOptions): {
+export declare const DEFAULT_MAX_CONNECTIONS = 100;
+export declare function attachTierless(httpServer: HttpServer, { bundle, tier, session, path: wsPath, wire, heap, maxConnections }: AttachOptions): {
     close(): void;
 };
 export interface ServeAppOpts extends AttachOptions {

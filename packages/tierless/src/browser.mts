@@ -13,6 +13,7 @@
 // first call. `exec` services browser-pinned resources (dom.commit in the full-tierless
 // mode, ui.* if you pin some); actions that never touch one simply run out on the server.
 import { makeHost, answerWith } from "./host.mjs";
+import { makeCoherence } from "./coherence.mjs";
 import { makePeer, wsPort, onEvent } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
 import { httpResources, httpPins, crossHttpRequest } from "./adapt.mjs";
@@ -30,6 +31,11 @@ export interface ConnectOpts {
   exec?: Exec;
   bundle?: Bundle;
   tier?: string;
+  /** §5 heap coherence (deref a server-owned handle over the socket, write a mutation back
+   *  under CAS, serve browser-owned handles). On by default; it takes effect per module —
+   *  only --auto-deref/--auto-writeback bundles excise and service §5 ops, so ordinary
+   *  bundles are unaffected. false disables it entirely. */
+  heap?: boolean;
 }
 export interface Connection {
   ready: Promise<void>;
@@ -39,11 +45,11 @@ export interface Connection {
   /** Run entry(...args) HERE; foreign resources are fetched over the session (the frame
    *  never ships — the compiled-class-method path, see bindMethods). opts.exec serves
    *  pinned requests on this tier; opts.pins adds the resource family's declared pins. */
-  runLocal(entry: string, args?: unknown[], module?: string, opts?: { exec?: Exec; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest) => import("./types.mjs").ResourceRequest | null }): Promise<unknown>;
+  runLocal(entry: string, args?: unknown[], module?: string, opts?: { exec?: Exec; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest) => import("./types.mjs").ResourceRequest | null; migrate?: (req: import("./types.mjs").ResourceRequest) => boolean }): Promise<unknown>;
   close(): void;
 }
 
-export function connect({ url, exec, bundle, tier = "browser" }: ConnectOpts = {}): Connection {
+export function connect({ url, exec, bundle, tier = "browser", heap = true }: ConnectOpts = {}): Connection {
   const ws = new WebSocket((typeof url === "function" ? url() : url) || defaultUrl());
   const peer = makePeer(wsPort(ws));
   const ready: Promise<void> = new Promise((res, rej) => {
@@ -51,10 +57,16 @@ export function connect({ url, exec, bundle, tier = "browser" }: ConnectOpts = {
     onEvent(ws, "error", (e: any) => rej(new Error("tierless: websocket error" + (e && e.message ? ": " + e.message : ""))));
   });
 
+  // §5 heap coherence for this connection, shared by every module-host on it (each host
+  // applies it only if its own bundle is heap-compiled). serve() lets the server fetch
+  // browser-owned handles back, receive write-backs, and release finished continuations.
+  const coherence = heap ? makeCoherence(tier) : undefined;
+  if (coherence) coherence.serve(peer);
+
   const hosts = new Map<string, Host>();                          // moduleId -> host
   const register = (module: string, b: Bundle): Host => {
     const id = module || "";
-    if (!hosts.has(id)) hosts.set(id, makeHost({ bundle: b, tier, exec: exec as Exec, meta: id ? { module: id } : {} }));   // exec is optional here (actions-only pages never own a resource); makeHost only calls it when one is
+    if (!hosts.has(id)) hosts.set(id, makeHost({ bundle: b, tier, exec: exec as Exec, meta: id ? { module: id } : {}, coherence }));   // exec is optional here (actions-only pages never own a resource); makeHost only calls it when one is
     return hosts.get(id)!;
   };
   if (bundle) register("", bundle);
@@ -73,7 +85,7 @@ export function connect({ url, exec, bundle, tier = "browser" }: ConnectOpts = {
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
       return h.call(peer, entry, args);
     },
-    runLocal: async (entry: string, args: unknown[] = [], module: string = "", opts?: { exec?: Exec; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest) => import("./types.mjs").ResourceRequest | null }): Promise<unknown> => {
+    runLocal: async (entry: string, args: unknown[] = [], module: string = "", opts?: { exec?: Exec; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest) => import("./types.mjs").ResourceRequest | null; migrate?: (req: import("./types.mjs").ResourceRequest) => boolean }): Promise<unknown> => {
       await ready;
       const h = hosts.get(module || "");
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));

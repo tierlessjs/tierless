@@ -73,10 +73,14 @@ export interface Host {
    *  unserializable values (live class instances, reactive proxies): the §6 fetch arm,
    *  and the path compiled class methods run on. A PINNED request — the family's
    *  declared semantics (opts.pins) or args closing over tier-owned values (callbacks,
-   *  host objects) — executes here through opts.exec instead of crossing. */
+   *  host objects) — executes here through opts.exec instead of crossing. opts.migrate
+   *  flips a park to the migrate arm (docs/migrate-arm.md): the continuation ships to
+   *  the resource's tier and comes home by the stop rule. */
   runLocal(peer: Peer, entry: string, args?: unknown[], opts?: { exec?: Exec; pins?: (req: ResourceRequest) => boolean; map?: (req: ResourceRequest) => ResourceRequest | null; migrate?: (req: ResourceRequest) => boolean }): Promise<unknown>;
-  handleStart(payload: any, bin: Uint8Array | null): Promise<{ obj: HostReply; bin?: Uint8Array }>;
-  handleResume(payload: any, bin: Uint8Array | null): Promise<{ obj: HostReply; bin?: Uint8Array }>;
+  // `peer` is the socket the message arrived on; the host services any §5 deref back over
+  // it (needed only when heap coherence is configured — omit it and derefs aren't served).
+  handleStart(payload: any, bin: Uint8Array | null, peer?: Peer): Promise<{ obj: HostReply; bin?: Uint8Array }>;
+  handleResume(payload: any, bin: Uint8Array | null, peer?: Peer): Promise<{ obj: HostReply; bin?: Uint8Array }>;
   /** Serve one fetched resource for a peer's runLocal. */
   handleExec(payload: any, bin: Uint8Array | null): Promise<{ obj: HostReply; bin?: Uint8Array }>;
   answer(peer: Peer): Host;

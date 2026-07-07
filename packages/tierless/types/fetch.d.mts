@@ -1,4 +1,6 @@
 import { type Handle } from "./graph.mjs";
+import { type Store } from "./store.mjs";
+export { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_BYTES, type Store, type LruOpts, type MaybePromise } from "./store.mjs";
 export interface TierEntry {
     heap: Heap;
 }
@@ -13,6 +15,7 @@ export declare class Heap {
     get(id: string): unknown;
     version(id: string): number;
     mutate(id: string, fn: (obj: unknown) => void): void;
+    drop(id: string): void;
 }
 export declare class Channel {
     tiers: Tiers;
@@ -39,4 +42,9 @@ export interface FetchHost {
     stats: HostStats;
     deref(h: unknown): unknown;
 }
-export declare function makeHost(localTier: LocalTier, channel: Channel): FetchHost;
+type CacheEntry = {
+    version: number;
+    copy: unknown;
+    bytes: number;
+};
+export declare function makeHost(localTier: LocalTier, channel: Channel, store?: Store<CacheEntry>): FetchHost;
