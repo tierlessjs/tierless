@@ -54,6 +54,7 @@ const cases: Case[] = [
   { file: "test/probes/method-compile.mts", needs: ["class methods compile, park, and fall back correctly"] },
   { file: "test/e2e/method-live.mts",      needs: ["frame and instance stay put, resources fetch, errors unwind, unbound falls back"] },
   { file: "test/probes/migrate-arm.mts",   needs: ["a chain migrates in one crossing; the stop rule, identity, and unwind hold"] },
+  { file: "test/e2e/migrate-live.mts",     needs: ["the migrate arm runs live: a chain is one crossing, home segments see the real instance"] },
 ];
 
 let failed = 0;
