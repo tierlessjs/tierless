@@ -48,11 +48,23 @@ export interface AttachOptions {
    *  compiled with --auto-deref/--auto-writeback excise and service §5 ops, so ordinary
    *  bundles (including a resolver's) are unaffected. false disables it entirely. */
   heap?: boolean;
+  /** Live-connection cap. The count is PER PROCESS — every tierless endpoint in the
+   *  process draws from one pool — so per-connection budgets (the §5 cache, socket
+   *  buffers) have a finite process-wide ceiling. A connection beyond the cap is refused
+   *  at the upgrade with 503; established sessions are untouched. Default
+   *  DEFAULT_MAX_CONNECTIONS (100). */
+  maxConnections?: number;
 }
+
+// Default per-process connection cap. Each connection carries per-connection budgets (the
+// §5 cache is up to 64 MiB, plus socket buffers), so the process ceiling is cap x budget —
+// pick maxConnections to fit the deployment's memory, not the OS's file-descriptor limit.
+export const DEFAULT_MAX_CONNECTIONS = 100;
+let liveConnections = 0;   // process-wide: every attachTierless endpoint draws from one pool
 
 // Mount the session endpoint on an EXISTING http server (Express/Fastify/Vite — anything
 // that emits 'upgrade'); co-mountable with other websocket handlers.
-export function attachTierless(httpServer: HttpServer, { bundle, tier = "server", session, path: wsPath = WS_PATH, heap = true }: AttachOptions): { close(): void } {
+export function attachTierless(httpServer: HttpServer, { bundle, tier = "server", session, path: wsPath = WS_PATH, heap = true, maxConnections = DEFAULT_MAX_CONNECTIONS }: AttachOptions): { close(): void } {
   const wss = new WebSocketServer({ noServer: true });
   const resolveBundle = typeof bundle === "function" ? bundle : () => bundle;
 
@@ -65,6 +77,13 @@ export function attachTierless(httpServer: HttpServer, { bundle, tier = "server"
       if (httpServer.listeners("upgrade").length === 1) socket.destroy();
       return;
     }
+    if (liveConnections >= maxConnections) {                       // over the cap: refuse THIS upgrade, leave established sessions alone
+      socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    liveConnections++;
+    socket.on("close", () => { liveConnections--; });              // the raw TCP close fires once, whatever the ws handshake did
     wss.handleUpgrade(req, socket, head, (ws: any) => wss.emit("connection", ws, req));
   };
   httpServer.on("upgrade", onUpgrade);

@@ -21,8 +21,15 @@ export interface AttachOptions {
      *  compiled with --auto-deref/--auto-writeback excise and service §5 ops, so ordinary
      *  bundles (including a resolver's) are unaffected. false disables it entirely. */
     heap?: boolean;
+    /** Live-connection cap. The count is PER PROCESS — every tierless endpoint in the
+     *  process draws from one pool — so per-connection budgets (the §5 cache, socket
+     *  buffers) have a finite process-wide ceiling. A connection beyond the cap is refused
+     *  at the upgrade with 503; established sessions are untouched. Default
+     *  DEFAULT_MAX_CONNECTIONS (100). */
+    maxConnections?: number;
 }
-export declare function attachTierless(httpServer: HttpServer, { bundle, tier, session, path: wsPath, heap }: AttachOptions): {
+export declare const DEFAULT_MAX_CONNECTIONS = 100;
+export declare function attachTierless(httpServer: HttpServer, { bundle, tier, session, path: wsPath, heap, maxConnections }: AttachOptions): {
     close(): void;
 };
 export interface ServeAppOpts extends AttachOptions {
