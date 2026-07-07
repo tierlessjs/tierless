@@ -21,7 +21,7 @@ console.log("Probe: the TypeScript surface — every entry typed through the exp
 writeFileSync(join(dir, "ok.ts"), `
 import { makeHost, answerWith, type Bundle, type Host } from "tierless";
 import { makePump, initialStack } from "tierless/runtime";
-import { attachTierless, serveApp, WS_PATH } from "tierless/server";
+import { attachTierless, serveApp, WS_PATH, DEFAULT_MAX_CONNECTIONS } from "tierless/server";
 import { connect, bindActions, configureTierless } from "tierless/browser";
 import { useAction, type ActionStatus } from "tierless/react";
 import tierlessPlugin from "tierless/vite";
@@ -36,9 +36,11 @@ import {
   makeDeltaSession, encodeDelta, applyDelta,
   makeTrackedSession, touch, planDelta, encodeDeltaTracked, applyDeltaTracked,
   adoptBaseline, subForFullWire, exciseForCapture,
-  openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot,
+  openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot, dirtySnapshot,
 } from "tierless/delta";
 import { makeTier, encodeWire, decodeWire, wireHandles, writeBack, commitWrite, makeCoherentHost } from "tierless/heap";
+import { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_BYTES, type Store, type MaybePromise } from "tierless/store";
+import { makeCoherence, usesHeap, type Coherence } from "tierless/coherence";
 
 const bundle: Bundle = { PROGRAMS: {}, __unwind: () => false };
 const pump = makePump(bundle);
@@ -48,7 +50,7 @@ void host.call;
 void answerWith; void WS_PATH;
 const attached = attachTierless({} as any, { bundle, tier: "server", session: async () => ({ exec: async () => 1 }) });
 void attached.close();
-serveApp({ bundle, session: async () => ({ exec: async () => 1 }) }).then((a) => { void a.port; a.close(); });
+serveApp({ bundle, session: async () => ({ exec: async () => 1 }), maxConnections: DEFAULT_MAX_CONNECTIONS }).then((a) => { void a.port; a.close(); });
 const conn = connect({ url: "ws://x", bundle });
 void conn.call("f", [1]);
 const regHost: Host = conn.register("m2", bundle);   // register() returns Host, not unknown (the old .d.ts's declared return)
@@ -99,7 +101,7 @@ void store.get(h); void store.has(h); void store.hashFor({ a: 1 });
 const peer = newPeerView(); peer.add(h);   // 0-arg factory returning a Set, not newPeerView(store)
 void hashOf({ a: 1 });
 const heap = new Heap("t1");
-const handle = heap.put({ a: 1 }); void heap.get(handle.id); void heap.version(handle.id);
+const handle = heap.put({ a: 1 }); void heap.get(handle.id); void heap.version(handle.id); heap.drop(handle.id);
 void new Channel({ t1: { heap } });
 const dA = makeDeltaSession("server");
 const dStack = [{ fn: "F", pc: 0, x: 1 }];
@@ -115,6 +117,7 @@ const rebuilt = subForFullWire(dB, dStack, null);
 void rebuilt.stack; void rebuilt.request;
 exciseForCapture(dB, dStack, null, { id: "server", heapPut: () => "h1" }, 1024);
 const snap = openSnapshot("server", { a: 1 });
+const isDirty: boolean = dirtySnapshot(snap, { a: 2 }); void isDirty;   // the pure query — no baseline advance
 void diffSnapshot(snap, { a: 2 }).byteLength;
 const wholeBytes = wholeSnapshot(snap, { a: 1 });
 void applySnapshot("server", { a: 1 }, wholeBytes);
@@ -131,6 +134,14 @@ const cw = commitWrite(hChannel, hHandle, (copy) => { void copy; }, { tries: 3 }
 void cw.ok; void cw.tries;
 const chost = makeCoherentHost(hTier, hChannel);
 void chost.stats.fetches; void chost.deref(hHandle); void chost.writeBack({});
+const lru: Store<{ version: number; copy: unknown }> = makeLruStore({ max: 4096 });   // default unit weight -> a count cap
+const byteLru = makeLruStore<{ bytes: number }>({ max: DEFAULT_CACHE_BYTES, weigh: (e) => e.bytes });   // a memory budget
+void lru.get("x"); void lru.set("x", { version: 1, copy: 1 }); void lru.evict("x"); void byteLru;
+const mp: MaybePromise<number> = Promise.resolve(1); void mp;   // the store contract is possibly-async by design
+void makeUnboundedStore<number>();                                        // the non-evicting default, also public
+void makeCoherentHost(hTier, hChannel, { cache: lru });                   // per-namespace policy: the cache store is injectable
+const coh: Coherence = makeCoherence("server");                           // the live-path §5 coherence (excision + deref/write-back over the socket)
+void coh.encodeOpts("sid-1"); void coh.owns("@writeback"); void coh.stats.wholeWrites; void coh.release("sid-1"); void usesHeap(bundle);
 `);
 const ok = tsc([join("test", ".types-fixture", "ok.ts")]);
 check("a consumer exercising every main entry type-checks under --strict", ok.status === 0, (ok.stdout || "").split("\n").slice(0, 3).join(" | "));

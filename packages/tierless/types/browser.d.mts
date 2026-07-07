@@ -5,6 +5,11 @@ export interface ConnectOpts {
     exec?: Exec;
     bundle?: Bundle;
     tier?: string;
+    /** §5 heap coherence (deref a server-owned handle over the socket, write a mutation back
+     *  under CAS, serve browser-owned handles). On by default; it takes effect per module —
+     *  only --auto-deref/--auto-writeback bundles excise and service §5 ops, so ordinary
+     *  bundles are unaffected. false disables it entirely. */
+    heap?: boolean;
 }
 export interface Connection {
     ready: Promise<void>;
@@ -13,7 +18,7 @@ export interface Connection {
     call(entry: string, args?: unknown[], module?: string): Promise<unknown>;
     close(): void;
 }
-export declare function connect({ url, exec, bundle, tier }?: ConnectOpts): Connection;
+export declare function connect({ url, exec, bundle, tier, heap }?: ConnectOpts): Connection;
 export declare function configureTierless(opts: ConnectOpts): void;
 export declare function bindActions(bundle: Bundle, { module }?: {
     module?: string;

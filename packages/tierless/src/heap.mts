@@ -13,8 +13,10 @@ import { encodeGraph, decodeGraph, isHandle, type Handle, type EncodeTier } from
 import { Heap, type Channel, type LocalTier } from "./fetch.mjs";
 import { openSnapshot, diffSnapshot, wholeSnapshot, applySnapshot, type Session, type DeltaFrame, type DeltaRequest } from "./wire-delta.mjs";
 import { rootsOf, rebuildStack } from "./wire-io.mjs";
+import { makeUnboundedStore, type Store } from "./store.mjs";
 
 export { Channel, makeHost } from "./fetch.mjs";
+export { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_BYTES, type Store, type LruOpts, type MaybePromise } from "./store.mjs";
 
 // A tier with a versioned heap. heapPut/heapGet adapt Heap to the codec's §5 excision
 // hook (encodeGraph calls tier.heapPut(v) and stamps {owner: tier.id, id}).
@@ -115,9 +117,21 @@ export interface CoherentHost {
   deref(h: unknown): unknown;
   writeBack(obj: unknown): unknown;
 }
-export function makeCoherentHost(localTier: LocalTier, channel: Channel): CoherentHost {
-  const cache = new Map<string, { version: number; copy: unknown }>();  // id -> { version, copy }
-  const sessions = new Map<string, Session>();                         // id -> a delta session baselined at fetch, so a write-back ships only the change
+// The two retained maps are separate namespaces behind separate injected stores: the
+// `cache` (a version-invalidated snapshot cache) and `sessions` (a write-back baseline
+// per dereferenced object). They are NOT interchangeable for eviction — a baseline with
+// an uncommitted mutation must not be evicted, so they can't share one global policy.
+// Both default to unbounded here (behavior identical to the old hardcoded Maps): the
+// coherent path is not yet in the serving path, and its eviction must be gated on clean
+// state, a separate later design. Injecting the stores now makes that a policy swap, not
+// a rewrite.
+export interface CoherentHostStores {
+  cache?: Store<{ version: number; copy: unknown }>;
+  sessions?: Store<Session>;
+}
+export function makeCoherentHost(localTier: LocalTier, channel: Channel, stores: CoherentHostStores = {}): CoherentHost {
+  const cache = stores.cache ?? makeUnboundedStore<{ version: number; copy: unknown }>();  // id -> { version, copy }
+  const sessions = stores.sessions ?? makeUnboundedStore<Session>();                       // id -> a delta session baselined at fetch, so a write-back ships only the change
   const stats: CoherentHostStats = { fetches: 0, hits: 0, localUses: 0, writeBacks: 0, conflicts: 0, wire: 0, whole: 0 };
   const tag = (obj: unknown, owner: string, id: string, version: number): unknown => {
     if (obj && typeof obj === "object" && Object.isExtensible(obj)) Object.defineProperty(obj, PROV, { value: { owner, id, version }, enumerable: false, writable: true, configurable: true });  // a frozen/sealed user object can't be tagged — skip, don't throw (it can't be written back anyway)
@@ -129,7 +143,10 @@ export function makeCoherentHost(localTier: LocalTier, channel: Channel): Cohere
       if (!isHandle(h)) return h;
       if (h.owner === localTier.id) { stats.localUses++; return tag(localTier.heap.get(h.id), h.owner, h.id, localTier.heap.version(h.id)); } // master in place
       const current = channel.currentVersion(h);
-      const c = cache.get(h.id);
+      // deref/writeBack are synchronous; the default stores resolve synchronously. The
+      // Store contract is typed possibly-async so an alternative store can be injected
+      // without a signature change (an async store would require an async host).
+      const c = cache.get(h.id) as { version: number; copy: unknown } | undefined;
       if (c && c.version === current) { stats.hits++; return c.copy; }              // coherent cache hit
       const { copy, version } = channel.fetch(h);
       tag(copy, h.owner, h.id, version);
@@ -149,7 +166,7 @@ export function makeCoherentHost(localTier: LocalTier, channel: Channel): Cohere
         ownerHeap.ver.set(prov.id, ownerHeap.version(prov.id) + 1); prov.version = ownerHeap.version(prov.id); stats.writeBacks++; return obj;
       }
       if (ownerHeap.version(prov.id) !== prov.version) { stats.conflicts++; return obj; } // optimistic CAS: stale -> reject (a real reader refetches+retries via commitWrite)
-      const session = sessions.get(prov.id);
+      const session = sessions.get(prov.id) as Session | undefined;
       if (!session) return obj;                                                    // no fetch baseline to diff against (a remote deref always opens one) — nothing coherent to ship
       const delta = diffSnapshot(session, obj);
       const whole = wholeSnapshot(session, obj);                                   // the floor: same fetch-anchored baseline as the delta + the owner's applySnapshot, so ids align

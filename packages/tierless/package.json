@@ -84,6 +84,14 @@
       "types": "./types/fetch.d.mts",
       "default": "./src/fetch.mjs"
     },
+    "./store": {
+      "types": "./types/store.d.mts",
+      "default": "./src/store.mjs"
+    },
+    "./coherence": {
+      "types": "./types/coherence.d.mts",
+      "default": "./src/coherence.mjs"
+    },
     "./content": {
       "types": "./types/content.d.mts",
       "default": "./src/content.mjs"

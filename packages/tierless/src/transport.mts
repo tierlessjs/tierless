@@ -76,21 +76,38 @@ export function wsPort(ws: any): Port {
 }
 
 // RPC correlation over a port: request() awaits a matching reply; inbound requests are
-// dispatched to type handlers. A handler returns { obj, bin? }.
+// dispatched to type handlers. A handler returns { obj, bin? }. When the port closes,
+// every in-flight request REJECTS — a dropped socket settles the awaiting session (its
+// error unwinds, cleanup like the §5 heap release runs) instead of hanging it forever.
 export function makePeer(port: Port): Peer {
   let nextId = 1;
-  const pending = new Map<number, (value: { obj: any; bin: Uint8Array | null }) => void>();   // id -> resolve({ obj, bin })
+  let closed = false;
+  const pending = new Map<number, { res: (value: { obj: any; bin: Uint8Array | null }) => void; rej: (err: Error) => void }>();   // id -> settle({ obj, bin }) | reject
   const handlers = new Map<string, (payload: any, bin: Uint8Array | null) => any>();          // type -> (payload, bin) => { obj, bin? } | Promise<...>
   port.onMessage((m: any, bin) => {
     if (!m || typeof m !== "object") return;                        // well-framed but non-object payload: ignore, don't throw
-    if (m.kind === "reply") { const r = pending.get(m.id); if (r) { pending.delete(m.id); r({ obj: m.payload, bin }); } return; }
+    if (m.kind === "reply") { const r = pending.get(m.id); if (r) { pending.delete(m.id); r.res({ obj: m.payload, bin }); } return; }
     const h = handlers.get(m.payload && m.payload.type);
     Promise.resolve(h ? h(m.payload, bin) : { obj: { type: "error", message: "no handler for " + (m.payload && m.payload.type) } })
       .then((res: any) => port.send({ kind: "reply", id: m.id, payload: res.obj }, res.bin))
       .catch((e: any) => port.send({ kind: "reply", id: m.id, payload: { type: "error", message: String((e && e.message) || e) } }));
   });
+  port.onClose(() => {
+    closed = true;
+    const waiting = [...pending.values()];
+    pending.clear();
+    for (const p of waiting) p.rej(new Error("tierless: connection closed with the request in flight"));
+  });
   return {
-    request(payload: object, bin?: Uint8Array): Promise<{ obj: any; bin: Uint8Array | null }> { const id = nextId++; return new Promise((res) => { pending.set(id, res); port.send({ kind: "request", id, payload }, bin); }); },
+    request(payload: object, bin?: Uint8Array): Promise<{ obj: any; bin: Uint8Array | null }> {
+      if (closed) return Promise.reject(new Error("tierless: connection closed"));
+      const id = nextId++;
+      return new Promise((res, rej) => {
+        pending.set(id, { res, rej });
+        try { port.send({ kind: "request", id, payload }, bin); }
+        catch (e) { pending.delete(id); rej(e as Error); }          // a send on a dying socket must reject, not strand the entry
+      });
+    },
     on(type: string, handler: (payload: any, bin: Uint8Array | null) => any): void { handlers.set(type, handler); },
     close(): void { port.close(); },
   };

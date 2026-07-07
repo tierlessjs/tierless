@@ -26,6 +26,8 @@ packages/tierless/  the npm package — what `npm i tierless` delivers
     graph.mts       identity/cycle-safe graph codec for the wire
     wire-binary.mts the compact binary wire; wire-delta.mts the delta wire; content.mts
     heap.mts        §5 distributed handle heap; fetch.mts Heap/Channel/makeHost
+    coherence.mts   the heap on the LIVE socket: excision + deref/write-back served per
+                    connection, bounded by store.mts (byte-weighted LRU, pinnable)
     transport.mts   WebSocket framing + RPC peer (browser-safe)
     api/            the trust boundary — the reference monitor + sidecar transport
     vite.mts        the Vite plugin ("use tierless" modules -> monitor-backed actions)
@@ -163,6 +165,17 @@ The §5 distributed heap is how the big data stays put.
 - **Placement (§6).** At a pure-data boundary the driver can either ship the
   continuation to the data (migrate) or pull the data back and stay put (fetch),
   priced from real measured bytes — cheaper side wins, cold defaults to migrate.
+- **On the live socket (`coherence.mts`).** The session host services all of the above
+  per connection: the compiler's `@deref`/`@writeback` pseudo-tier resources resolve
+  against the peer over the same websocket the continuation rides. Applied per module —
+  only bundles compiled with the guards excise and service §5 ops, so ordinary modules
+  on the same endpoint (including resolver endpoints) are untouched.
+- **Memory bounds (`store.mts`).** Fetched snapshots live in a byte-weighted LRU
+  (64 MiB/connection default, injectable); an entry with an unshipped mutation is pinned
+  until its write-back lands, so bounding never drops a write (a post-eviction write
+  degrades to a whole-graph replace under the same CAS, counted in stats). The owner's
+  excised masters are released when their continuation completes, keeping a long-lived
+  connection's heap flat. Proofs: `test/e2e/heap-serve.mts`, `test/e2e/evict-safety.mts`.
 
 ## The trust boundary (`test/e2e/api/`)
 

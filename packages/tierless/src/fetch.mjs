@@ -18,6 +18,8 @@
 // WRITE path — a reader proposing its mutated snapshot back to the master under a
 // compare-and-set — is layered on top in src/heap.mjs.
 import { encodeGraph, decodeGraph, isHandle } from "./graph.mjs";
+import { makeLruStore, DEFAULT_CACHE_BYTES } from "./store.mjs";
+export { makeLruStore, makeUnboundedStore, DEFAULT_CACHE_BYTES } from "./store.mjs";
 // A tier-local heap of versioned objects. The owner is the single writer.
 export class Heap {
     tierId;
@@ -29,6 +31,7 @@ export class Heap {
     get(id) { return this.objs.get(id); }
     version(id) { return this.ver.get(id); }
     mutate(id, fn) { fn(this.objs.get(id)); this.ver.set(id, this.ver.get(id) + 1); } // single-writer; invalidates readers
+    drop(id) { this.objs.delete(id); this.ver.delete(id); } // release a master (owner-side heap bounding — coherence.mjs releases a continuation's excisions when it completes)
 }
 // The wire between tiers. fetch() serializes the master on the owner with the
 // identity/cycle-safe graph codec and returns a detached copy + its version.
@@ -48,10 +51,7 @@ export class Channel {
         return { copy, version: owner.heap.version(handle.id) };
     }
 }
-// A deref host for the interpreter running on `localTier`, with a read-through,
-// version-invalidated cache. Plug into run(tier, frames, host).
-export function makeHost(localTier, channel) {
-    const cache = new Map(); // id -> { version, copy }
+export function makeHost(localTier, channel, store = makeLruStore({ max: DEFAULT_CACHE_BYTES, weigh: (e) => e.bytes })) {
     const stats = { fetches: 0, hits: 0, localUses: 0, bytes: 0 };
     return {
         stats,
@@ -63,16 +63,21 @@ export function makeHost(localTier, channel) {
                 return localTier.heap.get(h.id);
             } // use the master
             const current = channel.currentVersion(h);
-            const c = cache.get(h.id);
+            // deref is a synchronous hot path (the auto-deref machine consumes its return
+            // synchronously); the default store resolves synchronously. The Store contract is
+            // typed possibly-async so an async store can be injected without a signature
+            // change — such a store would require an async deref, layered on top later.
+            const c = store.get(h.id);
             if (c && c.version === current) {
                 stats.hits++;
                 return c.copy;
             } // coherent cache hit
             const before = channel.bytes;
             const { copy, version } = channel.fetch(h); // fetch the snapshot
-            cache.set(h.id, { version, copy });
+            const bytes = channel.bytes - before; // wire size of this snapshot — the entry's memory weight
+            store.set(h.id, { version, copy, bytes });
             stats.fetches++;
-            stats.bytes += channel.bytes - before;
+            stats.bytes += bytes;
             return copy;
         },
     };
