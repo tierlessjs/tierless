@@ -88,7 +88,21 @@ through TCP delay relays: real 80 ms RTT on HTTP, CORS preflights, AND the
 websocket — the case devtools throttling can't shape. Per-test wall time is then
 elapsed time under that RTT, not a model.
 
-<!-- RTT80 RESULTS PENDING -->
+Measured 2026-07-07 (results/rtt80-*.jsonl; 195/195 pass parity — the extra
+exclusion vs the unshaped runs is an attachment-paste spec that fails under RTT
+on BOTH arms):
+
+    total wall time    13.1 min -> 12.7 min   (3% less)
+    median per test    1% less
+    trips              12% fewer suite-wide · 22% fewer median (covered subset)
+
+No wall-time win is claimed. Every compiled service call is still one crossing,
+so it pays the same RTT its XHR did; what disappears (preflights, some dependent
+refetches) is real but small against test runtimes that wait on UI, not just
+network. The trip reduction is banked latency headroom: it becomes wall time
+when the §6 migrate arm batches a method's request chain into one crossing.
+Byte columns in shaped runs are CDP-level and not quotable — the truth files
+above are the byte record.
 
 ## Correctness — their own suite as the judge
 

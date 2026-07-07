@@ -114,3 +114,13 @@ as always — the shaped-RTT runs are the timing instrument.
 Coverage note: 11 tests (login-failure/email-confirmation flows) never inject
 the browser API override and their page traffic bypasses both counters —
 symmetric on both arms, zeros in both files, excluded from nothing.
+
+## Shaped timing, native arms (2026-07-07, results/rtt80-*.jsonl)
+
+TIERLESS_RTT_MS=80, full suite, both arms: 195/195 pass parity (the extra
+exclusion is an attachment-paste spec failing under RTT on stock too). Total
+wall time 13.1 -> 12.7 min (3% less), median per test 1% less, trips 12% fewer
+suite-wide / 22% median covered. The honest read: per-request crossings pay
+per-request RTTs — the trip savings that exist today (preflights, dependent
+refetches) are real but small against UI-bound test time. Chain batching
+(§6 migrate arm) is where trips-fewer becomes seconds-faster.
