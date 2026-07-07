@@ -1,6 +1,6 @@
 # The §6 migrate arm for compiled methods
 
-Status: design agreed, slice 1 in progress. The fetch arm (host.mts runLocal) stays the
+Status: slices 1-2 shipped and proven (probe + live e2e + vite emit); slice-3 MECHANICS shipped (dynamic call parks, class-stamped handles, session twins, frame-aware fetch arm). Remaining: setup-closure extraction (__caps), the cross-module merged program registry the dyn dispatch needs, app wiring + profiled comparison runs. The fetch arm (host.mts runLocal) stays the
 default and the cold fallback; this document is the delta that lets a compiled method's
 continuation MIGRATE to the server and run its request chain there — N crossings become 1.
 
