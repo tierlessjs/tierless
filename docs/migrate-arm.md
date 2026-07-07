@@ -84,3 +84,16 @@ comparison runs, do the exploration (run protocol, docs/corpus.md).
 3. **The app's real chains**: compile the Pinia store functions that orchestrate
    multi-call sequences (closures over reactive refs → §5 handles, same stop rule).
    This is where the RTT verdict should finally move.
+
+## Slice-3 wall, found early: interceptor semantics for calls 2..N
+
+The fetch arm runs the app's request-interceptor chain browser-side per request
+(crossHttpRequest). A migrated chain's later calls park server-side, where those
+closures don't exist — Vikunja's per-service interceptor (objectToSnakeCase on the
+model) would be silently skipped and the backend would reject the write. Options,
+in current order of preference: (a) apply the pure part of the chain in the twin
+by importing the same helpers server-side (they're pure module functions in this
+app); (b) compile the interceptor functions themselves; (c) pin write-bearing
+requests to the fetch arm and migrate only read chains — the profile can encode
+that per-site today. Slice 1's fixtures don't have interceptors; this decision
+gates slice 3, not the mechanics.
