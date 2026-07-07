@@ -90,3 +90,27 @@ stock re-pays ~20 KB for the same revisit). Instrument correction: the CDP suite
 numbers count inflated payloads and now UNDERCOUNT the ported arm severely —
 socket-level counting is the byte instrument of record from here.
 
+
+## The suite at the socket (2026-07-07, results/truth-*.jsonl)
+
+The full 199-test suite, both arms, TCP-true accounting (TIERLESS_WIRE_TRUTH=1):
+session ws bytes counted inside the gateway (deflate included), browser API
+bytes through a counting TCP relay. Node-side seeding/login is split off via
+TIERLESS_BROWSER_API_URL and never counted; the boot tool refuses already-bound
+ports, so a stale stack can no longer serve a measured run.
+
+196/196 pass parity (the 3 exclusions fail identically on both arms, stock too).
+186 of 196 pairs touch the session. The distribution of record:
+
+    suite-wide   31.5 MB -> 27.5 MB  (13% less IO) · trips 6,229 -> 5,259 (16% fewer)
+    per test     median 35% fewer bytes, 22% fewer trips (covered subset)
+    best case    236 KB -> 18 KB (comment pagination: 112 -> 13 trips)
+
+This corrects the CDP-era claim above: "bytes median 32% MORE" was the
+instrument, not the port. At the socket, streaming deflate turns the same
+crossings into a 35% median per-test byte SAVING. Wall time on localhost: ~0%,
+as always — the shaped-RTT runs are the timing instrument.
+
+Coverage note: 11 tests (login-failure/email-confirmation flows) never inject
+the browser API override and their page traffic bypasses both counters —
+symmetric on both arms, zeros in both files, excluded from nothing.
