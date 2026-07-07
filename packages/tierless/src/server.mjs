@@ -185,7 +185,7 @@ export async function bundleResolverFromManifest(manifestPath) {
     const load = async (file) => {
         if (!cache.has(file)) {
             const mod = await import(pathToFileURL(path.join(dir, file)).href);
-            cache.set(file, { PROGRAMS: mod.PROGRAMS, __unwind: mod.__unwind });
+            cache.set(file, { PROGRAMS: mod.PROGRAMS, __unwind: mod.__unwind, ...(mod.__slots ? { __slots: mod.__slots } : {}) }); // __slots: the §5 stop-rule table a migrated method needs
         }
         return cache.get(file);
     };

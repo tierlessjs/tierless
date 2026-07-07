@@ -1164,7 +1164,32 @@ function compile(src: string, preamble: string): { code: string; meta: CompileMe
   // trajectory design: a site key is (fn, pc) and pcs silently change meaning across edits, so a
   // profile is only valid against the bundle whose traces built it). Hashed over the emitted code,
   // which is identical on both tiers.
-  const code = body + `export const BUNDLE_HASH = ${JSON.stringify(fnv1a(body))};\n`;
+  const hash = fnv1a(body);
+  const code = body + `export const BUNDLE_HASH = ${JSON.stringify(hash)};\n`;
+
+  // Machine-only server module (meta.serverCode): what a gateway needs to RESUME a
+  // migrated method — programs, slots, driver, the module's own helper functions, and
+  // only the imports that machine text references. The classes (and their constructor
+  // graph: http factories, framework glue, window-touching modules) never load in Node;
+  // the stop rule guarantees segments touching the live instance run at home, so the
+  // machine never misses them. Same BUNDLE_HASH: it names the MACHINE, which is shared.
+  if (meta.methods.some((m) => m.program)) {
+    const machineText = progs.join(",\n") + "\n" + pure.join("\n");
+    const refd = (name: string): boolean => new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(machineText);
+    const keptImports = rest
+      .filter((n): n is t.ImportDeclaration => t.isImportDeclaration(n))
+      .filter((n) => n.specifiers.some((s) => refd(s.local.name)))
+      .map((n) => gen(n));
+    meta.serverCode = [
+      ...keptImports,
+      helpers.trimEnd(),
+      ...pure,
+      "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};",
+      slotsOut.trimEnd(),
+      DRIVER,
+      `export const BUNDLE_HASH = ${JSON.stringify(hash)};`,
+    ].filter(Boolean).join("\n") + "\n";
+  }
   return { code, meta };
 }
 
@@ -1194,6 +1219,12 @@ interface CompileMeta {
   /** Per-method outcome for top-level classes: compiled into `program`, or kept
    *  original with the blocking `error`. Methods without tier calls aren't listed. */
   methods: Array<{ class: string; method: string; program: string | null; error?: string }>;
+  /** MACHINE-ONLY server module for class-method compilation (docs/migrate-arm.md): the
+   *  programs, module-level helper functions, and ONLY the imports machine code actually
+   *  references — the kept classes and their construction-time graph (http factories,
+   *  framework wiring) stay out, so the module loads in plain Node. The migrate arm's
+   *  gateway resolves this; absent when no class method compiled. */
+  serverCode?: string;
 }
 interface FunctionReport {
   name: string;

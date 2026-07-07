@@ -45,7 +45,7 @@ export interface Connection {
   /** Run entry(...args) HERE; foreign resources are fetched over the session (the frame
    *  never ships — the compiled-class-method path, see bindMethods). opts.exec serves
    *  pinned requests on this tier; opts.pins adds the resource family's declared pins. */
-  runLocal(entry: string, args?: unknown[], module?: string, opts?: { exec?: Exec; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest) => import("./types.mjs").ResourceRequest | null; migrate?: (req: import("./types.mjs").ResourceRequest) => boolean }): Promise<unknown>;
+  runLocal(entry: string, args?: unknown[], module?: string, opts?: { exec?: Exec; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest) => import("./types.mjs").ResourceRequest | null; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number }) => boolean }): Promise<unknown>;
   close(): void;
 }
 
@@ -85,7 +85,7 @@ export function connect({ url, exec, bundle, tier = "browser", heap = true }: Co
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
       return h.call(peer, entry, args);
     },
-    runLocal: async (entry: string, args: unknown[] = [], module: string = "", opts?: { exec?: Exec; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest) => import("./types.mjs").ResourceRequest | null; migrate?: (req: import("./types.mjs").ResourceRequest) => boolean }): Promise<unknown> => {
+    runLocal: async (entry: string, args: unknown[] = [], module: string = "", opts?: { exec?: Exec; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest) => import("./types.mjs").ResourceRequest | null; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number }) => boolean }): Promise<unknown> => {
       await ready;
       const h = hosts.get(module || "");
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
@@ -125,7 +125,7 @@ export function bindActions(bundle: Bundle, { module = "" }: { module?: string }
  *  the shared connection. Methods run on the FETCH path: the frame — whose arg 0 is the
  *  live instance, often a framework proxy — stays in the browser and mutates the real
  *  object; only resource requests and results cross. Call once per compiled module. */
-export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (prog: string, self: unknown, args: unknown[]) => Promise<unknown>) => void }, { module = "" }: { module?: string } = {}): void {
+export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (prog: string, self: unknown, args: unknown[]) => Promise<unknown>) => void }, { module = "", migrate }: { module?: string; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number }) => boolean } = {}): void {
   if (typeof bundle.__bindTierlessMethods !== "function") throw new Error("tierless: bundle has no compiled class methods (rebuild with a compiler that emits __bindTierlessMethods)");
   bundle.__bindTierlessMethods(async (prog, self, args) => {
     const conn = sharedConn();
@@ -142,6 +142,7 @@ export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (pro
       pins: httpPins,
       map: (req) => crossHttpRequest(own as Parameters<typeof crossHttpRequest>[0], req),
       ...(own ? { exec: httpResources(own) } : {}),
+      ...(migrate ? { migrate } : {}),   // §6: opt a park into the migrate arm (docs/migrate-arm.md); absent = fetch arm
     });
   });
 }

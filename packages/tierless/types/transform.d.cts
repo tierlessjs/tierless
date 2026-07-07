@@ -23,6 +23,12 @@ interface CompileMeta {
         program: string | null;
         error?: string;
     }>;
+    /** MACHINE-ONLY server module for class-method compilation (docs/migrate-arm.md): the
+     *  programs, module-level helper functions, and ONLY the imports machine code actually
+     *  references — the kept classes and their construction-time graph (http factories,
+     *  framework wiring) stay out, so the module loads in plain Node. The migrate arm's
+     *  gateway resolves this; absent when no class method compiled. */
+    serverCode?: string;
 }
 interface FunctionReport {
     name: string;

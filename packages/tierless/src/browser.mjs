@@ -100,7 +100,7 @@ export function bindActions(bundle, { module = "" } = {}) {
  *  the shared connection. Methods run on the FETCH path: the frame — whose arg 0 is the
  *  live instance, often a framework proxy — stays in the browser and mutates the real
  *  object; only resource requests and results cross. Call once per compiled module. */
-export function bindMethods(bundle, { module = "" } = {}) {
+export function bindMethods(bundle, { module = "", migrate } = {}) {
     if (typeof bundle.__bindTierlessMethods !== "function")
         throw new Error("tierless: bundle has no compiled class methods (rebuild with a compiler that emits __bindTierlessMethods)");
     bundle.__bindTierlessMethods(async (prog, self, args) => {
@@ -118,6 +118,7 @@ export function bindMethods(bundle, { module = "" } = {}) {
             pins: httpPins,
             map: (req) => crossHttpRequest(own, req),
             ...(own ? { exec: httpResources(own) } : {}),
+            ...(migrate ? { migrate } : {}), // §6: opt a park into the migrate arm (docs/migrate-arm.md); absent = fetch arm
         });
     });
 }

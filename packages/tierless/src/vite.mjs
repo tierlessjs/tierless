@@ -77,7 +77,13 @@ export default function tierless(opts = {}) {
     let compileTargets = new Set(); // absolute paths, resolved once root is known
     let sidecar = null;
     const machines = new Map(); // moduleId -> compiled server machine + its relative imports
+    // wire id -> the machine-only server module for a compiled APP file (meta.serverCode) +
+    // where its relative/aliased imports resolve from. Bundled (esbuild) at writeBundle so
+    // the gateway can RESUME migrated methods (docs/migrate-arm.md); the fetch arm never
+    // needed it — handleExec is bundle-free — so this is additive.
+    const appMachines = new Map();
     let root = process.cwd(); // Vite root, captured in configResolved (for the build emit path)
+    let aliases = {}; // string finds from Vite's resolved alias, for the server-machine bundle
     const SHIM_ID = "\0tierless-shim";
     // The shim virtual module: the compiled adapt-shim body plus this build's route table.
     // Workflow modules load through dynamic import, so they pass through the transform above
@@ -127,6 +133,8 @@ export default function tierless(opts = {}) {
                     this?.warn?.(`tierless: ${id} is in compile[] but no method compiled`);
                     return null;
                 }
+                if (meta.serverCode)
+                    appMachines.set("m:" + shortHash(cleanId), { code: meta.serverCode, resolveDir: path.dirname(cleanId) });
                 const binder = [
                     `import { bindMethods as __tlBindMethods } from ${JSON.stringify(runtime)};`,
                     `export const __bundle = { PROGRAMS, __unwind, __bindTierlessMethods };`,
@@ -157,8 +165,12 @@ export default function tierless(opts = {}) {
             if (config?.root)
                 root = config.root;
             compileTargets = new Set((compileList || []).map((p) => path.resolve(root, p)));
+            // string alias finds ('@' -> src) carry over to the server-machine esbuild bundle;
+            // regex finds don't map onto esbuild's alias option and are skipped (loudly at build
+            // time if a machine import then fails to resolve — never silently misresolved).
+            aliases = Object.fromEntries((config?.resolve?.alias || []).filter((a) => typeof a.find === "string").map((a) => [a.find, a.replacement]));
         },
-        buildStart() { machines.clear(); }, // fresh build: transform repopulates the map
+        buildStart() { machines.clear(); appMachines.clear(); }, // fresh build: transform repopulates the maps
         // Build: emit the server side of what the client build just produced. For every "use tierless"
         // module the transform compiled, write its machine (byte-identical to `tierless build --bare` —
         // the SAME compiler output, no second pass) plus a manifest mapping the module id the browser
@@ -166,7 +178,7 @@ export default function tierless(opts = {}) {
         // `bundleResolverFromManifest` — no hand-written module resolver, no re-compile. Runs on build
         // only (Vite never calls writeBundle in dev serve).
         writeBundle() {
-            if (!machines.size)
+            if (!machines.size && !appMachines.size)
                 return;
             const outDir = path.resolve(root, serverOutDir);
             mkdirSync(outDir, { recursive: true });
@@ -179,6 +191,23 @@ export default function tierless(opts = {}) {
                 const emitted = imports.length ? rewriteRelativeImports(code, path.dirname(id), outDir, imports, mixByPath) : code;
                 writeFileSync(path.join(outDir, name), emitted);
                 modules[id] = name;
+            }
+            // Compiled APP modules: the machine-only server module still imports app-graph
+            // helpers ('@/models/…', packages) — esbuild bundles that closure into ONE
+            // Node-loadable file, aliases resolved from the app's own Vite config. Errors here
+            // are BUILD errors: a machine import that can't resolve fails the build, never a
+            // half-emitted gateway.
+            if (appMachines.size) {
+                const esbuild = createRequire(path.join(root, "package.json"))("esbuild");
+                for (const [wireId, { code, resolveDir }] of appMachines) {
+                    const name = wireId.replace(/[^A-Za-z0-9._-]/g, "_") + ".server.mjs";
+                    esbuild.buildSync({
+                        stdin: { contents: code, resolveDir, loader: "js", sourcefile: wireId },
+                        bundle: true, format: "esm", platform: "node", target: "es2022",
+                        outfile: path.join(outDir, name), alias: aliases, logLevel: "silent",
+                    });
+                    modules[wireId] = name;
+                }
             }
             writeFileSync(path.join(outDir, "tierless.manifest.json"), JSON.stringify({ path: wsPath || WS_PATH, modules }, null, 2) + "\n");
         },

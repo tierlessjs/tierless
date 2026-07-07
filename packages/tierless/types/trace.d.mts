@@ -150,4 +150,24 @@ export interface DecideOpts {
     argFeatures?: string[];
 }
 export declare function decide(contBytes: number, key: string, profile: Profile | null, { fetchable, mode, stability, argFeatures }?: DecideOpts): Decision;
+export interface MethodMigrateOpts {
+    /** Minimum fraction of complete runs sharing the modal suffix (the same gate decide() uses). */
+    stability?: number;
+    /** How many MORE same-tier touches the modal suffix must hold. 1 = a two-call chain. */
+    minSuffix?: number;
+}
+/** The §6 rule at a compiled METHOD's park (docs/migrate-arm.md slice 2) — the mirror
+ *  image of decide()'s workflow rule. There, cold migrates: the continuation must reach
+ *  its resources somehow, and fetch is the unpriced arm. Here, cold FETCHES: the fetch
+ *  arm is free (the stack never ships) and migrating unpriced risks paying the shipping
+ *  for a one-call method that bounces straight home. Migrate only on evidence: the
+ *  profile — locked, from a profiling run, per the run protocol — shows this exact site
+ *  (fn, pc, resource) starting a STABLE same-tier chain, each suffix touch a round trip
+ *  the migration folds into one crossing. */
+export declare function methodMigrate(profile: Profile | null, { stability, minSuffix }?: MethodMigrateOpts): (req: {
+    name: string;
+}, site: {
+    fn: string;
+    pc: number;
+}) => boolean;
 export {};

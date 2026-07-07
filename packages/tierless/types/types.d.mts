@@ -90,7 +90,11 @@ export interface Host {
         exec?: Exec;
         pins?: (req: ResourceRequest) => boolean;
         map?: (req: ResourceRequest) => ResourceRequest | null;
-        migrate?: (req: ResourceRequest) => boolean;
+        migrate?: (req: ResourceRequest, site: {
+            fn: string;
+            pc: number;
+        }) => boolean;
+        trace?: boolean;
     }): Promise<unknown>;
     handleStart(payload: any, bin: Uint8Array | null, peer?: Peer): Promise<{
         obj: HostReply;

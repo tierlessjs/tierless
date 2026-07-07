@@ -1392,7 +1392,31 @@ function compile(src, preamble) {
     // trajectory design: a site key is (fn, pc) and pcs silently change meaning across edits, so a
     // profile is only valid against the bundle whose traces built it). Hashed over the emitted code,
     // which is identical on both tiers.
-    const code = body + `export const BUNDLE_HASH = ${JSON.stringify(fnv1a(body))};\n`;
+    const hash = fnv1a(body);
+    const code = body + `export const BUNDLE_HASH = ${JSON.stringify(hash)};\n`;
+    // Machine-only server module (meta.serverCode): what a gateway needs to RESUME a
+    // migrated method — programs, slots, driver, the module's own helper functions, and
+    // only the imports that machine text references. The classes (and their constructor
+    // graph: http factories, framework glue, window-touching modules) never load in Node;
+    // the stop rule guarantees segments touching the live instance run at home, so the
+    // machine never misses them. Same BUNDLE_HASH: it names the MACHINE, which is shared.
+    if (meta.methods.some((m) => m.program)) {
+        const machineText = progs.join(",\n") + "\n" + pure.join("\n");
+        const refd = (name) => new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(machineText);
+        const keptImports = rest
+            .filter((n) => t.isImportDeclaration(n))
+            .filter((n) => n.specifiers.some((s) => refd(s.local.name)))
+            .map((n) => gen(n));
+        meta.serverCode = [
+            ...keptImports,
+            helpers.trimEnd(),
+            ...pure,
+            "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};",
+            slotsOut.trimEnd(),
+            DRIVER,
+            `export const BUNDLE_HASH = ${JSON.stringify(hash)};`,
+        ].filter(Boolean).join("\n") + "\n";
+    }
     return { code, meta };
 }
 function fnv1a(s) {

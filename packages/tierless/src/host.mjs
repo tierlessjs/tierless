@@ -199,6 +199,13 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
             const localExec = overrideExec || execOn(peer);
             const sid = newSid();
             let stack = initialStack(entry, args);
+            // trace the fetch arm too: every serviced park is a resource touch at its (fn, pc)
+            // site — the records a PROFILING run turns into the method-boundary migrate profile
+            // (trace.mts methodMigrate). Head-sampled like everything else; zero cost untraced.
+            const tid = rec?.spawn(entry, opts.trace);
+            if (tid)
+                rec.stamp(stack, tid);
+            const flag = rec ? rec.flagOf(stack) : null;
             let request = null;
             let carry = null;
             // §5 mini-heap for the MIGRATE arm: excised locals park here while the stack is away
@@ -208,12 +215,17 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                 const c = carry;
                 carry = null;
                 // one-shot exec: the first service() call consumes the fetched result (or throws
-                // the fetch error INTO the machine); anything else this tier owns runs normally
-                const onceExec = (r) => { if (c)
+                // the fetch error INTO the machine); anything else this tier owns runs normally.
+                // The recorder wraps it so every serviced touch lands at its park site.
+                const onceBase = (r) => { if (c)
                     return "error" in c ? (() => { throw c.error; })() : c.value; return localExec(r); };
+                const s = stack;
+                const onceExec = !rec ? onceBase : async (r) => { const v = await onceBase(r); rec.res(s, r, v); return v; };
                 const res = await pump(stack, ownsHere, onceExec, request);
-                if (res.done)
+                if (res.done) {
+                    rec?.end(flag, "done");
                     return res.value;
+                }
                 request = res.request;
                 // pinned = the family's declared semantics (opts.pins) OR args closing over
                 // tier-owned values — executes here on the ORIGINAL request (the local exec is
@@ -244,13 +256,15 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                 // rule (op:"home", value already in the frame) or at a resource only this tier
                 // can serve. Errors the compiled code catches unwind over there; only uncaught
                 // ones surface here, exactly as they would have escaped the local pump.
-                if (migrate && migrate(request)) {
+                const top = stack[stack.length - 1];
+                if (migrate && migrate(request, { fn: top.fn, pc: top.pc })) {
                     if (!heapTier) {
                         const objs = new Map();
                         let n = 0;
                         heapTier = { id: tier, heapPut: (v) => { const k = "l" + n++; objs.set(k, v); return k; }, heapGet: (hid) => objs.get(hid) };
                     }
-                    const reply = await peer.request({ type: "resume", sid, ...meta }, encodeWireBinary(stack, req, { tier: heapTier, excise: ownedUnit }));
+                    const enc = () => encodeWireBinary(stack, req, { tier: heapTier, excise: ownedUnit });
+                    const reply = await peer.request({ type: "resume", sid, ...meta }, rec ? rec.ship(stack, req, enc, "migrate") : enc());
                     if (reply.obj.type === "error")
                         throw new Error(reply.obj.message);
                     if (reply.obj.type === "done")

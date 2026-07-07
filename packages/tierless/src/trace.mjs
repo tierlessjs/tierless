@@ -251,3 +251,21 @@ export function decide(contBytes, key, profile, { fetchable = true, mode = "traj
         ? { choice: "migrate", why: `${how}; continuation ${contBytes} B <= fetch side ${Math.round(fetchSide)} B`, fetchSide }
         : { choice: "fetch", why: `${how}; fetch side ${Math.round(fetchSide)} B < continuation ${contBytes} B`, fetchSide };
 }
+/** The §6 rule at a compiled METHOD's park (docs/migrate-arm.md slice 2) — the mirror
+ *  image of decide()'s workflow rule. There, cold migrates: the continuation must reach
+ *  its resources somehow, and fetch is the unpriced arm. Here, cold FETCHES: the fetch
+ *  arm is free (the stack never ships) and migrating unpriced risks paying the shipping
+ *  for a one-call method that bounces straight home. Migrate only on evidence: the
+ *  profile — locked, from a profiling run, per the run protocol — shows this exact site
+ *  (fn, pc, resource) starting a STABLE same-tier chain, each suffix touch a round trip
+ *  the migration folds into one crossing. */
+export function methodMigrate(profile, { stability = 0.9, minSuffix = 1 } = {}) {
+    if (!profile)
+        return () => false;
+    return (req, site) => {
+        const s = profile.sites[siteKey(site.fn, site.pc, req.name)];
+        if (!s || s.modal === null || s.stability < stability)
+            return false;
+        return s.modal.split(">").filter(Boolean).length >= minSuffix;
+    };
+}

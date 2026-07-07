@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { makeHost } from "tierless";
 import { makePeer, encodeMessage, decodeMessage, type Port } from "tierless/transport";
+import { memorySink, buildProfile, loadProfile, methodMigrate } from "tierless/trace";
 import type { Peer } from "tierless";
 
 const require = createRequire(import.meta.url);
@@ -166,5 +167,29 @@ const v6 = await bhost.runLocal(peer, "Svc$chain", [self6, 7], {});
 check("fetch arm still works (no migrate opt)", v6 === "got:n7", String(v6));
 check("fetch arm: TWO exec crossings, no resume — the stack stayed home", counts.exec === 2 && !counts.resume, JSON.stringify(counts));
 
+// ---- 7. slice 2: the profile decides — chains migrate, single calls stay on fetch -------
+// PROFILING pass (run protocol): the fetch arm runs traced; runLocal now records every
+// serviced park at its (fn, pc, resource) site plus the end marker, so buildProfile sees
+// complete method runs and their same-tier suffixes.
+const { sink, records } = memorySink();
+const thost = makeHost({ bundle, tier: "browser", exec: browserExec as never, trace: { rate: 1, sink } });
+for (let i = 0; i < 3; i++) {
+  await thost.runLocal(peer, "Svc$chain", [new mod.Svc({}), i], {});
+  await thost.runLocal(peer, "Svc$getAllish", [new mod.Svc({})], {});
+}
+const profile = loadProfile(buildProfile(records, mod.BUNDLE_HASH), mod.BUNDLE_HASH);
+check("profiling fetch runs produced a valid profile", !!profile && profile.runs.complete === 6, JSON.stringify(profile?.runs));
+
+// COMPARISON pass: the locked profile drives migrate — no racing, no exploration
+const mig = methodMigrate(profile);
+reset();
+const v7 = await bhost.runLocal(peer, "Svc$chain", [new mod.Svc({}), 7], { migrate: mig });
+check("decide: the chain site migrates on profile evidence (one crossing)", v7 === "got:n7" && counts.resume === 1 && !counts.exec, JSON.stringify(counts));
+reset();
+const s8 = new mod.Svc({});
+const v8 = await bhost.runLocal(peer, "Svc$getAllish", [s8], { migrate: mig });
+check("decide: the single-call site stays on the fetch arm (no shipping to bounce home)", Array.isArray(v8) && s8.total === 42 && counts.exec === 1 && !counts.resume, JSON.stringify(counts));
+check("decide: cold (no profile) never migrates", methodMigrate(null)({ name: "http.get" }, { fn: "Svc$chain", pc: 5 }) === false);
+
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
-console.log("\na chain migrates in one crossing; the stop rule, identity, and unwind hold");
+console.log("\na chain migrates in one crossing; the stop rule, identity, and unwind hold; the profile decides");

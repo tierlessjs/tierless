@@ -23,7 +23,10 @@ export interface Connection {
         exec?: Exec;
         pins?: (req: import("./types.mjs").ResourceRequest) => boolean;
         map?: (req: import("./types.mjs").ResourceRequest) => import("./types.mjs").ResourceRequest | null;
-        migrate?: (req: import("./types.mjs").ResourceRequest) => boolean;
+        migrate?: (req: import("./types.mjs").ResourceRequest, site: {
+            fn: string;
+            pc: number;
+        }) => boolean;
     }): Promise<unknown>;
     close(): void;
 }
@@ -40,6 +43,10 @@ export declare function bindActions(bundle: Bundle, { module }?: {
  *  object; only resource requests and results cross. Call once per compiled module. */
 export declare function bindMethods(bundle: Bundle & {
     __bindTierlessMethods?: (fn: (prog: string, self: unknown, args: unknown[]) => Promise<unknown>) => void;
-}, { module }?: {
+}, { module, migrate }?: {
     module?: string;
+    migrate?: (req: import("./types.mjs").ResourceRequest, site: {
+        fn: string;
+        pc: number;
+    }) => boolean;
 }): void;
