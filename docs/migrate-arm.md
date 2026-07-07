@@ -85,6 +85,36 @@ comparison runs, do the exploration (run protocol, docs/corpus.md).
    multi-call sequences (closures over reactive refs → §5 handles, same stop rule).
    This is where the RTT verdict should finally move.
 
+## Slice-3 ground truth (read from their code, 2026-07-07)
+
+- The project-open read chain (project → views → tasks) is NOT a function in their
+  code — it emerges from router + component composition (useTaskList's loadTasks makes
+  exactly one getAll). No compile surface can batch it without rewriting intent, which
+  is the retired shadow approach. State this in the results; it is the honest §6
+  finding about where batching lives.
+- The single-function chains that DO exist are store functions, mostly writes:
+  createNewTask (create + per-label creates), toggleFavorite (update + loadAllProjects),
+  saved-filter favorite (get + update), kanban bucket flows. Chain length 2-3: each
+  migration saves 1-2 RTTs on those interactions. Expectation for the final shaped
+  runs: movement on chain-bearing specs, not the suite median.
+- Store functions suspend on COMPILED-METHOD CALLS (taskService.update(...)), not on
+  this.http.*. So slice 3 is method-to-method suspendability:
+  1. compiled method stubs carry `__tierless_program`; lowering `await x.m(a)` emits a
+     DYNAMIC call park — at runtime, if x.m names a program, push its frame
+     (op:"call" with runtime fn, args [x, ...a]); otherwise a new op:"await" parks the
+     plain promise and the pump awaits it in place (promises never cross: they sit in
+     ret through a same-segment await, and a promise in a slot is ownedUnit — the stop
+     rule parks home before any segment could touch it elsewhere).
+  2. setup-closure extraction: functions inside defineStore(name, () => {...}) with
+     tier-reaching awaits compile with their free setup-scope bindings rewritten to
+     __caps.<name>; the stub passes a caps object (const bindings as plain properties —
+     Vikunja's setups are const-heavy; let-bindings need getter/setter). The caps
+     object is ownedUnit (refs/instances inside) — it excises whole, and segments
+     touching __caps park home, exactly like __self.
+  3. the twin applies the app's pure request-interceptor transform for writes (option
+     (a) below): Vikunja's is objectToSnakeCase from '@/helpers/case' — pure, importable
+     into the machine bundle.
+
 ## Slice-3 wall, found early: interceptor semantics for calls 2..N
 
 The fetch arm runs the app's request-interceptor chain browser-side per request
