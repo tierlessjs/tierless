@@ -78,7 +78,8 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024, conten
     const exciseTo = (v) => {
         const id = objs.length;
         idOf.set(v, id);
-        objs.push({ k: "H", h: { __tierless_handle__: true, owner: tier.id, id: tier.heapPut(v), kind: Array.isArray(v) ? "array" : "object" } });
+        const cls = v?.__tierless_cls; // inherited from the stamped prototype
+        objs.push({ k: "H", h: { __tierless_handle__: true, owner: tier.id, id: tier.heapPut(v), kind: Array.isArray(v) ? "array" : "object", ...(typeof cls === "string" ? { cls } : {}) } });
         return { k: "r", id };
     };
     function enc(v) {

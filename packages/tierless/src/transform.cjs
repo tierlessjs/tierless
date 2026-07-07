@@ -137,8 +137,16 @@ const isSusp = (s) => (t.isVariableDeclaration(s) && s.declarations.length === 1
 function suspInfo(s) {
     const y = (t.isVariableDeclaration(s) ? s.declarations[0].init : s.expression);
     const assign = t.isVariableDeclaration(s) ? s.declarations[0].id.name : null;
-    const a = y.argument.arguments; // R(tier, name, ...args)
-    return { assign, op: `{ op: "resource", tier: ${gen(a[0])}, name: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` };
+    const call = y.argument;
+    const a = call.arguments;
+    if (call.callee.name === "D") {
+        // D(recv, "member", ...args) — the DYNAMIC call park (docs/migrate-arm.md slice 3).
+        // The machine only DESCRIBES the call; the pump dispatches it (twin instance on a
+        // class-stamped handle / nested machine on a stamped stub / promise settled in
+        // place), because only the pump holds PROGRAMS, isHandle, and the twin registry.
+        return { assign, op: `{ op: "dyn", recv: ${gen(a[0])}, member: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` };
+    }
+    return { assign, op: `{ op: "resource", tier: ${gen(a[0])}, name: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` }; // R(tier, name, ...args)
 }
 // a statement that calls another suspendable (compiled) function -> push a sub-frame
 function callSusp(s) {
@@ -182,8 +190,9 @@ function containsSuspCall(node) {
 // which is all compileStmt knows how to lower. This is what lets ordinary code compile:
 // `return f(x)`, `out = api.get()`, `a + f(x)`, `g(f(x))`, `if (api.check())`, `while (...)`.
 const isResYield = (n) => !!n && t.isYieldExpression(n) && t.isCallExpression(n.argument) && t.isIdentifier(n.argument.callee, { name: "R" });
+const isDynYield = (n) => !!n && t.isYieldExpression(n) && t.isCallExpression(n.argument) && t.isIdentifier(n.argument.callee, { name: "D" }); // the dynamic call park (slice 3)
 const isSuspCallNode = (n) => !!n && t.isCallExpression(n) && t.isIdentifier(n.callee) && suspSet.has(n.callee.name);
-const isSuspExpr = (n) => isResYield(n) || isSuspCallNode(n);
+const isSuspExpr = (n) => isResYield(n) || isDynYield(n) || isSuspCallNode(n);
 // Same "generic walk, untyped inner walker" shape as containsSuspCall.
 function hasSuspInside(node, exclSelf) {
     let found = false;
@@ -718,10 +727,16 @@ function compileFn(node) {
             }
         };
         // args are referenced by ELEMENT (`this` lowers to F.args[0], params to F.args[i]) —
-        // keep that precision, or one excised instance would park every param-using segment
+        // keep that precision, or one excised instance would park every param-using segment.
+        // A dyn park whose RECEIVER is a DIRECT slot (F.x / F.args[i]) is exempted first:
+        // the pump's dispatch is handle-aware by construction (twin / machine / home), so a
+        // handle IN that slot must not trip the stop rule. A receiver that is a PATH through
+        // a slot (F.args[0].svc) stays scanned — evaluating it on a handle would misread,
+        // so the segment correctly parks home. Argument expressions always stay scanned.
         const refsOf = (id) => {
             const out = new Set();
-            for (const m of caseText.get(id).matchAll(/\bF\.([A-Za-z_$][\w$]*)(\[(\d+)\])?/g)) {
+            const text = caseText.get(id).replace(/\bop: "dyn", recv: F\.(?:args\[\d+\]|[A-Za-z_$][\w$]*)(?=,)/g, 'op: "dyn"');
+            for (const m of text.matchAll(/\bF\.([A-Za-z_$][\w$]*)(\[(\d+)\])?/g)) {
                 if (m[1] === "pc")
                     continue;
                 out.add(m[1] === "args" && m[3] !== undefined ? `args[${m[3]}]` : m[1]);
@@ -1279,7 +1294,8 @@ function relativeImports(rest) {
 // (__bindTierlessMethods) and falling back to the untouched original — an unbound bundle
 // behaves stock, byte for byte. Per-method and graceful: a method the compiler can't
 // carry stays original and is reported in meta.methods with the reason.
-function compileClassMethods(ast, progs, meta) {
+function compileClassMethods(ast, progs, meta, rest) {
+    const stubProps = []; // Cls.prototype.m.__tierless_program = "Cls$m" — what the dynamic call park dispatches on
     for (const top of ast.program.body) {
         const cls = t.isClassDeclaration(top) ? top
             : (t.isExportNamedDeclaration(top) || t.isExportDefaultDeclaration(top)) && t.isClassDeclaration(top.declaration) ? top.declaration
@@ -1291,6 +1307,7 @@ function compileClassMethods(ast, progs, meta) {
             continue;
         }
         const clsName = cls.id.name;
+        let compiledAny = false;
         for (const m of [...cls.body.body]) {
             if (!t.isClassMethod(m) || m.kind !== "method" || m.static || m.computed || !t.isIdentifier(m.key))
                 continue;
@@ -1308,12 +1325,22 @@ function compileClassMethods(ast, progs, meta) {
                 m.params = []; // stub reads `arguments`; original params would re-evaluate defaults
                 m.body = t.blockStatement([t.returnStatement(t.conditionalExpression(t.binaryExpression("===", t.unaryExpression("typeof", t.identifier("__TIERLESS_METHOD__")), t.stringLiteral("function")), t.callExpression(t.identifier("__TIERLESS_METHOD__"), [t.stringLiteral(progName), t.thisExpression(),
                         t.callExpression(t.memberExpression(t.identifier("Array"), t.identifier("from")), [t.identifier("arguments")])]), t.callExpression(t.memberExpression(t.thisExpression(), t.identifier("__tierless_orig_" + mName)), [t.spreadElement(t.identifier("arguments"))])))]);
+                // stamp the stub with its program name: a compiled CALLER's dynamic park reads it
+                // to push this method as a nested machine instead of awaiting an opaque promise
+                stubProps.push(t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.memberExpression(t.memberExpression(t.identifier(clsName), t.identifier("prototype")), t.identifier(mName)), t.identifier("__tierless_program")), t.stringLiteral(progName))));
+                compiledAny = true;
             }
             catch (e) {
                 meta.methods.push({ class: clsName, method: mName, program: null, error: e.message.split("\n")[0] });
             }
         }
+        // class identity for §5: excision stamps it onto the handle (h.cls), so a dynamic
+        // call park can dispatch to a session twin or this class's machine WITHOUT the live
+        // instance (docs/migrate-arm.md "the dispatch problem")
+        if (compiledAny)
+            stubProps.push(t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.memberExpression(t.identifier(clsName), t.identifier("prototype")), t.identifier("__tierless_cls")), t.stringLiteral(clsName))));
     }
+    rest.push(...stubProps); // `kept` is generated from rest — program-body pushes would never emit
 }
 // Lower ONE method in isolation: synthesize `function Cls$m(__self, ...params) { body }`
 // in its own File, rewrite `this` (through arrows — they share the method's this; not
@@ -1324,8 +1351,20 @@ function lowerMethod(clsName, mName, m, progName) {
     const fnNode = t.functionDeclaration(t.identifier(progName), [t.identifier("__self"), ...m.params.map((x) => t.cloneNode(x, true))], t.cloneNode(m.body, true));
     const file = t.file(t.program([fnNode]));
     allowlist(file); // recognizes both this.<ns> and __self.<ns>, so it can run before the this-rewrite
+    // residual awaits of MEMBER CALLS become dynamic call parks (docs/migrate-arm.md
+    // slice 3): `await x.m(a)` -> `yield D(x, "m", a)` — resolved at RUNTIME to a nested
+    // machine (a compiled method's stub names its program) or a pump-settled promise.
+    // The await must be DIRECT on the call: `await somePromiseVar` still rejects below.
+    traverse(file, { AwaitExpression(ap) {
+            const arg = ap.node.argument;
+            if (t.isCallExpression(arg) && t.isMemberExpression(arg.callee) && !arg.callee.computed && t.isIdentifier(arg.callee.property) && !arg.arguments.some((x) => t.isSpreadElement(x))) {
+                const y = t.yieldExpression(t.callExpression(t.identifier("D"), [arg.callee.object, t.stringLiteral(arg.callee.property.name), ...arg.arguments]));
+                y.loc = ap.node.loc;
+                ap.replaceWith(y);
+            }
+        } });
     let yields = 0;
-    traverse(file, { YieldExpression(yp) { if (isResYield(yp.node))
+    traverse(file, { YieldExpression(yp) { if (isResYield(yp.node) || isDynYield(yp.node))
             yields++; } });
     if (!yields)
         return null; // no tier calls: not a compilation candidate, no report either
@@ -1374,7 +1413,7 @@ function compile(src, preamble) {
             meta.pure.push(name);
         } // a pure helper can still mutate continuation state
     }
-    compileClassMethods(ast, progs, meta); // class methods with tier calls (their nodes sit in `rest` — the stub swap lands in `kept`)
+    compileClassMethods(ast, progs, meta, rest); // class methods with tier calls (their nodes sit in `rest` — the stub swap lands in `kept`)
     const head = preamble + (TRACK_WRITES ? "\n" + TRACK_PREAMBLE : "");
     const kept = rest.length ? rest.map(gen).join("\n") + "\n" : ""; // imports / top-level state the module declared
     // for-of/for-in and object-rest emit a tiny pure helper — but ONLY when a source actually uses

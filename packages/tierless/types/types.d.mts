@@ -21,6 +21,11 @@ export type MachineResult = {
     tier: string;
     name: string;
     args: unknown[];
+} | {
+    op: "dyn";
+    recv: unknown;
+    member: string;
+    args: unknown[];
 };
 /** A compiled bundle (transform.cjs output): named state machines + the frame unwinder. */
 export interface Bundle {

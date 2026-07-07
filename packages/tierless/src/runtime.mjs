@@ -12,7 +12,7 @@
 // socket by the binary wire codec (wire-binary.mjs); host.mjs assembles that loop.
 import { isHandle } from "./graph.mjs";
 export const initialStack = (fn, args = []) => [{ fn, pc: 0, args }];
-export function makePump(bundle) {
+export function makePump(bundle, { twins } = {}) {
     const { PROGRAMS, __unwind } = bundle;
     const slots = bundle.__slots;
     // §5 stop rule (docs/migrate-arm.md): a machine segment is plain JS — it cannot suspend
@@ -66,6 +66,40 @@ export function makePump(bundle) {
             }
             else if (r.op === "call") {
                 stack.push({ fn: r.fn, pc: 0, args: r.args }); // suspendable call: push a sub-frame and run it
+            }
+            else if (r.op === "dyn") {
+                // the dynamic call park (docs/migrate-arm.md slice 3), resolved in dispatch order:
+                // twin method on a class-stamped handle / nested machine / plain promise settled
+                // here. Settled promises route rejections like any resource error; a handle with
+                // no local meaning parks the stack to its owner and re-dispatches live there.
+                const recv = r.recv;
+                const settle = async (p) => {
+                    try {
+                        top.ret = await p;
+                    }
+                    catch (err) {
+                        if (!__unwind(stack, err))
+                            throw err;
+                    }
+                };
+                if (isHandle(recv)) {
+                    const cls = recv.cls;
+                    const twin = cls && twins ? twins(cls) : undefined;
+                    const prog = cls && PROGRAMS[cls + "$" + r.member] ? cls + "$" + r.member : null;
+                    if (twin)
+                        await settle(twin[r.member](...r.args));
+                    else if (prog)
+                        stack.push({ fn: prog, pc: 0, args: [recv, ...r.args] });
+                    else
+                        return { done: false, request: { op: "home", tier: recv.owner, name: r.member, args: [] }, stack };
+                }
+                else {
+                    const f = recv?.[r.member];
+                    if (f && typeof f.__tierless_program === "string")
+                        stack.push({ fn: f.__tierless_program, pc: 0, args: [recv, ...r.args] });
+                    else
+                        await settle(f.apply(recv, r.args));
+                }
             }
             else if (r.op === "throw") {
                 stack.pop();

@@ -87,11 +87,16 @@ const out3 = await inst3.getAll({ page: 5 });
 check("bound stub routes (program, this, args)", routed !== null && routed!.prog === "Svc$getAll" && routed!.self === inst3 && JSON.stringify(routed!.args) === '[{"page":5}]');
 check("bound path result matches original semantics", out3.length === 2 && out3[1].tagged && inst3.totalPages === 3);
 
-// ---- graceful degradation: non-resource await stays uncompiled with a reason ------------
+// ---- awaited member calls compile into dynamic parks; only bare awaits reject ------------
 const { meta: meta2 } = compile(`"use tierless";
 export class W { async m() { await Promise.resolve(1); const r = this.http.get("/x"); return r; } }`,
 { resources: { "this.http": "server" }, filename: "w.js" });
-check("non-resource await reported, method kept original", meta2.methods.length === 1 && meta2.methods[0].program === null && /awaits a non-resource/.test(meta2.methods[0].error || ""), JSON.stringify(meta2.methods));
+check("awaited member call compiles (a dynamic park now, not a rejection)", meta2.methods.length === 1 && meta2.methods[0].program === "W$m", JSON.stringify(meta2.methods));
+
+const { meta: metaBare } = compile(`"use tierless";
+export class V { async m(p) { await p; const r = this.http.get("/x"); return r; } }`,
+{ resources: { "this.http": "server" }, filename: "v.js" });
+check("a BARE await (no call to dispatch on) still rejects with the reason", metaBare.methods.length === 1 && metaBare.methods[0].program === null && /awaits a non-resource/.test(metaBare.methods[0].error || ""), JSON.stringify(metaBare.methods));
 
 // ---- super use stays uncompiled with a reason -------------------------------------------
 const { meta: meta3 } = compile(`"use tierless";

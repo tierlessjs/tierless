@@ -67,8 +67,8 @@ function ownedUnit(v) {
     return ownsValues(v);
 }
 let nextSid = 1;
-export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn }) {
-    const pump = makePump(bundle);
+export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn, twins }) {
+    const pump = makePump(bundle, { twins });
     const coherence = coherenceIn && usesHeap(bundle) ? coherenceIn : undefined; // per-bundle gate (see MakeHostOpts.coherence)
     const ownsBase = owns || ((t) => t === tier);
     // The host also owns the heap pseudo-tiers ("@deref"/"@writeback"): a handle read or a

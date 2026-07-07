@@ -45,6 +45,9 @@ export interface MakeHostOpts {
    *  same connection-wide coherence can be passed to every module-host on a socket and
    *  only the heap-compiled ones excise and service §5 ops. */
   coherence?: Coherence;
+  /** Session twin registry for dynamic call parks (docs/migrate-arm.md slice 3):
+   *  class-stamped handles resolve to LOCAL instances here. Opt-in per class. */
+  twins?: (cls: string) => object | undefined;
 }
 
 // OWNERSHIP scan — the generic half of request pinning (a resource family adds its
@@ -87,8 +90,8 @@ function ownedUnit(v: unknown): boolean {
 
 let nextSid = 1;
 
-export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn }: MakeHostOpts): Host {
-  const pump = makePump(bundle);
+export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn, twins }: MakeHostOpts): Host {
+  const pump = makePump(bundle, { twins });
   const coherence = coherenceIn && usesHeap(bundle) ? coherenceIn : undefined;   // per-bundle gate (see MakeHostOpts.coherence)
   const ownsBase: (tier: string) => boolean = owns || ((t) => t === tier);
   // The host also owns the heap pseudo-tiers ("@deref"/"@writeback"): a handle read or a

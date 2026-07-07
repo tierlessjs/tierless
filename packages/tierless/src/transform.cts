@@ -172,12 +172,11 @@ function suspInfo(s: t.Statement): { assign: string | null; op: string } {
   const call = y.argument as t.CallExpression;
   const a = call.arguments as t.Node[];
   if ((call.callee as t.Identifier).name === "D") {
-    // D(recv, "member", ...args) — the DYNAMIC call park (docs/migrate-arm.md slice 3):
-    // decided at RUNTIME by the callee itself. A compiled method's stub carries its
-    // program name — push its frame (a nested machine, suspendable straight through);
-    // anything else is a plain promise the pump settles in place. One expression, so it
-    // rides the ordinary susp term.
-    return { assign, op: `(() => { const __r = ${gen(a[0])}, __f = __r[${gen(a[1])}], __a = [${a.slice(2).map(gen).join(", ")}]; return __f && typeof __f.__tierless_program === "string" ? { op: "call", fn: __f.__tierless_program, args: [__r, ...__a] } : { op: "await", value: __f.apply(__r, __a) }; })()` };
+    // D(recv, "member", ...args) — the DYNAMIC call park (docs/migrate-arm.md slice 3).
+    // The machine only DESCRIBES the call; the pump dispatches it (twin instance on a
+    // class-stamped handle / nested machine on a stamped stub / promise settled in
+    // place), because only the pump holds PROGRAMS, isHandle, and the twin registry.
+    return { assign, op: `{ op: "dyn", recv: ${gen(a[0])}, member: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` };
   }
   return { assign, op: `{ op: "resource", tier: ${gen(a[0])}, name: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` };   // R(tier, name, ...args)
 }
@@ -620,10 +619,16 @@ function compileFn(node: t.FunctionDeclaration): string {
       }
     };
     // args are referenced by ELEMENT (`this` lowers to F.args[0], params to F.args[i]) —
-    // keep that precision, or one excised instance would park every param-using segment
+    // keep that precision, or one excised instance would park every param-using segment.
+    // A dyn park whose RECEIVER is a DIRECT slot (F.x / F.args[i]) is exempted first:
+    // the pump's dispatch is handle-aware by construction (twin / machine / home), so a
+    // handle IN that slot must not trip the stop rule. A receiver that is a PATH through
+    // a slot (F.args[0].svc) stays scanned — evaluating it on a handle would misread,
+    // so the segment correctly parks home. Argument expressions always stay scanned.
     const refsOf = (id: number): Set<string> => {
       const out = new Set<string>();
-      for (const m of caseText.get(id)!.matchAll(/\bF\.([A-Za-z_$][\w$]*)(\[(\d+)\])?/g)) {
+      const text = caseText.get(id)!.replace(/\bop: "dyn", recv: F\.(?:args\[\d+\]|[A-Za-z_$][\w$]*)(?=,)/g, 'op: "dyn"');
+      for (const m of text.matchAll(/\bF\.([A-Za-z_$][\w$]*)(\[(\d+)\])?/g)) {
         if (m[1] === "pc") continue;
         out.add(m[1] === "args" && m[3] !== undefined ? `args[${m[3]}]` : m[1]);
       }
@@ -1080,7 +1085,7 @@ function relativeImports(rest: t.Statement[]): string[] {
 // (__bindTierlessMethods) and falling back to the untouched original — an unbound bundle
 // behaves stock, byte for byte. Per-method and graceful: a method the compiler can't
 // carry stays original and is reported in meta.methods with the reason.
-function compileClassMethods(ast: t.File, progs: string[], meta: CompileMeta): void {
+function compileClassMethods(ast: t.File, progs: string[], meta: CompileMeta, rest: t.Statement[]): void {
   const stubProps: t.Statement[] = [];   // Cls.prototype.m.__tierless_program = "Cls$m" — what the dynamic call park dispatches on
   for (const top of ast.program.body) {
     const cls = t.isClassDeclaration(top) ? top
@@ -1089,6 +1094,7 @@ function compileClassMethods(ast: t.File, progs: string[], meta: CompileMeta): v
     if (!cls) continue;
     if (!cls.id) { meta.methods.push({ class: "(default)", method: "*", program: null, error: "anonymous default-export class — name it to compile its methods" }); continue; }
     const clsName = cls.id.name;
+    let compiledAny = false;
     for (const m of [...cls.body.body]) {
       if (!t.isClassMethod(m) || m.kind !== "method" || m.static || m.computed || !t.isIdentifier(m.key)) continue;
       const mName = m.key.name;
@@ -1113,12 +1119,19 @@ function compileClassMethods(ast: t.File, progs: string[], meta: CompileMeta): v
         stubProps.push(t.expressionStatement(t.assignmentExpression("=",
           t.memberExpression(t.memberExpression(t.memberExpression(t.identifier(clsName), t.identifier("prototype")), t.identifier(mName)), t.identifier("__tierless_program")),
           t.stringLiteral(progName))));
+        compiledAny = true;
       } catch (e) {
         meta.methods.push({ class: clsName, method: mName, program: null, error: (e as Error).message.split("\n")[0] });
       }
     }
+    // class identity for §5: excision stamps it onto the handle (h.cls), so a dynamic
+    // call park can dispatch to a session twin or this class's machine WITHOUT the live
+    // instance (docs/migrate-arm.md "the dispatch problem")
+    if (compiledAny) stubProps.push(t.expressionStatement(t.assignmentExpression("=",
+      t.memberExpression(t.memberExpression(t.identifier(clsName), t.identifier("prototype")), t.identifier("__tierless_cls")),
+      t.stringLiteral(clsName))));
   }
-  ast.program.body.push(...stubProps);
+  rest.push(...stubProps);   // `kept` is generated from rest — program-body pushes would never emit
 }
 
 // Lower ONE method in isolation: synthesize `function Cls$m(__self, ...params) { body }`
@@ -1176,7 +1189,7 @@ function compile(src: string, preamble: string): { code: string; meta: CompileMe
     if (suspSet.has(name)) { progs.push(lower(p!)); meta.programs.push(name); if (exported) meta.exported.push(name); }
     else { if (TRACK_WRITES) insertDirtyBarriers(p!); pure.push((exported ? "export " : "") + gen(p!.node)); meta.pure.push(name); }  // a pure helper can still mutate continuation state
   }
-  compileClassMethods(ast, progs, meta);                          // class methods with tier calls (their nodes sit in `rest` — the stub swap lands in `kept`)
+  compileClassMethods(ast, progs, meta, rest);                    // class methods with tier calls (their nodes sit in `rest` — the stub swap lands in `kept`)
   const head = preamble + (TRACK_WRITES ? "\n" + TRACK_PREAMBLE : "");
   const kept = rest.length ? rest.map(gen).join("\n") + "\n" : ""; // imports / top-level state the module declared
   // for-of/for-in and object-rest emit a tiny pure helper — but ONLY when a source actually uses

@@ -18,7 +18,15 @@ export type { Bundle, Frame, MachineResult, ResourceRequest, Exec, Peer, Host } 
 
 export const initialStack = (fn: string, args: unknown[] = []): Frame[] => [{ fn, pc: 0, args }];
 
-export function makePump(bundle: Bundle): Pump {
+export interface PumpOpts {
+  /** Session twin registry (docs/migrate-arm.md slice 3): resolves a class-stamped §5
+   *  handle to a LOCAL instance of that class, so a dynamic call park runs the real
+   *  method — its own interceptors, its own state — on this tier. Opt-in per class:
+   *  return undefined and the park falls through to a machine push or a home park. */
+  twins?: (cls: string) => object | undefined;
+}
+
+export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
   const { PROGRAMS, __unwind } = bundle;
   const slots = bundle.__slots as Record<string, Record<number, string[]>> | undefined;
 
@@ -64,11 +72,27 @@ export function makePump(bundle: Bundle): Pump {
         stack[stack.length - 1].ret = r.value;            // return into the caller frame
       } else if (r.op === "call") {
         stack.push({ fn: r.fn, pc: 0, args: r.args });    // suspendable call: push a sub-frame and run it
-      } else if (r.op === "await") {
-        // an uncompiled callee's promise: settle it HERE (it was created here this very
-        // step — promises never ride a wire) and route a rejection like any resource error
-        try { top.ret = await (r.value as Promise<unknown>); }
-        catch (err) { if (!__unwind(stack, err)) throw err; }
+      } else if (r.op === "dyn") {
+        // the dynamic call park (docs/migrate-arm.md slice 3), resolved in dispatch order:
+        // twin method on a class-stamped handle / nested machine / plain promise settled
+        // here. Settled promises route rejections like any resource error; a handle with
+        // no local meaning parks the stack to its owner and re-dispatches live there.
+        const recv = r.recv;
+        const settle = async (p: unknown): Promise<void> => {
+          try { top.ret = await p; } catch (err) { if (!__unwind(stack, err)) throw err; }
+        };
+        if (isHandle(recv)) {
+          const cls = (recv as { cls?: string }).cls;
+          const twin = cls && twins ? twins(cls) : undefined;
+          const prog = cls && PROGRAMS[cls + "$" + r.member] ? cls + "$" + r.member : null;
+          if (twin) await settle((twin as Record<string, (...a: unknown[]) => unknown>)[r.member](...r.args));
+          else if (prog) stack.push({ fn: prog, pc: 0, args: [recv, ...r.args] });
+          else return { done: false, request: { op: "home", tier: recv.owner, name: r.member, args: [] }, stack };
+        } else {
+          const f = (recv as Record<string, unknown> | null | undefined)?.[r.member] as ((...a: unknown[]) => unknown) & { __tierless_program?: string };
+          if (f && typeof f.__tierless_program === "string") stack.push({ fn: f.__tierless_program, pc: 0, args: [recv, ...r.args] });
+          else await settle(f.apply(recv as object, r.args));
+        }
       } else if (r.op === "throw") {
         stack.pop();
         if (!__unwind(stack, r.value)) throw r.value;     // uncaught after unwinding all frames

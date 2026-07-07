@@ -3,6 +3,9 @@ export interface Handle {
     owner: string;
     id: string;
     kind?: "array" | "object";
+    /** Class identity of an excised compiled-class instance (the __tierless_cls stamp):
+     *  what a dynamic call park dispatches on without the live object (migrate-arm.md). */
+    cls?: string;
 }
 export declare function isHandle(x: unknown): x is Handle;
 export declare const GLOBALS: Record<string, unknown>;

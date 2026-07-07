@@ -20,6 +20,9 @@ export interface Handle {
   owner: string;
   id: string;
   kind?: "array" | "object";
+  /** Class identity of an excised compiled-class instance (the __tierless_cls stamp):
+   *  what a dynamic call park dispatches on without the live object (migrate-arm.md). */
+  cls?: string;
 }
 
 export function isHandle(x: unknown): x is Handle {
@@ -96,7 +99,8 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
   // §5 excision: park v in the local heap, emit the handle leaf (identity-deduped).
   const exciseTo = (v: unknown): any => {
     const id = objs.length; idOf.set(v, id);
-    objs.push({ k: "H", h: { __tierless_handle__: true, owner: tier!.id, id: tier!.heapPut(v), kind: Array.isArray(v) ? "array" : "object" } });
+    const cls = (v as { __tierless_cls?: unknown })?.__tierless_cls;   // inherited from the stamped prototype
+    objs.push({ k: "H", h: { __tierless_handle__: true, owner: tier!.id, id: tier!.heapPut(v), kind: Array.isArray(v) ? "array" : "object", ...(typeof cls === "string" ? { cls } : {}) } });
     return { k: "r", id };
   };
 

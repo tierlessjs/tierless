@@ -20,6 +20,9 @@ export interface MakeHostOpts {
      *  same connection-wide coherence can be passed to every module-host on a socket and
      *  only the heap-compiled ones excise and service §5 ops. */
     coherence?: Coherence;
+    /** Session twin registry for dynamic call parks (docs/migrate-arm.md slice 3):
+     *  class-stamped handles resolve to LOCAL instances here. Opt-in per class. */
+    twins?: (cls: string) => object | undefined;
 }
-export declare function makeHost({ bundle, tier, exec, owns, meta, trace, coherence: coherenceIn }: MakeHostOpts): Host;
+export declare function makeHost({ bundle, tier, exec, owns, meta, trace, coherence: coherenceIn, twins }: MakeHostOpts): Host;
 export declare function answerWith(peer: Peer, hostFor: (id: string) => Host | Promise<Host>, field?: string): void;

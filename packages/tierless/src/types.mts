@@ -19,10 +19,11 @@ export type MachineResult =
   | { op: "call"; fn: string; args: unknown[] }
   | { op: "throw"; value: unknown }
   | { op: "resource"; tier: string; name: string; args: unknown[] }
-  // an awaited value that is NOT a machine (an uncompiled callee's promise): the pump
-  // awaits it IN PLACE and feeds ret — it never crosses a wire (docs/migrate-arm.md
-  // slice 3: the dynamic call park's fallback arm)
-  | { op: "await"; value: unknown };
+  // the DYNAMIC call park (docs/migrate-arm.md slice 3): an awaited member call whose
+  // meaning the PUMP resolves — a session twin's method (class-stamped handle), a
+  // nested machine (stamped stub), or a plain promise settled in place. Never crosses
+  // a wire as-is; only its consequences do.
+  | { op: "dyn"; recv: unknown; member: string; args: unknown[] };
 
 /** A compiled bundle (transform.cjs output): named state machines + the frame unwinder. */
 export interface Bundle {

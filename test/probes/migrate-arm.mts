@@ -63,10 +63,19 @@ export class Svc {
       return "caught:" + e.message;
     }
   }
+}
+export class Store {
+  constructor(svc) { this.svc = svc; }
+  async flow(id) {
+    const svc = this.svc;
+    const a = await svc.chain(id);
+    const b = await svc.getAllish();
+    return a + ":" + b.length;
+  }
 }`;
 
 const { code, meta } = compile(SRC, { resources: { "this.http": "server" }, filename: "svc.js" });
-check("all five methods compiled", meta.methods.filter((m: any) => !m.error).length === 5, JSON.stringify(meta.methods));
+check("all six methods compiled (Store.flow suspends on METHOD calls only)", meta.methods.filter((m: any) => !m.error).length === 6, JSON.stringify(meta.methods));
 
 const dir = mkdtempSync(join(tmpdir(), "tlmig-"));
 writeFileSync(join(dir, "svc.mjs"), code);
@@ -190,6 +199,38 @@ const s8 = new mod.Svc({});
 const v8 = await bhost.runLocal(peer, "Svc$getAllish", [s8], { migrate: mig });
 check("decide: the single-call site stays on the fetch arm (no shipping to bounce home)", Array.isArray(v8) && s8.total === 42 && counts.exec === 1 && !counts.resume, JSON.stringify(counts));
 check("decide: cold (no profile) never migrates", methodMigrate(null)({ name: "http.get" }, { fn: "Svc$chain", pc: 5 }) === false);
+
+// ---- 8. slice 3: a STORE method chaining two service-method calls (docs/migrate-arm.md) --
+// flow's parks are DYNAMIC (awaited member calls, no http.* of its own). Fetch arm: each
+// service call runs as a nested machine at home, its http parks exec-carry — 3 crossings.
+reset();
+const st1 = new mod.Store(new mod.Svc({}));
+const f1 = await bhost.runLocal(peer, "Store$flow", [st1, 7], {});
+check("store flow, fetch arm: correct value, nested machines at home, 3 exec crossings", f1 === "got:n7:3" && counts.exec === 3 && !counts.resume, JSON.stringify(counts));
+
+// migrate WITHOUT twins: the whole stack ships at the first http park; the class-stamped
+// handle lets the SECOND service call dispatch as a machine ON THE SERVER; only
+// getAllish's self-writing tail comes home — the 3-call store chain is ONE crossing.
+reset();
+const svc2 = new mod.Svc({});
+const st2 = new mod.Store(svc2);
+const f2 = await bhost.runLocal(peer, "Store$flow", [st2, 7], migrate);
+check("store flow, migrate: one crossing for the whole chain", f2 === "got:n7:3" && counts.resume === 1 && !counts.exec, JSON.stringify(counts));
+check("store flow, migrate: all three http calls served on the SERVER", served.join(",") === "/a/7,/b/n7,/things" && browserServed.length === 0, `server=${served}`);
+check("store flow, migrate: the self-writing tail still hit the REAL instance at home", svc2.total === 42, String(svc2.total));
+
+// migrate WITH a session twin: the server resolves the class-stamped handle to a LOCAL
+// instance — the method runs for real over there (its own state, its own interceptors);
+// the browser instance is deliberately untouched (twin rebinding is opt-in per class).
+reset();
+const twinSvc = new mod.Svc({ get: (url: string) => serverExec({ name: "http.get", args: [url] }) });   // the twin's OWN http, server-local
+const shostT = makeHost({ bundle, tier: "server", exec: serverExec as never, twins: (cls: string) => (cls === "Svc" ? twinSvc : undefined) });
+const [bp2, sp2] = pair();
+shostT.answer(makePeer(sp2));
+const svc3 = new mod.Svc({});
+const f3 = await bhost.runLocal(makePeer(bp2), "Store$flow", [new mod.Store(svc3), 7], migrate);
+check("store flow, twin: one crossing, value correct", f3 === "got:n7:3" && counts.resume === 1 && !counts.exec, JSON.stringify({ counts, f3 }));
+check("store flow, twin: the TWIN's state mutated, the browser instance untouched", twinSvc.total === 42 && svc3.total === 0, JSON.stringify({ twin: twinSvc.total, browser: svc3.total }));
 
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
 console.log("\na chain migrates in one crossing; the stop rule, identity, and unwind hold; the profile decides");
