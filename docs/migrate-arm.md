@@ -115,6 +115,39 @@ comparison runs, do the exploration (run protocol, docs/corpus.md).
      (a) below): Vikunja's is objectToSnakeCase from '@/helpers/case' — pure, importable
      into the machine bundle.
 
+### The dispatch problem (and its §5 answer): op:"dyn" in the PUMP
+
+A dynamic call park that reads `recv[member].__tierless_program` needs the LIVE
+receiver — but a migrated caller holds a §5 handle, so the slot rule would park every
+method-call segment home: one crossing per method, no better than the fetch arm. And
+even pushing the callee's machine server-side would thrash: their service methods'
+prefixes read live instance state (this.paths, getReplacedRoute), fencing every
+call home anyway. Both problems fall to one move — dispatch in the PUMP, which holds
+PROGRAMS, isHandle, and (new) a session TWIN REGISTRY:
+
+- `await x.m(a)` lowers to `yield D(x, "m", a)` → the machine returns
+  `{ op:"dyn", recv, member, args }`. The pump resolves it:
+  1. recv is a class-stamped handle and the registry has a twin for that class →
+     call the TWIN INSTANCE's method and settle the promise in place. The twin is a
+     server-side instance of THEIR OWN class (fetcher made Node-safe), so the real
+     request-interceptor chain runs — the interceptor wall disappears, self-touches
+     are twin-local, and an N-call store chain is genuinely ONE crossing.
+  2. recv is live and m is a stamped stub → push the callee's frame (nested machine).
+  3. recv is live and uncompiled → settle `recv.m(...)` in place (this also covers
+     `await Promise.all(...)`, `await response.blob()`, and every other awaited
+     member call — they never cross).
+  A class-stamped handle with NO twin and no program parks home (op:"home") and
+  re-dispatches live.
+- The compiler stamps `Cls.prototype.__tierless_cls = "Cls"` beside the stub program
+  names; ownership excision copies it onto the handle (`h.cls`); the wire carries it
+  as one optional interned string on the handle slot.
+- The slot scanner strips the dyn term's `recv:` expression before scanning (the
+  dispatch is handle-aware by construction); argument expressions stay scanned.
+- Twin-instance state divergence is real (their services mutate this.totalPages,
+  loading flags — reads of those on the browser instance after a twinned call would
+  miss the mutation), so twin rebinding is OPT-IN PER CLASS in the app port, declared
+  where the twin registry is built.
+
 ## Slice-3 wall, found early: interceptor semantics for calls 2..N
 
 The fetch arm runs the app's request-interceptor chain browser-side per request

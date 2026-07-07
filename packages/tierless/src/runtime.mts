@@ -64,6 +64,11 @@ export function makePump(bundle: Bundle): Pump {
         stack[stack.length - 1].ret = r.value;            // return into the caller frame
       } else if (r.op === "call") {
         stack.push({ fn: r.fn, pc: 0, args: r.args });    // suspendable call: push a sub-frame and run it
+      } else if (r.op === "await") {
+        // an uncompiled callee's promise: settle it HERE (it was created here this very
+        // step — promises never ride a wire) and route a rejection like any resource error
+        try { top.ret = await (r.value as Promise<unknown>); }
+        catch (err) { if (!__unwind(stack, err)) throw err; }
       } else if (r.op === "throw") {
         stack.pop();
         if (!__unwind(stack, r.value)) throw r.value;     // uncaught after unwinding all frames

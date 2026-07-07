@@ -169,8 +169,17 @@ const isSusp = (s: t.Statement): boolean =>
 function suspInfo(s: t.Statement): { assign: string | null; op: string } {
   const y = (t.isVariableDeclaration(s) ? s.declarations[0].init : (s as t.ExpressionStatement).expression) as t.YieldExpression;
   const assign = t.isVariableDeclaration(s) ? (s.declarations[0].id as t.Identifier).name : null;
-  const a = (y.argument as t.CallExpression).arguments as t.Node[];   // R(tier, name, ...args)
-  return { assign, op: `{ op: "resource", tier: ${gen(a[0])}, name: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` };
+  const call = y.argument as t.CallExpression;
+  const a = call.arguments as t.Node[];
+  if ((call.callee as t.Identifier).name === "D") {
+    // D(recv, "member", ...args) — the DYNAMIC call park (docs/migrate-arm.md slice 3):
+    // decided at RUNTIME by the callee itself. A compiled method's stub carries its
+    // program name — push its frame (a nested machine, suspendable straight through);
+    // anything else is a plain promise the pump settles in place. One expression, so it
+    // rides the ordinary susp term.
+    return { assign, op: `(() => { const __r = ${gen(a[0])}, __f = __r[${gen(a[1])}], __a = [${a.slice(2).map(gen).join(", ")}]; return __f && typeof __f.__tierless_program === "string" ? { op: "call", fn: __f.__tierless_program, args: [__r, ...__a] } : { op: "await", value: __f.apply(__r, __a) }; })()` };
+  }
+  return { assign, op: `{ op: "resource", tier: ${gen(a[0])}, name: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` };   // R(tier, name, ...args)
 }
 // a statement that calls another suspendable (compiled) function -> push a sub-frame
 function callSusp(s: t.Statement): { assign: string | null; fn: string; args: string } | null {
@@ -204,8 +213,9 @@ function containsSuspCall(node: t.Node | t.Node[] | null | undefined): boolean {
 // which is all compileStmt knows how to lower. This is what lets ordinary code compile:
 // `return f(x)`, `out = api.get()`, `a + f(x)`, `g(f(x))`, `if (api.check())`, `while (...)`.
 const isResYield = (n: t.Node | null | undefined): n is t.YieldExpression => !!n && t.isYieldExpression(n) && t.isCallExpression(n.argument) && t.isIdentifier(n.argument.callee, { name: "R" });
+const isDynYield = (n: t.Node | null | undefined): n is t.YieldExpression => !!n && t.isYieldExpression(n) && t.isCallExpression(n.argument) && t.isIdentifier(n.argument.callee, { name: "D" });   // the dynamic call park (slice 3)
 const isSuspCallNode = (n: t.Node | null | undefined): n is t.CallExpression => !!n && t.isCallExpression(n) && t.isIdentifier(n.callee) && suspSet.has(n.callee.name);
-const isSuspExpr = (n: t.Node | null | undefined): n is t.YieldExpression | t.CallExpression => isResYield(n) || isSuspCallNode(n);
+const isSuspExpr = (n: t.Node | null | undefined): n is t.YieldExpression | t.CallExpression => isResYield(n) || isDynYield(n) || isSuspCallNode(n);
 // Same "generic walk, untyped inner walker" shape as containsSuspCall.
 function hasSuspInside(node: t.Node | t.Node[] | null | undefined, exclSelf: boolean): boolean {
   let found = false;
@@ -1071,6 +1081,7 @@ function relativeImports(rest: t.Statement[]): string[] {
 // behaves stock, byte for byte. Per-method and graceful: a method the compiler can't
 // carry stays original and is reported in meta.methods with the reason.
 function compileClassMethods(ast: t.File, progs: string[], meta: CompileMeta): void {
+  const stubProps: t.Statement[] = [];   // Cls.prototype.m.__tierless_program = "Cls$m" — what the dynamic call park dispatches on
   for (const top of ast.program.body) {
     const cls = t.isClassDeclaration(top) ? top
       : (t.isExportNamedDeclaration(top) || t.isExportDefaultDeclaration(top)) && t.isClassDeclaration(top.declaration) ? top.declaration
@@ -1097,11 +1108,17 @@ function compileClassMethods(ast: t.File, progs: string[], meta: CompileMeta): v
             t.callExpression(t.memberExpression(t.identifier("Array"), t.identifier("from")), [t.identifier("arguments")])]),
           t.callExpression(t.memberExpression(t.thisExpression(), t.identifier("__tierless_orig_" + mName)), [t.spreadElement(t.identifier("arguments"))]),
         ))]);
+        // stamp the stub with its program name: a compiled CALLER's dynamic park reads it
+        // to push this method as a nested machine instead of awaiting an opaque promise
+        stubProps.push(t.expressionStatement(t.assignmentExpression("=",
+          t.memberExpression(t.memberExpression(t.memberExpression(t.identifier(clsName), t.identifier("prototype")), t.identifier(mName)), t.identifier("__tierless_program")),
+          t.stringLiteral(progName))));
       } catch (e) {
         meta.methods.push({ class: clsName, method: mName, program: null, error: (e as Error).message.split("\n")[0] });
       }
     }
   }
+  ast.program.body.push(...stubProps);
 }
 
 // Lower ONE method in isolation: synthesize `function Cls$m(__self, ...params) { body }`
@@ -1113,8 +1130,21 @@ function lowerMethod(clsName: string, mName: string, m: t.ClassMethod, progName:
   const fnNode = t.functionDeclaration(t.identifier(progName), [t.identifier("__self"), ...(m.params.map((x) => t.cloneNode(x, true)) as t.FunctionDeclaration["params"])], t.cloneNode(m.body, true));
   const file = t.file(t.program([fnNode]));
   allowlist(file);                                                 // recognizes both this.<ns> and __self.<ns>, so it can run before the this-rewrite
+  // residual awaits of MEMBER CALLS become dynamic call parks (docs/migrate-arm.md
+  // slice 3): `await x.m(a)` -> `yield D(x, "m", a)` — resolved at RUNTIME to a nested
+  // machine (a compiled method's stub names its program) or a pump-settled promise.
+  // The await must be DIRECT on the call: `await somePromiseVar` still rejects below.
+  traverse(file, { AwaitExpression(ap) {
+    const arg = ap.node.argument;
+    if (t.isCallExpression(arg) && t.isMemberExpression(arg.callee) && !arg.callee.computed && t.isIdentifier(arg.callee.property) && !arg.arguments.some((x) => t.isSpreadElement(x))) {
+      const y = t.yieldExpression(t.callExpression(t.identifier("D"),
+        [arg.callee.object as t.Expression, t.stringLiteral(arg.callee.property.name), ...(arg.arguments as t.Expression[])]));
+      y.loc = ap.node.loc;
+      ap.replaceWith(y);
+    }
+  } });
   let yields = 0;
-  traverse(file, { YieldExpression(yp) { if (isResYield(yp.node)) yields++; } });
+  traverse(file, { YieldExpression(yp) { if (isResYield(yp.node) || isDynYield(yp.node)) yields++; } });
   if (!yields) return null;                                        // no tier calls: not a compilation candidate, no report either
   traverse(file, { Super(sp) {
     throw new Error(`tierless: ${clsName}.${mName} uses super (line ${sp.node.loc?.start.line ?? "?"}) — super dispatch can't be carried by the frame yet; the method stays uncompiled`);

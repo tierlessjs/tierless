@@ -18,7 +18,11 @@ export type MachineResult =
   | { op: "return"; value: unknown }
   | { op: "call"; fn: string; args: unknown[] }
   | { op: "throw"; value: unknown }
-  | { op: "resource"; tier: string; name: string; args: unknown[] };
+  | { op: "resource"; tier: string; name: string; args: unknown[] }
+  // an awaited value that is NOT a machine (an uncompiled callee's promise): the pump
+  // awaits it IN PLACE and feeds ret — it never crosses a wire (docs/migrate-arm.md
+  // slice 3: the dynamic call park's fallback arm)
+  | { op: "await"; value: unknown };
 
 /** A compiled bundle (transform.cjs output): named state machines + the frame unwinder. */
 export interface Bundle {
