@@ -75,10 +75,15 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024, conten
     const objs = []; // id -> { k:"a"|"o"|"H"|"c", ... }
     const idOf = new Map(); // object -> id (identity + cycle handling)
     // §5 excision: park v in the local heap, emit the handle leaf (identity-deduped).
+    // The class stamp rides ONLY for DIRECT instances of the stamped class: a subclass
+    // may override the very method a far-side dispatch would resolve to the BASE machine,
+    // silently running the wrong code. Subclass instances stay unstamped — their calls
+    // park home (or hit a session twin, which constructs the real subclass and is exact).
     const exciseTo = (v) => {
         const id = objs.length;
         idOf.set(v, id);
-        const cls = v?.__tierless_cls; // inherited from the stamped prototype
+        const proto = v && typeof v === "object" ? Object.getPrototypeOf(v) : null;
+        const cls = proto && Object.prototype.hasOwnProperty.call(proto, "__tierless_cls") ? proto.__tierless_cls : undefined;
         objs.push({ k: "H", h: { __tierless_handle__: true, owner: tier.id, id: tier.heapPut(v), kind: Array.isArray(v) ? "array" : "object", ...(typeof cls === "string" ? { cls } : {}) } });
         return { k: "r", id };
     };

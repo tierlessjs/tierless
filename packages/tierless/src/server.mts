@@ -36,6 +36,10 @@ export interface SessionSetup {
   entry?: string;
   args?: unknown[];
   onDone?: (value: unknown) => void;
+  /** Session twin registry (docs/migrate-arm.md slice 3): resolve a class-stamped §5
+   *  handle to a LOCAL instance — typically the app's own service class constructed
+   *  with this session's credentials. Opt-in per class; scoped to this connection. */
+  twins?: (cls: string) => object | undefined;
 }
 export interface AttachOptions {
   /** The compiled bundle, or an async resolver by module id (multi-module endpoints). */
@@ -126,7 +130,7 @@ export function attachTierless(httpServer: HttpServer, { bundle, tier = "server"
     ws.on("error", () => {});                                    // a client socket error (reset, etc.) must not throw out of the emitter and crash the host
     if (wire && ws._socket) wire.track(ws._socket);
     try {
-      const { exec, entry, args = [], onDone } = await session(req);
+      const { exec, entry, args = [], onDone, twins } = await session(req);
       const peer = makePeer(wsPort(ws));
       // §5 heap coherence is per-connection: one heap for excised locals, one bounded
       // reader cache, shared across this socket's module-hosts (each host applies it only
@@ -136,7 +140,7 @@ export function attachTierless(httpServer: HttpServer, { bundle, tier = "server"
       if (coherence) coherence.serve(peer);
       const hosts = new Map<string, import("./types.mjs").Host>();  // moduleId -> host (stateless; cached per socket)
       const hostFor = async (id: string) => {
-        if (!hosts.has(id)) hosts.set(id, makeHost({ bundle: await resolveBundle(id), tier, exec, meta: id ? { module: id } : {}, coherence }));
+        if (!hosts.has(id)) hosts.set(id, makeHost({ bundle: await resolveBundle(id), tier, exec, meta: id ? { module: id } : {}, coherence, twins }));
         return hosts.get(id)!;
       };
       answerWith(peer, hostFor);                                   // browser-started sessions (actions) + bounces

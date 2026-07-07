@@ -253,10 +253,39 @@ export default function tierless(opts = {}) {
                     throw e;
             }
             const EXEC_ONLY = { PROGRAMS: {}, __unwind: () => false };
+            // Compiled APP modules resolve to ONE merged machine world (docs/migrate-arm.md
+            // slice 3): a migrated store frame's dynamic call park must find the service
+            // module's programs, whatever module id the wire happens to carry.
+            let appMerged = null;
+            const mergedApp = async () => {
+                if (appMerged || !fromManifest)
+                    return appMerged;
+                const manifest = JSON.parse(readFileSync(path.join(root, serverOutDir, "tierless.manifest.json"), "utf8"));
+                const merged = { PROGRAMS: {}, __unwind: null, __slots: {} };
+                for (const id of Object.keys(manifest.modules)) {
+                    if (!id.startsWith("m:"))
+                        continue;
+                    const b = await fromManifest(id);
+                    Object.assign(merged.PROGRAMS, b.PROGRAMS);
+                    if (b.__slots)
+                        Object.assign(merged.__slots, b.__slots);
+                    if (!merged.__unwind)
+                        merged.__unwind = b.__unwind;
+                }
+                return (appMerged = merged.__unwind ? merged : null);
+            };
             attachTierless(s.httpServer, {
                 path: wsPath,
                 wire,
                 bundle: async (id) => {
+                    if (id.startsWith("m:")) {
+                        try {
+                            const m = await mergedApp();
+                            if (m)
+                                return m;
+                        }
+                        catch { /* fall through */ }
+                    }
                     if (fromManifest) {
                         try {
                             return await fromManifest(id);

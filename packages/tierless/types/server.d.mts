@@ -8,6 +8,10 @@ export interface SessionSetup {
     entry?: string;
     args?: unknown[];
     onDone?: (value: unknown) => void;
+    /** Session twin registry (docs/migrate-arm.md slice 3): resolve a class-stamped §5
+     *  handle to a LOCAL instance — typically the app's own service class constructed
+     *  with this session's credentials. Opt-in per class; scoped to this connection. */
+    twins?: (cls: string) => object | undefined;
 }
 export interface AttachOptions {
     /** The compiled bundle, or an async resolver by module id (multi-module endpoints). */

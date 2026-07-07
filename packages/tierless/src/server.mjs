@@ -90,7 +90,7 @@ export function attachTierless(httpServer, { bundle, tier = "server", session, p
         if (wire && ws._socket)
             wire.track(ws._socket);
         try {
-            const { exec, entry, args = [], onDone } = await session(req);
+            const { exec, entry, args = [], onDone, twins } = await session(req);
             const peer = makePeer(wsPort(ws));
             // §5 heap coherence is per-connection: one heap for excised locals, one bounded
             // reader cache, shared across this socket's module-hosts (each host applies it only
@@ -102,7 +102,7 @@ export function attachTierless(httpServer, { bundle, tier = "server", session, p
             const hosts = new Map(); // moduleId -> host (stateless; cached per socket)
             const hostFor = async (id) => {
                 if (!hosts.has(id))
-                    hosts.set(id, makeHost({ bundle: await resolveBundle(id), tier, exec, meta: id ? { module: id } : {}, coherence }));
+                    hosts.set(id, makeHost({ bundle: await resolveBundle(id), tier, exec, meta: id ? { module: id } : {}, coherence, twins }));
                 return hosts.get(id);
             };
             answerWith(peer, hostFor); // browser-started sessions (actions) + bounces

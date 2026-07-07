@@ -121,15 +121,29 @@ export function bindActions(bundle: Bundle, { module = "" }: { module?: string }
   return out;
 }
 
+// ONE merged machine world per page (docs/migrate-arm.md slice 3): every bindMethods
+// module contributes its programs and slot tables, so a dynamic call park in one
+// module's machine (a store) can push another module's (a service) — locally or on the
+// far side of a migration. The maps mutate IN PLACE: hosts capture the objects, so a
+// module bound later is visible to sessions already running.
+const APP_MERGED: Bundle = { PROGRAMS: {}, __unwind: () => false, __slots: {} };
+let appUnwindSet = false;
+
 /** Route a compiled module's class-method stubs (real app code — service layers) through
  *  the shared connection. Methods run on the FETCH path: the frame — whose arg 0 is the
  *  live instance, often a framework proxy — stays in the browser and mutates the real
  *  object; only resource requests and results cross. Call once per compiled module. */
 export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (prog: string, self: unknown, args: unknown[]) => Promise<unknown>) => void }, { module = "", migrate }: { module?: string; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number }) => boolean } = {}): void {
   if (typeof bundle.__bindTierlessMethods !== "function") throw new Error("tierless: bundle has no compiled class methods (rebuild with a compiler that emits __bindTierlessMethods)");
+  for (const [k, v] of Object.entries(bundle.PROGRAMS)) {
+    if (APP_MERGED.PROGRAMS[k] && APP_MERGED.PROGRAMS[k] !== v) console.warn("tierless: program name collision across compiled modules: " + k);
+    APP_MERGED.PROGRAMS[k] = v;
+  }
+  if (bundle.__slots) Object.assign(APP_MERGED.__slots as Record<string, unknown>, bundle.__slots as Record<string, unknown>);
+  if (!appUnwindSet) { APP_MERGED.__unwind = bundle.__unwind; appUnwindSet = true; }   // driver-identical across compiled modules
   bundle.__bindTierlessMethods(async (prog, self, args) => {
     const conn = sharedConn();
-    conn.register(module, bundle);
+    conn.register(module, APP_MERGED);
     // pinned requests (declared: blob/stream responses; owned values: callbacks,
     // FormData) run on the instance's OWN http — the same object the uncompiled method
     // would have used — so uploads and downloads behave stock. Crossing requests are
