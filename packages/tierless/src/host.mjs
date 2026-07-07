@@ -195,8 +195,12 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
         // (No trace recording yet: the recorder prices shipped stacks; fetch-hop records land
         // with the §6 decide-loop integration.)
         runLocal: async (peer, entry, args = [], opts = {}) => {
+            // map/exec receive the PARKED TOP FRAME too: with nested machines (a store method
+            // calling service methods), the instance that owns a park is that frame's args[0],
+            // not the run's own arg 0 — interceptor chains and pinned fallbacks must follow it.
             const { exec: overrideExec, pins, map, migrate } = opts;
-            const localExec = overrideExec || execOn(peer);
+            const baseExec = execOn(peer);
+            const localExec = overrideExec ? (r) => overrideExec(r, stack[stack.length - 1]) : baseExec;
             const sid = newSid();
             let stack = initialStack(entry, args);
             // trace the fetch arm too: every serviced park is a resource touch at its (fn, pc)
@@ -244,7 +248,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                 }
                 // opts.map prepares the CROSSING form — request-time config the compiled path
                 // bypassed (interceptor chains, baseURL); null = the chain can't run here, pin
-                const req = map ? map(request) : request;
+                const req = map ? map(request, stack[stack.length - 1]) : request;
                 if (!req) {
                     await localFallback();
                     continue;

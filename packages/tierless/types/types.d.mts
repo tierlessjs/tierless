@@ -92,9 +92,9 @@ export interface Host {
      *  flips a park to the migrate arm (docs/migrate-arm.md): the continuation ships to
      *  the resource's tier and comes home by the stop rule. */
     runLocal(peer: Peer, entry: string, args?: unknown[], opts?: {
-        exec?: Exec;
+        exec?: (req: ResourceRequest, frame?: Frame) => unknown | Promise<unknown>;
         pins?: (req: ResourceRequest) => boolean;
-        map?: (req: ResourceRequest) => ResourceRequest | null;
+        map?: (req: ResourceRequest, frame?: Frame) => ResourceRequest | null;
         migrate?: (req: ResourceRequest, site: {
             fn: string;
             pc: number;

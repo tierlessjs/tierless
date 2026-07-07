@@ -20,9 +20,9 @@ export interface Connection {
      *  never ships — the compiled-class-method path, see bindMethods). opts.exec serves
      *  pinned requests on this tier; opts.pins adds the resource family's declared pins. */
     runLocal(entry: string, args?: unknown[], module?: string, opts?: {
-        exec?: Exec;
+        exec?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => unknown | Promise<unknown>;
         pins?: (req: import("./types.mjs").ResourceRequest) => boolean;
-        map?: (req: import("./types.mjs").ResourceRequest) => import("./types.mjs").ResourceRequest | null;
+        map?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => import("./types.mjs").ResourceRequest | null;
         migrate?: (req: import("./types.mjs").ResourceRequest, site: {
             fn: string;
             pc: number;

@@ -45,7 +45,7 @@ export interface Connection {
   /** Run entry(...args) HERE; foreign resources are fetched over the session (the frame
    *  never ships — the compiled-class-method path, see bindMethods). opts.exec serves
    *  pinned requests on this tier; opts.pins adds the resource family's declared pins. */
-  runLocal(entry: string, args?: unknown[], module?: string, opts?: { exec?: Exec; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest) => import("./types.mjs").ResourceRequest | null; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number }) => boolean }): Promise<unknown>;
+  runLocal(entry: string, args?: unknown[], module?: string, opts?: { exec?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => unknown | Promise<unknown>; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => import("./types.mjs").ResourceRequest | null; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number }) => boolean }): Promise<unknown>;
   close(): void;
 }
 
@@ -85,7 +85,7 @@ export function connect({ url, exec, bundle, tier = "browser", heap = true }: Co
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
       return h.call(peer, entry, args);
     },
-    runLocal: async (entry: string, args: unknown[] = [], module: string = "", opts?: { exec?: Exec; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest) => import("./types.mjs").ResourceRequest | null; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number }) => boolean }): Promise<unknown> => {
+    runLocal: async (entry: string, args: unknown[] = [], module: string = "", opts?: { exec?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => unknown | Promise<unknown>; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => import("./types.mjs").ResourceRequest | null; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number }) => boolean }): Promise<unknown> => {
       await ready;
       const h = hosts.get(module || "");
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
@@ -137,11 +137,19 @@ export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (pro
     // auth headers, model→DTO transforms, casing) runs HERE, and the post-chain wire
     // config crosses — exactly what axios would hand its adapter. An async chain
     // returns null and the request pins to the instance instead.
-    const own = (self as { http?: Record<string, unknown> } | null)?.http;
+    // the instance owning a park is the PARKED frame's arg 0 (nested machines: a store
+    // method's park belongs to the service instance it called, not to the store) — fall
+    // back to the run's own receiver for the common single-frame case
+    const httpOf = (frame?: { args?: unknown[] }): Record<string, unknown> | undefined =>
+      ((frame?.args?.[0] as { http?: Record<string, unknown> } | undefined)?.http) ?? (self as { http?: Record<string, unknown> } | null)?.http;
     return conn.runLocal(prog, [self, ...args], module, {
       pins: httpPins,
-      map: (req) => crossHttpRequest(own as Parameters<typeof crossHttpRequest>[0], req),
-      ...(own ? { exec: httpResources(own) } : {}),
+      map: (req, frame) => crossHttpRequest(httpOf(frame) as Parameters<typeof crossHttpRequest>[0], req),
+      exec: (req, frame) => {
+        const own = httpOf(frame);
+        if (!own) throw new Error("tierless: no instance http to serve a pinned request");
+        return httpResources(own)(req as never);
+      },
       ...(migrate ? { migrate } : {}),   // §6: opt a park into the migrate arm (docs/migrate-arm.md); absent = fetch arm
     });
   });

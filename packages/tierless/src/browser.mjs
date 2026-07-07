@@ -113,11 +113,19 @@ export function bindMethods(bundle, { module = "", migrate } = {}) {
         // auth headers, model→DTO transforms, casing) runs HERE, and the post-chain wire
         // config crosses — exactly what axios would hand its adapter. An async chain
         // returns null and the request pins to the instance instead.
-        const own = self?.http;
+        // the instance owning a park is the PARKED frame's arg 0 (nested machines: a store
+        // method's park belongs to the service instance it called, not to the store) — fall
+        // back to the run's own receiver for the common single-frame case
+        const httpOf = (frame) => (frame?.args?.[0]?.http) ?? self?.http;
         return conn.runLocal(prog, [self, ...args], module, {
             pins: httpPins,
-            map: (req) => crossHttpRequest(own, req),
-            ...(own ? { exec: httpResources(own) } : {}),
+            map: (req, frame) => crossHttpRequest(httpOf(frame), req),
+            exec: (req, frame) => {
+                const own = httpOf(frame);
+                if (!own)
+                    throw new Error("tierless: no instance http to serve a pinned request");
+                return httpResources(own)(req);
+            },
             ...(migrate ? { migrate } : {}), // §6: opt a park into the migrate arm (docs/migrate-arm.md); absent = fetch arm
         });
     });

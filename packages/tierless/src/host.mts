@@ -210,8 +210,12 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
     // (No trace recording yet: the recorder prices shipped stacks; fetch-hop records land
     // with the §6 decide-loop integration.)
     runLocal: async (peer, entry, args = [], opts = {}) => {
-      const { exec: overrideExec, pins, map, migrate } = opts as { exec?: Exec; pins?: (req: ResourceRequest) => boolean; map?: (req: ResourceRequest) => ResourceRequest; migrate?: (req: ResourceRequest, site: { fn: string; pc: number }) => boolean };
-      const localExec = overrideExec || execOn(peer);
+      // map/exec receive the PARKED TOP FRAME too: with nested machines (a store method
+      // calling service methods), the instance that owns a park is that frame's args[0],
+      // not the run's own arg 0 — interceptor chains and pinned fallbacks must follow it.
+      const { exec: overrideExec, pins, map, migrate } = opts as { exec?: (req: ResourceRequest, frame?: Frame) => unknown; pins?: (req: ResourceRequest) => boolean; map?: (req: ResourceRequest, frame?: Frame) => ResourceRequest; migrate?: (req: ResourceRequest, site: { fn: string; pc: number }) => boolean };
+      const baseExec = execOn(peer);
+      const localExec: Exec = overrideExec ? (r) => overrideExec(r, stack[stack.length - 1]) : baseExec;
       const sid = newSid();
       let stack = initialStack(entry, args);
       // trace the fetch arm too: every serviced park is a resource touch at its (fn, pc)
@@ -245,7 +249,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
         if ((pins && pins(request)) || ownsValues(request.args)) { await localFallback(); continue; }
         // opts.map prepares the CROSSING form — request-time config the compiled path
         // bypassed (interceptor chains, baseURL); null = the chain can't run here, pin
-        const req = map ? map(request) : request;
+        const req = map ? map(request, stack[stack.length - 1]) : request;
         if (!req) { await localFallback(); continue; }
         // THE MIGRATE ARM (docs/migrate-arm.md): ship the whole continuation to the
         // resource's tier instead of fetching the value back. Tier-owned locals excise
