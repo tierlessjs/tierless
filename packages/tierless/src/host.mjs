@@ -45,6 +45,26 @@ function ownsValues(v, depth = 0) {
         return v.some((x) => ownsValues(x, depth + 1));
     return Object.values(v).some((x) => ownsValues(x, depth + 1)); // own enumerable props — what crosses; prototypes stay home like axios's JSON pass
 }
+// The migrate arm's §5 excision predicate (docs/migrate-arm.md): consulted per VALUE while
+// the codec walks a shipping stack. Containers return false — the walk descends and each
+// element decides for itself — so one owned element doesn't park a whole args array.
+// Prototyped instances excise as units even when their data would serialize: crossing
+// structurally would hand back a prototype-stripped copy, and a later segment that touches
+// the slot must see the SAME object (the stop rule guarantees that touch happens at home).
+function ownedUnit(v) {
+    if (typeof v === "function")
+        return true;
+    if (v === null || typeof v !== "object")
+        return false;
+    if (Array.isArray(v) || v instanceof Map || v instanceof Set)
+        return false;
+    if (v instanceof Date || v instanceof Uint8Array)
+        return false;
+    const proto = Object.getPrototypeOf(v);
+    if (proto !== Object.prototype && proto !== null)
+        return true;
+    return ownsValues(v);
+}
 export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }) {
     const pump = makePump(bundle);
     const ownsHere = owns || ((t) => t === tier);
@@ -132,11 +152,14 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }) {
         // (No trace recording yet: the recorder prices shipped stacks; fetch-hop records land
         // with the §6 decide-loop integration.)
         runLocal: async (peer, entry, args = [], opts = {}) => {
-            const { exec: overrideExec, pins, map } = opts;
+            const { exec: overrideExec, pins, map, migrate } = opts;
             const localExec = overrideExec || exec;
-            const stack = initialStack(entry, args);
+            let stack = initialStack(entry, args);
             let request = null;
             let carry = null;
+            // §5 mini-heap for the MIGRATE arm: excised locals park here while the stack is away
+            // and resolve back by identity when it returns. Scoped to this run — nothing leaks.
+            let heapTier = null;
             for (;;) {
                 const c = carry;
                 carry = null;
@@ -168,6 +191,29 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }) {
                 const req = map ? map(request) : request;
                 if (!req) {
                     await localFallback();
+                    continue;
+                }
+                // THE MIGRATE ARM (docs/migrate-arm.md): ship the whole continuation to the
+                // resource's tier instead of fetching the value back. Tier-owned locals excise
+                // into the run's mini-heap and cross as handles; the peer pumps the chain with
+                // its own exec and returns done, or the stack itself — parked home by the stop
+                // rule (op:"home", value already in the frame) or at a resource only this tier
+                // can serve. Errors the compiled code catches unwind over there; only uncaught
+                // ones surface here, exactly as they would have escaped the local pump.
+                if (migrate && migrate(request)) {
+                    if (!heapTier) {
+                        const objs = new Map();
+                        let n = 0;
+                        heapTier = { id: tier, heapPut: (v) => { const k = "l" + n++; objs.set(k, v); return k; }, heapGet: (hid) => objs.get(hid) };
+                    }
+                    const reply = await peer.request({ type: "resume", ...meta }, encodeWireBinary(stack, req, { tier: heapTier, excise: ownedUnit }));
+                    if (reply.obj.type === "error")
+                        throw new Error(reply.obj.message);
+                    if (reply.obj.type === "done")
+                        return reply.obj.value;
+                    const back = decodeWireBinary(reply.bin, { tier: heapTier });
+                    stack = back.stack;
+                    request = back.request; // op:"home" -> pump steps on from ret; a browser-owned resource -> pump services it here
                     continue;
                 }
                 const { obj } = await peer.request({ type: "exec", tier: req.tier, ...meta }, encodeArgs([req.name, req.args]));

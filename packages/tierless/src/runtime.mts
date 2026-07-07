@@ -11,6 +11,7 @@
 // the last resource lands. The {stack, request} it hands back is serialized for the
 // socket by the binary wire codec (wire-binary.mjs); host.mjs assembles that loop.
 
+import { isHandle } from "./graph.mjs";
 import type { Bundle, Frame, Exec, ResourceRequest, Pump } from "./types.mjs";
 
 export type { Bundle, Frame, MachineResult, ResourceRequest, Exec, Peer, Host } from "./types.mjs";
@@ -19,6 +20,25 @@ export const initialStack = (fn: string, args: unknown[] = []): Frame[] => [{ fn
 
 export function makePump(bundle: Bundle): Pump {
   const { PROGRAMS, __unwind } = bundle;
+  const slots = bundle.__slots as Record<string, Record<number, string[]>> | undefined;
+
+  // §5 stop rule (docs/migrate-arm.md): a machine segment is plain JS — it cannot suspend
+  // mid-flight, so a segment that touches an excised local must not START on a tier where
+  // that slot is a handle. The compiler emits, per program per state, the frame slots the
+  // segment entered there references; if any currently holds a handle, park the stack to
+  // the handle's owner BEFORE stepping. "args" means the unpack block reads F.args — its
+  // elements are checked too (a nested call can pass a handle as an argument).
+  const parkHome = (top: Frame): ResourceRequest | null => {
+    const need = slots?.[top.fn]?.[top.pc];
+    if (!need) return null;
+    for (const k of need) {
+      const v = k === "args" ? (Array.isArray(top.args) ? top.args.find(isHandle) : top.args)
+        : k.startsWith("args[") ? (Array.isArray(top.args) ? top.args[Number(k.slice(5, -1))] : top.args)
+        : (top as Record<string, unknown>)[k];
+      if (isHandle(v)) return { op: "home", tier: v.owner, name: k, args: [] };
+    }
+    return null;
+  };
 
   // Run a resource and route a failure into the continuation: if a try/catch is active in
   // any frame on the stack (__unwind walks frames), jump to its catch/finally; otherwise
@@ -30,9 +50,13 @@ export function makePump(bundle: Bundle): Pump {
   }
 
   return async function pump(stack, ownsHere, execHere, incoming = null) {
-    if (incoming) await service(stack, incoming, execHere);  // the resource that migrated us here
+    // an op:"home" incoming is the stop rule's park marker, not a resource — the value it
+    // carried home is already in the frame's ret; pump straight on from it
+    if (incoming && incoming.op !== "home") await service(stack, incoming, execHere);
     for (;;) {
       const top = stack[stack.length - 1];
+      const home = parkHome(top);
+      if (home && !ownsHere(home.tier)) return { done: false, request: home, stack };
       const r = PROGRAMS[top.fn](top);
       if (r.op === "return") {
         stack.pop();

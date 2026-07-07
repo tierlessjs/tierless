@@ -67,9 +67,9 @@ function readNode(r: R, S: (i: number) => string): any {
 
 // Serialize a continuation, mirroring encodeWire's frame-flattening, then writing the
 // {frames, req, {roots, objs}} structure as bytes. opts (tier/threshold) drive §5 excision.
-export function encodeWireBinary(stack: DeltaFrame[], request: DeltaRequest | null, { tier = null, threshold = 8192, content = null }: EncodeOptions = {}): Uint8Array {
+export function encodeWireBinary(stack: DeltaFrame[], request: DeltaRequest | null, { tier = null, threshold = 8192, content = null, excise = null }: EncodeOptions = {}): Uint8Array {
   const { rootVals, frames, req } = rootsOf(stack, request);
-  const graph = encodeGraph(rootVals, { tier, threshold, content });
+  const graph = encodeGraph(rootVals, { tier, threshold, content, excise });
 
   // pass 1: intern strings and collect object shapes ------------------------------------
   const { strs, intern } = makeInterner();
@@ -133,7 +133,7 @@ export function encodeWireBinary(stack: DeltaFrame[], request: DeltaRequest | nu
   return w.done();
 }
 
-export function decodeWireBinary(bytes: Uint8Array | ArrayBufferLike, { content = null }: DecodeOptions = {}): { stack: DeltaFrame[]; request: DeltaRequest | null } {
+export function decodeWireBinary(bytes: Uint8Array | ArrayBufferLike, { content = null, tier = null }: DecodeOptions = {}): { stack: DeltaFrame[]; request: DeltaRequest | null } {
   const r = new R(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), "wire-binary");
   checkMagic(r, MAGIC);
   const strs = readStrings(r);
@@ -165,7 +165,7 @@ export function decodeWireBinary(bytes: Uint8Array | ArrayBufferLike, { content 
     return slot;
   };
   const objs: any[] = []; { const n = r.count(); for (let i = 0; i < n; i++) objs.push(readSlot()); }
-  const vals = decodeGraph({ roots, objs }, { content });
+  const vals = decodeGraph({ roots, objs }, { content, tier });
   return rebuildStack(frames, req, vals);
 }
 

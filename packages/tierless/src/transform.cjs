@@ -126,6 +126,7 @@ function allowlist(ast) {
 // handlers and refuses to silently skip a finally.
 let blocks, suspSet, AUTO_DEREF = false, AUTO_WRITEBACK = false, TRACK_WRITES = false;
 let SOURCE_MAP = false, curLine = 0, srcFile = "", fnSites = {}; // --source-map: stamp each block with its source line so a migrated frame reports file:line, not just a pc
+let fnSlots = {}; // §5 stop rule: per program per state, the frame slots its segment references (docs/migrate-arm.md)
 const nb = () => { const b = { lines: [], term: null }; if (SOURCE_MAP)
     b.line = curLine; blocks.push(b); return blocks.length - 1; };
 const isSusp = (s) => (t.isVariableDeclaration(s) && s.declarations.length === 1 && t.isYieldExpression(s.declarations[0].init)) ||
@@ -677,13 +678,75 @@ function compileFn(node) {
         }
         throw new Error("bad terminator " + tm.kind);
     };
-    const cases = ids.map((id) => { const blk = blocks[id]; const lines = blk.lines.slice(); lines.push(emitTerm(blk.term)); return `      case ${R(id)}:\n        ${lines.join("\n        ")}`; }).join("\n");
+    const caseText = new Map(); // raw id -> the case's full emitted text (lines + term)
+    const cases = ids.map((id) => { const blk = blocks[id]; const lines = blk.lines.slice(); lines.push(emitTerm(blk.term)); caseText.set(id, lines.join("\n")); return `      case ${R(id)}:\n        ${lines.join("\n        ")}`; }).join("\n");
     if (SOURCE_MAP) {
         const sites = {};
         for (const id of ids)
             sites[R(id)] = blocks[id].line;
         fnSites[fnName] = sites;
     } // pc -> source line
+    // §5 stop-rule metadata (docs/migrate-arm.md): per resume state, the frame slots the
+    // segment entered there references before its next suspension. Computed on the EMITTED
+    // text (F.<name> occurrences — reads, writes, and term expressions alike), closed over
+    // every successor a step can reach without returning from the step function. Throw and
+    // finally terms over-approximate with every handler in the function: coming home early
+    // is a lost optimization, running a segment beside a handle is a wrong program.
+    {
+        const allCatch = [], allFin = [], allAbrupt = [];
+        for (const id of ids) {
+            const tm = blocks[id].term;
+            if (tm.kind === "pushTry") {
+                if (tm.catch != null)
+                    allCatch.push(tm.catch);
+                if (tm.fin != null)
+                    allFin.push(tm.fin);
+            }
+            if (tm.kind === "abrupt" && tm.targetRaw != null)
+                allAbrupt.push(tm.targetRaw);
+        }
+        const succs = (id) => {
+            const tm = blocks[id].term;
+            switch (tm.kind) {
+                case "jump": return [tm.to];
+                case "branch": return [tm.then, tm.else];
+                case "pushTry": return [tm.to];
+                case "throw": return [...allCatch, ...allFin];
+                case "finish": return [tm.after, ...allCatch, ...allFin, ...allAbrupt];
+                case "abrupt": return [...(tm.targetRaw != null ? [tm.targetRaw] : []), ...allFin];
+                default: return []; // susp/call/ret end the step — the next segment gets its own check
+            }
+        };
+        // args are referenced by ELEMENT (`this` lowers to F.args[0], params to F.args[i]) —
+        // keep that precision, or one excised instance would park every param-using segment
+        const refsOf = (id) => {
+            const out = new Set();
+            for (const m of caseText.get(id).matchAll(/\bF\.([A-Za-z_$][\w$]*)(\[(\d+)\])?/g)) {
+                if (m[1] === "pc")
+                    continue;
+                out.add(m[1] === "args" && m[3] !== undefined ? `args[${m[3]}]` : m[1]);
+            }
+            return out;
+        };
+        const table = {};
+        for (const id of ids) {
+            const seen = new Set([id]), refs = new Set();
+            const walk = [id];
+            while (walk.length) {
+                const b = walk.pop();
+                for (const r of refsOf(b))
+                    refs.add(r);
+                for (const s of succs(b))
+                    if (!seen.has(s)) {
+                        seen.add(s);
+                        walk.push(s);
+                    }
+            }
+            if (refs.size)
+                table[R(id)] = [...refs].sort();
+        }
+        fnSlots[fnName] = table;
+    }
     // default: every reachable pc has a case, so landing here means a corrupt frame — a transform bug, or
     // a continuation mangled in transit. Hard-error at once instead of letting `while (true)` spin forever:
     // fail fast and loud rather than hang. (No valid run reaches it; this is a safety net, not control flow.)
@@ -1293,6 +1356,7 @@ function compile(src, preamble) {
     USED_FORIN = false;
     USED_OBJREST = false;
     fnSites = {};
+    fnSlots = {};
     const { fnPaths, rest, susp } = collectProgram(ast);
     suspSet = susp;
     const pure = [], progs = [], meta = { programs: [], exported: [], pure: [], imports: relativeImports(rest), methods: [] };
@@ -1319,7 +1383,11 @@ function compile(src, preamble) {
     // --source-map: a pc->line table per program + a frameSite helper, so a migrated frame reports a
     // portable file:line. Gated, so without the flag the bundle is byte-for-byte what it was before.
     const sm = SOURCE_MAP ? `\nexport const SOURCE_FILE = ${JSON.stringify(srcFile)};\nexport const SITES = ${JSON.stringify(fnSites)};\nexport const frameSite = (f) => { const m = SITES[f.fn], ln = m && m[f.pc]; return SOURCE_FILE + ":" + (ln || "?"); };\nexport const stackSites = (stack) => stack.map(frameSite);\n` : "";
-    const body = head + "\n" + kept + helpers + (pure.length ? pure.join("\n") + "\n" : "") + "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};\n" + DRIVER + sm;
+    // __slots: the §5 stop-rule table the pump consults before stepping a frame (only states
+    // that reference any slot appear; programs with no entries are omitted entirely).
+    const slotTable = Object.fromEntries(Object.entries(fnSlots).filter(([, t]) => Object.keys(t).length));
+    const slotsOut = Object.keys(slotTable).length ? `export const __slots = ${JSON.stringify(slotTable)};\n` : "";
+    const body = head + "\n" + kept + helpers + (pure.length ? pure.join("\n") + "\n" : "") + "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};\n" + slotsOut + DRIVER + sm;
     // BUNDLE_HASH: identity of this exact compiled machine, for trace/profile validity (§6 of the
     // trajectory design: a site key is (fn, pc) and pcs silently change meaning across edits, so a
     // profile is only valid against the bundle whose traces built it). Hashed over the emitted code,

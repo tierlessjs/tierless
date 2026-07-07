@@ -97,9 +97,9 @@ function readNode(r, S) {
 }
 // Serialize a continuation, mirroring encodeWire's frame-flattening, then writing the
 // {frames, req, {roots, objs}} structure as bytes. opts (tier/threshold) drive §5 excision.
-export function encodeWireBinary(stack, request, { tier = null, threshold = 8192, content = null } = {}) {
+export function encodeWireBinary(stack, request, { tier = null, threshold = 8192, content = null, excise = null } = {}) {
     const { rootVals, frames, req } = rootsOf(stack, request);
-    const graph = encodeGraph(rootVals, { tier, threshold, content });
+    const graph = encodeGraph(rootVals, { tier, threshold, content, excise });
     // pass 1: intern strings and collect object shapes ------------------------------------
     const { strs, intern } = makeInterner();
     const shapeMap = new Map(), shapes = []; // sig -> idx; shapes[idx] = [[keyStrIdx, nonEnum], ...]
@@ -288,7 +288,7 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
     }
     return w.done();
 }
-export function decodeWireBinary(bytes, { content = null } = {}) {
+export function decodeWireBinary(bytes, { content = null, tier = null } = {}) {
     const r = new R(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), "wire-binary");
     checkMagic(r, MAGIC);
     const strs = readStrings(r);
@@ -410,7 +410,7 @@ export function decodeWireBinary(bytes, { content = null } = {}) {
         for (let i = 0; i < n; i++)
             objs.push(readSlot());
     }
-    const vals = decodeGraph({ roots, objs }, { content });
+    const vals = decodeGraph({ roots, objs }, { content, tier });
     return rebuildStack(frames, req, vals);
 }
 // A fresh start ships only the entry args — no continuation and no resource yet. Carry them through

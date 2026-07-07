@@ -4,7 +4,8 @@
 // them (api.dbl/api.get return their first arg, api.fail throws) and serializes the
 // continuation at every suspend to prove loop state and the try-handler stack migrate.
 //
-// Regenerate:  node transform.cjs cf-fixtures.src.js cf-fixtures.gen.mjs --bare
+// Regenerate (from the repo root, so the header matches what source-maps.mts compares):
+//   node packages/tierless/src/transform.cjs test/e2e/cf-fixtures.src.js test/e2e/cf-fixtures.gen.mjs --bare
 function forContinue() {
   let sum = 0;
   for (let i = 1; i <= 6; i = i + 1) {

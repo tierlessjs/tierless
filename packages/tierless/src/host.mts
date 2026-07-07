@@ -59,6 +59,22 @@ function ownsValues(v: unknown, depth = 0): boolean {
   return Object.values(v as object).some((x) => ownsValues(x, depth + 1));   // own enumerable props — what crosses; prototypes stay home like axios's JSON pass
 }
 
+// The migrate arm's §5 excision predicate (docs/migrate-arm.md): consulted per VALUE while
+// the codec walks a shipping stack. Containers return false — the walk descends and each
+// element decides for itself — so one owned element doesn't park a whole args array.
+// Prototyped instances excise as units even when their data would serialize: crossing
+// structurally would hand back a prototype-stripped copy, and a later segment that touches
+// the slot must see the SAME object (the stop rule guarantees that touch happens at home).
+function ownedUnit(v: unknown): boolean {
+  if (typeof v === "function") return true;
+  if (v === null || typeof v !== "object") return false;
+  if (Array.isArray(v) || v instanceof Map || v instanceof Set) return false;
+  if (v instanceof Date || v instanceof Uint8Array) return false;
+  const proto = Object.getPrototypeOf(v);
+  if (proto !== Object.prototype && proto !== null) return true;
+  return ownsValues(v);
+}
+
 export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }: MakeHostOpts): Host {
   const pump = makePump(bundle);
   const ownsHere: (tier: string) => boolean = owns || ((t) => t === tier);
@@ -146,11 +162,14 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }: MakeHos
     // (No trace recording yet: the recorder prices shipped stacks; fetch-hop records land
     // with the §6 decide-loop integration.)
     runLocal: async (peer, entry, args = [], opts = {}) => {
-      const { exec: overrideExec, pins, map } = opts as { exec?: Exec; pins?: (req: ResourceRequest) => boolean; map?: (req: ResourceRequest) => ResourceRequest };
+      const { exec: overrideExec, pins, map, migrate } = opts as { exec?: Exec; pins?: (req: ResourceRequest) => boolean; map?: (req: ResourceRequest) => ResourceRequest; migrate?: (req: ResourceRequest) => boolean };
       const localExec = overrideExec || exec;
-      const stack = initialStack(entry, args);
+      let stack = initialStack(entry, args);
       let request: ResourceRequest | null = null;
       let carry: { value: unknown } | { error: unknown } | null = null;
+      // §5 mini-heap for the MIGRATE arm: excised locals park here while the stack is away
+      // and resolve back by identity when it returns. Scoped to this run — nothing leaks.
+      let heapTier: { id: string; heapPut(v: unknown): string; heapGet(hid: string): unknown } | null = null;
       for (;;) {
         const c = carry; carry = null;
         // one-shot exec: the first service() call consumes the fetched result (or throws
@@ -170,6 +189,23 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace }: MakeHos
         // bypassed (interceptor chains, baseURL); null = the chain can't run here, pin
         const req = map ? map(request) : request;
         if (!req) { await localFallback(); continue; }
+        // THE MIGRATE ARM (docs/migrate-arm.md): ship the whole continuation to the
+        // resource's tier instead of fetching the value back. Tier-owned locals excise
+        // into the run's mini-heap and cross as handles; the peer pumps the chain with
+        // its own exec and returns done, or the stack itself — parked home by the stop
+        // rule (op:"home", value already in the frame) or at a resource only this tier
+        // can serve. Errors the compiled code catches unwind over there; only uncaught
+        // ones surface here, exactly as they would have escaped the local pump.
+        if (migrate && migrate(request)) {
+          if (!heapTier) { const objs = new Map<string, unknown>(); let n = 0; heapTier = { id: tier, heapPut: (v) => { const k = "l" + n++; objs.set(k, v); return k; }, heapGet: (hid) => objs.get(hid) }; }
+          const reply = await peer.request({ type: "resume", ...meta }, encodeWireBinary(stack, req, { tier: heapTier, excise: ownedUnit }));
+          if (reply.obj.type === "error") throw new Error(reply.obj.message);
+          if (reply.obj.type === "done") return reply.obj.value;
+          const back = decodeWireBinary(reply.bin!, { tier: heapTier });
+          stack = back.stack as Frame[];
+          request = back.request as ResourceRequest | null;   // op:"home" -> pump steps on from ret; a browser-owned resource -> pump services it here
+          continue;
+        }
         const { obj } = await peer.request({ type: "exec", tier: req.tier, ...meta }, encodeArgs([req.name, req.args]));
         if (obj.type === "error") {
           const err = new Error(obj.message) as Error & { response?: unknown; isAxiosError?: boolean; code?: string };
