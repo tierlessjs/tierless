@@ -20,7 +20,7 @@
 //
 // The plugin is a plain object (no vite import), so it is unit-testable headless.
 import { createRequire } from "node:module";
-import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync, appendFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { WS_PATH } from "./ws-path.mjs";
@@ -198,7 +198,7 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
         if (meta.serverCode) appMachines.set("m:" + shortHash(cleanId), { code: meta.serverCode, resolveDir: path.dirname(cleanId) });
         const binder = [
           `import { bindMethods as __tlBindMethods } from ${JSON.stringify(runtime)};`,
-          `export const __bundle = { PROGRAMS, __unwind, __bindTierlessMethods };`,
+          `export const __bundle = { PROGRAMS, __unwind, __bindTierlessMethods, BUNDLE_HASH, ...(typeof __slots === "undefined" ? {} : { __slots }) };`,
           `__tlBindMethods(__bundle, { module: ${JSON.stringify("m:" + shortHash(cleanId))} });`   // wire id: a hash, not the ~85 B source path — it rides EVERY exec message (app modules resolve to the exec-only host, so any stable id works),
         ].join("\n");
         return { code: compiled + "\n" + binder + "\n", map: null };
@@ -300,6 +300,21 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
       // ws frames post-inflate, so the gateway itself is the only honest place to count
       const wire = process.env.TIERLESS_WIRE_TRUTH ? makeWireStats() : undefined;
       if (wire) s.middlewares.use("/__tierless/wire", (_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(wire.read())); });
+      // Run protocol (docs/corpus.md): a PROFILING run appends browser trace batches to
+      // TIERLESS_TRACE_OUT; a COMPARISON run serves the locked TIERLESS_PROFILE. The shim
+      // wires the browser side to these endpoints when the matching env is set at preview.
+      if (process.env.TIERLESS_TRACE_OUT) {
+        const out = process.env.TIERLESS_TRACE_OUT;
+        s.middlewares.use("/__tierless/trace", (req: any, res: any) => {
+          let body = "";
+          req.on("data", (c: unknown) => { body += String(c); });
+          req.on("end", () => { try { appendFileSync(out, body.endsWith("\n") || !body ? body : body + "\n"); } catch { /* profiling only; never fail the app */ } res.statusCode = 204; res.end(); });
+        });
+      }
+      if (process.env.TIERLESS_PROFILE) {
+        const profileJson = readFileSync(process.env.TIERLESS_PROFILE, "utf8");   // read at boot: comparison runs are frozen
+        s.middlewares.use("/__tierless/profile", (_req: any, res: any) => { res.setHeader("content-type", "application/json"); res.end(profileJson); });
+      }
       if (!apiUrl) throw new Error("tierless: workflows/compile need { apiUrl } (the backend the gateway calls)");
       // compiled APP modules have no server emit (the fetch arm runs no machine here) —
       // their sessions get an exec-only host; workflow modules resolve from the manifest

@@ -14,6 +14,7 @@
 // mode, ui.* if you pin some); actions that never touch one simply run out on the server.
 import { makeHost, answerWith } from "./host.mjs";
 import { makeCoherence } from "./coherence.mjs";
+import { methodMigrate, loadProfile, type Profile } from "./trace.mjs";
 import { makePeer, wsPort, onEvent } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
 import { httpResources, httpPins, crossHttpRequest } from "./adapt.mjs";
@@ -36,6 +37,13 @@ export interface ConnectOpts {
    *  only --auto-deref/--auto-writeback bundles excise and service §5 ops, so ordinary
    *  bundles are unaffected. false disables it entirely. */
   heap?: boolean;
+  /** Trace recording for PROFILING runs (run protocol, docs/corpus.md): every method
+   *  run records its resource touches; records post to this URL as JSONL batches. */
+  traceUrl?: string;
+  /** Profile for COMPARISON runs: fetched from this URL at connect; when it loads (and
+   *  its bundle hash matches the merged app world), bindMethods stubs consult the
+   *  method-boundary §6 rule — chains migrate, everything else keeps the fetch arm. */
+  profileUrl?: string;
 }
 export interface Connection {
   ready: Promise<void>;
@@ -49,13 +57,42 @@ export interface Connection {
   close(): void;
 }
 
-export function connect({ url, exec, bundle, tier = "browser", heap = true }: ConnectOpts = {}): Connection {
+// The app-wide §6 method rule + the profiling recorder options, set by connect() from
+// ConnectOpts and consulted by every bindMethods stub. Mutable refs: a profile that
+// arrives after the first interaction upgrades later calls; before it, cold = fetch.
+let appMigrate: ((req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number }) => boolean) | null = null;
+let appTrace: { rate: number; sink: (r: unknown) => void } | null = null;
+const appHashes: string[] = [];   // per-module BUNDLE_HASHes of the merged world, sorted — the profile validity key
+export const mergedAppHash = (): string => "merged:" + [...appHashes].sort().join("+");
+
+export function connect({ url, exec, bundle, tier = "browser", heap = true,
+  // run-protocol wiring can also come from page globals (a measured run's driver injects
+  // them into the built index.html, like their CI's window.TESTING) — build-time shims
+  // can't know a preview-time mode
+  traceUrl = (globalThis as { __TIERLESS_TRACE__?: string }).__TIERLESS_TRACE__,
+  profileUrl = (globalThis as { __TIERLESS_PROFILE__?: string }).__TIERLESS_PROFILE__,
+}: ConnectOpts = {}): Connection {
   const ws = new WebSocket((typeof url === "function" ? url() : url) || defaultUrl());
   const peer = makePeer(wsPort(ws));
   const ready: Promise<void> = new Promise((res, rej) => {
     onEvent(ws, "open", () => res());
     onEvent(ws, "error", (e: any) => rej(new Error("tierless: websocket error" + (e && e.message ? ": " + e.message : ""))));
   });
+
+  if (traceUrl) {                                            // PROFILING run: batch records to the gateway
+    const buf: unknown[] = [];
+    const flush = (): void => { if (!buf.length) return; const body = buf.map((r) => JSON.stringify(r)).join("\n") + "\n"; buf.length = 0; void fetch(traceUrl, { method: "POST", body, keepalive: true }).catch(() => {}); };
+    setInterval(flush, 1000);
+    if (typeof addEventListener === "function") addEventListener("pagehide", flush);
+    appTrace = { rate: 1, sink: (r) => { buf.push(r); if (buf.length >= 100) flush(); } };
+  }
+  if (profileUrl) {                                          // COMPARISON run: locked profile, no exploration
+    void fetch(profileUrl).then((r) => (r.ok ? r.json() : null)).then((p) => {
+      const prof = loadProfile(p as Profile | null, mergedAppHash());
+      if (prof) appMigrate = methodMigrate(prof);
+      else if (p) console.warn("tierless: profile ignored — built for " + (p as Profile).bundle + ", app is " + mergedAppHash());
+    }).catch(() => {});
+  }
 
   // §5 heap coherence for this connection, shared by every module-host on it (each host
   // applies it only if its own bundle is heap-compiled). serve() lets the server fetch
@@ -66,7 +103,7 @@ export function connect({ url, exec, bundle, tier = "browser", heap = true }: Co
   const hosts = new Map<string, Host>();                          // moduleId -> host
   const register = (module: string, b: Bundle): Host => {
     const id = module || "";
-    if (!hosts.has(id)) hosts.set(id, makeHost({ bundle: b, tier, exec: exec as Exec, meta: id ? { module: id } : {}, coherence }));   // exec is optional here (actions-only pages never own a resource); makeHost only calls it when one is
+    if (!hosts.has(id)) hosts.set(id, makeHost({ bundle: b, tier, exec: exec as Exec, meta: id ? { module: id } : {}, coherence, ...(appTrace ? { trace: appTrace as never } : {}) }));   // exec is optional here (actions-only pages never own a resource); makeHost only calls it when one is
     return hosts.get(id)!;
   };
   if (bundle) register("", bundle);
@@ -141,6 +178,7 @@ export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (pro
   }
   if (bundle.__slots) Object.assign(APP_MERGED.__slots as Record<string, unknown>, bundle.__slots as Record<string, unknown>);
   if (!appUnwindSet) { APP_MERGED.__unwind = bundle.__unwind; appUnwindSet = true; }   // driver-identical across compiled modules
+  if (typeof bundle.BUNDLE_HASH === "string") appHashes.push(bundle.BUNDLE_HASH);      // the merged world's profile-validity key
   bundle.__bindTierlessMethods(async (prog, self, args) => {
     const conn = sharedConn();
     conn.register(module, APP_MERGED);
@@ -164,7 +202,9 @@ export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (pro
         if (!own) throw new Error("tierless: no instance http to serve a pinned request");
         return httpResources(own)(req as never);
       },
-      ...(migrate ? { migrate } : {}),   // §6: opt a park into the migrate arm (docs/migrate-arm.md); absent = fetch arm
+      // §6 at the park: an explicit opt wins; otherwise the app-wide profile rule
+      // (loaded by connect({ profileUrl }) on comparison runs; null = cold = fetch arm)
+      migrate: migrate ?? ((req, site) => appMigrate?.(req, site) ?? false),
     });
   });
 }

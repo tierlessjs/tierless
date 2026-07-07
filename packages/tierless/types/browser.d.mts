@@ -10,6 +10,13 @@ export interface ConnectOpts {
      *  only --auto-deref/--auto-writeback bundles excise and service §5 ops, so ordinary
      *  bundles are unaffected. false disables it entirely. */
     heap?: boolean;
+    /** Trace recording for PROFILING runs (run protocol, docs/corpus.md): every method
+     *  run records its resource touches; records post to this URL as JSONL batches. */
+    traceUrl?: string;
+    /** Profile for COMPARISON runs: fetched from this URL at connect; when it loads (and
+     *  its bundle hash matches the merged app world), bindMethods stubs consult the
+     *  method-boundary §6 rule — chains migrate, everything else keeps the fetch arm. */
+    profileUrl?: string;
 }
 export interface Connection {
     ready: Promise<void>;
@@ -30,7 +37,8 @@ export interface Connection {
     }): Promise<unknown>;
     close(): void;
 }
-export declare function connect({ url, exec, bundle, tier, heap }?: ConnectOpts): Connection;
+export declare const mergedAppHash: () => string;
+export declare function connect({ url, exec, bundle, tier, heap, traceUrl, profileUrl, }?: ConnectOpts): Connection;
 export declare function configureTierless(opts: ConnectOpts & {
     preconnect?: boolean;
 }): void;
