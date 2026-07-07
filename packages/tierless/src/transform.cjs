@@ -1308,13 +1308,28 @@ function compileClassMethods(ast, progs, meta, rest) {
         }
         const clsName = cls.id.name;
         let compiledAny = false;
+        // sibling methods with DIRECT tier calls return promises by construction — a sync
+        // wrapper's `return this.post(...)` may safely become a dyn park (see lowerMethod)
+        const tierSiblings = new Set();
+        for (const m of cls.body.body) {
+            if (!t.isClassMethod(m) || !t.isIdentifier(m.key))
+                continue;
+            let hit = false;
+            t.traverseFast(m, (n) => {
+                if (t.isCallExpression(n) && t.isMemberExpression(n.callee) && t.isMemberExpression(n.callee.object)
+                    && t.isThisExpression(n.callee.object.object) && t.isIdentifier(n.callee.object.property) && TIER_OF["this." + n.callee.object.property.name])
+                    hit = true;
+            });
+            if (hit)
+                tierSiblings.add(m.key.name);
+        }
         for (const m of [...cls.body.body]) {
             if (!t.isClassMethod(m) || m.kind !== "method" || m.static || m.computed || !t.isIdentifier(m.key))
                 continue;
             const mName = m.key.name;
             const progName = clsName + "$" + mName;
             try {
-                const prog = lowerMethod(clsName, mName, m, progName);
+                const prog = lowerMethod(clsName, mName, m, progName, tierSiblings);
                 if (!prog)
                     continue; // no tier calls — stays a plain method
                 progs.push(prog);
@@ -1468,11 +1483,25 @@ function compileStoreFunctions(ast, progs, meta) {
 // through nested functions — they have their own), run the allow-list on it (which also
 // absorbs `await` around tier calls), and reject what can't migrate with a precise
 // reason. Returns null when the method makes no tier calls at all.
-function lowerMethod(clsName, mName, m, progName) {
+function lowerMethod(clsName, mName, m, progName, tierSiblings = new Set()) {
     const fnNode = t.functionDeclaration(t.identifier(progName), [t.identifier("__self"), ...m.params.map((x) => t.cloneNode(x, true))], t.cloneNode(m.body, true));
     const file = t.file(t.program([fnNode]));
     allowlist(file); // recognizes both this.<ns> and __self.<ns>, so it can run before the this-rewrite
     rewriteDynAwaits(file, fnNode); // awaited member calls -> dynamic parks; bare awaits still reject below
+    // a WRAPPER's `return this.m(...)` where m is a tier-calling sibling: the callee is
+    // promise-returning by construction, so the tail joins the run as a dyn park — the
+    // chains real services build out of delegation (update -> post) stay ONE traced run.
+    traverse(file, { ReturnStatement(rp) {
+            if (rp.getFunctionParent()?.node !== fnNode)
+                return;
+            const arg = rp.node.argument;
+            if (t.isCallExpression(arg) && t.isMemberExpression(arg.callee) && !arg.callee.computed && t.isIdentifier(arg.callee.property)
+                && tierSiblings.has(arg.callee.property.name)
+                && (t.isThisExpression(arg.callee.object) || t.isIdentifier(arg.callee.object, { name: "__self" }))
+                && !arg.arguments.some((x) => t.isSpreadElement(x))) {
+                rp.node.argument = t.yieldExpression(t.callExpression(t.identifier("D"), [arg.callee.object, t.stringLiteral(arg.callee.property.name), ...arg.arguments]));
+            }
+        } });
     let yields = 0;
     traverse(file, { YieldExpression(yp) { if (isResYield(yp.node) || isDynYield(yp.node))
             yields++; } });
