@@ -148,3 +148,22 @@ The §6 machinery works end to end (fixtures prove N-call chains collapse to
 one crossing when they exist); this corpus program simply doesn't have them.
 Wall-time wins here would need the session-twin registry on flows the suite
 doesn't exercise, or an app whose orchestration layer actually chains.
+
+## The 3 chains, measured head-to-head (2026-07-07, saved-filter spec, RTT 80)
+
+Targeted experiment (TIERLESS_SPEC): the one chain-bearing spec, both arms, same
+build — fetch arm vs a synthetic profile shipping the chain site (getM@8, 100%
+stable). Per-test wall clock:
+
+    Can mark a saved filter as favorite            2945 -> 2920 ms   (-25 ms)
+    Can remove a saved filter from favorites       2884 -> 2890 ms   ( +6 ms)
+    Favorite status persists after page reload     4527 -> 4521 ms   ( -6 ms)
+
+Delta ~0: noise on 3-4.5 s tests. The mechanism is the predicted crossing
+parity: the chain's second half dispatches on a SUBCLASS service instance
+(unstamped by the correctness guard) and a mutated model instance — both park
+the shipped continuation home between the two calls. Ship + park-home + one
+exec = the fetch arm's two execs, round trip for round trip. The measurement
+confirms the analysis empirically. The chain becomes a win only with the
+session-twin registry (the real subclass constructed server-side) — and the
+ceiling is 1 RTT (80 ms) on a ~3,000 ms test: ~3% even then.
