@@ -148,6 +148,27 @@ PROGRAMS, isHandle, and (new) a session TWIN REGISTRY:
   miss the mutation), so twin rebinding is OPT-IN PER CLASS in the app port, declared
   where the twin registry is built.
 
+### Crossing parity without twins (measured expectation, 2026-07-07)
+
+Vikunja's store chains call SUBCLASS instances (new TaskService()), which the
+correctness guard leaves unstamped — their dyn parks dispatch at home. Per method:
+one ship-out + one park-home = one round trip, exactly the fetch arm's exec round
+trip. So WITHOUT twins the comparison run should show crossing/wall PARITY on store
+chains (no regression — the §6 profile simply can't win here), and the whole
+wall-time case for this app rides on the TWIN registry:
+- app patch stamps the twinned subclasses (Cls.prototype.__tierless_cls) so handles
+  carry their real class;
+- a server-only twins module constructs THEIR service classes per session (fetcher
+  Node-guarded: axios.getAdapter('xhr') behind typeof XMLHttpRequest; window.API_URL /
+  localStorage.getItem(token) shimmed per session — single-session-safe for the
+  measurement harness, a real lease design for production);
+- gateway session() returns twins from it (TIERLESS_TWINS -> module path), so an
+  N-call chain settles N methods server-side in ONE crossing with their own
+  interceptors — the interceptor wall solved by construction.
+Divergence audit before enabling a class: compiled store flows must read only
+RETURN VALUES of twinned calls (loadTasks/update/toggleFavorite do; anything reading
+instance state after a call stays untwinned).
+
 ## Slice-3 wall, found early: interceptor semantics for calls 2..N
 
 The fetch arm runs the app's request-interceptor chain browser-side per request
