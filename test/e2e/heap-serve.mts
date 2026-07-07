@@ -263,6 +263,28 @@ async function wsPair(): Promise<[import("tierless/transport").Peer, import("tie
   conn.close(); app.close();
 }
 
+// ===== Part 9: a DROPPED socket settles the session and releases the heap ==================
+// The peer rejects every in-flight request when its port closes, so a session whose other
+// side vanishes mid-flight fails with a clear error instead of hanging forever — and the
+// failure path runs the same release as success, freeing the continuation's excised masters.
+{
+  const wss = new WebSocketServer({ port: 0 });
+  await new Promise<void>((r) => wss.on("listening", r));
+  const serverPeerP = new Promise<any>((res) => wss.on("connection", (ws: any) => res(makePeer(wsPort(ws)))));
+  const clientWs = new WebSocket(`ws://localhost:${wss.address().port}`);
+  clientWs.on("message", () => clientWs.close());                  // a peer that dies on first contact, mid-request
+  await new Promise<void>((r, j) => { clientWs.on("open", () => r()); clientWs.on("error", j); });
+  const serverPeer = await serverPeerP;
+
+  const coh = makeCoherence("server");
+  const host = makeHost({ bundle, tier: "server", exec: apiExec, coherence: coh });
+  coh.serve(serverPeer);
+  const outcome = await host.run(serverPeer, "Report").then(() => "resolved", (e: any) => String(e && e.message));
+  check("a session whose peer dropped mid-flight settles with a clear error (no hang)", outcome.includes("connection closed"), `(got: ${outcome.slice(0, 70)})`);
+  check("the failed session's excised masters were released all the same", coh.tier.heap.objs.size === 0);
+  wss.close();
+}
+
 console.log(ok()
   ? "PASS — the full §5 heap is wired into the real serving path: excision, deref-over-socket, CAS write-back in place, byte-bounded pinned cache, per-continuation owner-heap release, per-bundle gating on mixed endpoints — all through makeHost/serveApp/connect"
   : "FAIL");
