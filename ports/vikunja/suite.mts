@@ -67,7 +67,9 @@ if (RTT) {
 // spawn, NOT execFileSync: the delay relays run in THIS process, and a synchronous
 // child would block the event loop — the proxies would bind but never accept, and
 // every shaped connection dies ECONNREFUSED.
-const suite = spawn("corepack", ["pnpm", "exec", "playwright", "test", "--reporter=line", ...(RTT ? ["--timeout=90000"] : [])], {
+// TIERLESS_SPEC narrows to matching spec files — for targeted experiments (a single
+// chain-bearing spec under RTT), never for the numbers of record.
+const suite = spawn("corepack", ["pnpm", "exec", "playwright", "test", "--reporter=line", ...(RTT ? ["--timeout=90000"] : []), ...(process.env.TIERLESS_SPEC ? [process.env.TIERLESS_SPEC] : [])], {
   cwd: path.join(SRC, "frontend"),
   stdio: "inherit",
   env: {
