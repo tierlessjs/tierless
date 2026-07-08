@@ -14,10 +14,11 @@ app-owned frame before host machinery.
 
 ## The diff to their app
 
-    patches/0005-tierless-axios-adapter.patch   fetcher.ts: +12 lines (the adapter)
+    patches/0005-tierless-axios-adapter.patch   fetcher.ts: +14 lines (the adapter, Node-guarded)
     patches/0006-compile-services.patch         vite.config.ts: +2 lines (plugin entry)
+    patches/0007-session-twins.patch            2 new files (~50 lines): the audited twin list
 
-plus `pnpm add tierless` (a dependency install, not a diff). What the two patches do:
+plus `pnpm add tierless` (a dependency install, not a diff). What the patches do:
 
 1. **The adapter** replaces axios's XHR bottom with tierless resource requests.
    Everything above it — their interceptor chains, snake-case conversion, auth
@@ -25,10 +26,14 @@ plus `pnpm add tierless` (a dependency install, not a diff). What the two patche
    can honor (blob/stream responses, FormData/Blob bodies, progress callbacks) fall
    through to axios's own XHR adapter, decided per request by declared semantics plus
    an ownership scan, never by serialization failure alone.
-2. **The plugin line** names `src/services/abstractService.ts` for compilation. Its
-   HTTP methods (getAll/get/create/update/delete...) become serializable state
-   machines; all ~40 service classes inherit them, so every service call site in the
-   app can park at the session socket. On the server a TWIN of their axios instance
+2. **The plugin line** names `src/services/abstractService.ts` and three store files
+   for compilation. The service HTTP methods (getAll/get/create/update/delete...)
+   become serializable state machines; all ~40 service classes inherit them, so every
+   service call site in the app can park at the session socket. Compiled STORE
+   functions suspend on method calls (dynamic call parks), so a store chain can
+   migrate whole. **Patch 0007** declares the classes safe to run as session TWINS
+   server-side (real instances, real interceptors; their state changes ride the reply
+   home so the browser instance reads its writes). On the server a TWIN of their axios instance
    (same call surface, fetch-backed, session token attached per connection) services
    `http.*` requests against the backend over localhost. Authority travels with the
    request; the gateway holds no credentials.
@@ -83,26 +88,25 @@ structural step, not part of these numbers.
 
 ## Timing — measured under real injected RTT, and honest about it
 
-`TIERLESS_RTT_MS=80 node ports/vikunja/suite.mts [--baseline]` routes the browser
-through TCP delay relays: real 80 ms RTT on HTTP, CORS preflights, AND the
-websocket — the case devtools throttling can't shape. Per-test wall time is then
-elapsed time under that RTT, not a model.
+`TIERLESS_RTT_MS=20 node ports/vikunja/suite.mts [--baseline]` routes the browser
+through TCP delay relays (TCP_NODELAY set — Nagle + delayed ACK otherwise reads as
+~40 ms per small ws frame and once masqueraded as a ported regression). RTT 20 ms
+models residential latency; TIERLESS_BPS adds link bandwidth (1 Gbps: measured zero
+effect at this app's payload sizes, results/rtt20-bps1g-*.jsonl).
 
-Measured 2026-07-07 (results/rtt80-*.jsonl; 195/195 pass parity — the extra
-exclusion vs the unshaped runs is an attachment-paste spec that fails under RTT
-on BOTH arms):
+Measured 2026-07-07 (results/rtt20-*.jsonl; full parity, exclusions identical on
+stock): fetch arm 8.5 -> 8.5 min (parity); with the locked profile shipping the
+app's ONE stable chain and session twins serving it (results/rtt20-chains-ported
+.jsonl): 8.5 -> 8.3 min, median per-test 2% less. Per-test decomposition
+(ports/report-time.mts, dur@RTT - dur@RTT0): at 20 ms RTT the network-wait pool is
+just 7% of suite wall time — the honest ceiling for ANY flow rewrite here.
 
-    total wall time    13.1 min -> 12.7 min   (3% less)
-    median per test    1% less
-    trips              12% fewer suite-wide · 22% fewer median (covered subset)
-
-No wall-time win is claimed. Every compiled service call is still one crossing,
-so it pays the same RTT its XHR did; what disappears (preflights, some dependent
-refetches) is real but small against test runtimes that wait on UI, not just
-network. The trip reduction is banked latency headroom: it becomes wall time
-when the §6 migrate arm batches a method's request chain into one crossing.
-Byte columns in shaped runs are CDP-level and not quotable — the truth files
-above are the byte record.
+The chain itself, measured with repetition (5 runs/arm, medians): the migrating
+test folds one crossing (wsOut 7 -> 6) and saves 52 ms; non-migrating tests are
+unchanged. One RTT per chain occurrence, linear in RTT — real, small at
+residential latency, and the census is honest: their suite has exactly one stable
+chain (project$toggleSavedFilterFavorite), found only once trajectory stats were
+conditioned on the run's ENTRY (a shared touch site had drowned it).
 
 ## Correctness — their own suite as the judge
 
