@@ -167,3 +167,37 @@ exec = the fetch arm's two execs, round trip for round trip. The measurement
 confirms the analysis empirically. The chain becomes a win only with the
 session-twin registry (the real subclass constructed server-side) — and the
 ceiling is 1 RTT (80 ms) on a ~3,000 ms test: ~3% even then.
+
+## Chains and twins, completed and measured (2026-07-07)
+
+The full §6 pipeline ran end to end on the stores-compiled build: profiling run
+(4,997 records, 3,886 complete method runs) -> entry-conditioned profile ->
+locked comparison. Three findings, in causal order:
+
+1. **Entry conditioning was the missing granularity.** The favorite-toggle chain
+   traces perfectly (getM -> update in one run), but suffix stats keyed by the
+   touching frame's site drown it: getM@8 is shared by ~204 single-touch callers
+   (1.5% stability -> correctly refused). Keyed by (run entry, site), the chain
+   is 100% stable and ships: `project$toggleSavedFilterFavorite>getM@8`. The
+   earlier "nothing stable to batch" verdicts were this blindness, not the app.
+2. **That is the app's ONE stable chain.** Their suite drives every other
+   multi-call flow through reactive composition or non-compiling store functions.
+   The site list is the honest census.
+3. **The chain's win, measured with repetition** (5 runs per arm, medians,
+   RTT 20): the migrating test saves 52 ms (2,506 -> 2,454 ms; wsOut 7 -> 6 —
+   one crossing folded), served by a SavedFilterService session twin whose
+   state changes ride the reply home (write-back; browser instance reads its
+   writes). Non-migrating tests: +3/+24 ms — shipping never regresses. At the
+   ceiling this is one RTT per chain occurrence: real, small at residential
+   latency, linear in RTT.
+
+Twin audit outcome: TaskService, LabelTaskService, ProjectService twin directly;
+SavedFilterService's thin class twins with its browser-bound co-module imports
+stubbed (vite twinsStubs — loud runtime error if a twin path ever calls one).
+
+Instrument corrections folded into all of the above: TCP_NODELAY on the shaped
+relay AND the gateway socket (Nagle + delayed ACK read as ~40 ms/message and
+was most of an apparent ported regression on request-heavy specs); per-test
+time decomposition (report-time.mts) separating network waits from the
+render/Playwright floor; TIERLESS_BPS bandwidth modeling (1 Gbps: measured
+zero effect at this app's payload sizes).
