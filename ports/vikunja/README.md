@@ -95,11 +95,14 @@ models residential latency; TIERLESS_BPS adds link bandwidth (1 Gbps: measured z
 effect at this app's payload sizes, results/rtt20-bps1g-*.jsonl).
 
 Measured 2026-07-07 (results/rtt20-*.jsonl; full parity, exclusions identical on
-stock): fetch arm 8.5 -> 8.5 min (parity); with the locked profile shipping the
-app's ONE stable chain and session twins serving it (results/rtt20-chains-ported
-.jsonl): 8.5 -> 8.3 min, median per-test 2% less. Per-test decomposition
-(ports/report-time.mts, dur@RTT - dur@RTT0): at 20 ms RTT the network-wait pool is
-just 7% of suite wall time — the honest ceiling for ANY flow rewrite here.
+stock): wall clock 8.5 -> 8.3 min with the locked profile shipping the app's ONE
+stable chain and session twins serving it (results/rtt20-chains-ported.jsonl).
+The network-wait decomposition (dur@RTT20 minus a PLAIN unshaped floor run,
+results/floor-*.jsonl — wire-truth runs are NOT valid floors, their counting
+relay inflates request-heavy tests): TOTAL network wait 77.0s stock vs 77.5s
+ported — parity within single-run noise — with the per-test MEDIAN 471 -> 421 ms
+(11% less). The pool is 15% of suite wall time at 20 ms RTT: the ceiling any
+flow rewrite has to work with.
 
 The chain itself, measured with repetition (5 runs/arm, medians): the migrating
 test folds one crossing (wsOut 7 -> 6) and saves 52 ms; non-migrating tests are
