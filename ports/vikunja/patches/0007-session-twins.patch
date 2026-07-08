@@ -1,0 +1,38 @@
+--- /dev/null
++++ b/frontend/src/tierlessTwins.ts
+@@ -0,0 +1,35 @@
++// Session twins (tierless, docs/migrate-arm.md): the classes a migrated store chain may
++// call server-side, as REAL instances of the app's own services — their interceptor
++// chains (auth header, casing) run for real, and each call's instance-state changes ride
++// the reply home (twin write-back), so the browser instance reads its writes.
++//
++// One module, two tiers: imported by the browser build, it stamps each class's identity
++// onto its prototype (what a §5 handle carries so the gateway can dispatch); bundled for
++// the gateway (dist-tierless/twins.server.mjs), makeTwins() constructs them per session.
++//
++// Opt-in list. A class belongs here only if its instances are safe to twin: constructed
++// per call site or read via return values / write-back-covered fields. Audited for this
++// app's compiled store flows.
++import TaskService from '@/services/task'
++import LabelTaskService from '@/services/labelTask'
++import SavedFilterService from '@/services/savedFilter'
++import ProjectService from '@/services/project'
++
++const TWIN_CLASSES: Record<string, new () => object> = {TaskService, LabelTaskService, SavedFilterService, ProjectService}
++// eslint-disable-next-line @typescript-eslint/no-explicit-any
++for (const [name, C] of Object.entries(TWIN_CLASSES)) (C.prototype as any).__tierless_cls = name
++
++export function makeTwins({token, apiUrl}: {token: string | null; apiUrl: string}): (cls: string) => object | undefined {
++	if (typeof window === 'undefined') {
++		// the services read window.API_URL and localStorage-held auth at REQUEST time —
++		// shim both for this process. Single-session-safe (the measurement harness runs
++		// one authenticated session at a time); a multi-tenant gateway needs per-session
++		// leases here instead of process globals.
++		// eslint-disable-next-line @typescript-eslint/no-explicit-any
++		;(globalThis as any).window = {API_URL: apiUrl}
++		// eslint-disable-next-line @typescript-eslint/no-explicit-any
++		;(globalThis as any).localStorage = {getItem: (k: string) => (k === 'token' ? token : null), setItem() {}, removeItem() {}}
++	}
++	const twins: Record<string, object> = {}
++	return (cls: string) => (TWIN_CLASSES[cls] ? (twins[cls] ??= new TWIN_CLASSES[cls]()) : undefined)
++}

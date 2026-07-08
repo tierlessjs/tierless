@@ -220,8 +220,9 @@ check("store flow, migrate: all three http calls served on the SERVER", served.j
 check("store flow, migrate: the self-writing tail still hit the REAL instance at home", svc2.total === 42, String(svc2.total));
 
 // migrate WITH a session twin: the server resolves the class-stamped handle to a LOCAL
-// instance — the method runs for real over there (its own state, its own interceptors);
-// the browser instance is deliberately untouched (twin rebinding is opt-in per class).
+// instance — the method runs for real over there (its own state, its own interceptors) —
+// and the twin's state changes ride the reply home, applied to the LIVE browser instance
+// before the awaiting code resumes: read-your-writes, no extra crossing.
 reset();
 const twinSvc = new mod.Svc({ get: (url: string) => serverExec({ name: "http.get", args: [url] }) });   // the twin's OWN http, server-local
 const shostT = makeHost({ bundle, tier: "server", exec: serverExec as never, twins: (cls: string) => (cls === "Svc" ? twinSvc : undefined) });
@@ -230,7 +231,7 @@ shostT.answer(makePeer(sp2));
 const svc3 = new mod.Svc({});
 const f3 = await bhost.runLocal(makePeer(bp2), "Store$flow", [new mod.Store(svc3), 7], migrate);
 check("store flow, twin: one crossing, value correct", f3 === "got:n7:3" && counts.resume === 1 && !counts.exec, JSON.stringify({ counts, f3 }));
-check("store flow, twin: the TWIN's state mutated, the browser instance untouched", twinSvc.total === 42 && svc3.total === 0, JSON.stringify({ twin: twinSvc.total, browser: svc3.total }));
+check("store flow, twin: write-back — the LIVE browser instance reads its writes", twinSvc.total === 42 && svc3.total === 42, JSON.stringify({ twin: twinSvc.total, browser: svc3.total }));
 
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
 console.log("\na chain migrates in one crossing; the stop rule, identity, and unwind hold; the profile decides");

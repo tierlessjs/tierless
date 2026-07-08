@@ -18,7 +18,8 @@
   },
   "patches": [
     "patches/0005-tierless-axios-adapter.patch",
-    "patches/0006-compile-services.patch"
+    "patches/0006-compile-services.patch",
+    "patches/0007-session-twins.patch"
   ],
   "testPatches": [
     "patches/0003-measure-fixture.patch",

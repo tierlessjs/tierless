@@ -119,9 +119,9 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
   };
   // A traced stack's flag is captured BEFORE pumping: a finished pump has popped every
   // frame, so the end marker needs the flag held aside. Untraced stacks pump exactly as before.
-  const runPump = async (peer: Peer | undefined, stack: Frame[], incoming: ResourceRequest | null = null): Promise<PumpResult> => {
+  const runPump = async (peer: Peer | undefined, stack: Frame[], incoming: ResourceRequest | null = null, sink?: { twinDelta(d: import("./types.mjs").TwinDelta): void }): Promise<PumpResult> => {
     const flag = rec ? rec.flagOf(stack) : null;
-    const res = await pump(stack, ownsHere, execFor(peer, stack), incoming);
+    const res = await pump(stack, ownsHere, execFor(peer, stack), incoming, sink);
     if (res.done) rec?.end(flag, "done");
     return res;
   };
@@ -164,10 +164,16 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
   // payload's sid tags any locals this step excises, released by the starter's completion.
   async function step(peer: Peer | undefined, sid: string, stack: Frame[], incoming: ResourceRequest | null): Promise<{ obj: HostReply; bin?: Uint8Array }> {
     const flag = rec ? rec.flagOf(stack) : null;
+    // twin calls' state changes ride the reply home (docs/migrate-arm.md "twins and
+    // correctness"): the home tier applies them to the live instances before the
+    // awaiting code resumes — read-your-writes without an extra crossing
+    const twinDeltas: import("./types.mjs").TwinDelta[] = [];
+    const sink = twins ? { twinDelta: (d: import("./types.mjs").TwinDelta) => twinDeltas.push(d) } : undefined;
+    const carry = (): { twinDeltas?: import("./types.mjs").TwinDelta[] } => (twinDeltas.length ? { twinDeltas } : {});
     try {
-      const res = await runPump(peer, stack, incoming);
-      if (res.done) return { obj: { type: "done", value: res.value } };
-      return { obj: { type: "suspend" }, bin: ship(sid, res) };
+      const res = await runPump(peer, stack, incoming, sink);
+      if (res.done) return { obj: { type: "done", value: res.value, ...carry() } };
+      return { obj: { type: "suspend", ...carry() }, bin: ship(sid, res) };
     } catch (e: any) {
       rec?.end(flag, "error");
       return { obj: { type: "error", message: String((e && e.message) || e) } };
@@ -264,6 +270,14 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
           const enc = (): Uint8Array => encodeWireBinary(stack, req, { tier: heapTier!, excise: ownedUnit });
           const reply = await peer.request({ type: "resume", sid, ...meta }, rec ? rec.ship(stack, req, enc, "migrate") : enc());
           if (reply.obj.type === "error") throw new Error(reply.obj.message);
+          // twin write-back (docs/migrate-arm.md "twins and correctness"): apply the
+          // fields the session twins mutated to OUR live instances BEFORE the awaiting
+          // code resumes — it reads its writes exactly as if the method ran at home
+          for (const d of (reply.obj.twinDeltas as import("./types.mjs").TwinDelta[] | undefined) ?? []) {
+            if (d.owner !== tier) continue;
+            const live = heapTier.heapGet(d.id);
+            if (live && typeof live === "object") Object.assign(live, d.fields);
+          }
           if (reply.obj.type === "done") return reply.obj.value;
           const back = decodeWireBinary(reply.bin!, { tier: heapTier });
           stack = back.stack as Frame[];
