@@ -214,7 +214,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
             // (trace.mts methodMigrate). Head-sampled like everything else; zero cost untraced.
             const tid = rec?.spawn(entry, opts.trace);
             if (tid)
-                rec.stamp(stack, tid);
+                rec.stamp(stack, tid, entry); // entry conditions the method-boundary trajectory stats
             const flag = rec ? rec.flagOf(stack) : null;
             let request = null;
             let carry = null;
@@ -267,7 +267,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                 // can serve. Errors the compiled code catches unwind over there; only uncaught
                 // ones surface here, exactly as they would have escaped the local pump.
                 const top = stack[stack.length - 1];
-                if (migrate && migrate(request, { fn: top.fn, pc: top.pc })) {
+                if (migrate && migrate(request, { fn: top.fn, pc: top.pc, entry })) {
                     if (!heapTier) {
                         const objs = new Map();
                         let n = 0;

@@ -102,16 +102,19 @@ export function makeRecorder({ rate = 0, force = [], sink }) {
             const id = mintTraceId();
             return explicit === true || forced.has(entry) || sampleTrace(id, rate) ? id : null; // sampled out: no field at all — 0 wire bytes
         },
-        stamp(stack, id) {
+        stamp(stack, id, entry) {
+            // entry rides the flag (and every record): the METHOD boundary's trajectory stats
+            // are conditioned on the run's entry — a touch site shared by many callers would
+            // otherwise drown a chain-bearing caller in single-touch occurrences
             if (stack.length)
-                stack[0].__trace = { id, hop: 0, seq: 0, on: 1 };
+                stack[0].__trace = { id, hop: 0, seq: 0, on: 1, ...(entry ? { entry } : {}) };
         },
         res(stack, req, result) {
             const f = flagOf(stack);
             if (!f)
                 return;
             const { fn, pc } = top(stack);
-            emit({ t: "res", id: f.id, hop: f.hop, seq: f.seq++, fn, pc, resource: req.name, tier: req.tier, argFeatures: argFeatures(req.args), resultBytes: resultBytes(result) });
+            emit({ t: "res", id: f.id, hop: f.hop, seq: f.seq++, fn, pc, resource: req.name, tier: req.tier, argFeatures: argFeatures(req.args), resultBytes: resultBytes(result), ...(f.entry ? { entry: f.entry } : {}) });
         },
         ship(stack, req, encode, choice) {
             const f = flagOf(stack);
@@ -140,6 +143,8 @@ export function memorySink() {
 }
 // ---------------------------------------------------------------- profile -------------
 export const siteKey = (fn, pc, resource) => fn + "|" + pc + "|" + resource;
+/** The method boundary's site: the same touch site, conditioned on the RUN's entry. */
+export const entrySiteKey = (entry, fn, pc, resource) => entry + ">" + siteKey(fn, pc, resource);
 // Derive the profile from raw records, offline. Size/variance models use every run —
 // truncated ones included, a partial run's sizes are real. Trajectory statistics use ONLY
 // complete runs (those with an "end" record): a truncated suffix is indistinguishable from
@@ -182,20 +187,29 @@ export function buildProfile(records, bundle) {
             continue; // trajectory statistics: complete runs only
         for (let i = 0; i < touches.length; i++) {
             const r = touches[i];
-            const s = site(siteKey(r.fn, r.pc, r.resource));
+            // suffix stats land under the aggregate site AND, when the run carries its entry,
+            // under the ENTRY-CONDITIONED site: a touch site shared by many callers (every
+            // service getM) would otherwise drown a chain-bearing caller's trajectory in
+            // single-touch occurrences — the method boundary decides per (entry, site).
+            const keys = [siteKey(r.fn, r.pc, r.resource)];
+            if (r.entry)
+                keys.push(entrySiteKey(r.entry, r.fn, r.pc, r.resource));
             const suffix = touches.slice(i + 1).filter((x) => x.tier === r.tier); // future SAME-tier resources
             const sig = suffix.map((x) => siteKey(x.fn, x.pc, x.resource)).join(">");
-            const e = (s.suffixes[sig] ||= { n: 0, priced: 0, fetchSum: 0, fetchable: true });
-            if (suffix.every((x) => x.resultBytes >= 0)) { // a fully fetchable occurrence prices the suffix
-                const sum = suffix.reduce((acc, x) => acc + x.resultBytes, 0);
-                e.fetchSum += (sum - e.fetchSum) / (e.priced + 1);
-                e.priced++;
+            for (const k of keys) {
+                const s = site(k);
+                const e = (s.suffixes[sig] ||= { n: 0, priced: 0, fetchSum: 0, fetchable: true });
+                if (suffix.every((x) => x.resultBytes >= 0)) { // a fully fetchable occurrence prices the suffix
+                    const sum = suffix.reduce((acc, x) => acc + x.resultBytes, 0);
+                    e.fetchSum += (sum - e.fetchSum) / (e.priced + 1);
+                    e.priced++;
+                }
+                else {
+                    e.fetchable = false; // one unserializable result: fetch cannot traverse this suffix
+                }
+                e.n++; // shape statistics (modal/stability) count every occurrence
+                s.complete++;
             }
-            else {
-                e.fetchable = false; // one unserializable result: fetch cannot traverse this suffix
-            }
-            e.n++; // shape statistics (modal/stability) count every occurrence
-            s.complete++;
         }
     }
     for (const s of Object.values(sites)) {
@@ -263,7 +277,10 @@ export function methodMigrate(profile, { stability = 0.9, minSuffix = 1 } = {}) 
     if (!profile)
         return () => false;
     return (req, site) => {
-        const s = profile.sites[siteKey(site.fn, site.pc, req.name)];
+        // prefer the ENTRY-CONDITIONED site: chains live in callers, and a shared touch
+        // site's aggregate stats can hide a caller whose runs chain 100% of the time
+        const s = (site.entry ? profile.sites[entrySiteKey(site.entry, site.fn, site.pc, req.name)] : undefined)
+            ?? profile.sites[siteKey(site.fn, site.pc, req.name)];
         if (!s || s.modal === null || s.stability < stability)
             return false;
         return s.modal.split(">").filter(Boolean).length >= minSuffix;

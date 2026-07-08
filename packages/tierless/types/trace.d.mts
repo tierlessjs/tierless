@@ -6,6 +6,7 @@ export interface TraceFlag {
     hop: number;
     seq: number;
     on: 1;
+    entry?: string;
 }
 export type TraceRecord = 
 /** One resource touch (inline-served or the one that forced a crossing), with its result size. */
@@ -20,6 +21,7 @@ export type TraceRecord =
     tier: string;
     argFeatures: string[];
     resultBytes: number;
+    entry?: string;
 }
 /** One crossing: the continuation shipped (or was priced) at this site. choice is present once a §6 driver decides. */
  | {
@@ -54,7 +56,7 @@ export interface Recorder {
     /** Stamp a root frame with a spawn decision's id (unconditional — the decision was spawn()'s). */
     stamp(stack: {
         [k: string]: unknown;
-    }[], id: string): void;
+    }[], id: string, entry?: string): void;
     flagOf(stack: {
         [k: string]: unknown;
     }[]): TraceFlag | null;
@@ -93,6 +95,8 @@ export declare function memorySink(): {
     records: TraceRecord[];
 };
 export declare const siteKey: (fn: string, pc: number, resource: string) => string;
+/** The method boundary's site: the same touch site, conditioned on the RUN's entry. */
+export declare const entrySiteKey: (entry: string, fn: string, pc: number, resource: string) => string;
 interface SizeBucket {
     n: number;
     mean: number;
@@ -169,5 +173,6 @@ export declare function methodMigrate(profile: Profile | null, { stability, minS
 }, site: {
     fn: string;
     pc: number;
+    entry?: string;
 }) => boolean;
 export {};

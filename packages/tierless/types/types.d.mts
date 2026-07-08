@@ -113,6 +113,7 @@ export interface Host {
         migrate?: (req: ResourceRequest, site: {
             fn: string;
             pc: number;
+            entry?: string;
         }) => boolean;
         trace?: boolean;
     }): Promise<unknown>;

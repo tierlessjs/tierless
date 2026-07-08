@@ -53,14 +53,14 @@ export interface Connection {
   /** Run entry(...args) HERE; foreign resources are fetched over the session (the frame
    *  never ships — the compiled-class-method path, see bindMethods). opts.exec serves
    *  pinned requests on this tier; opts.pins adds the resource family's declared pins. */
-  runLocal(entry: string, args?: unknown[], module?: string, opts?: { exec?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => unknown | Promise<unknown>; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => import("./types.mjs").ResourceRequest | null; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number }) => boolean }): Promise<unknown>;
+  runLocal(entry: string, args?: unknown[], module?: string, opts?: { exec?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => unknown | Promise<unknown>; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => import("./types.mjs").ResourceRequest | null; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean }): Promise<unknown>;
   close(): void;
 }
 
 // The app-wide §6 method rule + the profiling recorder options, set by connect() from
 // ConnectOpts and consulted by every bindMethods stub. Mutable refs: a profile that
 // arrives after the first interaction upgrades later calls; before it, cold = fetch.
-let appMigrate: ((req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number }) => boolean) | null = null;
+let appMigrate: ((req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean) | null = null;
 let appTrace: { rate: number; sink: (r: unknown) => void } | null = null;
 const appHashes: string[] = [];   // per-module BUNDLE_HASHes of the merged world, sorted — the profile validity key
 export const mergedAppHash = (): string => "merged:" + [...appHashes].sort().join("+");
@@ -122,7 +122,7 @@ export function connect({ url, exec, bundle, tier = "browser", heap = true,
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
       return h.call(peer, entry, args);
     },
-    runLocal: async (entry: string, args: unknown[] = [], module: string = "", opts?: { exec?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => unknown | Promise<unknown>; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => import("./types.mjs").ResourceRequest | null; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number }) => boolean }): Promise<unknown> => {
+    runLocal: async (entry: string, args: unknown[] = [], module: string = "", opts?: { exec?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => unknown | Promise<unknown>; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => import("./types.mjs").ResourceRequest | null; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean }): Promise<unknown> => {
       await ready;
       const h = hosts.get(module || "");
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
@@ -170,7 +170,7 @@ let appUnwindSet = false;
  *  the shared connection. Methods run on the FETCH path: the frame — whose arg 0 is the
  *  live instance, often a framework proxy — stays in the browser and mutates the real
  *  object; only resource requests and results cross. Call once per compiled module. */
-export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (prog: string, self: unknown, args: unknown[]) => Promise<unknown>) => void }, { module = "", migrate }: { module?: string; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number }) => boolean } = {}): void {
+export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (prog: string, self: unknown, args: unknown[]) => Promise<unknown>) => void }, { module = "", migrate }: { module?: string; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean } = {}): void {
   if (typeof bundle.__bindTierlessMethods !== "function") throw new Error("tierless: bundle has no compiled class methods (rebuild with a compiler that emits __bindTierlessMethods)");
   for (const [k, v] of Object.entries(bundle.PROGRAMS)) {
     if (APP_MERGED.PROGRAMS[k] && APP_MERGED.PROGRAMS[k] !== v) console.warn("tierless: program name collision across compiled modules: " + k);

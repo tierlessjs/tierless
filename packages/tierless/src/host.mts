@@ -219,7 +219,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
       // map/exec receive the PARKED TOP FRAME too: with nested machines (a store method
       // calling service methods), the instance that owns a park is that frame's args[0],
       // not the run's own arg 0 — interceptor chains and pinned fallbacks must follow it.
-      const { exec: overrideExec, pins, map, migrate } = opts as { exec?: (req: ResourceRequest, frame?: Frame) => unknown; pins?: (req: ResourceRequest) => boolean; map?: (req: ResourceRequest, frame?: Frame) => ResourceRequest; migrate?: (req: ResourceRequest, site: { fn: string; pc: number }) => boolean };
+      const { exec: overrideExec, pins, map, migrate } = opts as { exec?: (req: ResourceRequest, frame?: Frame) => unknown; pins?: (req: ResourceRequest) => boolean; map?: (req: ResourceRequest, frame?: Frame) => ResourceRequest; migrate?: (req: ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean };
       const baseExec = execOn(peer);
       const localExec: Exec = overrideExec ? (r) => overrideExec(r, stack[stack.length - 1]) : baseExec;
       const sid = newSid();
@@ -228,7 +228,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
       // site — the records a PROFILING run turns into the method-boundary migrate profile
       // (trace.mts methodMigrate). Head-sampled like everything else; zero cost untraced.
       const tid = rec?.spawn(entry, (opts as { trace?: boolean }).trace);
-      if (tid) rec!.stamp(stack, tid);
+      if (tid) rec!.stamp(stack, tid, entry);   // entry conditions the method-boundary trajectory stats
       const flag = rec ? rec.flagOf(stack) : null;
       let request: ResourceRequest | null = null;
       let carry: { value: unknown } | { error: unknown } | null = null;
@@ -265,7 +265,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
         // can serve. Errors the compiled code catches unwind over there; only uncaught
         // ones surface here, exactly as they would have escaped the local pump.
         const top = stack[stack.length - 1];
-        if (migrate && migrate(request, { fn: top.fn, pc: top.pc })) {
+        if (migrate && migrate(request, { fn: top.fn, pc: top.pc, entry })) {
           if (!heapTier) { const objs = new Map<string, unknown>(); let n = 0; heapTier = { id: tier, heapPut: (v) => { const k = "l" + n++; objs.set(k, v); return k; }, heapGet: (hid) => objs.get(hid) }; }
           const enc = (): Uint8Array => encodeWireBinary(stack, req, { tier: heapTier!, excise: ownedUnit });
           const reply = await peer.request({ type: "resume", sid, ...meta }, rec ? rec.ship(stack, req, enc, "migrate") : enc());

@@ -33,6 +33,7 @@ export interface Connection {
         migrate?: (req: import("./types.mjs").ResourceRequest, site: {
             fn: string;
             pc: number;
+            entry?: string;
         }) => boolean;
     }): Promise<unknown>;
     close(): void;
@@ -56,5 +57,6 @@ export declare function bindMethods(bundle: Bundle & {
     migrate?: (req: import("./types.mjs").ResourceRequest, site: {
         fn: string;
         pc: number;
+        entry?: string;
     }) => boolean;
 }): void;
