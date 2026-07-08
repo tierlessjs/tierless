@@ -18,7 +18,7 @@
 +export {}
 --- /dev/null
 +++ b/frontend/src/tierlessTwins.ts
-@@ -0,0 +1,37 @@
+@@ -0,0 +1,39 @@
 +// Session twins (tierless, docs/migrate-arm.md): the classes a migrated store chain may
 +// call server-side, as REAL instances of the app's own services — their interceptor
 +// chains (auth header, casing) run for real, and each call's instance-state changes ride
@@ -30,15 +30,17 @@
 +//
 +// Opt-in list. A class belongs here only if its instances are safe to twin (constructed
 +// per call site or read via return values / write-back-covered fields) AND its module
-+// loads in Node. Audited for this app's compiled store flows. SavedFilterService is
-+// REJECTED by that audit: its module mixes the class with router/i18n/store composables
-+// — a browser-bound graph — so the saved-filter chain keeps crossing parity.
++// loads in Node. Audited for this app's compiled store flows. SavedFilterService's
++// MODULE mixes the class (thin: paths + modelFactory) with browser-bound composables the
++// twin never calls — the twins bundle stubs those imports (vite twinsStubs), and any
++// twin-path call into a stub is a loud runtime error rather than silent wrongness.
 +import '@/tierlessNodeShims'
 +import TaskService from '@/services/task'
 +import LabelTaskService from '@/services/labelTask'
 +import ProjectService from '@/services/project'
++import SavedFilterService from '@/services/savedFilter'
 +
-+const TWIN_CLASSES: Record<string, new () => object> = {TaskService, LabelTaskService, ProjectService}
++const TWIN_CLASSES: Record<string, new () => object> = {TaskService, LabelTaskService, ProjectService, SavedFilterService}
 +// eslint-disable-next-line @typescript-eslint/no-explicit-any
 +for (const [name, C] of Object.entries(TWIN_CLASSES)) (C.prototype as any).__tierless_cls = name
 +

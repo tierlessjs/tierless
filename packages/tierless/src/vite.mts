@@ -105,6 +105,11 @@ export interface TierlessPluginOptions {
    *  per session — a migrated chain then settles its method calls server-side on REAL
    *  instances of the app's own classes, and their state changes ride the reply home. */
   twins?: string;
+  /** Module ids (as the app imports them, e.g. '@/message') to STUB in the twins server
+   *  bundle: browser-bound modules a twinned class's FILE drags in but its methods never
+   *  touch (toast helpers, the router). Stubbed as a runtime Proxy of no-op functions —
+   *  loading succeeds, and any twin-path call into one is a loud runtime error to audit. */
+  twinsStubs?: string[];
 }
 export interface TierlessPlugin {
   name: string;
@@ -142,6 +147,7 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
     apiUrl,                                // the existing backend restResources proxies to
     compile: compileList,                  // app files whose class methods compile (real-code port)
     twins: twinsModule,                    // app module exporting TWIN_CLASSES stamping + makeTwins (docs/migrate-arm.md)
+    twinsStubs = [],                       // browser-bound module ids stubbed in the twins bundle
   } = opts;
 
   const isTierlessModule = (code: string): boolean => DIRECTIVE.test(code);
@@ -288,11 +294,17 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
       if (twinsModule) {
         const esbuild = createRequire(path.join(root, "package.json"))("esbuild") as { buildSync: (opts: object) => void };
         twinsOut = "twins.server.mjs";
+        // stub file is CJS ON PURPOSE: named imports from CJS resolve at RUNTIME, so one
+        // Proxy covers every name a stubbed browser module exports
+        const stubPath = path.join(outDir, "__tl_twin_stub.cjs");
+        if (twinsStubs.length) writeFileSync(stubPath, "module.exports = new Proxy({}, { get: (_, k) => (k === \"__esModule\" ? undefined : () => { throw new Error(\"tierless twin stub called: \" + String(k) + \" — audit the twins list\"); }) });\n");
         esbuild.buildSync({
           entryPoints: [path.resolve(root, twinsModule)],
           bundle: true, format: "esm", platform: "node", target: "es2022",
           banner: { js: 'import { createRequire as __tlCreateRequire } from "node:module"; const require = __tlCreateRequire(import.meta.url);' },
-          outfile: path.join(outDir, twinsOut), alias: aliases, logLevel: "silent",
+          outfile: path.join(outDir, twinsOut),
+          alias: { ...aliases, ...Object.fromEntries(twinsStubs.map((id) => [id, stubPath])) },   // exact ids beat the '@' prefix: esbuild prefers the longest alias match
+          logLevel: "silent",
         });
       }
       writeFileSync(path.join(outDir, "tierless.manifest.json"),
