@@ -201,3 +201,19 @@ was most of an apparent ported regression on request-heavy specs); per-test
 time decomposition (report-time.mts) separating network waits from the
 render/Playwright floor; TIERLESS_BPS bandwidth modeling (1 Gbps: measured
 zero effect at this app's payload sizes).
+
+## The "request-heavy regression," diagnosed to closure (2026-07-07)
+
+Two causes, both now measured; no residual regression exists.
+1. REAL, FIXED: Nagle + delayed ACK on the gateway socket (~40 ms per small ws
+   frame, worst on 170-request tests; halved that family's net waits when fixed).
+2. INSTRUMENT: the date-display family is NON-STATIONARY across runs — its
+   workload depends on wall-clock time (relative-date rendering over now-seeded
+   tasks), drifting ±1 s/test between runs. Proof: the stock arm's own unshaped
+   floor ran ~1 s/test SLOWER than its shaped run. Every cross-run number for
+   this family — including the apparent ported regression — was drift.
+   Verdict by drift-neutral interleaved A/B (3 reps/arm, RTT 20, 18 tests):
+   stock median 35.5 s vs ported 35.4 s — parity (-0.3%).
+Standing rule: a test family whose workload depends on wall-clock time is only
+measurable WITHIN a time window (interleaved arms), never across runs; suite
+totals quoting this family across runs inherit +/-10 s of noise.
