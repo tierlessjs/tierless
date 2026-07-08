@@ -148,6 +148,16 @@ PROGRAMS, isHandle, and (new) a session TWIN REGISTRY:
   miss the mutation), so twin rebinding is OPT-IN PER CLASS in the app port, declared
   where the twin registry is built.
 
+### VALIDITY NOTE on the 2026-07-07 profile verdict (found 2026-07-07, later)
+
+The "3,916 runs, 3 chains, nothing stable to batch" verdict was profiled against a
+work-tree build whose vite.config predated the stores-compile patch (APPLIED-tracking
+drift: patch 0006 was updated in the repo but never re-applied to the tree — no store
+was compiled, and no dist-tierless was emitted at all). It is a valid profile of the
+SERVICE-METHOD surface only. Whether compiled STORE functions (toggleFavorite,
+createNewTask, kanban flows) show stable chains is unmeasured until the rebuild with
+stores + twins; the re-profiling on that build supersedes this verdict either way.
+
 ### Crossing parity without twins (measured expectation, 2026-07-07)
 
 Vikunja's store chains call SUBCLASS instances (new TaskService()), which the
