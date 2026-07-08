@@ -43,8 +43,21 @@ export interface ResourceRequest {
     args: unknown[];
 }
 export type Exec = (req: ResourceRequest) => unknown | Promise<unknown>;
+/** A twin call's observable effect on instance state (docs/migrate-arm.md): the fields
+ *  the twin mutated, addressed by the receiver HANDLE so the home tier can apply them to
+ *  the live instance before the awaiting code resumes — read-your-writes at method
+ *  return, carried on the crossing that was already coming home. Field values ride the
+ *  reply's JSON payload, so they must be JSON-safe (true of instance counters/flags;
+ *  a Date-valued field would come home as its ISO string). */
+export interface TwinDelta {
+    owner: string;
+    id: string;
+    fields: Record<string, unknown>;
+}
 /** Runs a continuation on the local tier until it finishes or parks at a foreign resource. */
-export type Pump = (stack: Frame[], ownsHere: (tier: string) => boolean, execHere: Exec, incoming?: ResourceRequest | null) => Promise<{
+export type Pump = (stack: Frame[], ownsHere: (tier: string) => boolean, execHere: Exec, incoming?: ResourceRequest | null, sink?: {
+    twinDelta(d: TwinDelta): void;
+}) => Promise<{
     done: true;
     value: unknown;
 } | {
@@ -65,8 +78,10 @@ export interface Peer {
 export type HostReply = {
     type: "done";
     value: unknown;
+    twinDeltas?: TwinDelta[];
 } | {
     type: "suspend";
+    twinDeltas?: TwinDelta[];
 } | {
     type: "error";
     message: string;

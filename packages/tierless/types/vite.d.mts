@@ -35,6 +35,12 @@ export interface TierlessPluginOptions {
      *  instance stay in the browser; `this.http.*` requests are served by the preview
      *  gateway's twin against apiUrl). No shadow modules, no route table. */
     compile?: string[];
+    /** App module exporting `makeTwins({token, apiUrl})` and stamping its TWIN_CLASSES
+     *  (docs/migrate-arm.md "twins and correctness"). Imported by the browser build for
+     *  the prototype stamps; esbuild-bundled for the gateway, which constructs the twins
+     *  per session — a migrated chain then settles its method calls server-side on REAL
+     *  instances of the app's own classes, and their state changes ride the reply home. */
+    twins?: string;
 }
 export interface TierlessPlugin {
     name: string;

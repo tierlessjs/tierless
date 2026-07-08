@@ -274,6 +274,9 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
           esbuild.buildSync({
             stdin: { contents: code, resolveDir, loader: "js", sourcefile: wireId },
             bundle: true, format: "esm", platform: "node", target: "es2022",
+            // a CJS dep in the graph (axios & co) compiles to require() calls — give the
+            // ESM output a real require for node builtins instead of esbuild's throw-shim
+            banner: { js: 'import { createRequire as __tlCreateRequire } from "node:module"; const require = __tlCreateRequire(import.meta.url);' },
             outfile: path.join(outDir, name), alias: aliases, logLevel: "silent",
           });
           modules[wireId] = name;
@@ -288,6 +291,7 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
         esbuild.buildSync({
           entryPoints: [path.resolve(root, twinsModule)],
           bundle: true, format: "esm", platform: "node", target: "es2022",
+          banner: { js: 'import { createRequire as __tlCreateRequire } from "node:module"; const require = __tlCreateRequire(import.meta.url);' },
           outfile: path.join(outDir, twinsOut), alias: aliases, logLevel: "silent",
         });
       }

@@ -47,7 +47,17 @@ export function makePump(bundle, { twins } = {}) {
                 throw err;
         }
     }
-    return async function pump(stack, ownsHere, execHere, incoming = null) {
+    // a twin call's observable state change, shipped home on the same crossing so the
+    // awaiting code reads its writes (docs/migrate-arm.md "twins and correctness"): own
+    // enumerable data fields, shallow-diffed around the call
+    const dataFields = (o) => {
+        const out = {};
+        for (const [k, v] of Object.entries(o))
+            if (typeof v !== "function")
+                out[k] = v;
+        return out;
+    };
+    return async function pump(stack, ownsHere, execHere, incoming = null, sink) {
         // an op:"home" incoming is the stop rule's park marker, not a resource — the value it
         // carried home is already in the frame's ret; pump straight on from it
         if (incoming && incoming.op !== "home")
@@ -86,8 +96,18 @@ export function makePump(bundle, { twins } = {}) {
                     const cls = recv.cls;
                     const twin = cls && twins ? twins(cls) : undefined;
                     const prog = cls && PROGRAMS[cls + "$" + r.member] ? cls + "$" + r.member : null;
-                    if (twin)
+                    if (twin) {
+                        const pre = dataFields(twin);
                         await settle(twin[r.member](...r.args));
+                        if (sink) {
+                            const fields = {};
+                            for (const [k, v] of Object.entries(dataFields(twin)))
+                                if (!Object.is(v, pre[k]))
+                                    fields[k] = v;
+                            if (Object.keys(fields).length)
+                                sink.twinDelta({ owner: recv.owner, id: recv.id, fields });
+                        }
+                    }
                     else if (prog)
                         stack.push({ fn: prog, pc: 0, args: [recv, ...r.args] });
                     else

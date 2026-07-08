@@ -71,6 +71,7 @@ export default function tierless(opts = {}) {
     workflows, // route pattern -> workflow module (adapting an existing app)
     apiUrl, // the existing backend restResources proxies to
     compile: compileList, // app files whose class methods compile (real-code port)
+    twins: twinsModule, // app module exporting TWIN_CLASSES stamping + makeTwins (docs/migrate-arm.md)
      } = opts;
     const isTierlessModule = (code) => DIRECTIVE.test(code);
     const hasCompile = !!(compileList && compileList.length);
@@ -91,6 +92,9 @@ export default function tierless(opts = {}) {
     // token (read at connect) as a query param the preview gateway forwards to the backend.
     const shimSource = () => {
         const configure = [
+            // the twins module's browser side effect stamps each twinned class's identity onto
+            // its prototype — what a §5 handle carries so the gateway can dispatch to a twin
+            ...(twinsModule ? [`import ${JSON.stringify("/" + twinsModule.replace(/^\//, ""))};`] : []),
             `import { configureTierless } from ${JSON.stringify(runtime)};`,
             // url is a thunk (token read at connect time, not page load); preconnect only when a
             // session already exists — the handshake then overlaps app bootstrap instead of
@@ -204,12 +208,28 @@ export default function tierless(opts = {}) {
                     esbuild.buildSync({
                         stdin: { contents: code, resolveDir, loader: "js", sourcefile: wireId },
                         bundle: true, format: "esm", platform: "node", target: "es2022",
+                        // a CJS dep in the graph (axios & co) compiles to require() calls — give the
+                        // ESM output a real require for node builtins instead of esbuild's throw-shim
+                        banner: { js: 'import { createRequire as __tlCreateRequire } from "node:module"; const require = __tlCreateRequire(import.meta.url);' },
                         outfile: path.join(outDir, name), alias: aliases, logLevel: "silent",
                     });
                     modules[wireId] = name;
                 }
             }
-            writeFileSync(path.join(outDir, "tierless.manifest.json"), JSON.stringify({ path: wsPath || WS_PATH, modules }, null, 2) + "\n");
+            // the twins module: the app's own service classes, Node-bundled so the gateway can
+            // construct per-session twin instances (docs/migrate-arm.md "twins and correctness")
+            let twinsOut;
+            if (twinsModule) {
+                const esbuild = createRequire(path.join(root, "package.json"))("esbuild");
+                twinsOut = "twins.server.mjs";
+                esbuild.buildSync({
+                    entryPoints: [path.resolve(root, twinsModule)],
+                    bundle: true, format: "esm", platform: "node", target: "es2022",
+                    banner: { js: 'import { createRequire as __tlCreateRequire } from "node:module"; const require = __tlCreateRequire(import.meta.url);' },
+                    outfile: path.join(outDir, twinsOut), alias: aliases, logLevel: "silent",
+                });
+            }
+            writeFileSync(path.join(outDir, "tierless.manifest.json"), JSON.stringify({ path: wsPath || WS_PATH, modules, ...(twinsOut ? { twins: twinsOut } : {}) }, null, 2) + "\n");
         },
         // ---- injected page glue: session config (+ the route shim when workflows are on) ----
         resolveId(id) { return (workflows || hasCompile) && (id === "tierless-shim" || id === SHIM_ID) ? SHIM_ID : undefined; },
@@ -318,11 +338,23 @@ export default function tierless(opts = {}) {
                     // the twin of the app's own axios instance: http.* from compiled class methods
                     const twin = httpResources(twinHttp(apiUrl, { token }));
                     const log = !!process.env.TIERLESS_LOG_EXEC;
+                    // session twin INSTANCES of the app's own service classes (manifest.twins):
+                    // a migrated chain's dynamic call parks settle on these, interceptors and all
+                    let twinReg;
+                    try {
+                        const manifest = JSON.parse(readFileSync(path.join(root, serverOutDir, "tierless.manifest.json"), "utf8"));
+                        if (manifest.twins) {
+                            const mod = await import(pathToFileURL(path.join(root, serverOutDir, manifest.twins)).href);
+                            if (typeof mod.makeTwins === "function")
+                                twinReg = mod.makeTwins({ token: token ?? null, apiUrl });
+                        }
+                    }
+                    catch { /* no twins bundle: chains dispatch home, correctness unchanged */ }
                     return { exec: (r) => {
                             if (log)
                                 console.log("[tierless exec]", r.name, JSON.stringify(r.args).slice(0, 3000));
                             return r.name.startsWith("http.") ? twin(r) : rest(r);
-                        } };
+                        }, ...(twinReg ? { twins: twinReg } : {}) };
                 },
             });
         },
