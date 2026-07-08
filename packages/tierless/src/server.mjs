@@ -87,6 +87,11 @@ export function attachTierless(httpServer, { bundle, tier = "server", session, p
     httpServer.on("upgrade", onUpgrade);
     wss.on("connection", async (ws, req) => {
         ws.on("error", () => { }); // a client socket error (reset, etc.) must not throw out of the emitter and crash the host
+        // the session multiplexes MANY small frames on one TCP stream — Nagle + the peer's
+        // delayed ACK would stall each one ~40 ms; browsers set NODELAY on their end, we
+        // must match on ours (this is a deployment property, not just a benchmark one)
+        if (ws._socket?.setNoDelay)
+            ws._socket.setNoDelay(true);
         if (wire && ws._socket)
             wire.track(ws._socket);
         try {

@@ -31,8 +31,9 @@ const PROFILE_RUN = !!process.env.TIERLESS_PROFILE_RUN;
 const PROFILE = process.env.TIERLESS_PROFILE || "";
 if (PROFILE_RUN && PROFILE) { console.error("pick one: TIERLESS_PROFILE_RUN (profiling) or TIERLESS_PROFILE (comparison)"); process.exit(2); }
 const TRACE_OUT = fileURLToPath(new URL(`../work/${VARIANT}/trace.jsonl`, import.meta.url));
+const BPS = Number(process.env.TIERLESS_BPS || 0);   // model link bandwidth (bits/s) on the shaped relays; 0 = unshaped
 const SRC = fileURLToPath(new URL(`../work/${VARIANT}/src/`, import.meta.url));
-const OUT = fileURLToPath(new URL(`../work/${VARIANT}/measure${RTT ? `-rtt${RTT}` : ""}.jsonl`, import.meta.url));
+const OUT = fileURLToPath(new URL(`../work/${VARIANT}/measure${RTT ? `-rtt${RTT}` : ""}${BPS ? `-bps${BPS}` : ""}.jsonl`, import.meta.url));
 
 // their CI injects window.TESTING=true into the BUILT index.html (test.yml, "Inject
 // testing flag"); the app gates test-only behavior on it and a dozen specs fail on any
@@ -60,15 +61,13 @@ if (TRUTH) {
   console.log("wire truth: browser api via counting relay :23456, counters :14990, ws bytes at /__tierless/wire");
 }
 if (RTT) {
-  delayProxy(14173, 4173, RTT / 2).unref();   // frontend origin (SPA + tierless ws)
-  delayProxy(13456, 3456, RTT / 2).unref();   // API origin (XHR + CORS preflights)
-  console.log(`RTT injection: ${RTT} ms via 127.0.0.1:14173 -> 4173, 127.0.0.1:13456 -> 3456`);
+  delayProxy(14173, 4173, RTT / 2, undefined, BPS || undefined).unref();   // frontend origin (SPA + tierless ws)
+  delayProxy(13456, 3456, RTT / 2, undefined, BPS || undefined).unref();   // API origin (XHR + CORS preflights)
+  console.log(`RTT injection: ${RTT} ms via 127.0.0.1:14173 -> 4173, 127.0.0.1:13456 -> 3456${BPS ? ` at ${BPS / 1e6} Mbps` : ""}`);
 }
 // spawn, NOT execFileSync: the delay relays run in THIS process, and a synchronous
 // child would block the event loop — the proxies would bind but never accept, and
 // every shaped connection dies ECONNREFUSED.
-// TIERLESS_SPEC narrows to matching spec files — for targeted experiments (a single
-// chain-bearing spec under RTT), never for the numbers of record.
 const suite = spawn("corepack", ["pnpm", "exec", "playwright", "test", "--reporter=line", ...(RTT ? ["--timeout=90000"] : []), ...(process.env.TIERLESS_SPEC ? [process.env.TIERLESS_SPEC] : [])], {
   cwd: path.join(SRC, "frontend"),
   stdio: "inherit",
