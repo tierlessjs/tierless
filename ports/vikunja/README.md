@@ -104,6 +104,11 @@ itself — same build, one variable per pair:
   concurrent crossings already overlapped their RTTs, so fewer frames does not
   mean fewer round-trip waits.
 
+  Verdict: neutral on every metric this suite prices — DEFAULT OFF
+  (`__TIERLESS_EXEC_BATCH__` page global / `TIERLESS_EXEC_BATCH=1` suite env
+  opts in). ROADMAP.md carries the review-or-remove item: revisit once more
+  ports show whether any app pays per frame.
+
 ## Timing — measured under real injected RTT, and honest about it
 
 `TIERLESS_RTT_MS=20 node ports/vikunja/suite.mts [--baseline]` routes the browser

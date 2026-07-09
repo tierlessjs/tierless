@@ -40,6 +40,16 @@ proven (38 executable proofs, `npm test`).
 
 ## Adoption & measurement
 
+- **Burst coalescing: review after more ports, or remove.** Implemented and
+  measured on Vikunja (ports/vikunja/COMPILING.md, 2026-07-09): merging
+  concurrent exec crossings into one `execBatch` frame cut session ws frames
+  24% with zero time or byte movement — concurrent requests already overlap
+  their RTTs, and deflate already absorbs payload repetition. Default OFF
+  (`__TIERLESS_EXEC_BATCH__` opts in). Decision rule: if no later port
+  surfaces a case where frame count is the paid unit (per-message pricing,
+  mobile radio budgets), remove the mechanism and keep the Vikunja results
+  as the recorded answer.
+
 - **The corpus program** (`docs/corpus.md`): a statistical claim over real apps —
   "median X× less network wait, Y% less IO across N apps' own e2e journeys."
   Rungs 1–3 are built (harness verified against socket ground truth; REST-proxy

@@ -74,9 +74,11 @@ export function connect({ url, exec, bundle, tier = "browser", heap = true,
 }: ConnectOpts = {}): Connection {
   const ws = new WebSocket((typeof url === "function" ? url() : url) || defaultUrl());
   // burst coalescing (host.mts batchExec): concurrent execs merge into one crossing.
-  // The global is the measured-run A/B switch — same pattern as the run-protocol globals.
+  // DEFAULT OFF — measured neutral on time and bytes for the first corpus app (frame
+  // count only, ports/vikunja); opt in via the page global (same pattern as the
+  // run-protocol globals) where per-frame costs matter. Review once more ports exist.
   const raw = makePeer(wsPort(ws));
-  const peer = (globalThis as { __TIERLESS_NO_EXEC_BATCH__?: boolean }).__TIERLESS_NO_EXEC_BATCH__ ? raw : batchExec(raw);
+  const peer = (globalThis as { __TIERLESS_EXEC_BATCH__?: boolean }).__TIERLESS_EXEC_BATCH__ ? batchExec(raw) : raw;
   const ready: Promise<void> = new Promise((res, rej) => {
     onEvent(ws, "open", () => res());
     onEvent(ws, "error", (e: any) => rej(new Error("tierless: websocket error" + (e && e.message ? ": " + e.message : ""))));

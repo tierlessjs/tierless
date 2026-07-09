@@ -224,8 +224,9 @@ multi-call flows as CONCURRENT bursts instead (N components mount, N service
 calls fire in the same tick, each its own ws frame). Burst coalescing harvests
 that shape at the exec boundary, with no compiler or profile involvement:
 
-- Browser (`batchExec`, host.mts; default on, `__TIERLESS_NO_EXEC_BATCH__`
-  disables for A/B): exec requests queue for one timer turn (setTimeout 0 —
+- Browser (`batchExec`, host.mts; DEFAULT OFF after the verdict below —
+  `__TIERLESS_EXEC_BATCH__` page global / TIERLESS_EXEC_BATCH suite env
+  enables): exec requests queue for one timer turn (setTimeout 0 —
   microtasks drain first, so every pump that can reach a park this tick does);
   same-(tier, module) groups re-encode as ONE `execBatch` frame sharing one
   interned string table. A lone request passes through as a plain exec.
@@ -256,3 +257,8 @@ census: 185 of 195 tests touch the session; the biggest single-test reduction
 was 40 -> 28 frames (project-history). comment-pagination's huge trip delta in
 the raw report is seeding variance in that spec (107 vs 9 HTTP requests), not
 batching — its ws frames went 4 -> 2.
+
+Verdict (2026-07-09): neutral on every metric this corpus prices — wall time and
+bytes at parity, frames-only win. DEFAULT OFF. Roadmap: re-review after more
+ports — if no app in the corpus surfaces a case where frame count is the paid
+unit, remove the mechanism and keep these results as the recorded answer.
