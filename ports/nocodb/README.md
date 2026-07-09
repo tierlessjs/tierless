@@ -108,3 +108,22 @@ Next: the port — patch 0002 puts the tierless adapter at nocodb-sdk's axios
 bottom (the Vikunja 0005 pattern), plugin entry into nc-gui's nuxt `vite:`
 block, gateway into the :3000 server, then the ported arm against this
 baseline.
+
+## Patch 0002 certified behaviorally invisible (2026-07-09, results/cert-0002-adapter.jsonl)
+
+Full suite on the ported tree (adapter at the sdk's axios bottom, direct-fetch
+exec — every request refashioned as a tierless resource request and back):
+
+    84 passed · 3 failed · 192 skipped · 1.1 h — ZERO new failures vs baseline
+
+The 3 failures are a strict subset of the baseline's 5 CORS exclusions; the two
+sourceRestrictions specs flipping to pass is timing wobble within that stock
+refresh-race family (one also passed in a stock isolation rerun), not an
+adapter effect. Coverage audit: every main-thread Api instance flows through
+addAxiosInterceptors (createApiInstance + the $api plugin); the ee/ app variant
+(not in the CE build) and workers/importWorker.ts (its own Api, stock XHR on
+both arms) are the two knowing, symmetric bypasses.
+
+Next: the session socket — compile surface (nocodb-sdk HttpClient.request is
+the single generated choke point), plugin entry in nc-gui's nuxt vite block,
+gateway serving http.* against :8080 over localhost.
