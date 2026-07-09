@@ -23,7 +23,7 @@ const res = await adapter({
 
 check("resource name is api.get", seen!.name === "api.get");
 const [url, body, opts] = seen!.args as [string, unknown, { headers: Record<string, string> }];
-check("url joins base + path", url.startsWith("http://127.0.0.1:3456/api/v1/projects/1/views/1/tasks?"), url);
+check("url joins base + path, ORIGIN-RELATIVE (the executing tier binds its own base)", url.startsWith("/api/v1/projects/1/views/1/tasks?"), url);
 check("array params serialize as key[]", url.includes("sort_by%5B%5D=position"), url);
 check("scalar + empty params kept, undefined dropped", url.includes("page=1") && url.includes("filter=") && !url.includes("skip_me"), url);
 check("GET carries no body", body === undefined);

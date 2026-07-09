@@ -69,11 +69,18 @@ export function axiosAdapter({ exec, fallback }: AxiosAdapterOpts) {
 
     const method = (config.method || "get").toLowerCase();
     // Full URL from baseURL + url, exactly as axios would combine them; params appended
-    // with the config's own serializer when present. The exec enforces same-origin.
+    // with the config's own serializer when present.
     const base = config.baseURL ? new URL(config.baseURL, typeof location !== "undefined" ? location.href : undefined) : undefined;
+    const baseOrigin = base ? base.origin : (typeof location !== "undefined" ? location.origin : "http://localhost");
     const joined = config.url && /^https?:\/\//.test(config.url)
       ? new URL(config.url)
-      : new URL((base ? base.pathname.replace(/\/$/, "") : "") + "/" + String(config.url || "").replace(/^\//, ""), base ? base.origin : (typeof location !== "undefined" ? location.origin : "http://localhost"));
+      : new URL((base ? base.pathname.replace(/\/$/, "") : "") + "/" + String(config.url || "").replace(/^\//, ""), baseOrigin);
+    // only the app's OWN api crosses as a resource request; an explicit other-origin URL
+    // is external I/O — stock behavior via the fallback, never a tier crossing
+    if (joined.origin !== baseOrigin) {
+      if (!fallback) throw new Error("tierless axios adapter: cross-origin request needs a fallback adapter: " + joined.origin);
+      return fallback(config);
+    }
     let path = joined.pathname + joined.search;
     if (config.params && Object.keys(config.params).length) {
       const s = typeof config.paramsSerializer === "function" ? config.paramsSerializer(config.params)
@@ -86,9 +93,13 @@ export function axiosAdapter({ exec, fallback }: AxiosAdapterOpts) {
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(rawHeaders)) if (v !== undefined && v !== null && typeof v !== "function") headers[k.toLowerCase()] = String(v);
 
+    // ORIGIN-RELATIVE on purpose: the api namespace is tier-owned — whoever executes the
+    // request binds it to ITS OWN base (browser: restResources(origin); a session
+    // gateway: its localhost backend). An absolute URL would weld the browser's origin
+    // spelling (hostname, counting-relay port) into a request another tier executes.
     const envelope = await exec({
       op: "resource", tier: "server", name: "api." + method,
-      args: [joined.origin + path, config.data === undefined ? undefined : config.data, { headers }],
+      args: [path, config.data === undefined ? undefined : config.data, { headers }],
     }) as { status: number; headers: Record<string, string>; body: unknown };
 
     const response = {
