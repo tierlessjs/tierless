@@ -139,7 +139,19 @@ export function connect({ url, exec, bundle, tier = "browser", heap = true,
     },
     exec: async (req: import("./types.mjs").ResourceRequest): Promise<unknown> => {
       await ready;
-      return execOver(peer, req);
+      const value = await execOver(peer, req);
+      // observability hook (opt-in via page global): a bounded log of completed
+      // crossings, so TEST harnesses whose waits watch the HTTP transport (playwright
+      // waitForResponse) can watch the session transport instead — the run-protocol
+      // accommodation surface. Zero cost unless the page set the flag.
+      const g = globalThis as { __TIERLESS_EXEC_LOG__?: boolean; __tierlessExecLog?: unknown[] };
+      if (g.__TIERLESS_EXEC_LOG__) {
+        const env = value as { status?: number; body?: unknown } | null;
+        const log = (g.__tierlessExecLog ||= []);
+        log.push({ name: req.name, url: String(req.args?.[0] ?? ""), status: env && typeof env.status === "number" ? env.status : undefined, body: env && "body" in (env as object) ? env.body : undefined });
+        if (log.length > 500) log.splice(0, log.length - 500);
+      }
+      return value;
     },
     close: () => ws.close(),
   };
