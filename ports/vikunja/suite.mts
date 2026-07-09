@@ -45,6 +45,10 @@ if (!html.includes("window.TESTING")) html = html.replace("<head>", "<head><scri
 html = html.replace(/<script data-tierless-run>[^<]*<\/script>/, "");
 if (PROFILE_RUN) html = html.replace("<head>", "<head><script data-tierless-run>window.__TIERLESS_TRACE__=\"/__tierless/trace\";</script>");
 if (PROFILE) html = html.replace("<head>", "<head><script data-tierless-run>window.__TIERLESS_PROFILE__=\"/__tierless/profile\";</script>");
+// TIERLESS_NO_EXEC_BATCH=1: burst coalescing OFF — the control arm of the batching A/B,
+// same build, one variable (packages/tierless/src/browser.mts reads the global)
+html = html.replace(/<script data-tierless-batch>[^<]*<\/script>/, "");
+if (process.env.TIERLESS_NO_EXEC_BATCH) html = html.replace("<head>", "<head><script data-tierless-batch>window.__TIERLESS_NO_EXEC_BATCH__=true;</script>");
 writeFileSync(idx, html);
 
 rmSync(OUT, { force: true });
