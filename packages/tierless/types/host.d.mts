@@ -26,3 +26,4 @@ export interface MakeHostOpts {
 }
 export declare function makeHost({ bundle, tier, exec, owns, meta, trace, coherence: coherenceIn, twins }: MakeHostOpts): Host;
 export declare function answerWith(peer: Peer, hostFor: (id: string) => Host | Promise<Host>, field?: string): void;
+export declare function batchExec(peer: Peer): Peer;

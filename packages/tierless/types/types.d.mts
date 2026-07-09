@@ -130,5 +130,10 @@ export interface Host {
         obj: HostReply;
         bin?: Uint8Array;
     }>;
+    /** Serve a coalesced BURST of fetched resources in one crossing (per-element results). */
+    handleExecBatch(payload: any, bin: Uint8Array | null): Promise<{
+        obj: HostReply;
+        bin?: Uint8Array;
+    }>;
     answer(peer: Peer): Host;
 }
