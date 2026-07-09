@@ -36,10 +36,19 @@ export interface Connection {
             entry?: string;
         }) => boolean;
     }): Promise<unknown>;
+    /** ONE resource request executed on the SERVER over this session — no machine, no
+     *  frame: the fetch-arm crossing as a first-class op (host.mts execOver). The
+     *  I/O-bottom adapter path: an app's axios adapter crosses here per request. */
+    exec(req: import("./types.mjs").ResourceRequest): Promise<unknown>;
     close(): void;
 }
 export declare const mergedAppHash: () => string;
 export declare function connect({ url, exec, bundle, tier, heap, traceUrl, profileUrl, }?: ConnectOpts): Connection;
+/** The shared connection's exec crossing as a tierless Exec — what an I/O-bottom
+ *  adapter plugs in to route the app's requests over the session socket:
+ *  `axiosAdapter({ exec: sessionExec(), ... })`. Lazy: the socket opens on first use
+ *  (or at configureTierless({ preconnect }) time), each call awaits readiness. */
+export declare function sessionExec(): Exec;
 export declare function configureTierless(opts: ConnectOpts & {
     preconnect?: boolean;
 }): void;

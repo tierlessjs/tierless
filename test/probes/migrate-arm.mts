@@ -14,7 +14,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { makeHost, batchExec } from "tierless";
+import { makeHost, batchExec, execOver } from "tierless";
 import { makePeer, encodeMessage, decodeMessage, type Port } from "tierless/transport";
 import { memorySink, buildProfile, loadProfile, methodMigrate } from "tierless/trace";
 import type { Peer } from "tierless";
@@ -266,6 +266,13 @@ const boomErr: any = await boomP.then(() => null, (e) => e);
 const ok3 = await okP;
 check("burst error: uncaught element rejects shaped, sibling completes", ok3 === "got:n3" && boomErr?.message === "nope" && boomErr?.response?.status === 400 && boomErr?.isAxiosError === true, JSON.stringify({ ok3, m: boomErr?.message, r: boomErr?.response }));
 check("burst error: round 1 batched, the survivor's second call went alone", counts.execBatch === 1 && counts.exec === 1, JSON.stringify(counts));
+
+// ---- 10. execOver: the fetch-arm crossing as a first-class op (the adapter path) -------
+reset();
+const ev: any = await execOver(peer, { op: "resource", tier: "server", name: "http.get", args: ["/things"] });
+check("execOver: value crosses in one exec frame", ev?.body?.join(",") === "1,2,3" && counts.exec === 1 && !counts.resume, JSON.stringify({ ev, counts }));
+const ee: any = await execOver(peer, { op: "resource", tier: "server", name: "http.get", args: ["/boom"] }).then(() => null, (e: unknown) => e);
+check("execOver: error crosses SHAPED (message + response + axios mark)", ee?.message === "nope" && ee?.response?.status === 400 && ee?.isAxiosError === true, JSON.stringify({ m: ee?.message, r: ee?.response }));
 
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
 console.log("\na chain migrates in one crossing; the stop rule, identity, and unwind hold; the profile decides");

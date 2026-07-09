@@ -1,6 +1,6 @@
 import { type RecorderOpts, type Recorder } from "./trace.mjs";
 import { type Coherence } from "./coherence.mjs";
-import type { Bundle, Exec, Peer, Host } from "./types.mjs";
+import type { Bundle, Exec, ResourceRequest, Peer, Host } from "./types.mjs";
 export type { Bundle, Frame, MachineResult, ResourceRequest, Exec, Peer, Host } from "./types.mjs";
 export type { Coherence } from "./coherence.mjs";
 export interface MakeHostOpts {
@@ -25,5 +25,6 @@ export interface MakeHostOpts {
     twins?: (cls: string) => object | undefined;
 }
 export declare function makeHost({ bundle, tier, exec, owns, meta, trace, coherence: coherenceIn, twins }: MakeHostOpts): Host;
+export declare function execOver(peer: Peer, req: ResourceRequest, meta?: Record<string, unknown>): Promise<unknown>;
 export declare function answerWith(peer: Peer, hostFor: (id: string) => Host | Promise<Host>, field?: string): void;
 export declare function batchExec(peer: Peer): Peer;

@@ -12,7 +12,7 @@
 // Browser-safe and import-safe under SSR: nothing touches WebSocket/location until the
 // first call. `exec` services browser-pinned resources (dom.commit in the full-tierless
 // mode, ui.* if you pin some); actions that never touch one simply run out on the server.
-import { makeHost, answerWith, batchExec } from "./host.mjs";
+import { makeHost, answerWith, batchExec, execOver } from "./host.mjs";
 import { makeCoherence } from "./coherence.mjs";
 import { methodMigrate, loadProfile, type Profile } from "./trace.mjs";
 import { makePeer, wsPort, onEvent } from "./transport.mjs";
@@ -54,6 +54,10 @@ export interface Connection {
    *  never ships — the compiled-class-method path, see bindMethods). opts.exec serves
    *  pinned requests on this tier; opts.pins adds the resource family's declared pins. */
   runLocal(entry: string, args?: unknown[], module?: string, opts?: { exec?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => unknown | Promise<unknown>; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => import("./types.mjs").ResourceRequest | null; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean }): Promise<unknown>;
+  /** ONE resource request executed on the SERVER over this session — no machine, no
+   *  frame: the fetch-arm crossing as a first-class op (host.mts execOver). The
+   *  I/O-bottom adapter path: an app's axios adapter crosses here per request. */
+  exec(req: import("./types.mjs").ResourceRequest): Promise<unknown>;
   close(): void;
 }
 
@@ -133,8 +137,20 @@ export function connect({ url, exec, bundle, tier = "browser", heap = true,
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
       return h.runLocal(peer, entry, args, opts);
     },
+    exec: async (req: import("./types.mjs").ResourceRequest): Promise<unknown> => {
+      await ready;
+      return execOver(peer, req);
+    },
     close: () => ws.close(),
   };
+}
+
+/** The shared connection's exec crossing as a tierless Exec — what an I/O-bottom
+ *  adapter plugs in to route the app's requests over the session socket:
+ *  `axiosAdapter({ exec: sessionExec(), ... })`. Lazy: the socket opens on first use
+ *  (or at configureTierless({ preconnect }) time), each call awaits readiness. */
+export function sessionExec(): Exec {
+  return (req) => sharedConn().exec(req);
 }
 
 // ---- the actions surface (what the Vite plugin emits calls into) ----------------------

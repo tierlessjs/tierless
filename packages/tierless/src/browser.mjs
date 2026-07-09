@@ -12,7 +12,7 @@
 // Browser-safe and import-safe under SSR: nothing touches WebSocket/location until the
 // first call. `exec` services browser-pinned resources (dom.commit in the full-tierless
 // mode, ui.* if you pin some); actions that never touch one simply run out on the server.
-import { makeHost, answerWith, batchExec } from "./host.mjs";
+import { makeHost, answerWith, batchExec, execOver } from "./host.mjs";
 import { makeCoherence } from "./coherence.mjs";
 import { methodMigrate, loadProfile } from "./trace.mjs";
 import { makePeer, wsPort, onEvent } from "./transport.mjs";
@@ -103,8 +103,19 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
                 throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
             return h.runLocal(peer, entry, args, opts);
         },
+        exec: async (req) => {
+            await ready;
+            return execOver(peer, req);
+        },
         close: () => ws.close(),
     };
+}
+/** The shared connection's exec crossing as a tierless Exec — what an I/O-bottom
+ *  adapter plugs in to route the app's requests over the session socket:
+ *  `axiosAdapter({ exec: sessionExec(), ... })`. Lazy: the socket opens on first use
+ *  (or at configureTierless({ preconnect }) time), each call awaits readiness. */
+export function sessionExec() {
+    return (req) => sharedConn().exec(req);
 }
 // ---- the actions surface (what the Vite plugin emits calls into) ----------------------
 let sharedOpts = {};

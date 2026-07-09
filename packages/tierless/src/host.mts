@@ -284,15 +284,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
           request = back.request as ResourceRequest | null;   // op:"home" -> pump steps on from ret; a browser-owned resource -> pump services it here
           continue;
         }
-        const { obj } = await peer.request({ type: "exec", tier: req.tier, ...meta }, encodeArgs([req.name, req.args]));
-        if (obj.type === "error") {
-          const err = new Error(obj.message) as Error & { response?: unknown; isAxiosError?: boolean; code?: string };
-          if (obj.response) {                                      // HTTP-semantics failure: app code reads error.response.data
-            err.response = obj.response; err.isAxiosError = true;
-            err.code = (obj.response as { status: number }).status >= 500 ? "ERR_BAD_RESPONSE" : "ERR_BAD_REQUEST";
-          }
-          carry = { error: err };
-        } else carry = { value: obj.value };
+        try { carry = { value: await execOver(peer, req, meta) }; } catch (e) { carry = { error: e }; }
       }
     },
     // The answering half, exposed as plain handlers so a dispatcher can route by meta.
@@ -346,6 +338,23 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
     },
   };
   return host;
+}
+
+// ONE fetched crossing on a peer, as a first-class op: send (name, args), return the
+// value or throw the SHAPED error (error.response/isAxiosError intact — app code reads
+// them either way). This is exactly the exchange runLocal's fetch arm performs at a
+// park; exposed so an I/O-bottom adapter can cross the session without a machine.
+export async function execOver(peer: Peer, req: ResourceRequest, meta: Record<string, unknown> = {}): Promise<unknown> {
+  const { obj } = await peer.request({ type: "exec", tier: req.tier, ...meta }, encodeArgs([req.name, req.args]));
+  if (obj.type === "error") {
+    const err = new Error(obj.message) as Error & { response?: unknown; isAxiosError?: boolean; code?: string };
+    if (obj.response) {                                      // HTTP-semantics failure: app code reads error.response.data
+      err.response = obj.response; err.isAxiosError = true;
+      err.code = (obj.response as { status: number }).status >= 500 ? "ERR_BAD_RESPONSE" : "ERR_BAD_REQUEST";
+    }
+    throw err;
+  }
+  return obj.value;
 }
 
 // Route peer messages to one of several hosts by a payload field (default "module") —
