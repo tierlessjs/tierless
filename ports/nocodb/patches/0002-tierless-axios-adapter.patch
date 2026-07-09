@@ -1,0 +1,28 @@
+diff -ruN a/packages/nc-gui/composables/useApi/interceptors.ts b/packages/nc-gui/composables/useApi/interceptors.ts
+--- a/packages/nc-gui/composables/useApi/interceptors.ts	2026-07-09 19:30:42.133718401 +0000
++++ b/packages/nc-gui/composables/useApi/interceptors.ts	2026-07-09 19:30:42.182495426 +0000
+@@ -1,3 +1,6 @@
++import axios from 'axios'
++import { axiosAdapter } from 'tierless/adapt-axios'
++import { restResources } from 'tierless/adapt'
+ import type { Api } from 'nocodb-sdk'
+ const DbNotFoundMsg = 'Database config not found'
+ 
+@@ -12,6 +15,17 @@
+ 
+   const axiosInstance = api.instance
+ 
++  // The tierless I/O bottom (corpus port, patch 0002): axios above this line is
++  // untouched — the interceptors below, the generated sdk, models all run as always;
++  // requests are fulfilled as tierless resource requests. In the browser the exec is a
++  // direct fetch to the API origin — stock behavior. Browser-pinned configs (progress,
++  // blobs, FormData) fall through to axios's own XHR adapter (absent under Node/SSR).
++  axiosInstance.defaults.adapter = axiosAdapter({
++    // the instance's own baseURL, read per request — same source their requests use
++    exec: (req) => restResources(new URL(axiosInstance.defaults.baseURL || '/', location.href).origin, { envelopeErrors: true })(req),
++    fallback: typeof XMLHttpRequest === 'undefined' ? undefined : axios.getAdapter('xhr'),
++  })
++
+   axiosInstance.interceptors.request.use((config) => {
+     config.headers['xc-gui'] = 'true'
+     config.headers['xc-socket-id'] = skipSocket ? null : $ncSocket.id() || null

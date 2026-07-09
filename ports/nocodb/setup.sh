@@ -23,6 +23,11 @@ corepack pnpm run registerIntegrations
 # UI: their CI downloads a prebuilt artifact from private S3; build locally instead.
 # The root tsconfig extends ee/.nuxt/tsconfig.json — prepare the ee app once first.
 cd packages/nc-gui
+# ported tree only (patch 0002 imports tierless): the runtime as a linked install, not
+# a diff — same posture as Vikunja. The baseline tree never gets port patches or this.
+if grep -q "tierless/adapt-axios" composables/useApi/interceptors.ts 2>/dev/null; then
+  corepack pnpm add "tierless@link:../../../../../packages/tierless"
+fi
 EE=true corepack pnpm exec nuxt prepare ./ee
 NODE_OPTIONS=--max_old_space_size=8192 corepack pnpm run build
 

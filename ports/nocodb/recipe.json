@@ -17,7 +17,9 @@
     "codeload": null,
     "git": "d24e50aea5de5e18662969c15c61212c475923cfdad15cf3015fd28b9d98fefe"
   },
-  "patches": [],
+  "patches": [
+    "patches/0002-tierless-axios-adapter.patch"
+  ],
   "testPatches": [
     "patches/0001-measure-reporter.patch"
   ]
