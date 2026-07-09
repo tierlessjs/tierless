@@ -21,6 +21,10 @@ const OUT = fileURLToPath(new URL(`../work/${VARIANT}/measure.jsonl`, import.met
 
 rmSync(OUT, { force: true });
 const app = await bootNocodb();
+// a killed suite must still tear the stack down: the app processes are DETACHED groups
+// (boot.mts), so without this a stray kill leaves rspack/nodemon watchers respawning
+// servers that own the ports forever
+for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => { app.close(); process.exit(1); });
 // --workers=1 pins THEIR CI sqlite-lane concurrency (their config sets it only under
 // CI=true, which flips retries/forbidOnly too — the explicit flag takes just the part
 // that matters: one shared sqlite backend cannot serve 4 racing browser contexts)
