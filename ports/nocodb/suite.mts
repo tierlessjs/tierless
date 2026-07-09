@@ -21,7 +21,7 @@ const OUT = fileURLToPath(new URL(`../work/${VARIANT}/measure.jsonl`, import.met
 
 rmSync(OUT, { force: true });
 const app = await bootNocodb();
-const suite = spawn("corepack", ["pnpm", "exec", "playwright", "test", ...(process.env.TIERLESS_SPEC ? [process.env.TIERLESS_SPEC] : [])], {
+const suite = spawn("corepack", ["pnpm", "exec", "playwright", "test", ...(process.env.TIERLESS_SPEC || "").split(/\s+/).filter(Boolean)], {
   cwd: path.join(SRC, "tests/playwright"),
   stdio: "inherit",
   env: {
