@@ -73,12 +73,38 @@ Runtime facts, verified in this sandbox (2026-07-09):
 
 ## Status
 
-- Recipe pinned and fetched (git transport, tree hash verified). Bootstrap +
-  builds reproduced per above.
-- **Stock smoke: GO.** tests/db/general slice: 31 tests — 19 passed, 15 skipped
-  (EE-gated, expected on the CE lane), 2 failed under first-boot machine load
-  (backend rspack watch compiling concurrently) and both pass deterministically
-  in isolation; upstream's own CI runs `retries: 2`.
-- Next: boot.mts + suite.mts (Vikunja-shape, one command per arm), measure
-  fixture test-patch, then a full stock baseline run to establish pass
-  parity + wall time before any porting.
+- Recipe pinned and fetched (git transport, tree hash verified). `setup.sh` is
+  the one-command rebuild; boot.mts/suite.mts are the one-command arms; the
+  measure collector is a REPORTER (patch 0001 — their specs import `test`
+  straight from @playwright/test, no shared fixture module to hook; a 2-line
+  config patch + workers=1 keeps per-test attribution sound).
+
+## Stock baseline (2026-07-09, results/baseline.jsonl)
+
+Full suite, their sqlite-lane concurrency (`--workers=1` — their config pins
+that only under CI=true; unpinned local runs race 4 browsers against the one
+sqlite backend and add flakes):
+
+    282 discovered · 82 passed · 5 failed · 195 skipped · 1.1 h wall
+
+Corrections to the selection-time sizing: 191+ of the discovered tests are
+EE- or pg-gated and SKIP on this lane — the honest CE+sqlite workload is
+~87 running tests, not the ~350 spec-level count. Still the request-shape
+class we picked it for (data-grid chains and bursts).
+
+The 5 stock failures are one mechanism, diagnosed at the wire: on full-page
+reload/shared-view flows the app POSTs `/auth/token/refresh` WITH credentials,
+the backend answers `Access-Control-Allow-Origin: *` and no
+Allow-Credentials — browsers BLOCK credentialed wildcard responses (curl
+can't see this; Playwright records status −1 "Network Error") — the app then
+signs out, rotating token_version, and every subsequent call 401s ("Token
+Expired" with a fresh 10h token). Stock-rooted and arm-symmetric: these
+exclusions will fail identically on the ported arm (auth flows stay on stock
+XHR), falling out of report.mts's pass-parity gate — same treatment as
+Vikunja's Dex/drag exclusions. Affected: columnAttachments, metaLTAR
+delete-over-UI, sourceRestrictions ×2, viewGridShare-GroupBy.
+
+Next: the port — patch 0002 puts the tierless adapter at nocodb-sdk's axios
+bottom (the Vikunja 0005 pattern), plugin entry into nc-gui's nuxt `vite:`
+block, gateway into the :3000 server, then the ported arm against this
+baseline.
