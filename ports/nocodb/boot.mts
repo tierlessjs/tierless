@@ -7,12 +7,13 @@
 //
 //   node ports/nocodb/boot.mts [--baseline]     (build first: bash ports/nocodb/setup.sh)
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, openSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const VARIANT = process.argv.includes("--baseline") ? "nocodb-baseline" : "nocodb";
-const SRC = fileURLToPath(new URL(`../work/${VARIANT}/src/`, import.meta.url));
+const WORK = fileURLToPath(new URL(`../work/${VARIANT}/`, import.meta.url));
+const SRC = path.join(WORK, "src/");
 export const API = "http://127.0.0.1:8080";
 export const FRONT = "http://127.0.0.1:3000";
 const EXECUTOR = "http://127.0.0.1:9000";
@@ -38,12 +39,15 @@ export async function bootNocodb(): Promise<{ close(): void }> {
     if (await serving(url)) throw new Error(`${url} is already serving — a stale stack owns the port; kill it before booting`);
   }
   const env = { ...process.env, HUSKY: "0", COREPACK_ENABLE_DOWNLOAD_PROMPT: "0" };
+  // logs land beside the tree (work/<variant>/*.log, truncated per boot) — a failing
+  // spec's backend-side cause is otherwise invisible
+  const log = (name: string): ["ignore", number, number] => { const fd = openSync(path.join(WORK, name + ".log"), "w"); return ["ignore", fd, fd]; };
   // detached process GROUPS: pnpm/rspack/nodemon spawn children of their own; killing
   // only the wrapper leaves a stale server owning the port. kill(-pid) takes the group.
   const procs: ChildProcess[] = [
-    spawn("corepack", ["pnpm", "run", "dev"], { cwd: path.join(SRC, "packages/nc-sql-executor"), env, stdio: "ignore", detached: true }),
-    spawn("corepack", ["pnpm", "run", "watch:run:playwright"], { cwd: path.join(SRC, "packages/nocodb"), env, stdio: "ignore", detached: true }),
-    spawn("corepack", ["pnpm", "run", "ci:start"], { cwd: path.join(SRC, "packages/nc-gui"), env, stdio: "ignore", detached: true }),
+    spawn("corepack", ["pnpm", "run", "dev"], { cwd: path.join(SRC, "packages/nc-sql-executor"), env, stdio: log("executor"), detached: true }),
+    spawn("corepack", ["pnpm", "run", "watch:run:playwright"], { cwd: path.join(SRC, "packages/nocodb"), env, stdio: log("backend"), detached: true }),
+    spawn("corepack", ["pnpm", "run", "ci:start"], { cwd: path.join(SRC, "packages/nc-gui"), env, stdio: log("frontend"), detached: true }),
   ];
   // the backend's first wait includes its rspack watch build (minutes); their CI polls
   // :8080 the same way. The executor answers anything (404 root = up).
