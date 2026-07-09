@@ -31,12 +31,10 @@ their real files through the transform; this file tracks what it finds.
 
 ## Open items (in order)
 
-- **Runtime wiring**: `__bindTierlessMethods` → the page's shared host; `http.*`
-  server exec = twin axios instance from their factory over restResources(localhost);
-  leases for the two pinned globals. Then a compiled `getAll` can actually migrate.
-- **Method-to-method suspendability**: an uncompiled method calling `this.getAll()`
-  hits the stub and works (host-routed), but is itself not migratable; propagate
-  suspendability through `this.*` call edges the way module fns already do.
+Resolved since first written: runtime wiring (bindMethods + shared host, shipped
+and measured below) and method-to-method suspendability (dynamic call parks —
+awaited member calls compile and dispatch in the pump). Still open:
+
 - **`super` in compiled methods** (TaskCollectionService.getReplacedRoute) — carry
   super dispatch in the frame, or inline the parent method.
 - **Non-resource `await` inside otherwise-compilable methods** — local-await
@@ -217,3 +215,44 @@ Two causes, both now measured; no residual regression exists.
 Standing rule: a test family whose workload depends on wall-clock time is only
 measurable WITHIN a time window (interleaved arms), never across runs; suite
 totals quoting this family across runs inherit +/-10 s of noise.
+
+## Burst coalescing, implemented and measured (2026-07-09)
+
+The chains work closed with a structural lesson: sequential multi-call chains are
+what §6 migration harvests, and this app has exactly one — reactive apps express
+multi-call flows as CONCURRENT bursts instead (N components mount, N service
+calls fire in the same tick, each its own ws frame). Burst coalescing harvests
+that shape at the exec boundary, with no compiler or profile involvement:
+
+- Browser (`batchExec`, host.mts; default on, `__TIERLESS_NO_EXEC_BATCH__`
+  disables for A/B): exec requests queue for one timer turn (setTimeout 0 —
+  microtasks drain first, so every pump that can reach a park this tick does);
+  same-(tier, module) groups re-encode as ONE `execBatch` frame sharing one
+  interned string table. A lone request passes through as a plain exec.
+- Gateway (`handleExecBatch`): fans the vector out through the same exec
+  concurrently, returns per-element `{ok, value}` / `{ok, message, response}` —
+  each caller's catch sees exactly what its own single exec would have.
+- Safe by construction: only requests ALREADY in flight together merge;
+  ordering between concurrent execs was never defined. Probe coverage in
+  test/probes/migrate-arm.mts (burst = one frame per round, per-element error
+  isolation incl. error.response, lone-request passthrough).
+
+Measured, ported build vs itself with batching off (one variable; 195/195 pass
+parity both arms; results/truth-batch-*.jsonl, rtt20-batch-*.jsonl):
+
+    ws frames    1,094 -> 834 out, 1,076 -> 805 in   (24-25% fewer)
+                 no test sent MORE frames under batching
+    ws bytes     -1% TCP-true (stationary subset) — the win is frames, not
+                 bytes; deflate already amortizes payload repetition
+    wall time    parity at RTT 0 (6.8 min both) and RTT 20 (median per-test
+                 delta -3 ms) — the one-timer-turn hold costs nothing
+                 measurable, and concurrent crossings already overlapped
+                 their RTTs
+
+Where it bites instead: per-frame costs the suite doesn't model — radio wakeups
+and packet counts on mobile, per-message broker/lambda pricing, head-of-line
+processing on chatty views (kanban mounts a getAll per bucket). The honest
+census: 185 of 195 tests touch the session; the biggest single-test reduction
+was 40 -> 28 frames (project-history). comment-pagination's huge trip delta in
+the raw report is seeding variance in that spec (107 vs 9 HTTP requests), not
+batching — its ws frames went 4 -> 2.

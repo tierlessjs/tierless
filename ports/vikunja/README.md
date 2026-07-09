@@ -80,11 +80,29 @@ Measured 2026-07-07 (196/196 pass parity; 186 pairs touch the session):
     best case       236 KB -> 18 KB, 112 -> 13 trips (comment-pagination spec:
                     the per-comment avatar refetch antipattern collapses)
 
-No batching is claimed: every service call is still its own crossing today. The
-savings are preflights gone (same-origin socket), envelope headers trimmed to what
-their code reads (content-type + x-*), and the session-long deflate window. The §6
-migrate arm — batching a compiled method's chain into one crossing — is the next
-structural step, not part of these numbers.
+No batching is in those numbers: there, every service call was its own crossing.
+The savings are preflights gone (same-origin socket), envelope headers trimmed to
+what their code reads (content-type + x-*), and the session-long deflate window.
+Two batching mechanisms landed after, each measured against the ported build
+itself — same build, one variable per pair:
+
+- **§6 chain migration** (sequential structure — a compiled method's call chain
+  runs server-side as one crossing): see Timing below.
+- **Burst coalescing** (concurrent structure — the shape reactive apps actually
+  produce: N components mount, N service calls fire in the same tick). The
+  browser holds exec crossings for one timer turn and merges same-module bursts
+  into one `execBatch` frame; the gateway fans out concurrently and returns
+  per-element results, errors shaped exactly as a lone call's. Safe by
+  construction: only requests already in flight together merge.
+
+  Measured 2026-07-09 (results/truth-batch-*.jsonl; 195/195 pass parity both
+  arms): session ws frames 1,094 -> 834 out and 1,076 -> 805 in (24% fewer),
+  and NO test sent more frames. TCP-true ws bytes only 1% less — the win is
+  frame count, not bytes (deflate already amortizes payload repetition). Wall
+  time parity at RTT 0 and at RTT 20 (results/rtt20-batch-*.jsonl, per-test
+  median delta −3 ms): the one-timer-turn hold costs nothing measurable, and
+  concurrent crossings already overlapped their RTTs, so fewer frames does not
+  mean fewer round-trip waits.
 
 ## Timing — measured under real injected RTT, and honest about it
 
