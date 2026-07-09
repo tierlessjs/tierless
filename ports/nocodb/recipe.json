@@ -1,0 +1,22 @@
+{
+  "name": "nocodb",
+  "repo": "nocodb/nocodb",
+  "sha": "aa3fa4a874b7ab5bb3c817a73ba60290091767a3",
+  "sources": [
+    {
+      "kind": "codeload",
+      "zip": "https://codeload.github.com/nocodb/nocodb/zip/aa3fa4a874b7ab5bb3c817a73ba60290091767a3"
+    },
+    {
+      "kind": "git",
+      "url": "https://github.com/nocodb/nocodb.git",
+      "ref": "v2026.06.1"
+    }
+  ],
+  "treeHash": {
+    "codeload": null,
+    "git": "d24e50aea5de5e18662969c15c61212c475923cfdad15cf3015fd28b9d98fefe"
+  },
+  "patches": [],
+  "testPatches": []
+}

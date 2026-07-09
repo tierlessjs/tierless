@@ -26,7 +26,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-interface Source { kind: string; zip: string }
+interface Source { kind: string; zip?: string; url?: string; ref?: string }
 interface Recipe {
   name: string;
   repo: string;                       // owner/repo, provenance display
@@ -68,26 +68,39 @@ if (!existsSync(src)) {
   mkdirSync(work, { recursive: true });
   let fetched: Source | null = null;
   for (const s of recipe.sources) {
-    const zip = path.join(work, "src.zip");
     try {
-      console.log(`fetching ${recipe.repo}@${recipe.sha.slice(0, 12)} via ${s.kind}\n  ${s.zip}`);
-      // curl over fetch(): it honors HTTPS_PROXY/CA everywhere this runs, sandbox or laptop.
-      execFileSync("curl", ["-sSL", "--fail", "-o", zip, s.zip], { stdio: ["ignore", "inherit", "pipe"] });
+      if (s.kind === "git") {
+        // git smart-http transport: shallow clone at the RELEASE TAG, then verify the
+        // checkout IS the pinned commit (a moved tag fails loudly). Needed where zip
+        // hosts are proxied away (some sandboxes) — the tree hash pins content either way.
+        const clone = path.join(work, "clone");
+        console.log(`fetching ${recipe.repo}@${recipe.sha.slice(0, 12)} via git\n  ${s.url} @ ${s.ref}`);
+        execFileSync("git", ["clone", "--quiet", "--depth", "1", "--branch", s.ref!, s.url!, clone], { stdio: ["ignore", "inherit", "pipe"] });
+        const head = execFileSync("git", ["-C", clone, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+        if (head !== recipe.sha) { rmSync(clone, { recursive: true, force: true }); throw new Error(`ref ${s.ref} is ${head}, recipe pins ${recipe.sha}`); }
+        rmSync(path.join(clone, ".git"), { recursive: true, force: true });
+        execFileSync("mv", [clone, src]);
+      } else {
+        const zip = path.join(work, "src.zip");
+        console.log(`fetching ${recipe.repo}@${recipe.sha.slice(0, 12)} via ${s.kind}\n  ${s.zip}`);
+        // curl over fetch(): it honors HTTPS_PROXY/CA everywhere this runs, sandbox or laptop.
+        execFileSync("curl", ["-sSL", "--fail", "-o", zip, s.zip!], { stdio: ["ignore", "inherit", "pipe"] });
+        execFileSync("unzip", ["-q", zip, "-d", path.join(work, "unzip")]);
+        // strip leading directories until the tree root (codeload: one dir; goproxy: module@version under host/owner dirs)
+        let top = path.join(work, "unzip");
+        for (;;) {
+          const entries = readdirSync(top, { withFileTypes: true });
+          if (entries.length === 1 && entries[0].isDirectory()) { top = path.join(top, entries[0].name); continue; }
+          break;
+        }
+        execFileSync("mv", [top, src]);
+        rmSync(path.join(work, "unzip"), { recursive: true, force: true }); rmSync(zip, { force: true });
+      }
       fetched = s;
       break;
-    } catch { console.log(`  ${s.kind} unreachable here — trying the next transport`); }
+    } catch (e) { console.log(`  ${s.kind} unreachable here — trying the next transport${e instanceof Error && e.message.includes("recipe pins") ? ` (${e.message})` : ""}`); }
   }
   if (!fetched) { console.error("no transport reachable"); process.exit(1); }
-  execFileSync("unzip", ["-q", path.join(work, "src.zip"), "-d", path.join(work, "unzip")]);
-  // strip leading directories until the tree root (codeload: one dir; goproxy: module@version under host/owner dirs)
-  let top = path.join(work, "unzip");
-  for (;;) {
-    const entries = readdirSync(top, { withFileTypes: true });
-    if (entries.length === 1 && entries[0].isDirectory()) { top = path.join(top, entries[0].name); continue; }
-    break;
-  }
-  execFileSync("mv", [top, src]);
-  rmSync(path.join(work, "unzip"), { recursive: true, force: true }); rmSync(path.join(work, "src.zip"), { force: true });
   writeFileSync(path.join(work, "TRANSPORT"), fetched.kind + "\n");
   writeFileSync(path.join(work, "TREEHASH"), treeHash(src) + "\n");   // hashed at extract time: reruns verify THIS (the tree is patched below)
 }
