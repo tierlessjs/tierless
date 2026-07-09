@@ -1,0 +1,74 @@
+diff -ruN a/tests/playwright/playwright.config.ts b/tests/playwright/playwright.config.ts
+--- a/tests/playwright/playwright.config.ts	2026-07-09 13:55:23.762760861 +0000
++++ b/tests/playwright/playwright.config.ts	2026-07-09 13:55:23.784588523 +0000
+@@ -43,7 +43,8 @@
+   /* Opt out of parallel tests on CI. */
+   workers: workers,
+   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
+-  reporter: 'html',
++  // tierless corpus harness (test patch, both arms): per-test JSONL when measuring
++  reporter: process.env.TIERLESS_MEASURE_OUT ? [['line'], ['./tierlessMeasureReporter.ts']] : 'html',
+   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
+   use: {
+     // headless: !!process.env.CI,
+@@ -51,7 +52,7 @@
+     /* Maximum time each action such as `click()` can take. Defaults to 0 (no limit). */
+     actionTimeout: 10000,
+     /* Base URL to use in actions like `await page.goto('/')`. */
+-    baseURL: 'http://localhost:3000',
++    baseURL: process.env.BASE_URL || 'http://localhost:3000',
+ 
+     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
+     trace: process.env.CI ? 'on-first-retry' : process.env.TRACE ? 'on' : 'off',
+diff -ruN a/tests/playwright/tierlessMeasureReporter.ts b/tests/playwright/tierlessMeasureReporter.ts
+--- a/tests/playwright/tierlessMeasureReporter.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/tests/playwright/tierlessMeasureReporter.ts	2026-07-09 13:55:23.789037029 +0000
+@@ -0,0 +1,48 @@
++// Per-test measurement reporter (tierless corpus harness, docs/corpus.md): appends one
++// JSONL row per test ATTEMPT to TIERLESS_MEASURE_OUT — id, status, retry, durationMs.
++// With TIERLESS_WIRE_URLS set (comma-separated endpoints returning flat JSON number
++// counters), reads them around each attempt and records the deltas as wire* fields.
++// Per-test attribution is sound on this suite because the sqlite lane runs workers=1;
++// reporter hooks are not strictly awaited between attempts, so wire deltas are
++// best-effort — the byte instrument of record is the TCP-true pair of runs.
++import type { Reporter, TestCase, TestResult } from '@playwright/test/reporter';
++import { appendFileSync } from 'fs';
++
++const OUT = process.env.TIERLESS_MEASURE_OUT;
++const WIRE = (process.env.TIERLESS_WIRE_URLS || '').split(',').filter(Boolean);
++
++async function counters(): Promise<Record<string, number>> {
++  const out: Record<string, number> = {};
++  for (const url of WIRE) {
++    try {
++      const j = (await (await fetch(url)).json()) as Record<string, unknown>;
++      for (const [k, v] of Object.entries(j)) if (typeof v === 'number') out[k] = (out[k] || 0) + v;
++    } catch {
++      /* counter endpoint absent on this arm */
++    }
++  }
++  return out;
++}
++
++class TierlessMeasure implements Reporter {
++  private before: Record<string, number> = {};
++  async onTestBegin(_test: TestCase) {
++    if (WIRE.length) this.before = await counters();
++  }
++  async onTestEnd(test: TestCase, result: TestResult) {
++    if (!OUT) return;
++    const after = WIRE.length ? await counters() : {};
++    const wire: Record<string, number> = {};
++    for (const k of Object.keys(after)) wire['wire' + k[0].toUpperCase() + k.slice(1)] = after[k] - (this.before[k] || 0);
++    const file = test.location.file.replace(/^.*tests\/playwright\//, '');
++    const titles = test.titlePath().filter((t) => t && !t.endsWith('.spec.ts') && t !== 'chromium');
++    appendFileSync(
++      OUT,
++      JSON.stringify({ id: `${file}:${test.location.line} › ${titles.join(' › ')}`, status: result.status, retry: result.retry, durationMs: result.duration, ...wire }) + '\n',
++    );
++  }
++  printsToStdio() {
++    return false;
++  }
++}
++export default TierlessMeasure;
