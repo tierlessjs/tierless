@@ -12,7 +12,7 @@
 // Browser-safe and import-safe under SSR: nothing touches WebSocket/location until the
 // first call. `exec` services browser-pinned resources (dom.commit in the full-tierless
 // mode, ui.* if you pin some); actions that never touch one simply run out on the server.
-import { makeHost, answerWith } from "./host.mjs";
+import { makeHost, answerWith, batchExec } from "./host.mjs";
 import { makeCoherence } from "./coherence.mjs";
 import { methodMigrate, loadProfile, type Profile } from "./trace.mjs";
 import { makePeer, wsPort, onEvent } from "./transport.mjs";
@@ -73,7 +73,10 @@ export function connect({ url, exec, bundle, tier = "browser", heap = true,
   profileUrl = (globalThis as { __TIERLESS_PROFILE__?: string }).__TIERLESS_PROFILE__,
 }: ConnectOpts = {}): Connection {
   const ws = new WebSocket((typeof url === "function" ? url() : url) || defaultUrl());
-  const peer = makePeer(wsPort(ws));
+  // burst coalescing (host.mts batchExec): concurrent execs merge into one crossing.
+  // The global is the measured-run A/B switch — same pattern as the run-protocol globals.
+  const raw = makePeer(wsPort(ws));
+  const peer = (globalThis as { __TIERLESS_NO_EXEC_BATCH__?: boolean }).__TIERLESS_NO_EXEC_BATCH__ ? raw : batchExec(raw);
   const ready: Promise<void> = new Promise((res, rej) => {
     onEvent(ws, "open", () => res());
     onEvent(ws, "error", (e: any) => rej(new Error("tierless: websocket error" + (e && e.message ? ": " + e.message : ""))));

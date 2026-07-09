@@ -303,6 +303,23 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
       return step(peer, (payload && payload.sid) || "", stack, null);
     },
     handleResume: (payload, bin, peer) => { const { stack, request } = decodeWireBinary(bin!); return step(peer, (payload && payload.sid) || "", stack as Frame[], request as ResourceRequest | null); },
+    // Serve a BURST of fetched resources in one crossing (the browser's microtask
+    // batcher, docs/migrate-arm.md "burst coalescing"): bin is a vector of the same
+    // per-exec payloads, results return per-element — value or shaped error — so each
+    // caller's catch sees exactly what its own single exec would have produced.
+    handleExecBatch: async (payload, bin) => {
+      const items = decodeArgs(bin!) as [string, unknown[]][];
+      const results = await Promise.all(items.map(async ([name, rargs]) => {
+        try {
+          return { ok: true, value: await exec({ op: "resource", tier: payload.tier || tier, name, args: rargs }) };
+        } catch (e: any) {
+          const r = e?.response;
+          return { ok: false, message: String((e && e.message) || e),
+            ...(r ? { response: { status: r.status, statusText: r.statusText ?? "", headers: r.headers ?? {}, data: r.data } } : {}) };
+        }
+      }));
+      return { obj: { type: "done", value: results } };
+    },
     // Serve one fetched resource for a peer's runLocal: no stack arrives and none returns.
     // An HTTP-semantics failure keeps its response (status, headers, body) — app code
     // reads error.response.data for its own error handling, on either tier.
@@ -323,6 +340,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
       peer.on("start", (p, bin) => host.handleStart(p, bin, peer));
       peer.on("resume", (p, bin) => host.handleResume(p, bin, peer));
       peer.on("exec", (p, bin) => host.handleExec(p, bin));
+      peer.on("execBatch", (p, bin) => host.handleExecBatch(p, bin));
       if (coherence) coherence.serve(peer);
       return host;
     },
@@ -338,4 +356,53 @@ export function answerWith(peer: Peer, hostFor: (id: string) => Host | Promise<H
   peer.on("start", async (p, bin) => (await pick(p)).handleStart(p, bin, peer));   // thread the peer so a §5 deref can fetch back over it
   peer.on("resume", async (p, bin) => (await pick(p)).handleResume(p, bin, peer));
   peer.on("exec", async (p, bin) => (await pick(p)).handleExec(p, bin));
+  peer.on("execBatch", async (p, bin) => (await pick(p)).handleExecBatch(p, bin));
+}
+
+// Burst coalescing at the exec boundary: reactive apps fire CONCURRENT resource touches
+// (N components mount, each runLocal parks at its own http.* in the same tick) — the
+// fetch arm sends N ws frames where one would do. This wrapper holds exec requests for
+// one timer turn (setTimeout 0 — a microtask flush fires before sibling pumps reach
+// their parks; the ~1 ms window is noise against a 20 ms RTT) and merges same-(tier,
+// module) requests into one execBatch. Per-element results unwrap to exactly the reply
+// shape a single exec would have produced, so runLocal is untouched. Safe by
+// construction: only requests that were ALREADY in flight together merge — ordering
+// between concurrent execs was never defined. A lone request passes through unchanged.
+export function batchExec(peer: Peer): Peer {
+  type Waiter = { bin: Uint8Array; res: (r: { obj: any; bin: Uint8Array | null }) => void; rej: (e: unknown) => void };
+  const queues = new Map<string, { payload: any; waiters: Waiter[] }>();
+  let scheduled = false;
+  const flush = (): void => {
+    scheduled = false;
+    const batches = [...queues.values()];
+    queues.clear();
+    for (const b of batches) {
+      if (b.waiters.length === 1) { const w = b.waiters[0]; peer.request(b.payload, w.bin).then(w.res, w.rej); continue; }
+      // decode the queued frames back to (name, args) pairs and re-encode as ONE vector:
+      // the batch shares one interned string table (urls, header names) — smaller than
+      // the sum of the frames it replaces. (Uint8Array is not a codec leaf, so the bins
+      // themselves can't nest.)
+      peer.request({ ...b.payload, type: "execBatch" }, encodeArgs(b.waiters.map((w) => decodeArgs(w.bin))))
+        .then(({ obj }) => b.waiters.forEach((w, i) => {
+          const r = (obj.value as ({ ok: true; value: unknown } | { ok: false; message: string; response?: unknown })[] | undefined)?.[i];
+          if (!r) w.res({ obj: { type: "error", message: obj.message || "tierless: execBatch reply missing element " + i }, bin: null });
+          else if (r.ok) w.res({ obj: { type: "done", value: r.value }, bin: null });
+          else w.res({ obj: { type: "error", message: r.message, ...(r.response ? { response: r.response } : {}) }, bin: null });
+        }), (e) => b.waiters.forEach((w) => w.rej(e)));
+    }
+  };
+  return {
+    request(payload: any, bin?: Uint8Array) {
+      if (!payload || payload.type !== "exec" || !bin) return peer.request(payload, bin);
+      return new Promise((res, rej) => {
+        const key = JSON.stringify([payload.tier, payload.module ?? null]);
+        let q = queues.get(key);
+        if (!q) queues.set(key, (q = { payload, waiters: [] }));
+        q.waiters.push({ bin, res, rej });
+        if (!scheduled) { scheduled = true; setTimeout(flush, 0); }
+      });
+    },
+    on: (type, handler) => peer.on(type, handler),
+    close: () => peer.close(),
+  };
 }

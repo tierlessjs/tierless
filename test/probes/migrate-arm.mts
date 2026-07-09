@@ -14,7 +14,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { makeHost } from "tierless";
+import { makeHost, batchExec } from "tierless";
 import { makePeer, encodeMessage, decodeMessage, type Port } from "tierless/transport";
 import { memorySink, buildProfile, loadProfile, methodMigrate } from "tierless/trace";
 import type { Peer } from "tierless";
@@ -63,6 +63,10 @@ export class Svc {
       return "caught:" + e.message;
     }
   }
+  async boom() {
+    const r = await this.http.get("/boom");
+    return r.body;
+  }
 }
 export class Store {
   constructor(svc) { this.svc = svc; }
@@ -75,7 +79,7 @@ export class Store {
 }`;
 
 const { code, meta } = compile(SRC, { resources: { "this.http": "server" }, filename: "svc.js" });
-check("all six methods compiled (Store.flow suspends on METHOD calls only)", meta.methods.filter((m: any) => !m.error).length === 6, JSON.stringify(meta.methods));
+check("all seven methods compiled (Store.flow suspends on METHOD calls only)", meta.methods.filter((m: any) => !m.error).length === 7, JSON.stringify(meta.methods));
 
 const dir = mkdtempSync(join(tmpdir(), "tlmig-"));
 writeFileSync(join(dir, "svc.mjs"), code);
@@ -232,6 +236,36 @@ const svc3 = new mod.Svc({});
 const f3 = await bhost.runLocal(makePeer(bp2), "Store$flow", [new mod.Store(svc3), 7], migrate);
 check("store flow, twin: one crossing, value correct", f3 === "got:n7:3" && counts.resume === 1 && !counts.exec, JSON.stringify({ counts, f3 }));
 check("store flow, twin: write-back — the LIVE browser instance reads its writes", twinSvc.total === 42 && svc3.total === 42, JSON.stringify({ twin: twinSvc.total, browser: svc3.total }));
+
+// ---- 9. burst coalescing: concurrent execs merge into ONE execBatch crossing ----------
+// Reactive apps fire N independent runs in the same tick (N components mount, each
+// parking at its own http.*). The batching peer (host.mts batchExec) holds exec frames
+// for one timer turn and merges the burst; per-element results — including shaped
+// errors — unwrap exactly as single execs, so each run's own catch sees its own failure.
+reset();
+const bpeer = batchExec(peer);
+const [r1, r2, r3] = await Promise.all([
+  bhost.runLocal(bpeer, "Svc$chain", [new mod.Svc({}), 1], {}),
+  bhost.runLocal(bpeer, "Svc$caught", [new mod.Svc({})], {}),
+  bhost.runLocal(bpeer, "Svc$chain", [new mod.Svc({}), 2], {}),
+]);
+check("burst: values correct, the failing element isolated in its own compiled catch", r1 === "got:n1" && r2 === "caught:nope" && r3 === "got:n2", JSON.stringify([r1, r2, r3]));
+check("burst: each concurrent round is ONE execBatch, zero plain execs", counts.execBatch === 2 && !counts.exec && !counts.resume, JSON.stringify(counts));
+
+// a lone request passes through as a plain exec — no batch framing, no protocol change
+reset();
+const lone = await bhost.runLocal(bpeer, "Svc$getAllish", [new mod.Svc({})], {});
+check("lone exec passes through unbatched", Array.isArray(lone) && counts.exec === 1 && !counts.execBatch, JSON.stringify(counts));
+
+// an UNCAUGHT batched failure rejects its own run with the full shaped error (message +
+// response, axios-marked) while the sibling in the same batch completes untouched
+reset();
+const boomP = bhost.runLocal(bpeer, "Svc$boom", [new mod.Svc({})], {});
+const okP = bhost.runLocal(bpeer, "Svc$chain", [new mod.Svc({}), 3], {});
+const boomErr: any = await boomP.then(() => null, (e) => e);
+const ok3 = await okP;
+check("burst error: uncaught element rejects shaped, sibling completes", ok3 === "got:n3" && boomErr?.message === "nope" && boomErr?.response?.status === 400 && boomErr?.isAxiosError === true, JSON.stringify({ ok3, m: boomErr?.message, r: boomErr?.response }));
+check("burst error: round 1 batched, the survivor's second call went alone", counts.execBatch === 1 && counts.exec === 1, JSON.stringify(counts));
 
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
 console.log("\na chain migrates in one crossing; the stop rule, identity, and unwind hold; the profile decides");

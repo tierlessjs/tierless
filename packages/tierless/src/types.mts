@@ -97,5 +97,7 @@ export interface Host {
   handleResume(payload: any, bin: Uint8Array | null, peer?: Peer): Promise<{ obj: HostReply; bin?: Uint8Array }>;
   /** Serve one fetched resource for a peer's runLocal. */
   handleExec(payload: any, bin: Uint8Array | null): Promise<{ obj: HostReply; bin?: Uint8Array }>;
+  /** Serve a coalesced BURST of fetched resources in one crossing (per-element results). */
+  handleExecBatch(payload: any, bin: Uint8Array | null): Promise<{ obj: HostReply; bin?: Uint8Array }>;
   answer(peer: Peer): Host;
 }
