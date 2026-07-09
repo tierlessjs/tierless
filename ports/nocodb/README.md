@@ -29,7 +29,13 @@ review-or-remove item (ROADMAP.md).
 
     node ports/run.mts nocodb          # fetch at the pinned sha, verify tree hash
     cd ports/work/nocodb/src
-    corepack pnpm@10.12.1 run bootstrap:ce
+    corepack prepare pnpm@10.12.1 --activate   # their CI pins pnpm 10; the bare `pnpm`
+                                               # inside their scripts must NOT resolve to
+                                               # 11 (it ignores pnpm.overrides — WARN
+                                               # confirms), and there is no packageManager
+                                               # field to pin it
+    HUSKY=0 corepack pnpm run bootstrap:ce     # HUSKY=0: the recipe tree has no .git,
+                                               # their root prepare script would fail
     # sidecar:   packages/nc-sql-executor    pnpm run dev &
     # backend:   packages/nocodb             pnpm run watch:run:playwright &   (sqlite, :8080)
     # frontend:  packages/nc-gui             pnpm run build && ci:start        (:3000)
