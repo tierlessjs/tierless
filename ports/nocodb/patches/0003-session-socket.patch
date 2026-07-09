@@ -1,7 +1,7 @@
 diff -ruN a/packages/nc-gui/composables/useApi/interceptors.ts b/packages/nc-gui/composables/useApi/interceptors.ts
 --- a/packages/nc-gui/composables/useApi/interceptors.ts	2026-07-09 21:36:18.634056670 +0000
-+++ b/packages/nc-gui/composables/useApi/interceptors.ts	2026-07-09 21:36:36.643268096 +0000
-@@ -1,7 +1,18 @@
++++ b/packages/nc-gui/composables/useApi/interceptors.ts	2026-07-09 23:02:36.806918936 +0000
+@@ -1,7 +1,21 @@
  import axios from 'axios'
  import { axiosAdapter } from 'tierless/adapt-axios'
 -import { restResources } from 'tierless/adapt'
@@ -13,6 +13,9 @@ diff -ruN a/packages/nc-gui/composables/useApi/interceptors.ts b/packages/nc-gui
 +// explicit URL, preconnected at app boot so the upgrade handshake never lands on the
 +// first interaction's critical path. Measured runs may inject an override global.
 +if (typeof window !== 'undefined') {
++  // bounded per-crossing log ({url, status, body}) — the suite's transport-agnostic
++  // waits read it (tests/playwright/pages/Base.ts, test patch 0004)
++  ;(window as any).__TIERLESS_EXEC_LOG__ = true
 +  configureTierless({
 +    url: () => (window as any).__TIERLESS_WS__ || `ws://${location.hostname}:8180/__tierless`,
 +    preconnect: true,
@@ -21,7 +24,7 @@ diff -ruN a/packages/nc-gui/composables/useApi/interceptors.ts b/packages/nc-gui
  const DbNotFoundMsg = 'Database config not found'
  
  const TIMEOUT_RETRY_COUNT = 1
-@@ -21,8 +32,11 @@
+@@ -21,8 +35,11 @@
    // direct fetch to the API origin — stock behavior. Browser-pinned configs (progress,
    // blobs, FormData) fall through to axios's own XHR adapter (absent under Node/SSR).
    axiosInstance.defaults.adapter = axiosAdapter({

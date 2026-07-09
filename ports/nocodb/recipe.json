@@ -22,6 +22,7 @@
     "patches/0003-session-socket.patch"
   ],
   "testPatches": [
-    "patches/0001-measure-reporter.patch"
+    "patches/0001-measure-reporter.patch",
+    "patches/0004-transport-agnostic-waits.patch"
   ]
 }
