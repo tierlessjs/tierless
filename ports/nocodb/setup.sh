@@ -2,14 +2,16 @@
 # NocoDB work-tree setup — the verified procedure from README.md as one idempotent
 # command, because sandbox rollbacks periodically wipe ports/work. Fetch, install,
 # build, browsers: everything a suite run needs, from the recipe alone.
-#   bash ports/nocodb/setup.sh
+#   bash ports/nocodb/setup.sh [--baseline]     (baseline: test patches only, no port)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+VARIANT=nocodb
+if [ "${1:-}" = "--baseline" ]; then VARIANT=nocodb-baseline; fi
 
-node ports/run.mts nocodb
+node ports/run.mts nocodb ${1:-}
 corepack prepare pnpm@10.12.1 --activate    # their CI's pnpm major; bare `pnpm` in their
                                             # scripts must not resolve to 11 (ignores pnpm.overrides)
-cd ports/work/nocodb/src
+cd "ports/work/$VARIANT/src"
 export HUSKY=0                              # recipe tree has no .git; their prepare would fail
 
 # bootstrap:ce, unrolled — with the sdk built EE: their integrations import EE sdk
