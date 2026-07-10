@@ -170,3 +170,20 @@ page's tierless exec log (same url predicate, method, status, JSON matcher
 applied to the winner's body); on stock the log never exists and the race
 reduces to the original wait exactly. One helper covered the suite where
 Vikunja needed per-site rewrites.
+
+## Shaped timing (2026-07-10, results/rtt20-*.jsonl)
+
+`TIERLESS_RTT_MS=20 node ports/nocodb/suite.mts [--baseline]` — 20 ms RTT on all
+three browser-facing hops (frontend origin, API origin, session ws; relays set
+TCP_NODELAY), gateway→backend on undelayed localhost, as deployed. 78 pass-parity
+pairs (8 failures shared by both arms under RTT pressure; 1 ported-only RTT flake
+— columnUserSelect duplicate-field — passed on the unshaped ported arm):
+
+    wall clock     54.3 -> 54.2 min total (parity)
+    per test       median 39.1 -> 38.7 s (+0.9% faster; p10 -1%, p90 +4%)
+
+The same verdict as Vikunja, now on a second app: at residential RTT, one exec
+crossing per request costs the same wall time as one HTTP request — the 94% byte
+win does not buy seconds without restructuring flows (§6 chains / migrations),
+and it costs none either. The timing ceiling lives in the request-per-interaction
+structure, which is the compile-surface story, not the transport story.
