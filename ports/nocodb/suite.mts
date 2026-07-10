@@ -21,9 +21,10 @@ import { delayProxy, type WireCounter } from "../latency-proxy.mts";
 const VARIANT = process.argv.includes("--baseline") ? "nocodb-baseline" : "nocodb";
 const TRUTH = !!process.env.TIERLESS_WIRE_TRUTH;
 const RTT = Number(process.env.TIERLESS_RTT_MS || 0);
+const GZIP = !!process.env.NC_TIERLESS_GZIP;   // env-gated stock compression (patch 0005) — the apples-to-apples arm
 if (TRUTH && RTT) { console.error("pick one: TIERLESS_WIRE_TRUTH (bytes) or TIERLESS_RTT_MS (time) — a counting relay inflates request-heavy tests"); process.exit(2); }
 const SRC = fileURLToPath(new URL(`../work/${VARIANT}/src/`, import.meta.url));
-const OUT = fileURLToPath(new URL(`../work/${VARIANT}/measure${TRUTH ? "-truth" : ""}${RTT ? `-rtt${RTT}` : ""}.jsonl`, import.meta.url));
+const OUT = fileURLToPath(new URL(`../work/${VARIANT}/measure${TRUTH ? "-truth" : ""}${RTT ? `-rtt${RTT}` : ""}${GZIP ? "-gzip" : ""}.jsonl`, import.meta.url));
 
 const wireUrls: string[] = [];
 if (TRUTH) {

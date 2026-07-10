@@ -23,6 +23,7 @@
   ],
   "testPatches": [
     "patches/0001-measure-reporter.patch",
-    "patches/0004-transport-agnostic-waits.patch"
+    "patches/0004-transport-agnostic-waits.patch",
+    "patches/0005-optional-gzip.patch"
   ]
 }
