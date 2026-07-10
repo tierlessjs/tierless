@@ -74,6 +74,14 @@ check("bounce: B's object patch reached A", mA.profile.f2 === 222);
 check("bounce: B's array pop reached A (length back to 800)", mA.rows.length === 800);
 check("bounce: A's earlier edits are intact after the round trip", mA.profile.f1 === 11 && mA.index.get("k49") === 44 && mA.tags.has("hot"));
 
+// a CLASS-STAMPED §5 handle keeps its cls through the delta wire — a dynamic call on
+// the receiving side selects its machine/twin by it, so dropping cls silently breaks dispatch
+(mA.profile as Record<string, unknown>).svc = { __tierless_handle__: true, owner: "server", id: "h9", kind: "object" as const, cls: "Svc" };
+touch(A, mA.profile);
+hop(A, mA, B);
+const gotH = (mB.profile as Record<string, unknown>).svc as { cls?: string; owner?: string; id?: string };
+check("a class-stamped handle round-trips the delta wire with cls intact", gotH?.cls === "Svc" && gotH?.owner === "server" && gotH?.id === "h9", JSON.stringify(gotH));
+
 console.log(ok()
   ? "PASS — per-field/element granularity: object/array/Map/Set ship only the slots that changed, both directions of an oscillation, and it is opt-in (off = byte-identical)"
   : "FAIL");

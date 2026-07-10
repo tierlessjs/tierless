@@ -35,6 +35,7 @@ export interface AxiosishConfig {
   timeout?: number;
   signal?: unknown;
   cancelToken?: unknown;
+  auth?: { username?: string; password?: string };
   [key: string]: unknown;
 }
 
@@ -110,6 +111,11 @@ export function axiosAdapter({ exec, fallback }: AxiosAdapterOpts) {
     const rawHeaders = config.headers?.toJSON ? config.headers.toJSON() : { ...(config.headers || {}) };
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(rawHeaders)) if (v !== undefined && v !== null && typeof v !== "function") headers[k.toLowerCase()] = String(v);
+    // axios's adapter-level Basic auth: overwrites any configured Authorization header
+    if (config.auth) {
+      const cred = (config.auth.username || "") + ":" + (config.auth.password || "");
+      headers.authorization = "Basic " + (typeof btoa === "function" ? btoa(cred) : Buffer.from(cred, "utf8").toString("base64"));
+    }
 
     // ORIGIN-RELATIVE on purpose: the api namespace is tier-owned — whoever executes the
     // request binds it to ITS OWN base (browser: restResources(origin); a session

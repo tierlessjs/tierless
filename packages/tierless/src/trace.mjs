@@ -51,19 +51,27 @@ function fnv1a(s) {
     }
     return h >>> 0;
 }
-/** Argument FEATURES, never values: numbers stay (they are structure — a row count), everything else reduces to type + size. */
+/** Argument FEATURES, never values: numbers stay (they are structure — a row count),
+ *  everything else reduces to type + size. TOTAL: inspection itself can throw (a revoked
+ *  proxy's ownKeys trap) and observability must never fail the observed run — such an
+ *  argument reduces to a coarse fallback feature instead. */
 export const argFeatures = (args) => args.map((a) => {
-    if (typeof a === "number")
-        return String(a);
-    if (typeof a === "string")
-        return "s" + a.length;
-    if (Array.isArray(a))
-        return "a" + a.length;
-    if (a === null || a === undefined)
-        return "_";
-    if (typeof a === "object")
-        return "o" + Object.keys(a).length;
-    return typeof a;
+    try {
+        if (typeof a === "number")
+            return String(a);
+        if (typeof a === "string")
+            return "s" + a.length;
+        if (Array.isArray(a))
+            return "a" + a.length;
+        if (a === null || a === undefined)
+            return "_";
+        if (typeof a === "object")
+            return "o" + Object.keys(a).length;
+        return typeof a;
+    }
+    catch {
+        return "?";
+    }
 });
 const utf8 = new TextEncoder();
 /** Measure a resource result the way the fetch path would ship it: encoded bytes,

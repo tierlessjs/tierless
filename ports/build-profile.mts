@@ -14,6 +14,10 @@ import { buildProfile, type TraceRecord } from "tierless/trace";
 const [traceFile, distDir, outFile] = process.argv.slice(2);
 if (!traceFile || !distDir || !outFile) { console.error("usage: node ports/build-profile.mts <trace.jsonl> <dist-tierless/> <profile.json>"); process.exit(2); }
 
+// the profile key hashes EVERY compiled module in the manifest, while the browser's key
+// grows as modules bindMethods — the pending profile activates only once the page has
+// loaded every compile target. Fail-safe on code-split pages that never load one: the
+// comparison run stays on the fetch arm (and warns), it never runs with a partial match.
 const manifest = JSON.parse(readFileSync(path.join(distDir, "tierless.manifest.json"), "utf8")) as { modules: Record<string, string> };
 const hashes: string[] = [];
 for (const [id, file] of Object.entries(manifest.modules)) {

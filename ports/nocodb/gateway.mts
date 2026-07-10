@@ -20,13 +20,24 @@ const server = createServer((req, res) => {
   res.statusCode = 200; res.end("tierless gateway");   // the boot health wait
 });
 
+// websockets don't do CORS: loopback binding alone doesn't stop a hostile page the
+// developer happens to visit from connecting to localhost and reaching the backend
+// through this unauthenticated exec bridge — only sockets opened by OUR page origins
+// (plain + shaped-relay ports) get a session
+const ALLOWED_ORIGINS = new Set((process.env.TIERLESS_ALLOWED_ORIGINS ||
+  "http://localhost:3000,http://127.0.0.1:3000,http://localhost:13000,http://127.0.0.1:13000").split(","));
+
 // exec-only: no machines yet (the adapter path crosses per request — patch 0003);
 // compiled surfaces resolve from a manifest when they land, same as vikunja's plugin
 const EXEC_ONLY = { PROGRAMS: {}, __unwind: () => false };
 attachTierless(server, {
   bundle: () => EXEC_ONLY as never,
   wire,
-  session: () => ({ exec: restResources(API, { envelopeErrors: true }) }),
+  session: (req) => {
+    const origin = String(req.headers.origin || "");
+    if (!ALLOWED_ORIGINS.has(origin)) throw new Error("tierless gateway: origin not allowed: " + JSON.stringify(origin));
+    return { exec: restResources(API, { envelopeErrors: true }) };
+  },
 });
 
 // loopback only: this is an unauthenticated exec gateway to the localhost backend —

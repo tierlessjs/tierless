@@ -20,6 +20,10 @@ export interface AxiosishConfig {
     timeout?: number;
     signal?: unknown;
     cancelToken?: unknown;
+    auth?: {
+        username?: string;
+        password?: string;
+    };
     [key: string]: unknown;
 }
 export interface AxiosAdapterOpts {

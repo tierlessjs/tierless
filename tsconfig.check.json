@@ -6,8 +6,17 @@
     "strict": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "verbatimModuleSyntax": true
   },
-  "include": ["test/**/*.mts", "bench/**/*.mts", "ports/**/*.mts"]
+  "include": [
+    "test/**/*.mts",
+    "bench/**/*.mts",
+    "ports/**/*.mts"
+  ],
+  "exclude": [
+    "ports/work/**"
+  ]
 }

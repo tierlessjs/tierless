@@ -44,7 +44,10 @@ export type TraceRecord =
     outcome: "done" | "error";
 };
 export type TraceSink = (record: TraceRecord) => void;
-/** Argument FEATURES, never values: numbers stay (they are structure — a row count), everything else reduces to type + size. */
+/** Argument FEATURES, never values: numbers stay (they are structure — a row count),
+ *  everything else reduces to type + size. TOTAL: inspection itself can throw (a revoked
+ *  proxy's ownKeys trap) and observability must never fail the observed run — such an
+ *  argument reduces to a coarse fallback feature instead. */
 export declare const argFeatures: (args: unknown[]) => string[];
 /** Measure a resource result the way the fetch path would ship it: encoded bytes,
  *  not UTF-16 code units (non-ASCII payloads differ). -1 when unserializable. */

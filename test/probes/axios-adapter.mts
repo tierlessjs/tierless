@@ -93,6 +93,11 @@ fell = false;
 await withFallback({ method: "put", baseURL: "http://x.test/api/v1", url: "/bin2", data: new ArrayBuffer(8), headers: {} });
 check("ArrayBuffer body uses fallback adapter", fell);
 
+// --- axios Basic auth crosses as the Authorization header axios would set ----------------
+canned = { status: 200, headers: {}, body: null };
+await adapter({ method: "get", baseURL: "http://x.test/api/v1", url: "/b", auth: { username: "u", password: "p w" }, headers: { authorization: "Bearer stale" } });
+check("auth {username,password} overwrites Authorization with Basic, like axios", ((seen!.args as unknown[])[2] as { headers: Record<string, string> }).headers.authorization === "Basic " + Buffer.from("u:p w").toString("base64"), JSON.stringify((seen!.args as unknown[])[2]));
+
 // --- URLSearchParams params serialize like axios (Object.keys sees nothing in one) -------
 canned = { status: 200, headers: {}, body: null };
 await adapter({ method: "get", baseURL: "http://x.test/api/v1", url: "/u", params: new URLSearchParams([["a", "1"], ["a", "2"], ["b", "x y"]]), headers: {} });

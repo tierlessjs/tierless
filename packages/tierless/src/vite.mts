@@ -449,6 +449,12 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
         path: wsPath,
         bundle: async (moduleId: string) => {
           if (!moduleId) throw new Error("tierless: session did not name its module");
+          // compiled APP modules stamp opaque m:<hash> wire ids — not loadable module
+          // paths. In dev their frames run in the browser (fetch arm) and only exec
+          // crossings arrive here, so an exec-only host serves them; migration needs
+          // the built manifest (vite preview / prod), and a resume against this host
+          // fails with "no machine", not a bogus ssrLoadModule("m:…") error.
+          if (moduleId.startsWith("m:")) return { PROGRAMS: {}, __unwind: () => false } as never;
           const mod = await s.ssrLoadModule(moduleId);
           if (!mod.__bundle) throw new Error("tierless: " + moduleId + " is not a tierless module");
           return mod.__bundle;
