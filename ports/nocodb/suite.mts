@@ -59,7 +59,9 @@ for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => { app.cl
 // --workers=1 pins THEIR CI sqlite-lane concurrency (their config sets it only under
 // CI=true, which flips retries/forbidOnly too — the explicit flag takes just the part
 // that matters: one shared sqlite backend cannot serve 4 racing browser contexts)
-const suite = spawn("corepack", ["pnpm", "exec", "playwright", "test", "--workers=1", ...(process.env.TIERLESS_SPEC || "").split(/\s+/).filter(Boolean)], {
+// heavier shaping needs headroom over their 70 s per-test timeout — hundreds of
+// request round-trips × RTT lands inside the test body; both arms get it equally
+const suite = spawn("corepack", ["pnpm", "exec", "playwright", "test", "--workers=1", ...(RTT >= 50 ? ["--timeout=120000"] : []), ...(process.env.TIERLESS_SPEC || "").split(/\s+/).filter(Boolean)], {
   cwd: path.join(SRC, "tests/playwright"),
   stdio: "inherit",
   env: {
