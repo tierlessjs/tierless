@@ -17,11 +17,11 @@ import { encodeWireBinary, decodeWireBinary, encodeArgs, decodeArgs } from "./wi
 import { makeRecorder, type RecorderOpts, type Recorder } from "./trace.mjs";
 import { DEREF_TIER, usesHeap, type Coherence } from "./coherence.mjs";
 import type { EncodeOptions } from "./graph.mjs";
-import type { Bundle, Frame, Exec, ResourceRequest, Peer, Host, HostReply, Pump } from "./types.mjs";
+import type { Bundle, Frame, Exec, ResourceRequest, PumpRequest, Peer, Host, HostReply, Pump } from "./types.mjs";
 
 const isRecorder = (t: RecorderOpts | Recorder): t is Recorder => typeof (t as Recorder).ship === "function";
 
-export type { Bundle, Frame, MachineResult, ResourceRequest, Exec, Peer, Host } from "./types.mjs";
+export type { Bundle, Frame, MachineResult, ResourceRequest, HomePark, PumpRequest, Exec, Peer, Host } from "./types.mjs";
 export type { Coherence } from "./coherence.mjs";
 
 // What settle()/step() work with — the value a Pump's promise resolves to. Named here so
@@ -232,7 +232,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
       const tid = rec?.spawn(entry, (opts as { trace?: boolean }).trace);
       if (tid) rec!.stamp(stack, tid, entry);   // entry conditions the method-boundary trajectory stats
       const flag = rec ? rec.flagOf(stack) : null;
-      let request: ResourceRequest | null = null;
+      let request: PumpRequest | null = null;
       let carry: { value: unknown } | { error: unknown } | null = null;
       // §5 mini-heap for the MIGRATE arm: excised locals park here while the stack is away
       // and resolve back by identity when it returns. Scoped to this run — nothing leaks.
@@ -248,16 +248,19 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
         const res = await pump(stack, ownsHere, onceExec, request);
         if (res.done) { rec?.end(flag, "done"); return res.value; }
         request = res.request;
+        // a HOME park (§5 stop rule) is not a resource: the stack can only continue
+        // where the handle lives, so it takes the resume path below unconditionally
+        const parked = request.op === "home" ? null : request;
         // pinned = the family's declared semantics (opts.pins) OR args closing over
         // tier-owned values — executes here on the ORIGINAL request (the local exec is
         // the app's own instance; it applies its own request-time config exactly once)
         const localFallback = async (): Promise<void> => {
-          try { carry = { value: await localExec(request!) }; } catch (e) { carry = { error: e }; }
+          try { carry = { value: await localExec(parked!) }; } catch (e) { carry = { error: e }; }
         };
-        if ((pins && pins(request)) || ownsValues(request.args)) { await localFallback(); continue; }
+        if (parked && ((pins && pins(parked)) || ownsValues(parked.args))) { await localFallback(); continue; }
         // opts.map prepares the CROSSING form — request-time config the compiled path
         // bypassed (interceptor chains, baseURL); null = the chain can't run here, pin
-        const req = map ? map(request, stack[stack.length - 1]) : request;
+        const req = !parked ? request : map ? map(parked, stack[stack.length - 1]) : parked;
         if (!req) { await localFallback(); continue; }
         // THE MIGRATE ARM (docs/migrate-arm.md): ship the whole continuation to the
         // resource's tier instead of fetching the value back. Tier-owned locals excise
@@ -267,7 +270,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
         // can serve. Errors the compiled code catches unwind over there; only uncaught
         // ones surface here, exactly as they would have escaped the local pump.
         const top = stack[stack.length - 1];
-        if (migrate && migrate(request, { fn: top.fn, pc: top.pc, entry })) {
+        if (!parked || (migrate && migrate(parked, { fn: top.fn, pc: top.pc, entry }))) {
           if (!heapTier) { const objs = new Map<string, unknown>(); let n = 0; heapTier = { id: tier, heapPut: (v) => { const k = "l" + n++; objs.set(k, v); return k; }, heapGet: (hid) => objs.get(hid) }; }
           const enc = (): Uint8Array => encodeWireBinary(stack, req, { tier: heapTier!, excise: ownedUnit });
           const reply = await peer.request({ type: "resume", sid, ...meta }, rec ? rec.ship(stack, req, enc, "migrate") : enc());
@@ -285,10 +288,10 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
           if (reply.obj.type === "done") return reply.obj.value;
           const back = decodeWireBinary(reply.bin!, { tier: heapTier });
           stack = back.stack as Frame[];
-          request = back.request as ResourceRequest | null;   // op:"home" -> pump steps on from ret; a browser-owned resource -> pump services it here
+          request = back.request as PumpRequest | null;   // op:"home" -> pump steps on from ret; a browser-owned resource -> pump services it here
           continue;
         }
-        try { carry = { value: await execOver(peer, req, meta) }; } catch (e) { carry = { error: e }; }
+        try { carry = { value: await execOver(peer, req as ResourceRequest, meta) }; } catch (e) { carry = { error: e }; }
       }
     },
     // The answering half, exposed as plain handlers so a dispatcher can route by meta.

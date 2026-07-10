@@ -1,7 +1,7 @@
 import { type RecorderOpts, type Recorder } from "./trace.mjs";
 import { type Coherence } from "./coherence.mjs";
 import type { Bundle, Exec, ResourceRequest, Peer, Host } from "./types.mjs";
-export type { Bundle, Frame, MachineResult, ResourceRequest, Exec, Peer, Host } from "./types.mjs";
+export type { Bundle, Frame, MachineResult, ResourceRequest, HomePark, PumpRequest, Exec, Peer, Host } from "./types.mjs";
 export type { Coherence } from "./coherence.mjs";
 export interface MakeHostOpts {
     bundle: Bundle;

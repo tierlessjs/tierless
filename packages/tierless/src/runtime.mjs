@@ -97,7 +97,7 @@ export function makePump(bundle, { twins } = {}) {
                 };
                 if (isHandle(recv)) {
                     const cls = recv.cls;
-                    const twin = cls && twins ? twins(cls) : undefined;
+                    const twin = cls && twins ? twins(cls, { id: recv.id, owner: recv.owner }) : undefined;
                     const prog = cls && PROGRAMS[cls + "$" + r.member] ? cls + "$" + r.member : null;
                     if (twin) {
                         // snapshot JSON IMAGES, not references: this.items.push(x) mutates in place,

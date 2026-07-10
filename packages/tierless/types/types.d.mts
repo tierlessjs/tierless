@@ -33,15 +33,24 @@ export interface Bundle {
     __unwind: (stack: Frame[], err: unknown) => boolean;
     [key: string]: unknown;
 }
-/** A tier-pinned resource request handed to `exec`. op "home" is the §5 stop rule's park
- *  marker (docs/migrate-arm.md): the stack must go to `tier` — where the handle in slot
- *  `name` lives — before its next segment can run. It is never handed to an exec. */
+/** A tier-pinned resource request handed to `exec`. */
 export interface ResourceRequest {
-    op: "resource" | "home";
+    op: "resource";
     tier: string;
     name: string;
     args: unknown[];
 }
+/** The §5 stop rule's park marker (docs/migrate-arm.md): the stack must go to `tier` —
+ *  where the handle in slot `name` lives — before its next segment can run. Pump-internal;
+ *  never handed to an `Exec`. */
+export interface HomePark {
+    op: "home";
+    tier: string;
+    name: string;
+    args: unknown[];
+}
+/** What a pump can park on: a real resource crossing, or the stop rule's home park. */
+export type PumpRequest = ResourceRequest | HomePark;
 export type Exec = (req: ResourceRequest) => unknown | Promise<unknown>;
 /** A twin call's observable effect on instance state (docs/migrate-arm.md): the fields
  *  the twin mutated, addressed by the receiver HANDLE so the home tier can apply them to
@@ -55,14 +64,14 @@ export interface TwinDelta {
     fields: Record<string, unknown>;
 }
 /** Runs a continuation on the local tier until it finishes or parks at a foreign resource. */
-export type Pump = (stack: Frame[], ownsHere: (tier: string) => boolean, execHere: Exec, incoming?: ResourceRequest | null, sink?: {
+export type Pump = (stack: Frame[], ownsHere: (tier: string) => boolean, execHere: Exec, incoming?: PumpRequest | null, sink?: {
     twinDelta(d: TwinDelta): void;
 }) => Promise<{
     done: true;
     value: unknown;
 } | {
     done: false;
-    request: ResourceRequest;
+    request: PumpRequest;
     stack: Frame[];
 }>;
 /** The RPC peer from tierless/transport (structural — anything with request/on works). */

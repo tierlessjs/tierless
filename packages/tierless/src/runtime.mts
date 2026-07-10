@@ -12,9 +12,9 @@
 // socket by the binary wire codec (wire-binary.mjs); host.mjs assembles that loop.
 
 import { isHandle } from "./graph.mjs";
-import type { Bundle, Frame, Exec, ResourceRequest, Pump } from "./types.mjs";
+import type { Bundle, Frame, Exec, ResourceRequest, HomePark, Pump } from "./types.mjs";
 
-export type { Bundle, Frame, MachineResult, ResourceRequest, Exec, Peer, Host } from "./types.mjs";
+export type { Bundle, Frame, MachineResult, ResourceRequest, HomePark, PumpRequest, Exec, Peer, Host } from "./types.mjs";
 
 export const initialStack = (fn: string, args: unknown[] = []): Frame[] => [{ fn, pc: 0, args }];
 
@@ -22,8 +22,11 @@ export interface PumpOpts {
   /** Session twin registry (docs/migrate-arm.md slice 3): resolves a class-stamped §5
    *  handle to a LOCAL instance of that class, so a dynamic call park runs the real
    *  method — its own interceptors, its own state — on this tier. Opt-in per class:
-   *  return undefined and the park falls through to a machine push or a home park. */
-  twins?: (cls: string) => object | undefined;
+   *  return undefined and the park falls through to a machine push or a home park.
+   *  `handle` carries the receiver's identity (owner tier + heap id): a registry serving
+   *  stateful per-instance classes must key on it, or two distinct home instances would
+   *  share one twin's state. Keying by class alone is right only for singletons. */
+  twins?: (cls: string, handle?: { id: string; owner: string }) => object | undefined;
 }
 
 export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
@@ -36,7 +39,7 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
   // segment entered there references; if any currently holds a handle, park the stack to
   // the handle's owner BEFORE stepping. "args" means the unpack block reads F.args — its
   // elements are checked too (a nested call can pass a handle as an argument).
-  const parkHome = (top: Frame): ResourceRequest | null => {
+  const parkHome = (top: Frame): HomePark | null => {
     const need = slots?.[top.fn]?.[top.pc];
     if (!need) return null;
     for (const k of need) {
@@ -95,7 +98,7 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
         };
         if (isHandle(recv)) {
           const cls = (recv as { cls?: string }).cls;
-          const twin = cls && twins ? twins(cls) : undefined;
+          const twin = cls && twins ? twins(cls, { id: recv.id, owner: recv.owner }) : undefined;
           const prog = cls && PROGRAMS[cls + "$" + r.member] ? cls + "$" + r.member : null;
           if (twin) {
             // snapshot JSON IMAGES, not references: this.items.push(x) mutates in place,

@@ -239,24 +239,27 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                     return res.value;
                 }
                 request = res.request;
+                // a HOME park (§5 stop rule) is not a resource: the stack can only continue
+                // where the handle lives, so it takes the resume path below unconditionally
+                const parked = request.op === "home" ? null : request;
                 // pinned = the family's declared semantics (opts.pins) OR args closing over
                 // tier-owned values — executes here on the ORIGINAL request (the local exec is
                 // the app's own instance; it applies its own request-time config exactly once)
                 const localFallback = async () => {
                     try {
-                        carry = { value: await localExec(request) };
+                        carry = { value: await localExec(parked) };
                     }
                     catch (e) {
                         carry = { error: e };
                     }
                 };
-                if ((pins && pins(request)) || ownsValues(request.args)) {
+                if (parked && ((pins && pins(parked)) || ownsValues(parked.args))) {
                     await localFallback();
                     continue;
                 }
                 // opts.map prepares the CROSSING form — request-time config the compiled path
                 // bypassed (interceptor chains, baseURL); null = the chain can't run here, pin
-                const req = map ? map(request, stack[stack.length - 1]) : request;
+                const req = !parked ? request : map ? map(parked, stack[stack.length - 1]) : parked;
                 if (!req) {
                     await localFallback();
                     continue;
@@ -269,7 +272,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                 // can serve. Errors the compiled code catches unwind over there; only uncaught
                 // ones surface here, exactly as they would have escaped the local pump.
                 const top = stack[stack.length - 1];
-                if (migrate && migrate(request, { fn: top.fn, pc: top.pc, entry })) {
+                if (!parked || (migrate && migrate(parked, { fn: top.fn, pc: top.pc, entry }))) {
                     if (!heapTier) {
                         const objs = new Map();
                         let n = 0;
