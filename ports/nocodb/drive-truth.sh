@@ -20,7 +20,7 @@ commit_push() { # commit_push <message> <paths...>
   git -c user.email=noreply@anthropic.com -c user.name="Claude" commit -m "$msg
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01TV86rbddt84T6DDjTCxwod" || return 0   # nothing to commit = fine
+Claude-Session: https://claude.ai/code/session_01TV86rbddt84T6DDjTCxwod" || return 1
   for i in 1 2 3; do git push && return 0; sleep $((i * 4)); done
   return 1
 }

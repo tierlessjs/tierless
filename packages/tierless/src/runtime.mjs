@@ -120,9 +120,14 @@ export function makePump(bundle, { twins } = {}) {
                             if (sink) {
                                 const fields = {};
                                 const post = dataFields(twin);
-                                for (const [k, v] of Object.entries(post))
-                                    if (image(v) !== pre[k])
-                                        fields[k] = v;
+                                for (const [k, v] of Object.entries(post)) {
+                                    const img = image(v);
+                                    // ship the JSON IMAGE's value, not the live reference: the delta rides a
+                                    // JSON-encoded reply, so a circular/unserializable field would crash the
+                                    // whole session at encode time — unserializable changes can't cross, skip
+                                    if (img !== undefined && img !== pre[k])
+                                        fields[k] = JSON.parse(img);
+                                }
                                 const gone = Object.keys(pre).filter((k) => !(k in post)); // deletions: assignment can't express them
                                 if (Object.keys(fields).length || gone.length)
                                     sink.twinDelta({ owner: recv.owner, id: recv.id, fields, ...(gone.length ? { gone } : {}) });

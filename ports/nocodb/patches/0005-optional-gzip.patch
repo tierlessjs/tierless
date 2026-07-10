@@ -16,8 +16,8 @@ diff -ruN a/packages/nocodb/src/run/testDocker.ts b/packages/nocodb/src/run/test
 +// COMPRESSED stock deployment — this tree ships no compression middleware, so raw JSON
 +// is its native serving shape. Dependency-free (node zlib), buffered per response,
 +// thresholds mirroring expressjs/compression defaults (>=1k, compressible types only).
-+// write/end keep their (chunk, encoding, callback) argument forms: encodings decode
-+// into the buffer and callbacks still fire, so upstream flow control is undisturbed.
++// write/end keep their (chunk, encoding, callback) argument forms; the response is
++// FULLY BUFFERED (backpressure deliberately absorbed — bounded harness JSON bodies).
 +if (process.env.NC_TIERLESS_GZIP) {
 +  server.use((req, res, next) => {
 +    if (!/\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) return next();
