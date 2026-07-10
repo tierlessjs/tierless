@@ -114,7 +114,10 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
             if (g.__TIERLESS_EXEC_LOG__) {
                 const env = value;
                 const log = (g.__tierlessExecLog ||= []);
-                log.push({ name: req.name, url: String(req.args?.[0] ?? ""), status: env && typeof env.status === "number" ? env.status : undefined, body: env && "body" in env ? env.body : undefined });
+                // t (wall clock) rather than an index cursor: navigations reset the page world
+                // and restart the log, but time stays comparable — a harness wait armed before
+                // a goto() still recognizes the new document's crossings
+                log.push({ t: Date.now(), name: req.name, url: String(req.args?.[0] ?? ""), status: env && typeof env.status === "number" ? env.status : undefined, body: env && "body" in env ? env.body : undefined });
                 if (log.length > 500)
                     log.splice(0, log.length - 500);
             }

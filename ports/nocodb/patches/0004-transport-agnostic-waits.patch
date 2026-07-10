@@ -1,7 +1,7 @@
 diff -ruN a/tests/playwright/pages/Base.ts b/tests/playwright/pages/Base.ts
 --- a/tests/playwright/pages/Base.ts	2026-07-09 23:02:50.854894552 +0000
-+++ b/tests/playwright/pages/Base.ts	2026-07-09 23:03:17.636911525 +0000
-@@ -40,24 +40,66 @@
++++ b/tests/playwright/pages/Base.ts	2026-07-10 01:52:00.831215351 +0000
+@@ -40,24 +40,67 @@
      timeout?: number;
      responseStatusCodeToMatch?: number;
    }) {
@@ -20,9 +20,9 @@ diff -ruN a/tests/playwright/pages/Base.ts b/tests/playwright/pages/Base.ts
 +    // HTTP response ever fires for them. Race the HTTP wait against the page's tierless
 +    // exec log (same url predicate, method, status). On the stock build the log never
 +    // exists and the race reduces to the original wait exactly.
-+    const logFrom = await this.rootPage
-+      .evaluate(() => ((window as any).__tierlessExecLog || []).length)
-+      .catch(() => 0);
++    // a TIMESTAMP, not an index cursor: uiAction may navigate, which resets the page
++    // world and restarts the log — wall clock stays comparable across documents
++    const logFrom = await this.rootPage.evaluate(() => Date.now()).catch(() => Date.now());
 +    const httpWait = this.rootPage.waitForResponse(
 +      res =>
 +        (requestUrlPathToMatch instanceof RegExp
@@ -34,9 +34,10 @@ diff -ruN a/tests/playwright/pages/Base.ts b/tests/playwright/pages/Base.ts
 +    );
 +    const tierlessWait = this.rootPage.waitForFunction(
 +      ({ from, reSrc, reFlags, sub, methods, status }) => {
-+        const log = ((window as any).__tierlessExecLog || []) as { name: string; url: string; status?: number }[];
-+        for (let i = from; i < log.length; i++) {
++        const log = ((window as any).__tierlessExecLog || []) as { t: number; name: string; url: string; status?: number }[];
++        for (let i = 0; i < log.length; i++) {
 +          const e = log[i];
++          if (!e || e.t < from) continue;
 +          const method = (e.name || '').split('.')[1]?.toUpperCase() || '';
 +          const urlOk = reSrc !== null ? new RegExp(reSrc, reFlags || '').test(e.url) : e.url.includes(sub as string);
 +          if (urlOk && e.status === status && (methods as string[]).includes(method)) return i + 1;
