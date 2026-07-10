@@ -5,8 +5,8 @@
 //   node wire-truth.mts [--baseline]
 import { createRequire } from "node:module";
 const { chromium } = createRequire("/opt/node22/lib/node_modules/")("playwright");
-import { delayProxy, type WireCounter } from "/home/user/tierless/ports/latency-proxy.mts";
-import { seedProjectWithTasks, API } from "/home/user/tierless/ports/vikunja/boot.mts";
+import { delayProxy, type WireCounter } from "../../latency-proxy.mts";
+import { seedProjectWithTasks, API } from "../boot.mts";
 
 const front: WireCounter = { toServer: 0, toClient: 0 };
 const api: WireCounter = { toServer: 0, toClient: 0 };
