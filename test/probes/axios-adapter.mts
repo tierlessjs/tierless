@@ -49,6 +49,19 @@ const withFallback = axiosAdapter({ exec: async () => { throw new Error("must no
 const fb = await withFallback({ method: "get", url: "/file", baseURL: "http://x.test", onUploadProgress: () => {}, headers: {} });
 check("progress config uses fallback adapter", fell && fb === "fallback-response");
 
+// --- protocol-relative URLs resolve, then get the same origin gate -----------------------
+canned = { status: 200, headers: {}, body: null };
+await adapter({ method: "get", baseURL: "http://x.test/api/v1", url: "//x.test/api/v1/self", headers: {} });
+check("protocol-relative same-origin url crosses with a clean path", (seen!.args as [string])[0] === "/api/v1/self", (seen!.args as [string])[0]);
+fell = false;
+await withFallback({ method: "get", baseURL: "http://x.test/api/v1", url: "//elsewhere.test/x", headers: {} });
+check("protocol-relative other-origin url falls back", fell);
+
+// --- withCredentials is browser-pinned (cookie jar can't cross tiers) ---------------------
+fell = false;
+await withFallback({ method: "post", baseURL: "http://x.test/api/v1", url: "/auth/refresh", withCredentials: true, headers: {} });
+check("withCredentials config uses fallback adapter", fell);
+
 // --- per-request paramsSerializer is honored ---------------------------------------------
 canned = { status: 200, headers: {}, body: null };
 await adapter({ method: "get", baseURL: "http://x.test/api/v1", url: "/f", params: { a: 1 }, paramsSerializer: { serialize: () => "custom=1" }, headers: {} });

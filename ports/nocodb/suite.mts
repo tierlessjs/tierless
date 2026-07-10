@@ -71,6 +71,10 @@ const suite = spawn("corepack", ["pnpm", "exec", "playwright", "test", "--worker
     ...(wireUrls.length ? { TIERLESS_WIRE_URLS: wireUrls.join(",") } : {}),
   },
 });
-await new Promise<void>((resolve) => suite.on("exit", () => resolve()));   // nonzero = some tests failed; every attempt is in the JSONL regardless
+const code = await new Promise<number>((resolve) => {
+  suite.on("error", (err) => { console.error("suite spawn failed:", err.message); resolve(1); });
+  suite.on("exit", (c) => resolve(c ?? 1));
+});
 app.close();
 console.log(`\nmeasured arm (${VARIANT}): ${path.relative(process.cwd(), OUT)}`);
+process.exitCode = code;   // nonzero = some tests failed; every attempt is in the JSONL regardless — callers tolerating failures say `|| true`

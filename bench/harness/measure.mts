@@ -93,9 +93,11 @@ export async function measureJourney(
     cdp.on("Network.requestWillBeSent", (e: any) => {
       if (!recording || ignore(e.request.url)) return;
       const body = e.request.postData ? Buffer.byteLength(e.request.postData) : 0;
+      const u = new URL(e.request.url);
       reqs.set(e.requestId, {
         kind: "http", url: e.request.url, method: e.request.method,
-        bytesOut: `${e.request.method} ${new URL(e.request.url).pathname} HTTP/1.1\r\n`.length + headerBytes(e.request.headers) + 2 + body,
+        // the request target includes the query string on the wire
+        bytesOut: Buffer.byteLength(`${e.request.method} ${u.pathname}${u.search} HTTP/1.1\r\n`) + headerBytes(e.request.headers) + 2 + body,
         bytesIn: 0,
         tStart: now(), tEnd: 0,
       });
@@ -111,7 +113,9 @@ export async function measureJourney(
     cdp.on("Network.webSocketFrameSent", (e: any) => {
       const s = sockets.get(e.requestId);
       if (!s || !recording) return;
-      const bytes = wsFrameBytes(e.response.payloadData.length, true);
+      // binary frames arrive base64-encoded in CDP; text frames as-is (same as receive)
+      const len = e.response.opcode === 2 ? Buffer.from(e.response.payloadData, "base64").length : Buffer.byteLength(e.response.payloadData);
+      const bytes = wsFrameBytes(len, true);
       s.framesOut++; s.bytesOut += bytes; s.frames.push({ dir: "out", t: now(), bytes });
     });
     cdp.on("Network.webSocketFrameReceived", (e: any) => {

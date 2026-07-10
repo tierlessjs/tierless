@@ -31,6 +31,7 @@ export interface AxiosishConfig {
   validateStatus?: ((status: number) => boolean) | null;
   onUploadProgress?: unknown;
   onDownloadProgress?: unknown;
+  withCredentials?: boolean;
   [key: string]: unknown;
 }
 
@@ -57,6 +58,7 @@ export function serializeParams(params: Record<string, unknown>): string {
 
 const pinned = (c: AxiosishConfig): boolean =>
   !!(c.onUploadProgress || c.onDownloadProgress || c.responseType === "blob" || c.responseType === "stream" || c.responseType === "arraybuffer"
+    || c.withCredentials   // cookie-jar auth (incl. HttpOnly) exists only in the browser — another tier can't reproduce it
     || (typeof FormData !== "undefined" && c.data instanceof FormData)
     || (typeof Blob !== "undefined" && c.data instanceof Blob));
 
@@ -72,8 +74,8 @@ export function axiosAdapter({ exec, fallback }: AxiosAdapterOpts) {
     // with the config's own serializer when present.
     const base = config.baseURL ? new URL(config.baseURL, typeof location !== "undefined" ? location.href : undefined) : undefined;
     const baseOrigin = base ? base.origin : (typeof location !== "undefined" ? location.origin : "http://localhost");
-    const joined = config.url && /^https?:\/\//.test(config.url)
-      ? new URL(config.url)
+    const joined = config.url && /^(https?:)?\/\//.test(config.url)   // absolute or protocol-relative
+      ? new URL(config.url, baseOrigin)
       : new URL((base ? base.pathname.replace(/\/$/, "") : "") + "/" + String(config.url || "").replace(/^\//, ""), baseOrigin);
     // only the app's OWN api crosses as a resource request; an explicit other-origin URL
     // is external I/O — stock behavior via the fallback, never a tier crossing

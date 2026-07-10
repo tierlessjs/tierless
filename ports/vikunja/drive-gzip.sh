@@ -50,6 +50,20 @@ if [ ! -f "$R/truth-baseline-gzip.jsonl" ]; then
   commit_push "ports/vikunja: compressed-stock wire-truth arm ($n rows)" "$R/truth-baseline-gzip.jsonl" || fail "push failed"
 fi
 
+# hard gzip gate on the ARM itself: compressed must be measurably smaller than the raw
+# arm on api-in bytes over tests passed in both runs, or the flag was inert.
+node -e '
+  const fs = require("fs");
+  const load = (p) => new Map(fs.readFileSync(p, "utf8").trim().split("\n").map(JSON.parse)
+    .filter((r) => r.status === "passed" && r.wireApiIn !== undefined).map((r) => [r.id, r]));
+  const raw = load("ports/vikunja/results/truth-baseline.jsonl");
+  const gz = load("ports/vikunja/results/truth-baseline-gzip.jsonl");
+  let a = 0, b = 0, n = 0;
+  for (const [t, r] of raw) { const g = gz.get(t); if (!g) continue; a += r.wireApiIn; b += g.wireApiIn; n++; }
+  console.log(`gzip gate: api-in over ${n} shared passed tests: raw=${a} gz=${b} (${(100 * (1 - b / a)).toFixed(1)}% smaller)`);
+  if (!(n >= 50 && b < a * 0.9)) { console.error("compressed arm is not measurably smaller — VIKUNJA_TIERLESS_GZIP inert?"); process.exit(1); }
+' || fail "gzip arm shows no compression vs the raw baseline arm"
+
 say "— bytes, ported vs COMPRESSED stock:"
 node ports/report.mts "$R/truth-baseline-gzip.jsonl" "$R/truth-ported.jsonl" | grep -E "total bytes|median per-test bytes|pass-parity EXCLUDED" | head -4 || true
 say "VIKUNJA GZIP DRIVE COMPLETE"

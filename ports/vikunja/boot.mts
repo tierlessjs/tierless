@@ -51,9 +51,16 @@ export async function bootVikunja(): Promise<{ close(): void }> {
     spawn(path.join(SRC, "vikunja"), [], { cwd: SRC, env: ENV, stdio: "ignore", detached: true }),
     spawn("corepack", ["pnpm", "run", "preview"], { cwd: path.join(SRC, "frontend"), env: { ...process.env, COREPACK_ENABLE_DOWNLOAD_PROMPT: "0" }, stdio: "ignore", detached: true }),
   ];
-  await Promise.all([waitFor(API + "/api/v1/info"), waitFor(FRONT)]);
+  // cleanup exists BEFORE any await: a failed readiness wait must not strand the
+  // detached groups — that would create exactly the stale stack the guard above rejects
   const close = (): void => procs.forEach((p) => { try { process.kill(-p.pid!, "SIGTERM"); } catch { p.kill(); } });
   process.on("exit", close);
+  try {
+    await Promise.all([waitFor(API + "/api/v1/info"), waitFor(FRONT)]);
+  } catch (err) {
+    close();
+    throw err;
+  }
   return { close };
 }
 

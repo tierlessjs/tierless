@@ -57,16 +57,23 @@ export async function bootNocodb(): Promise<{ close(): void }> {
     // the session gateway (both variants — env symmetry; the baseline build never connects)
     spawn(process.execPath, [fileURLToPath(new URL("./gateway.mts", import.meta.url))], { env, stdio: log("gateway"), detached: true }),
   ];
-  // the backend's first wait includes its rspack watch build (minutes); their CI polls
-  // :8080 the same way. The executor answers anything (404 root = up).
-  await Promise.all([
-    waitFor(API, 600_000),
-    waitFor(FRONT, 120_000),
-    waitFor(EXECUTOR, 120_000, false),
-    waitFor(GATEWAY, 120_000),
-  ]);
+  // cleanup exists BEFORE any await: a failed readiness wait must not strand four
+  // detached watcher groups that would own the ports for every later run
   const close = (): void => procs.forEach((p) => { try { process.kill(-p.pid!, "SIGTERM"); } catch { p.kill(); } });
   process.on("exit", close);
+  // the backend's first wait includes its rspack watch build (minutes); their CI polls
+  // :8080 the same way. The executor answers anything (404 root = up).
+  try {
+    await Promise.all([
+      waitFor(API, 600_000),
+      waitFor(FRONT, 120_000),
+      waitFor(EXECUTOR, 120_000, false),
+      waitFor(GATEWAY, 120_000),
+    ]);
+  } catch (err) {
+    close();
+    throw err;
+  }
   return { close };
 }
 

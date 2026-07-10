@@ -66,11 +66,13 @@ listed with both statuses.
 
 ## Honesty constraints (bind all rungs)
 
-- **Bytes and trips are measured; latency is modeled.** CDP's network throttling does
-  not apply to websockets (long-standing Chromium limitation), so real throttling would
-  bias exactly the before(HTTP)/after(ws) comparison. Latency claims are computed from
-  measured (trips, bytes) under a declared RTT/bandwidth model — the same pattern as
-  `bench/conduit.mts` — with the model parameters printed beside every number.
+- **Bytes, trips, and latency are all measured — never via CDP throttling.** CDP's
+  network throttling does not apply to websockets (long-standing Chromium limitation),
+  so it would bias exactly the before(HTTP)/after(ws) comparison. RTT is instead
+  injected for real by a TCP delay relay in front of both origins
+  (`ports/latency-proxy.mts`), which shapes websockets and CORS preflights identically
+  to plain HTTP. The declared RTT is printed beside every number; the settled timing
+  metric is network wait = duration@RTT − duration@unshaped-floor.
 - **Workload selection is not ours.** Journeys come from the target app's own e2e
   suite, by a fixed rule (e.g. every journey tagged smoke/critical), chosen before
   measurement.

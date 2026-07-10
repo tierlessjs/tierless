@@ -38,7 +38,13 @@ export function delayProxy(listen: number, target: number, oneWayMs: number, onW
         if (wait > 0) setTimeout(() => { if (to.writable) to.write(chunk); }, wait);
         else if (to.writable) to.write(chunk);
       });
-      from.on("end", () => (oneWayMs ? setTimeout(() => to.end(), oneWayMs) : to.end()));
+      from.on("end", () => {
+        // EOF rides behind any chunks still serializing on the modeled link — ending
+        // after only the propagation delay would truncate a bps-shaped stream.
+        const wait = Math.max(wireFree - Date.now(), 0) + oneWayMs;
+        if (wait > 0) setTimeout(() => to.end(), wait);
+        else to.end();
+      });
       from.on("error", () => to.destroy());
     };
     relay(cli, up, "toServer");

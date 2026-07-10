@@ -79,7 +79,9 @@ if [ ! -f ports/work/nocodb-baseline/.apples-gzip-smoked ]; then
     console.log(`gzip smoke: ${passed}/${rows.length} passed`);
     if (passed !== rows.length || rows.length < 2) process.exit(1);
   ' || fail "gzip smoke spec failed"
-  say "gzip gate: content-encoding hits=$ENC (informational; big bodies compress, small skip)"
+  # a small probed body may legitimately skip gzip (under the 1 KB threshold), so this
+  # curl alone can't be the gate — the hard assert against the raw arm runs after step 4
+  say "gzip gate: content-encoding hits=$ENC on the curl probe"
   touch ports/work/nocodb-baseline/.apples-gzip-smoked
 fi
 
@@ -93,6 +95,21 @@ if [ ! -f "$R/truth-baseline-gzip.jsonl" ]; then
   cp ports/work/nocodb-baseline/measure-truth-gzip.jsonl "$R/truth-baseline-gzip.jsonl"
   commit_push "ports/nocodb: compressed-stock wire-truth arm ($n rows)" "$R/truth-baseline-gzip.jsonl" || fail "push failed"
 fi
+
+# hard gzip gate: the compressed arm must actually be smaller than the raw arm on the
+# wire, or the flag was inert and the whole arm is mislabeled. Compares api-in bytes
+# summed over tests PASSED IN BOTH runs (the only rows report.mts compares too).
+node -e '
+  const fs = require("fs");
+  const load = (p) => new Map(fs.readFileSync(p, "utf8").trim().split("\n").map(JSON.parse)
+    .filter((r) => r.status === "passed" && r.wireApiIn !== undefined).map((r) => [r.id, r]));
+  const raw = load("ports/nocodb/results/truth-baseline.jsonl");
+  const gz = load("ports/nocodb/results/truth-baseline-gzip.jsonl");
+  let a = 0, b = 0, n = 0;
+  for (const [t, r] of raw) { const g = gz.get(t); if (!g) continue; a += r.wireApiIn; b += g.wireApiIn; n++; }
+  console.log(`gzip gate: api-in over ${n} shared passed tests: raw=${a} gz=${b} (${(100 * (1 - b / a)).toFixed(1)}% smaller)`);
+  if (!(n >= 50 && b < a * 0.9)) { console.error("compressed arm is not measurably smaller — NC_TIERLESS_GZIP inert?"); process.exit(1); }
+' || fail "gzip arm shows no compression vs the raw baseline arm"
 
 say "reports"
 say "— bytes, ported vs COMPRESSED stock:"

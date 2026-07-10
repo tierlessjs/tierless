@@ -73,7 +73,7 @@ console.log(`\npaired ${pairs.length} tests (${base.size} baseline, ${port.size}
 const wireTrue = pairs.length > 0 && pairs.every(({ b, p }) => hasWire(b) && hasWire(p));
 console.log(wireTrue
   ? "bytes are TCP-TRUE (socket-level, compression included; browser data path only — node-side seeding excluded)"
-  : "bytes are CDP-level (ws frames post-inflate — UNDERCOUNTS a compressed ported arm)");
+  : "bytes are CDP-level (ws frames counted post-inflate — OVERSTATES a deflate-compressed arm's wire bytes)");
 if (onlyBase.length) console.log(`  only in baseline (${onlyBase.length}): ${onlyBase.slice(0, 5).join("; ")}${onlyBase.length > 5 ? " …" : ""}`);
 if (onlyPort.length) console.log(`  only in ported (${onlyPort.length}): ${onlyPort.slice(0, 5).join("; ")}${onlyPort.length > 5 ? " …" : ""}`);
 if (parityFail.length) {

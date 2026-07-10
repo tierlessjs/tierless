@@ -54,8 +54,9 @@ proven (38 executable proofs, `npm test`).
   "median X× less network wait, Y% less IO across N apps' own e2e journeys."
   Rungs 1–3 are built (harness verified against socket ground truth; REST-proxy
   adapter + route-workflow shim; Vikunja ported at a 2-line diff, 196/196 pass
-  parity, −60% trips / −28% median IO on their own 199-test suite). Open: the
-  10–20-app study reporting medians and full distributions, losers included.
+  parity, 13% less suite IO / 16% fewer round trips — median per test 35%
+  fewer bytes, 22% fewer trips). Open: the 10–20-app study reporting medians
+  and full distributions, losers included.
 
 - **Cash the measured 486 ms data-path lead** (ports/vikunja README, timing
   section). Under real 80 ms RTT the port delivers all route data at t=260 vs

@@ -110,6 +110,9 @@ const hash = readFileSync(path.join(work, "TREEHASH"), "utf8").trim();
 const pinned = recipe.treeHash[transport];
 if (pinned === undefined || pinned === null) {
   console.log(`treeHash for transport "${transport}" (pin this in ${name}/recipe.json):\n  "${transport}": "${hash}"`);
+  // unverified content must not flow into a measured tree by default — pinning is a
+  // deliberate, one-time act (TIERLESS_PIN=1), after which every run verifies
+  if (!process.env.TIERLESS_PIN) { console.error("refusing to proceed on an unpinned transport (set TIERLESS_PIN=1 while pinning)"); process.exit(1); }
 } else if (hash !== pinned) {
   console.error(`TREE HASH MISMATCH (${transport}) — the fetched source is not the pinned content\n  expected ${pinned}\n  got      ${hash}`);
   process.exit(1);

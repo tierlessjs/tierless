@@ -77,9 +77,11 @@ export const argFeatures = (args: unknown[]): string[] => args.map((a) => {
   return typeof a;
 });
 
-/** Measure a resource result the way the fetch path would ship it. -1 when unserializable. */
+/** Measure a resource result the way the fetch path would ship it: encoded bytes,
+ *  not UTF-16 code units (non-ASCII payloads differ). -1 when unserializable. */
+const utf8 = new TextEncoder();
 export const resultBytes = (v: unknown): number => {
-  try { const s = JSON.stringify(v); return s === undefined ? 0 : s.length; } catch { return -1; }
+  try { const s = JSON.stringify(v); return s === undefined ? 0 : utf8.encode(s).length; } catch { return -1; }
 };
 
 // The recorder the host hooks call. All methods are no-ops in ~one property read when the
