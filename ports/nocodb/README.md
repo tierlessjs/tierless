@@ -146,9 +146,13 @@ lane, plus the exclusions below); 78 of 80 touch the session socket.
 Why the number dwarfs Vikunja's 13%/35%: **their Express backend serves raw,
 uncompressed JSON** (no compression middleware anywhere in the tree — verified),
 so stock pays full-size bodies plus per-request headers, while the ported arm
-pays one session-long deflate window. Vikunja's Go backend gzipped, leaving only
-cross-request redundancy to win. A NocoDB deployment behind a gzip proxy would
-land between the two; the measured stack is the one their own CI runs. Trips are
+pays one session-long deflate window. CORRECTION (2026-07-10): Vikunja's stock
+API is ALSO raw — its echo gzip middleware skips /api/ paths (verified
+empirically: identity encoding with Accept-Encoding: gzip) — so the 94%-vs-35%
+gap is payload-size distribution, not encoding. The apples-to-apples arms
+(results/truth-baseline-gzip.jsonl here; the vikunja analog) measure both ports
+against a COMPRESSED stock too; the measured default stack remains the one each
+app's own CI runs. Trips are
 not instrumented on this port (the reporter is wire-counter-based, no CDP
 fixture); ws message counts can be added at the gateway if wanted.
 

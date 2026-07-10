@@ -23,6 +23,7 @@
   ],
   "testPatches": [
     "patches/0003-measure-fixture.patch",
-    "patches/0004-transport-agnostic-waits.patch"
+    "patches/0004-transport-agnostic-waits.patch",
+    "patches/0008-optional-api-gzip.patch"
   ]
 }

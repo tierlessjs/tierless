@@ -62,7 +62,7 @@ awaited member calls compile and dispatch in the pump). Still open:
 196/196 pass parity (identical exclusions), **186 pairs through the session**.
 Trips: 15% fewer suite-wide, 22% median per test (preflights gone). Bytes:
 median 32% MORE per test — every request is its own crossing today, paying the
-module path (~85 B), envelope framing, and UNCOMPRESSED JSON (stock rides gzip)
+module path (~85 B), envelope framing, and UNCOMPRESSED JSON [correction 2026-07-10: stock API is raw too — the echo gzip middleware skips /api/; the overhead was framing, not an encoding gap]
 on each one; large payloads still win big (a gantt spec: 892 KB -> 29 KB).
 Wall time on localhost: ~0% (as always; shaped runs are the timing instrument).
 
@@ -80,7 +80,8 @@ whole session's history — cross-request redundancy per-response HTTP gzip cann
 reach. Measured at the SOCKET (counting TCP relays — CDP reports ws frames
 post-inflate and cannot see this), same warm open-project interaction:
 
-    stock    24.1 KB on the wire (4,491 out / 19,630 in, gzip included)
+    stock    24.1 KB on the wire (4,491 out / 19,630 in; static assets gzip,
+             API responses raw — echo's gzip middleware skips /api/, verified 2026-07-10)
     ported    6.2 KB on the wire — the session data path itself: 284 BYTES
 
 Scope: the 284 B is repeat-navigation best case (the window had seen the shape;
