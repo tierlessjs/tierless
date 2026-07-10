@@ -207,12 +207,24 @@ The settled metric is NETWORK WAIT — dur@RTT − dur@unshaped-floor per test
 RTT that decomposition is variance-dominated on this suite: the unimprovable
 floor is ~3,340 s per arm (render + Playwright fixtures), the modeled pool is
 ~5% of that, and 74 of 78 pairs measure a NEGATIVE net component (run-to-run
-noise exceeds the signal). The honest 20 ms verdict is wall parity, not a
-speedup claim in either direction; results/rtt80-*.jsonl (the Vikunja
-instrument, where the pool is ~4x larger) is the measurable decomposition.
+noise exceeds the signal). The honest 20 ms verdict is wall parity.
 
-The same verdict as Vikunja, now on a second app: at residential RTT, one exec
-crossing per request costs the same wall time as one HTTP request — the 94% byte
-win does not buy seconds without restructuring flows (§6 chains / migrations),
-and it costs none either. The timing ceiling lives in the request-per-interaction
-structure, which is the compile-surface story, not the transport story.
+## Network wait at RTT 80 (2026-07-10, results/rtt80-*.jsonl + floors)
+
+At 80 ms (the Vikunja instrument — a 4x larger pool) the decomposition is
+measurable: 58 tests pass in all four runs (floors + both rtt80 arms; RTT
+pressure and the CE-lane skips drop the rest), 8 of 58 still noise-negative
+(kept as-is; medians are robust):
+
+    unimprovable floor    2,554 s per arm (render + fixtures — transport can't move it)
+    network-wait pool     103.7 s -> 64.7 s   (38% of the POOL removed)
+    median per test       2,190 -> 1,685 ms network wait
+    pool share of wall    4% (baseline) — the ceiling ANY transport work has here
+
+So the honest two-line timing story: the port removes 38% of what the network
+actually costs this suite, and the network costs this suite 4% of its wall
+time. Per-interaction crossings pay per-interaction RTTs — the byte win (94%)
+does not become large wall-clock wins without restructuring flows (§6 chains /
+migrations), and it costs nothing either. The timing ceiling lives in the
+request-per-interaction structure — the compile-surface story, not the
+transport story — same verdict as Vikunja, now decomposed on a second app.
