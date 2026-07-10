@@ -135,7 +135,17 @@ export function makePump(bundle, { twins } = {}) {
                         return { done: false, request: { op: "home", tier: recv.owner, name: r.member, args: [] }, stack };
                 }
                 else {
-                    const f = recv?.[r.member];
+                    // the member LOOKUP itself can throw (a getter) — that's part of the awaited
+                    // expression, so it unwinds into the compiled catch exactly like the call would
+                    let f;
+                    try {
+                        f = recv?.[r.member];
+                    }
+                    catch (err) {
+                        if (!__unwind(stack, err))
+                            throw err;
+                        continue;
+                    }
                     if (f && typeof f.__tierless_program === "string")
                         stack.push({ fn: f.__tierless_program, pc: 0, args: [recv, ...r.args] });
                     else

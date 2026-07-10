@@ -88,19 +88,27 @@ export function twinHttp(baseUrl, { token, headers = {}, fetchImpl = fetch } = {
  *  shaped rejections cross as errors and unwind into the compiled code's own try/catch. */
 /** The http family's DECLARED pins — requests whose axios config makes them browser-
  *  bound by MEANING, not by transport: a blob/stream response can't cross, progress
- *  callbacks act on live UI. Serializable configs that no ownership scan could flag.
+ *  callbacks act on live UI, cookie-jar auth and in-flight abort semantics exist only
+ *  where the request was written. Serializable configs no ownership scan could flag.
  *  (Callbacks and FormData/Blob values are caught by the host's generic scan.) */
 export function httpPins(req) {
-    const cfg = req.args.find((a) => a !== null && typeof a === "object" && ("responseType" in a || "onUploadProgress" in a || "onDownloadProgress" in a));
-    const rt = cfg?.responseType;
-    return rt === "blob" || rt === "stream" || rt === "arraybuffer";
+    const KEYS = ["responseType", "onUploadProgress", "onDownloadProgress", "withCredentials", "signal", "cancelToken", "timeout"];
+    const cfg = req.args.find((a) => a !== null && typeof a === "object" && KEYS.some((k) => k in a));
+    if (!cfg)
+        return false;
+    const rt = cfg.responseType;
+    return rt === "blob" || rt === "stream" || rt === "arraybuffer"
+        || !!cfg.withCredentials || !!cfg.signal || !!cfg.cancelToken || (typeof cfg.timeout === "number" && cfg.timeout > 0);
 }
 /** Prepare an http.* request for CROSSING: run the instance's own request-interceptor
  *  chain (app code — auth headers, model→DTO transforms, casing) right here, where it
  *  was written to run, and emit the post-chain wire config — exactly what axios would
- *  hand its adapter. Returns null when the chain can't run synchronously (an async
- *  interceptor): the caller pins the request to the local instance, where axios runs
- *  the chain itself. Interceptors execute in axios's order (reverse registration). */
+ *  hand its adapter. A synchronous chain returns the crossing form directly; an async
+ *  interceptor switches to a promise that AWAITS the chain once and continues from
+ *  there — the already-invoked handler is never re-run (re-pinning to the instance
+ *  would execute its side effects twice and orphan the first promise's rejection).
+ *  Interceptors execute in axios's order (reverse registration); a chain error rejects
+ *  like the request itself failing, exactly as stock axios rejects the request. */
 export function crossHttpRequest(instance, req) {
     const m = /^http\.(get|post|put|patch|delete|head|options)$/.exec(req.name);
     if (!m)
@@ -116,27 +124,42 @@ export function crossHttpRequest(instance, req) {
         ...(hasBody ? { data: a1 } : {}),
         ...(extra || {}),
     };
+    const finish = (c) => {
+        const cUrl = String(c.url || url);
+        const abs = /^https?:\/\//.test(cUrl) ? cUrl : (c.baseURL ? String(c.baseURL).replace(/\/$/, "") + cUrl : cUrl);
+        const rawHeaders = c.headers?.toJSON ? c.headers.toJSON() : { ...(c.headers || {}) };
+        const headers = {};
+        for (const [k, v] of Object.entries(rawHeaders))
+            if (v !== undefined && v !== null && typeof v !== "function" && typeof v !== "object")
+                headers[k.toLowerCase()] = String(v);
+        const cfg = { headers };
+        if (c.params)
+            cfg.params = wireJson(c.params);
+        return { ...req, args: hasBody ? [abs, wireJson(c.data), cfg] : [abs, cfg] };
+    };
     const handlers = [];
     instance?.interceptors?.request?.forEach((h) => handlers.push(h));
-    for (const h of handlers.reverse()) { // axios runs request interceptors LIFO
+    handlers.reverse(); // axios runs request interceptors LIFO
+    for (let i = 0; i < handlers.length; i++) {
+        const h = handlers[i];
         if (h.runWhen && !h.runWhen(config))
             continue;
         const r = h.fulfilled ? h.fulfilled(config) : config;
-        if (r && typeof r.then === "function")
-            return null; // async chain: pin to the instance
+        if (r && typeof r.then === "function") {
+            return (async () => {
+                let c = (await r) || config;
+                for (let j = i + 1; j < handlers.length; j++) {
+                    const g = handlers[j];
+                    if (g.runWhen && !g.runWhen(c))
+                        continue;
+                    c = ((g.fulfilled ? (await g.fulfilled(c)) : c)) || c;
+                }
+                return finish(c);
+            })();
+        }
         config = r || config;
     }
-    const cUrl = String(config.url || url);
-    const abs = /^https?:\/\//.test(cUrl) ? cUrl : (config.baseURL ? String(config.baseURL).replace(/\/$/, "") + cUrl : cUrl);
-    const rawHeaders = config.headers?.toJSON ? config.headers.toJSON() : { ...(config.headers || {}) };
-    const headers = {};
-    for (const [k, v] of Object.entries(rawHeaders))
-        if (v !== undefined && v !== null && typeof v !== "function" && typeof v !== "object")
-            headers[k.toLowerCase()] = String(v);
-    const cfg = { headers };
-    if (config.params)
-        cfg.params = wireJson(config.params);
-    return { ...req, args: hasBody ? [abs, wireJson(config.data), cfg] : [abs, cfg] };
+    return finish(config);
 }
 // What crosses is EXACTLY axios's JSON pass: toJSON honored (models serialize
 // themselves), Dates -> ISO strings, undefined and functions dropped — the wire body

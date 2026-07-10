@@ -53,7 +53,7 @@ export interface Connection {
   /** Run entry(...args) HERE; foreign resources are fetched over the session (the frame
    *  never ships — the compiled-class-method path, see bindMethods). opts.exec serves
    *  pinned requests on this tier; opts.pins adds the resource family's declared pins. */
-  runLocal(entry: string, args?: unknown[], module?: string, opts?: { exec?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => unknown | Promise<unknown>; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => import("./types.mjs").ResourceRequest | null; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean }): Promise<unknown>;
+  runLocal(entry: string, args?: unknown[], module?: string, opts?: { exec?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => unknown | Promise<unknown>; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => import("./types.mjs").ResourceRequest | null | Promise<import("./types.mjs").ResourceRequest | null>; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean }): Promise<unknown>;
   /** ONE resource request executed on the SERVER over this session — no machine, no
    *  frame: the fetch-arm crossing as a first-class op (host.mts execOver). The
    *  I/O-bottom adapter path: an app's axios adapter crosses here per request. */
@@ -143,7 +143,7 @@ export function connect({ url, exec, bundle, tier = "browser", heap = true,
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
       return h.call(peer, entry, args);
     },
-    runLocal: async (entry: string, args: unknown[] = [], module: string = "", opts?: { exec?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => unknown | Promise<unknown>; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => import("./types.mjs").ResourceRequest | null; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean }): Promise<unknown> => {
+    runLocal: async (entry: string, args: unknown[] = [], module: string = "", opts?: { exec?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => unknown | Promise<unknown>; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => import("./types.mjs").ResourceRequest | null | Promise<import("./types.mjs").ResourceRequest | null>; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean }): Promise<unknown> => {
       await ready;
       const h = hosts.get(module || "");
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));

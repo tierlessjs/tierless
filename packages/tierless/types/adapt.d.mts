@@ -43,15 +43,19 @@ export interface RestResourcesOpts {
  *  shaped rejections cross as errors and unwind into the compiled code's own try/catch. */
 /** The http family's DECLARED pins — requests whose axios config makes them browser-
  *  bound by MEANING, not by transport: a blob/stream response can't cross, progress
- *  callbacks act on live UI. Serializable configs that no ownership scan could flag.
+ *  callbacks act on live UI, cookie-jar auth and in-flight abort semantics exist only
+ *  where the request was written. Serializable configs no ownership scan could flag.
  *  (Callbacks and FormData/Blob values are caught by the host's generic scan.) */
 export declare function httpPins(req: ResourceRequest): boolean;
 /** Prepare an http.* request for CROSSING: run the instance's own request-interceptor
  *  chain (app code — auth headers, model→DTO transforms, casing) right here, where it
  *  was written to run, and emit the post-chain wire config — exactly what axios would
- *  hand its adapter. Returns null when the chain can't run synchronously (an async
- *  interceptor): the caller pins the request to the local instance, where axios runs
- *  the chain itself. Interceptors execute in axios's order (reverse registration). */
+ *  hand its adapter. A synchronous chain returns the crossing form directly; an async
+ *  interceptor switches to a promise that AWAITS the chain once and continues from
+ *  there — the already-invoked handler is never re-run (re-pinning to the instance
+ *  would execute its side effects twice and orphan the first promise's rejection).
+ *  Interceptors execute in axios's order (reverse registration); a chain error rejects
+ *  like the request itself failing, exactly as stock axios rejects the request. */
 export declare function crossHttpRequest(instance: {
     defaults?: {
         baseURL?: string;
@@ -67,6 +71,6 @@ export declare function crossHttpRequest(instance: {
             }) => void) => void;
         };
     };
-} | null | undefined, req: ResourceRequest): ResourceRequest | null;
+} | null | undefined, req: ResourceRequest): ResourceRequest | null | Promise<ResourceRequest | null>;
 export declare function httpResources(instance: Record<string, unknown>): Exec;
 export declare function restResources(baseUrl: string, { token, headers, fetchImpl, envelopeErrors }?: RestResourcesOpts): Exec;

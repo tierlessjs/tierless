@@ -222,7 +222,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
       // map/exec receive the PARKED TOP FRAME too: with nested machines (a store method
       // calling service methods), the instance that owns a park is that frame's args[0],
       // not the run's own arg 0 — interceptor chains and pinned fallbacks must follow it.
-      const { exec: overrideExec, pins, map, migrate } = opts as { exec?: (req: ResourceRequest, frame?: Frame) => unknown; pins?: (req: ResourceRequest) => boolean; map?: (req: ResourceRequest, frame?: Frame) => ResourceRequest; migrate?: (req: ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean };
+      const { exec: overrideExec, pins, map, migrate } = opts as { exec?: (req: ResourceRequest, frame?: Frame) => unknown; pins?: (req: ResourceRequest) => boolean; map?: (req: ResourceRequest, frame?: Frame) => ResourceRequest | null | Promise<ResourceRequest | null>; migrate?: (req: ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean };
       const baseExec = execOn(peer);
       const localExec: Exec = overrideExec ? (r) => overrideExec(r, stack[stack.length - 1]) : baseExec;
       const sid = newSid();
@@ -260,8 +260,13 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
         };
         if (parked && ((pins && pins(parked)) || ownsValues(parked.args))) { await localFallback(); continue; }
         // opts.map prepares the CROSSING form — request-time config the compiled path
-        // bypassed (interceptor chains, baseURL); null = the chain can't run here, pin
-        const req = !parked ? request : map ? map(parked, stack[stack.length - 1]) : parked;
+        // bypassed (interceptor chains, baseURL); async when the chain has an async
+        // interceptor (awaited here, run exactly once); null = can't cross, pin.
+        // A chain that THROWS routes into the machine like the request itself failing —
+        // a compiled try/catch sees it exactly as axios's rejected request promise.
+        let req: PumpRequest | null;
+        try { req = !parked ? request : map ? await map(parked, stack[stack.length - 1]) : parked; }
+        catch (e) { carry = { error: e }; continue; }
         if (!req) { await localFallback(); continue; }
         // THE MIGRATE ARM (docs/migrate-arm.md): ship the whole continuation to the
         // resource's tier instead of fetching the value back. Tier-owned locals excise

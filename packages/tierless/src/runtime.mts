@@ -123,9 +123,13 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
           else if (prog) stack.push({ fn: prog, pc: 0, args: [recv, ...r.args] });
           else return { done: false, request: { op: "home", tier: recv.owner, name: r.member, args: [] }, stack };
         } else {
-          const f = (recv as Record<string, unknown> | null | undefined)?.[r.member] as ((...a: unknown[]) => unknown) & { __tierless_program?: string };
+          // the member LOOKUP itself can throw (a getter) — that's part of the awaited
+          // expression, so it unwinds into the compiled catch exactly like the call would
+          let f: ((...a: unknown[]) => unknown) & { __tierless_program?: string } | undefined;
+          try { f = (recv as Record<string, unknown> | null | undefined)?.[r.member] as typeof f; }
+          catch (err) { if (!__unwind(stack, err)) throw err; continue; }
           if (f && typeof f.__tierless_program === "string") stack.push({ fn: f.__tierless_program, pc: 0, args: [recv, ...r.args] });
-          else await settle(() => f.apply(recv as object, r.args));
+          else await settle(() => f!.apply(recv as object, r.args));
         }
       } else if (r.op === "throw") {
         stack.pop();

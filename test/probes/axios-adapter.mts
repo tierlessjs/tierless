@@ -80,6 +80,29 @@ canned = { status: 200, headers: {}, body: null };
 await adapter({ method: "get", baseURL: "http://x.test/api/v1", url: "/f", params: { a: 1 }, paramsSerializer: { serialize: () => "custom=1" }, headers: {} });
 check("config paramsSerializer wins", (seen!.args as [string])[0].endsWith("/f?custom=1"));
 
+// --- crossHttpRequest: an ASYNC interceptor chain is awaited exactly once ----------------
+const { crossHttpRequest, httpPins } = await import("../../packages/tierless/src/adapt.mts");
+let asyncRuns = 0;
+const inst = (fulfilled: (c: any) => unknown) => ({
+  defaults: { baseURL: "http://x.test/api/v1", headers: { common: { accept: "application/json" } } },
+  interceptors: { request: { forEach: (fn: (h: { fulfilled?: (c: unknown) => unknown }) => void) => [{ fulfilled }].forEach(fn) } },
+});
+const crossed = await crossHttpRequest(
+  inst(async (c: any) => { asyncRuns++; c.headers.authorization = "Bearer t9"; return c; }) as never,
+  { op: "resource", tier: "server", name: "http.get", args: ["/z"] },
+) as { args: unknown[] } | null;
+check("async interceptor: chain awaited ONCE, crossing carries its header", asyncRuns === 1 && !!crossed && (crossed.args[1] as { headers: Record<string, string> }).headers.authorization === "Bearer t9", JSON.stringify(crossed?.args));
+const chainErr = await Promise.resolve(crossHttpRequest(
+  inst(async () => { throw new Error("chain-fail"); }) as never,
+  { op: "resource", tier: "server", name: "http.get", args: ["/z"] },
+)).then(() => null, (e: Error) => e);
+check("async interceptor: a chain error rejects like the request failing", chainErr?.message === "chain-fail", String(chainErr));
+
+// --- httpPins: cookie-jar + abort semantics pin on the compiled-method path too ----------
+check("httpPins pins withCredentials", httpPins({ op: "resource", tier: "server", name: "http.get", args: ["/x", { withCredentials: true }] }));
+check("httpPins pins signal", httpPins({ op: "resource", tier: "server", name: "http.get", args: ["/x", { signal: new AbortController().signal }] }));
+check("httpPins pins positive timeout, not timeout 0", httpPins({ op: "resource", tier: "server", name: "http.get", args: ["/x", { timeout: 3000, responseType: "json" }] }) && !httpPins({ op: "resource", tier: "server", name: "http.get", args: ["/x", { timeout: 0, responseType: "json" }] }));
+
 // --- twinHttp: the server-side twin speaks the axios surface over fetch ------------------
 const { twinHttp } = await import("../../packages/tierless/src/adapt.mts");
 const { createServer } = await import("node:http");

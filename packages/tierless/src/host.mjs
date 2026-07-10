@@ -258,8 +258,18 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                     continue;
                 }
                 // opts.map prepares the CROSSING form — request-time config the compiled path
-                // bypassed (interceptor chains, baseURL); null = the chain can't run here, pin
-                const req = !parked ? request : map ? map(parked, stack[stack.length - 1]) : parked;
+                // bypassed (interceptor chains, baseURL); async when the chain has an async
+                // interceptor (awaited here, run exactly once); null = can't cross, pin.
+                // A chain that THROWS routes into the machine like the request itself failing —
+                // a compiled try/catch sees it exactly as axios's rejected request promise.
+                let req;
+                try {
+                    req = !parked ? request : map ? await map(parked, stack[stack.length - 1]) : parked;
+                }
+                catch (e) {
+                    carry = { error: e };
+                    continue;
+                }
                 if (!req) {
                     await localFallback();
                     continue;

@@ -85,12 +85,18 @@ export function makeRecorder({ rate = 0, force = [], sink }) {
     // that vanishes when tracing turns off). A throw here would even route through the
     // pump's error unwinding and could be CAUGHT BY APP CODE as a fake resource failure.
     // So: swallow and count, never propagate.
-    const emit = (r) => { try {
-        sink(r);
-    }
-    catch {
-        dropped++;
-    } };
+    // An ASYNC sink's rejection would otherwise escape as an unhandled rejection — same
+    // fault-injection hazard, one tick later. Observe and count it like a sync throw.
+    const emit = (r) => {
+        try {
+            const p = sink(r);
+            if (p && typeof p.catch === "function")
+                p.catch(() => { dropped++; });
+        }
+        catch {
+            dropped++;
+        }
+    };
     const top = (stack) => stack[stack.length - 1];
     const flagOf = (stack) => {
         const f = stack.length && stack[0].__trace;

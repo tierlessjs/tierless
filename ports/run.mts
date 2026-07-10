@@ -122,15 +122,29 @@ if (pinned === undefined || pinned === null) {
 
 const toApply = [...(baseline ? [] : recipe.patches), ...(recipe.testPatches ?? [])];
 const appliedFile = path.join(work, "APPLIED");
-const applied = new Set(existsSync(appliedFile) ? readFileSync(appliedFile, "utf8").split("\n").filter(Boolean) : []);
+// name + content digest per line: a committed patch EDITED under the same filename must
+// not cache-hit — the tree would run old code while the recipe claims the new patch.
+// (Legacy name-only lines from older trees stay honored by name.)
+const applied = new Map<string, string | null>();
+for (const line of existsSync(appliedFile) ? readFileSync(appliedFile, "utf8").split("\n").filter(Boolean) : []) {
+  const [name, digest] = line.split(" ");
+  applied.set(name, digest || null);
+}
+const writeApplied = (): void => writeFileSync(appliedFile, [...applied].map(([n, d]) => (d ? `${n} ${d}` : n)).join("\n") + "\n");
 for (const p of toApply) {
-  if (applied.has(p)) { console.log(`already applied ${p}`); continue; }
+  const digest = createHash("sha256").update(readFileSync(path.join(recipeDir, p))).digest("hex");
+  if (applied.has(p)) {
+    const was = applied.get(p);
+    if (was && was !== digest) { console.error(`patch ${p} changed since this tree applied it — rebuild the tree (delete ${path.relative(process.cwd(), work)})`); process.exit(1); }
+    console.log(`already applied ${p}`);
+    continue;
+  }
   // plain patch(1), NOT `git apply`: the work tree lives inside this repo (gitignored), and
   // git apply silently no-ops (exit 0!) on paths under an ignored directory of the enclosing
   // repository. patch -p1 is cwd-relative and repo-oblivious, and fails loudly.
   execFileSync("patch", ["-p1", "--no-backup-if-mismatch", "-i", path.join(recipeDir, p)], { cwd: src, stdio: "inherit" });
-  applied.add(p);
-  writeFileSync(appliedFile, [...applied].join("\n") + "\n");
+  applied.set(p, digest);
+  writeApplied();
   console.log(`applied ${p}`);
 }
 if (!toApply.length) console.log("no patches to apply");

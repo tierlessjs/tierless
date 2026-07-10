@@ -29,7 +29,7 @@ export interface Connection {
     runLocal(entry: string, args?: unknown[], module?: string, opts?: {
         exec?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => unknown | Promise<unknown>;
         pins?: (req: import("./types.mjs").ResourceRequest) => boolean;
-        map?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => import("./types.mjs").ResourceRequest | null;
+        map?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => import("./types.mjs").ResourceRequest | null | Promise<import("./types.mjs").ResourceRequest | null>;
         migrate?: (req: import("./types.mjs").ResourceRequest, site: {
             fn: string;
             pc: number;

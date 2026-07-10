@@ -23,6 +23,7 @@ import { delayProxy, type WireCounter } from "../latency-proxy.mts";
 const VARIANT = process.argv.includes("--baseline") ? "vikunja-baseline" : "vikunja";
 const TRUTH = !!process.env.TIERLESS_WIRE_TRUTH;
 const RTT = Number(process.env.TIERLESS_RTT_MS || 0);
+if (TRUTH && RTT) { console.error("pick one: TIERLESS_WIRE_TRUTH (bytes) or TIERLESS_RTT_MS (time) — combined, the API override routes around the RTT relay and the timing is partially unshaped"); process.exit(2); }
 // Run protocol (docs/corpus.md): TIERLESS_PROFILE_RUN=1 makes this a PROFILING run
 // (browser traces every method run to the gateway, appended to trace.jsonl); setting
 // TIERLESS_PROFILE=<profile.json> makes it a frozen COMPARISON run (the locked profile
@@ -32,6 +33,7 @@ const PROFILE = process.env.TIERLESS_PROFILE || "";
 if (PROFILE_RUN && PROFILE) { console.error("pick one: TIERLESS_PROFILE_RUN (profiling) or TIERLESS_PROFILE (comparison)"); process.exit(2); }
 const TRACE_OUT = fileURLToPath(new URL(`../work/${VARIANT}/trace.jsonl`, import.meta.url));
 const BPS = Number(process.env.TIERLESS_BPS || 0);   // model link bandwidth (bits/s) on the shaped relays; 0 = unshaped
+if (BPS && !RTT) { console.error("TIERLESS_BPS shapes the RTT relays — set TIERLESS_RTT_MS too (they only exist on shaped runs)"); process.exit(2); }
 const SRC = fileURLToPath(new URL(`../work/${VARIANT}/src/`, import.meta.url));
 const OUT = fileURLToPath(new URL(`../work/${VARIANT}/measure${RTT ? `-rtt${RTT}` : ""}${BPS ? `-bps${BPS}` : ""}.jsonl`, import.meta.url));
 

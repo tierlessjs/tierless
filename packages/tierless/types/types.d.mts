@@ -122,7 +122,7 @@ export interface Host {
     runLocal(peer: Peer, entry: string, args?: unknown[], opts?: {
         exec?: (req: ResourceRequest, frame?: Frame) => unknown | Promise<unknown>;
         pins?: (req: ResourceRequest) => boolean;
-        map?: (req: ResourceRequest, frame?: Frame) => ResourceRequest | null;
+        map?: (req: ResourceRequest, frame?: Frame) => ResourceRequest | null | Promise<ResourceRequest | null>;
         migrate?: (req: ResourceRequest, site: {
             fn: string;
             pc: number;
