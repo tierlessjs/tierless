@@ -149,12 +149,23 @@ so stock pays full-size bodies plus per-request headers, while the ported arm
 pays one session-long deflate window. CORRECTION (2026-07-10): Vikunja's stock
 API is ALSO raw — its echo gzip middleware skips /api/ paths (verified
 empirically: identity encoding with Accept-Encoding: gzip) — so the 94%-vs-35%
-gap is payload-size distribution, not encoding. The apples-to-apples arms
-(results/truth-baseline-gzip.jsonl here; the vikunja analog) measure both ports
-against a COMPRESSED stock too; the measured default stack remains the one each
-app's own CI runs. Trips are
+gap is payload-size distribution, not encoding. Trips are
 not instrumented on this port (the reporter is wire-counter-based, no CDP
-fixture); ws message counts can be added at the gateway if wanted.
+fixture; report.mts derives socket coverage from the TCP ws counters).
+
+### Apples-to-apples: against a COMPRESSED stock (results/truth-baseline-gzip.jsonl)
+
+Patch 0005 adds an env-gated gzip layer to their test server (`NC_TIERLESS_GZIP=1`;
+zlib, ≥1 KB compressible bodies — expressjs/compression defaults). The default
+measured stack stays what their own CI runs (raw); this arm answers "what if they
+deployed compression":
+
+    stock, gzip     26.5 MB -> 16.3 MB api-in (gzip cuts stock's API bytes 63%)
+    ported vs it    16.3 MB -> 1.57 MB   (90% less IO; median per-test 91%)
+
+Compression captures barely a third of the gap: the port's win here is
+structural — bodies that never repeat across a deflate window, headers that
+never re-send — not just encoding.
 
 Pass sets: 3 exclusions fail on BOTH arms (columnAttachments, metaLTAR
 delete-over-UI, viewGridShare — the stock CORS-refresh family), and
@@ -185,6 +196,15 @@ pairs (8 failures shared by both arms under RTT pressure; 1 ported-only RTT flak
 
     wall clock     54.3 -> 54.2 min total (parity)
     per test       median 39.1 -> 38.7 s (+0.9% faster; p10 -1%, p90 +4%)
+
+The settled metric is NETWORK WAIT — dur@RTT − dur@unshaped-floor per test
+(clean floors in results/floor-*.jsonl; `node ports/report-time.mts`). At 20 ms
+RTT that decomposition is variance-dominated on this suite: the unimprovable
+floor is ~3,340 s per arm (render + Playwright fixtures), the modeled pool is
+~5% of that, and 74 of 78 pairs measure a NEGATIVE net component (run-to-run
+noise exceeds the signal). The honest 20 ms verdict is wall parity, not a
+speedup claim in either direction; results/rtt80-*.jsonl (the Vikunja
+instrument, where the pool is ~4x larger) is the measurable decomposition.
 
 The same verdict as Vikunja, now on a second app: at residential RTT, one exec
 crossing per request costs the same wall time as one HTTP request — the 94% byte

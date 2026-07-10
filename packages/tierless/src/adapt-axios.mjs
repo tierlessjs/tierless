@@ -28,7 +28,10 @@ export function serializeParams(params) {
         visit(k, v);
     return q.toString();
 }
-const pinned = (c) => !!(c.onUploadProgress || c.onDownloadProgress || c.responseType === "blob" || c.responseType === "stream" || c.responseType === "arraybuffer"
+const pinned = (c) => 
+// text: axios must return the RAW string even for JSON-labeled responses, but the
+// crossing's exec parses by content-type; document: browser-specific decoding
+!!(c.onUploadProgress || c.onDownloadProgress || c.responseType === "blob" || c.responseType === "stream" || c.responseType === "arraybuffer" || c.responseType === "text" || c.responseType === "document"
     || c.withCredentials // cookie-jar auth (incl. HttpOnly) exists only in the browser — another tier can't reproduce it
     || c.signal || c.cancelToken || (typeof c.timeout === "number" && c.timeout > 0) // in-flight abort/timeout semantics don't cross the exec boundary — the adapter owns them, so these run stock
     || (typeof FormData !== "undefined" && c.data instanceof FormData)

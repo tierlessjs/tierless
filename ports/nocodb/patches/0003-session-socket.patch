@@ -18,7 +18,7 @@ diff -ruN a/packages/nc-gui/composables/useApi/interceptors.ts b/packages/nc-gui
  const DbNotFoundMsg = 'Database config not found'
  
  const TIMEOUT_RETRY_COUNT = 1
-@@ -13,6 +21,15 @@
+@@ -13,6 +21,16 @@
    const optimisedQuery = useState('optimisedQuery', () => true)
    const { $ncSocket } = useNuxtApp()
  
@@ -28,13 +28,14 @@ diff -ruN a/packages/nc-gui/composables/useApi/interceptors.ts b/packages/nc-gui
 +    // agnostic waits read it (tests/playwright/pages/Base.ts, test patch 0004)
 +    ;(window as any).__TIERLESS_EXEC_LOG__ = true
 +    const wsUrl = (useRuntimeConfig().public as any).tierlessWsUrl as string
-+    configureTierless({ url: () => wsUrl || `ws://${location.hostname}:8180/__tierless`, preconnect: true })
++    // scheme follows the page (an https page blocks ws:// as mixed content)
++    configureTierless({ url: () => wsUrl || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:8180/__tierless`, preconnect: true })
 +  }
 +
    const axiosInstance = api.instance
  
    // The tierless I/O bottom (corpus port, patch 0002): axios above this line is
-@@ -21,8 +38,11 @@
+@@ -21,8 +39,11 @@
    // direct fetch to the API origin — stock behavior. Browser-pinned configs (progress,
    // blobs, FormData) fall through to axios's own XHR adapter (absent under Node/SSR).
    axiosInstance.defaults.adapter = axiosAdapter({

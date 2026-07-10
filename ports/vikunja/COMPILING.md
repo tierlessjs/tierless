@@ -114,6 +114,26 @@ Coverage note: 11 tests (login-failure/email-confirmation flows) never inject
 the browser API override and their page traffic bypasses both counters —
 symmetric on both arms, zeros in both files, excluded from nothing.
 
+## Apples-to-apples: against a COMPRESSED stock (2026-07-10, results/truth-baseline-gzip.jsonl)
+
+Patch 0008 adds an env-gated override to their echo gzip middleware
+(`VIKUNJA_TIERLESS_GZIP=1` stops the Skipper from excluding /api/). The default
+measured stack stays their own CI's (raw API); this arm answers "what if they
+turned compression on" — gzip cuts stock's API-in bytes 16% (their JSON bodies
+are small; the hard gate in drive-gzip.sh requires ≥10%):
+
+    ported vs RAW stock     32.0 MB -> 28.2 MB  (12% less IO; median 35% per test)
+    ported vs GZIP stock    28.5 MB -> 28.2 MB  ( 1% less IO; median 19% per test)
+
+Honest read: on this app, a one-line compression middleware captures most of the
+port's SUITE-WIDE byte advantage — the totals are dominated by uncovered
+endpoints both arms fetch identically over HTTP. Per covered interaction the
+port still wins (19% median) because framing, headers, and cross-request deflate
+context don't come back with gzip. Caveat on symmetry: this pair compresses ALL
+of stock's traffic while the ported arm's residual direct-HTTP stays raw — a
+deployment that compresses would compress both; the same flag on the ported arm
+is the symmetric arm (NocoDB analog: drive-apples2.sh).
+
 ## Shaped timing, native arms (2026-07-07, results/rtt80-*.jsonl)
 
 TIERLESS_RTT_MS=80, full suite, both arms: 195/195 pass parity (the extra

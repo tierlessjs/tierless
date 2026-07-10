@@ -80,6 +80,11 @@ check("cancelToken uses fallback adapter", fell);
 await adapter({ method: "get", baseURL: "http://x.test/api/v1", url: "/t0", timeout: 0, headers: {} });
 check("timeout 0 (axios default: none) still crosses", (seen!.args as [string])[0] === "/api/v1/t0", (seen!.args as [string])[0]);
 
+// --- responseType text/document are browser-pinned (crossing parses by content-type) ------
+fell = false;
+await withFallback({ method: "get", baseURL: "http://x.test/api/v1", url: "/raw", responseType: "text", headers: {} });
+check("responseType text uses fallback adapter", fell);
+
 // --- binary bodies are browser-pinned (they'd JSON-serialize to {} on the crossing) -------
 fell = false;
 await withFallback({ method: "put", baseURL: "http://x.test/api/v1", url: "/bin", data: new Uint8Array([1, 2, 3]), headers: {} });

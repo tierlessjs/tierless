@@ -35,6 +35,15 @@ sweep_ports() {
   sleep 2
 }
 
+# ---- 0. the built UI must speak the CURRENT wire (SMW2): the browser runtime is baked
+# into nc-gui's build, and a magic bump in the linked package makes every session
+# crossing fail against a stale build ------------------------------------------------------
+if ! grep -qr '"SMW2"' ports/work/nocodb/src/packages/nc-gui/.output/public/_nuxt 2>/dev/null; then
+  say "rebuilding ported UI (stale wire magic in the built bundle)"
+  ( cd ports/work/nocodb/src/packages/nc-gui && NODE_OPTIONS=--max_old_space_size=8192 HUSKY=0 corepack pnpm run build ) || fail "gui rebuild failed"
+  grep -qr '"SMW2"' ports/work/nocodb/src/packages/nc-gui/.output/public/_nuxt || fail "rebuilt UI still lacks SMW2"
+fi
+
 # ---- 1. symmetric compressed arm: ported WITH gzip ---------------------------------------
 if [ ! -f "$R/truth-ported-gzip.jsonl" ]; then
   say "truth arm: ported WITH gzip (full suite)"

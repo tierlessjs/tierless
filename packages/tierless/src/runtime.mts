@@ -39,14 +39,26 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
   // segment entered there references; if any currently holds a handle, park the stack to
   // the handle's owner BEFORE stepping. "args" means the unpack block reads F.args — its
   // elements are checked too (a nested call can pass a handle as an argument).
+  // the wire codec descends into arrays/Maps/Sets, so a slot can arrive as a CONTAINER
+  // holding a handle ([svc], a Map of services) — scan those too, depth-capped (deeper
+  // object graphs excise at their own slots; they don't smuggle handles into this one)
+  const findHandle = (v: unknown, depth: number): { owner: string } | null => {
+    if (isHandle(v)) return v;
+    if (depth <= 0 || v === null || typeof v !== "object") return null;
+    const items = Array.isArray(v) ? v : v instanceof Map ? [...v.values()] : v instanceof Set ? [...v] : null;
+    if (!items) return null;
+    for (const x of items) { const h = findHandle(x, depth - 1); if (h) return h; }
+    return null;
+  };
   const parkHome = (top: Frame): HomePark | null => {
     const need = slots?.[top.fn]?.[top.pc];
     if (!need) return null;
     for (const k of need) {
-      const v = k === "args" ? (Array.isArray(top.args) ? top.args.find(isHandle) : top.args)
+      const v = k === "args" ? top.args
         : k.startsWith("args[") ? (Array.isArray(top.args) ? top.args[Number(k.slice(5, -1))] : top.args)
         : (top as Record<string, unknown>)[k];
-      if (isHandle(v)) return { op: "home", tier: v.owner, name: k, args: [] };
+      const h = findHandle(v, 2);
+      if (h) return { op: "home", tier: h.owner, name: k, args: [] };
     }
     return null;
   };
