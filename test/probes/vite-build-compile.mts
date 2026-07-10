@@ -18,12 +18,14 @@ const SRC_DIR = fileURLToPath(new URL("../../packages/tierless/src/", import.met
 const dir = mkdtempSync(join(tmpdir(), "vite-build-compile-"));
 const { check, counts } = makeCounter();
 
-// the compile branch and the emit both resolve esbuild from the APP root — give the
-// fixture app a node_modules that has it (the react-vite example's, same as a real
-// vite app's own dependency tree)
+// the compile branch and the emit both resolve vite/esbuild from the APP root — give
+// the fixture app a node_modules that has them: the react-vite example's when it's
+// installed (a real vite app's own dependency tree), else the REPO root's (CI installs
+// workspaces only; vite is a root devDependency for exactly this probe)
 writeFileSync(join(dir, "package.json"), "{}\n");
 const EXAMPLE_NM = fileURLToPath(new URL("../../examples/react-vite/node_modules", import.meta.url));
-symlinkSync(EXAMPLE_NM, join(dir, "node_modules"));
+const ROOT_NM = fileURLToPath(new URL("../../node_modules", import.meta.url));
+symlinkSync(existsSync(join(EXAMPLE_NM, "vite")) ? EXAMPLE_NM : ROOT_NM, join(dir, "node_modules"));
 
 // ---- the fixture app -------------------------------------------------------------------
 mkdirSync(join(dir, "src", "helpers"), { recursive: true });

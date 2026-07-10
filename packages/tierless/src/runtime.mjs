@@ -83,9 +83,12 @@ export function makePump(bundle, { twins } = {}) {
                 // here. Settled promises route rejections like any resource error; a handle with
                 // no local meaning parks the stack to its owner and re-dispatches live there.
                 const recv = r.recv;
-                const settle = async (p) => {
+                // a THUNK, invoked inside the try: a synchronous throw from the member call
+                // itself (a getter, a sync method body) unwinds exactly like a rejection —
+                // the compiled try/catch around the await must see both
+                const settle = async (call) => {
                     try {
-                        top.ret = await p;
+                        top.ret = await call();
                     }
                     catch (err) {
                         if (!__unwind(stack, err))
@@ -97,12 +100,22 @@ export function makePump(bundle, { twins } = {}) {
                     const twin = cls && twins ? twins(cls) : undefined;
                     const prog = cls && PROGRAMS[cls + "$" + r.member] ? cls + "$" + r.member : null;
                     if (twin) {
-                        const pre = dataFields(twin);
-                        await settle(twin[r.member](...r.args));
+                        // snapshot JSON IMAGES, not references: this.items.push(x) mutates in place,
+                        // so Object.is(pre, post) is true and a reference diff ships nothing
+                        const image = (v) => { try {
+                            return JSON.stringify(v);
+                        }
+                        catch {
+                            return undefined;
+                        } };
+                        const pre = {};
+                        for (const [k, v] of Object.entries(dataFields(twin)))
+                            pre[k] = image(v);
+                        await settle(() => twin[r.member](...r.args));
                         if (sink) {
                             const fields = {};
                             for (const [k, v] of Object.entries(dataFields(twin)))
-                                if (!Object.is(v, pre[k]))
+                                if (image(v) !== pre[k])
                                     fields[k] = v;
                             if (Object.keys(fields).length)
                                 sink.twinDelta({ owner: recv.owner, id: recv.id, fields });
@@ -118,7 +131,7 @@ export function makePump(bundle, { twins } = {}) {
                     if (f && typeof f.__tierless_program === "string")
                         stack.push({ fn: f.__tierless_program, pc: 0, args: [recv, ...r.args] });
                     else
-                        await settle(f.apply(recv, r.args));
+                        await settle(() => f.apply(recv, r.args));
                 }
             }
             else if (r.op === "throw") {

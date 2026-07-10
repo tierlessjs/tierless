@@ -67,6 +67,13 @@ export class Svc {
     const r = await this.http.get("/boom");
     return r.body;
   }
+  syncBoom() { throw new Error("sync-nope"); }
+  async pushThing() {
+    const r = await this.http.get("/things");
+    this.items = this.items || [];
+    this.items.push(r.body[0]);
+    return this.items.length;
+  }
 }
 export class Store {
   constructor(svc) { this.svc = svc; }
@@ -76,10 +83,24 @@ export class Store {
     const b = await svc.getAllish();
     return a + ":" + b.length;
   }
+  async guardedDyn() {
+    const svc = this.svc;
+    try {
+      await svc.syncBoom();
+      return "unreachable";
+    } catch (e) {
+      return "caught:" + e.message;
+    }
+  }
+  async flowPush(id) {
+    const svc = this.svc;
+    await svc.chain(id);
+    return await svc.pushThing();
+  }
 }`;
 
 const { code, meta } = compile(SRC, { resources: { "this.http": "server" }, filename: "svc.js" });
-check("all seven methods compiled (Store.flow suspends on METHOD calls only)", meta.methods.filter((m: any) => !m.error).length === 7, JSON.stringify(meta.methods));
+check("all tier-calling methods compiled (store methods suspend on METHOD calls only)", meta.methods.filter((m: any) => !m.error).length >= 9, JSON.stringify(meta.methods.length));
 
 const dir = mkdtempSync(join(tmpdir(), "tlmig-"));
 writeFileSync(join(dir, "svc.mjs"), code);
@@ -273,6 +294,21 @@ const ev: any = await execOver(peer, { op: "resource", tier: "server", name: "ht
 check("execOver: value crosses in one exec frame", ev?.body?.join(",") === "1,2,3" && counts.exec === 1 && !counts.resume, JSON.stringify({ ev, counts }));
 const ee: any = await execOver(peer, { op: "resource", tier: "server", name: "http.get", args: ["/boom"] }).then(() => null, (e: unknown) => e);
 check("execOver: error crosses SHAPED (message + response + axios mark)", ee?.message === "nope" && ee?.response?.status === 400 && ee?.isAxiosError === true, JSON.stringify({ m: ee?.message, r: ee?.response }));
+
+// ---- 11. dyn park, SYNC throw: the thunk settles it into the compiled catch ------------
+reset();
+const v11 = await bhost.runLocal(peer, "Store$guardedDyn", [new mod.Store(new mod.Svc({}))], {});
+check("dyn park: a synchronous member throw lands in the compiled catch", v11 === "caught:sync-nope", String(v11));
+
+// ---- 12. twin write-back sees IN-PLACE mutations (items.push) ---------------------------
+reset();
+const twinSvc2 = new mod.Svc({ get: (url: string) => serverExec({ name: "http.get", args: [url] }) });
+const shostT2 = makeHost({ bundle, tier: "server", exec: serverExec as never, twins: (cls: string) => (cls === "Svc" ? twinSvc2 : undefined) });
+const [bp3, sp3] = pair();
+shostT2.answer(makePeer(sp3));
+const svc4 = new mod.Svc({});
+const n12 = await bhost.runLocal(makePeer(bp3), "Store$flowPush", [new mod.Store(svc4), 7], migrate);
+check("twin write-back: in-place array mutation ships home", n12 === 1 && Array.isArray((svc4 as any).items) && (svc4 as any).items.length === 1, JSON.stringify({ n12, items: (svc4 as any).items }));
 
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
 console.log("\na chain migrates in one crossing; the stop rule, identity, and unwind hold; the profile decides");

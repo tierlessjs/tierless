@@ -87,19 +87,26 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
         // here. Settled promises route rejections like any resource error; a handle with
         // no local meaning parks the stack to its owner and re-dispatches live there.
         const recv = r.recv;
-        const settle = async (p: unknown): Promise<void> => {
-          try { top.ret = await p; } catch (err) { if (!__unwind(stack, err)) throw err; }
+        // a THUNK, invoked inside the try: a synchronous throw from the member call
+        // itself (a getter, a sync method body) unwinds exactly like a rejection —
+        // the compiled try/catch around the await must see both
+        const settle = async (call: () => unknown): Promise<void> => {
+          try { top.ret = await call(); } catch (err) { if (!__unwind(stack, err)) throw err; }
         };
         if (isHandle(recv)) {
           const cls = (recv as { cls?: string }).cls;
           const twin = cls && twins ? twins(cls) : undefined;
           const prog = cls && PROGRAMS[cls + "$" + r.member] ? cls + "$" + r.member : null;
           if (twin) {
-            const pre = dataFields(twin);
-            await settle((twin as Record<string, (...a: unknown[]) => unknown>)[r.member](...r.args));
+            // snapshot JSON IMAGES, not references: this.items.push(x) mutates in place,
+            // so Object.is(pre, post) is true and a reference diff ships nothing
+            const image = (v: unknown): string | undefined => { try { return JSON.stringify(v); } catch { return undefined; } };
+            const pre: Record<string, string | undefined> = {};
+            for (const [k, v] of Object.entries(dataFields(twin))) pre[k] = image(v);
+            await settle(() => (twin as Record<string, (...a: unknown[]) => unknown>)[r.member](...r.args));
             if (sink) {
               const fields: Record<string, unknown> = {};
-              for (const [k, v] of Object.entries(dataFields(twin))) if (!Object.is(v, pre[k])) fields[k] = v;
+              for (const [k, v] of Object.entries(dataFields(twin))) if (image(v) !== pre[k]) fields[k] = v;
               if (Object.keys(fields).length) sink.twinDelta({ owner: recv.owner, id: recv.id, fields });
             }
           }
@@ -108,7 +115,7 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
         } else {
           const f = (recv as Record<string, unknown> | null | undefined)?.[r.member] as ((...a: unknown[]) => unknown) & { __tierless_program?: string };
           if (f && typeof f.__tierless_program === "string") stack.push({ fn: f.__tierless_program, pc: 0, args: [recv, ...r.args] });
-          else await settle(f.apply(recv as object, r.args));
+          else await settle(() => f.apply(recv as object, r.args));
         }
       } else if (r.op === "throw") {
         stack.pop();
