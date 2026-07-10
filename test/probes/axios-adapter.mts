@@ -62,6 +62,19 @@ fell = false;
 await withFallback({ method: "post", baseURL: "http://x.test/api/v1", url: "/auth/refresh", withCredentials: true, headers: {} });
 check("withCredentials config uses fallback adapter", fell);
 
+// --- abort/timeout semantics are browser-pinned (they can't cross the exec boundary) ------
+fell = false;
+await withFallback({ method: "get", baseURL: "http://x.test/api/v1", url: "/slow", timeout: 5000, headers: {} });
+check("positive timeout uses fallback adapter", fell);
+fell = false;
+await withFallback({ method: "get", baseURL: "http://x.test/api/v1", url: "/s", signal: new AbortController().signal, headers: {} });
+check("signal uses fallback adapter", fell);
+fell = false;
+await withFallback({ method: "get", baseURL: "http://x.test/api/v1", url: "/c", cancelToken: { promise: Promise.resolve() }, headers: {} });
+check("cancelToken uses fallback adapter", fell);
+await adapter({ method: "get", baseURL: "http://x.test/api/v1", url: "/t0", timeout: 0, headers: {} });
+check("timeout 0 (axios default: none) still crosses", (seen!.args as [string])[0] === "/api/v1/t0", (seen!.args as [string])[0]);
+
 // --- per-request paramsSerializer is honored ---------------------------------------------
 canned = { status: 200, headers: {}, body: null };
 await adapter({ method: "get", baseURL: "http://x.test/api/v1", url: "/f", params: { a: 1 }, paramsSerializer: { serialize: () => "custom=1" }, headers: {} });

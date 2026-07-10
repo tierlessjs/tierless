@@ -119,11 +119,13 @@ export function makePump(bundle, { twins } = {}) {
                             // uncaught error (settle rethrows) must still ship them home
                             if (sink) {
                                 const fields = {};
-                                for (const [k, v] of Object.entries(dataFields(twin)))
+                                const post = dataFields(twin);
+                                for (const [k, v] of Object.entries(post))
                                     if (image(v) !== pre[k])
                                         fields[k] = v;
-                                if (Object.keys(fields).length)
-                                    sink.twinDelta({ owner: recv.owner, id: recv.id, fields });
+                                const gone = Object.keys(pre).filter((k) => !(k in post)); // deletions: assignment can't express them
+                                if (Object.keys(fields).length || gone.length)
+                                    sink.twinDelta({ owner: recv.owner, id: recv.id, fields, ...(gone.length ? { gone } : {}) });
                             }
                         }
                     }

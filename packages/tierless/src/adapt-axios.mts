@@ -32,6 +32,9 @@ export interface AxiosishConfig {
   onUploadProgress?: unknown;
   onDownloadProgress?: unknown;
   withCredentials?: boolean;
+  timeout?: number;
+  signal?: unknown;
+  cancelToken?: unknown;
   [key: string]: unknown;
 }
 
@@ -59,6 +62,7 @@ export function serializeParams(params: Record<string, unknown>): string {
 const pinned = (c: AxiosishConfig): boolean =>
   !!(c.onUploadProgress || c.onDownloadProgress || c.responseType === "blob" || c.responseType === "stream" || c.responseType === "arraybuffer"
     || c.withCredentials   // cookie-jar auth (incl. HttpOnly) exists only in the browser — another tier can't reproduce it
+    || c.signal || c.cancelToken || (typeof c.timeout === "number" && c.timeout > 0)   // in-flight abort/timeout semantics don't cross the exec boundary — the adapter owns them, so these run stock
     || (typeof FormData !== "undefined" && c.data instanceof FormData)
     || (typeof Blob !== "undefined" && c.data instanceof Blob));
 

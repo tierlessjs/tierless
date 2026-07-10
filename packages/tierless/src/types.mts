@@ -61,7 +61,14 @@ export type Exec = (req: ResourceRequest) => unknown | Promise<unknown>;
  *  return, carried on the crossing that was already coming home. Field values ride the
  *  reply's JSON payload, so they must be JSON-safe (true of instance counters/flags;
  *  a Date-valued field would come home as its ISO string). */
-export interface TwinDelta { owner: string; id: string; fields: Record<string, unknown> }
+export interface TwinDelta {
+  owner: string;
+  id: string;
+  fields: Record<string, unknown>;
+  /** Own data fields the twin DELETED during the call — Object.assign can't express
+   *  removal, so the home tier deletes these keys explicitly. */
+  gone?: string[];
+}
 
 /** Runs a continuation on the local tier until it finishes or parks at a foreign resource. */
 export type Pump = (

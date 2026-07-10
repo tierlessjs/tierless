@@ -17,6 +17,9 @@ export interface AxiosishConfig {
     onUploadProgress?: unknown;
     onDownloadProgress?: unknown;
     withCredentials?: boolean;
+    timeout?: number;
+    signal?: unknown;
+    cancelToken?: unknown;
     [key: string]: unknown;
 }
 export interface AxiosAdapterOpts {

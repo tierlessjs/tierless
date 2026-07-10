@@ -21,8 +21,12 @@ export interface MakeHostOpts {
      *  only the heap-compiled ones excise and service §5 ops. */
     coherence?: Coherence;
     /** Session twin registry for dynamic call parks (docs/migrate-arm.md slice 3):
-     *  class-stamped handles resolve to LOCAL instances here. Opt-in per class. */
-    twins?: (cls: string) => object | undefined;
+     *  class-stamped handles resolve to LOCAL instances here. Opt-in per class; key on
+     *  `handle` (owner + heap id) when instances are stateful — see PumpOpts.twins. */
+    twins?: (cls: string, handle?: {
+        id: string;
+        owner: string;
+    }) => object | undefined;
 }
 export declare function makeHost({ bundle, tier, exec, owns, meta, trace, coherence: coherenceIn, twins }: MakeHostOpts): Host;
 export declare function execOver(peer: Peer, req: ResourceRequest, meta?: Record<string, unknown>): Promise<unknown>;

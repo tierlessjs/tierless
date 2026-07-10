@@ -46,8 +46,9 @@ export interface MakeHostOpts {
    *  only the heap-compiled ones excise and service §5 ops. */
   coherence?: Coherence;
   /** Session twin registry for dynamic call parks (docs/migrate-arm.md slice 3):
-   *  class-stamped handles resolve to LOCAL instances here. Opt-in per class. */
-  twins?: (cls: string) => object | undefined;
+   *  class-stamped handles resolve to LOCAL instances here. Opt-in per class; key on
+   *  `handle` (owner + heap id) when instances are stateful — see PumpOpts.twins. */
+  twins?: (cls: string, handle?: { id: string; owner: string }) => object | undefined;
 }
 
 // OWNERSHIP scan — the generic half of request pinning (a resource family adds its
@@ -282,7 +283,10 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
           for (const d of (reply.obj.twinDeltas as import("./types.mjs").TwinDelta[] | undefined) ?? []) {
             if (d.owner !== tier) continue;
             const live = heapTier.heapGet(d.id);
-            if (live && typeof live === "object") Object.assign(live, d.fields);
+            if (live && typeof live === "object") {
+              Object.assign(live, d.fields);
+              for (const k of d.gone ?? []) delete (live as Record<string, unknown>)[k];
+            }
           }
           if (reply.obj.type === "error") throw new Error(reply.obj.message);
           if (reply.obj.type === "done") return reply.obj.value;

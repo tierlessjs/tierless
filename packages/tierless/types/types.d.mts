@@ -62,6 +62,9 @@ export interface TwinDelta {
     owner: string;
     id: string;
     fields: Record<string, unknown>;
+    /** Own data fields the twin DELETED during the call — Object.assign can't express
+     *  removal, so the home tier deletes these keys explicitly. */
+    gone?: string[];
 }
 /** Runs a continuation on the local tier until it finishes or parks at a foreign resource. */
 export type Pump = (stack: Frame[], ownsHere: (tier: string) => boolean, execHere: Exec, incoming?: PumpRequest | null, sink?: {

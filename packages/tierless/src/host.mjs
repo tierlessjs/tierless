@@ -289,8 +289,11 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                         if (d.owner !== tier)
                             continue;
                         const live = heapTier.heapGet(d.id);
-                        if (live && typeof live === "object")
+                        if (live && typeof live === "object") {
                             Object.assign(live, d.fields);
+                            for (const k of d.gone ?? [])
+                                delete live[k];
+                        }
                     }
                     if (reply.obj.type === "error")
                         throw new Error(reply.obj.message);

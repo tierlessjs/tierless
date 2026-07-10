@@ -71,9 +71,14 @@ if (wireDropped.length) console.log(`wire-counter failure EXCLUDED (${wireDroppe
 
 const parityFail = pairs.filter(({ b, p }) => b.status !== "passed" || p.status !== "passed");
 const counted = pairs.filter(({ b, p }) => b.status === "passed" && p.status === "passed");
+// wire-only rows (the NocoDB reporter) carry no CDP request/frame counts: trips are
+// then unknowable, not zero — the trip lines are suppressed instead of printing NaN
+const hasTrips = (r: Rec): boolean => r.requests !== undefined && r.wsFramesOut !== undefined;
+const tripsKnown = counted.length > 0 && counted.every(({ b, p }) => hasTrips(b) && hasTrips(p));
 // a pair is COVERED if the ported run actually used the session socket — the port
-// touched this interaction. Uncovered pairs measure noise, not the port.
-const covered = counted.filter(({ p }) => p.wsFramesOut > 0);
+// touched this interaction. Uncovered pairs measure noise, not the port. Wire-only
+// rows show socket use in the TCP ws counters instead of CDP frame counts.
+const covered = counted.filter(({ p }) => (p.wsFramesOut ?? 0) > 0 || (p.wsFramesOut === undefined && ((p.wireWsOut ?? 0) > 0 || (p.wireWsIn ?? 0) > 0)));
 
 console.log(`\npaired ${pairs.length} tests (${base.size} baseline, ${port.size} ported)`);
 const wireTrue = pairs.length > 0 && pairs.every(({ b, p }) => hasWire(b) && hasWire(p));
@@ -89,11 +94,15 @@ if (parityFail.length) {
 
 const sum = (xs: number[]): number => xs.reduce((a, x) => a + x, 0);
 const totB = sum(counted.map(({ b }) => bytes(b))), totP = sum(counted.map(({ p }) => bytes(p)));
-const trpB = sum(counted.map(({ b }) => trips(b))), trpP = sum(counted.map(({ p }) => trips(p)));
 
 console.log(`\n== suite-wide (${counted.length} pass-parity pairs; ${covered.length} touch the port) ==`);
 console.log(`  total bytes   ${(totB / 1024).toFixed(1)} KB -> ${(totP / 1024).toFixed(1)} KB   (${pct(totB, totP)} less IO)`);
-console.log(`  total trips   ${trpB} -> ${trpP}   (${pct(trpB, trpP)} fewer)`);
+if (tripsKnown) {
+  const trpB = sum(counted.map(({ b }) => trips(b))), trpP = sum(counted.map(({ p }) => trips(p)));
+  console.log(`  total trips   ${trpB} -> ${trpP}   (${pct(trpB, trpP)} fewer)`);
+} else {
+  console.log("  trips: n/a (wire-only rows carry no request/frame counts)");
+}
 console.log(`  median per-test bytes saved   ${medianSaved(counted, bytes)}`);
 
 // timing is asserted only when BOTH arms measured under the same conditions worth
@@ -113,13 +122,17 @@ if (counted.length && counted.every(({ b, p }) => b.durationMs !== undefined && 
 
 if (covered.length) {
   const cb = sum(covered.map(({ b }) => bytes(b))), cp = sum(covered.map(({ p }) => bytes(p)));
-  const ctb = sum(covered.map(({ b }) => trips(b))), ctp = sum(covered.map(({ p }) => trips(p)));
   console.log(`\n== covered subset (${covered.length} tests whose interaction the port serves) ==`);
   console.log(`  total bytes   ${(cb / 1024).toFixed(1)} KB -> ${(cp / 1024).toFixed(1)} KB   (${pct(cb, cp)} less IO)`);
-  console.log(`  total trips   ${ctb} -> ${ctp}   (${pct(ctb, ctp)} fewer)`);
-  console.log(`  median per-test: bytes ${medianSaved(covered, bytes)} less, trips ${medianSaved(covered, trips)} fewer`);
-  console.log(`\n  per-test detail (bytes before -> after · trips before -> after):`);
+  if (tripsKnown) {
+    const ctb = sum(covered.map(({ b }) => trips(b))), ctp = sum(covered.map(({ p }) => trips(p)));
+    console.log(`  total trips   ${ctb} -> ${ctp}   (${pct(ctb, ctp)} fewer)`);
+    console.log(`  median per-test: bytes ${medianSaved(covered, bytes)} less, trips ${medianSaved(covered, trips)} fewer`);
+  } else {
+    console.log(`  median per-test: bytes ${medianSaved(covered, bytes)} less (trips n/a)`);
+  }
+  console.log(`\n  per-test detail (bytes before -> after${tripsKnown ? " · trips before -> after" : ""}):`);
   for (const { id, b, p } of [...covered].sort((x, y) => (bytes(x.b) - bytes(x.p)) < (bytes(y.b) - bytes(y.p)) ? 1 : -1)) {
-    console.log(`    ${(bytes(b) / 1024).toFixed(1)} -> ${(bytes(p) / 1024).toFixed(1)} KB · ${trips(b)} -> ${trips(p)}  ${id.slice(0, 100)}`);
+    console.log(`    ${(bytes(b) / 1024).toFixed(1)} -> ${(bytes(p) / 1024).toFixed(1)} KB${tripsKnown ? ` · ${trips(b)} -> ${trips(p)}` : ""}  ${id.slice(0, 100)}`);
   }
 }

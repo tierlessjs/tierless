@@ -69,6 +69,7 @@ export class Svc {
   }
   syncBoom() { throw new Error("sync-nope"); }
   mutateBoom() { this.hits = (this.hits || 0) + 1; throw new Error("after-mutate"); }
+  dropMark() { delete this.tempThing; this.dropped = true; return "ok"; }
   async pushThing() {
     const r = await this.http.get("/things");
     this.items = this.items || [];
@@ -102,6 +103,11 @@ export class Store {
     const svc = this.svc;
     await svc.chain(id);
     return await svc.mutateBoom();
+  }
+  async flowDrop(id) {
+    const svc = this.svc;
+    await svc.chain(id);
+    return await svc.dropMark();
   }
 }`;
 
@@ -328,6 +334,18 @@ const svc5 = new mod.Svc({});
 const err13: any = await bhost.runLocal(makePeer(bp4), "Store$flowMutateBoom", [new mod.Store(svc5), 7], migrate).then(() => null, (e: unknown) => e);
 check("twin throw after mutation: the error still propagates home", err13?.message === "after-mutate", String(err13?.message));
 check("twin throw after mutation: the pre-throw mutation ships home on the error reply", (svc5 as any).hits === 1 && (twinSvc3 as any).hits === 1, JSON.stringify({ home: (svc5 as any).hits, twin: (twinSvc3 as any).hits }));
+
+// ---- 14. twin field DELETION ships home (assignment can't express removal) --------------
+reset();
+const twinSvc4 = new mod.Svc({ get: (url: string) => serverExec({ name: "http.get", args: [url] }) });
+(twinSvc4 as any).tempThing = "x";
+const shostT4 = makeHost({ bundle, tier: "server", exec: serverExec as never, twins: (cls: string) => (cls === "Svc" ? twinSvc4 : undefined) });
+const [bp5, sp5] = pair();
+shostT4.answer(makePeer(sp5));
+const svc6 = new mod.Svc({});
+(svc6 as any).tempThing = "x";
+const v14 = await bhost.runLocal(makePeer(bp5), "Store$flowDrop", [new mod.Store(svc6), 7], migrate);
+check("twin deletion: the deleted field is gone from the live home instance", v14 === "ok" && !("tempThing" in svc6) && (svc6 as any).dropped === true, JSON.stringify({ v14, has: "tempThing" in svc6, dropped: (svc6 as any).dropped }));
 
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
 console.log("\na chain migrates in one crossing; the stop rule, identity, and unwind hold; the profile decides");

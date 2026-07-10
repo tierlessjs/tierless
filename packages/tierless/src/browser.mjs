@@ -30,6 +30,21 @@ let appMigrate = null;
 let appTrace = null;
 const appHashes = []; // per-module BUNDLE_HASHes of the merged world, sorted — the profile validity key
 export const mergedAppHash = () => "merged:" + [...appHashes].sort().join("+");
+// A fetched comparison profile stays PENDING until the merged world matches it: with
+// preconnect, the fetch usually resolves before app modules bindMethods (their hashes
+// aren't in the merged key yet), so validating once at fetch time would permanently
+// reject a valid profile. Revalidated on every registration; calls before it settles
+// run on the fetch arm, the same cold-start rule as a late-arriving profile.
+let pendingProfile = null;
+const tryActivateProfile = () => {
+    if (!pendingProfile)
+        return;
+    const prof = loadProfile(pendingProfile, mergedAppHash());
+    if (prof) {
+        appMigrate = methodMigrate(prof);
+        pendingProfile = null;
+    }
+};
 export function connect({ url, exec, bundle, tier = "browser", heap = true, 
 // run-protocol wiring can also come from page globals (a measured run's driver injects
 // them into the built index.html, like their CI's window.TESTING) — build-time shims
@@ -58,11 +73,12 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
     }
     if (profileUrl) { // COMPARISON run: locked profile, no exploration
         void fetch(profileUrl).then((r) => (r.ok ? r.json() : null)).then((p) => {
-            const prof = loadProfile(p, mergedAppHash());
-            if (prof)
-                appMigrate = methodMigrate(prof);
-            else if (p)
-                console.warn("tierless: profile ignored — built for " + p.bundle + ", app is " + mergedAppHash());
+            if (!p)
+                return;
+            pendingProfile = p;
+            tryActivateProfile();
+            if (pendingProfile)
+                console.warn("tierless: profile pending — built for " + pendingProfile.bundle + ", app is currently " + mergedAppHash() + " (revalidates as modules register)");
         }).catch(() => { });
     }
     // §5 heap coherence for this connection, shared by every module-host on it (each host
@@ -184,8 +200,10 @@ export function bindMethods(bundle, { module = "", migrate } = {}) {
         APP_MERGED.__unwind = bundle.__unwind;
         appUnwindSet = true;
     } // driver-identical across compiled modules
-    if (typeof bundle.BUNDLE_HASH === "string")
-        appHashes.push(bundle.BUNDLE_HASH); // the merged world's profile-validity key
+    if (typeof bundle.BUNDLE_HASH === "string") {
+        appHashes.push(bundle.BUNDLE_HASH);
+        tryActivateProfile();
+    } // the merged world's profile-validity key grew — a pending profile may match now
     bundle.__bindTierlessMethods(async (prog, self, args) => {
         const conn = sharedConn();
         conn.register(module, APP_MERGED);

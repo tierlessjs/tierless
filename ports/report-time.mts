@@ -24,8 +24,9 @@ const load = (f: string): Map<string, Rec> => {
   return out;
 };
 
-const [tb, tp, rb, rp] = process.argv.slice(2).map(load);
-if (!rp) { console.error("usage: node ports/report-time.mts <truth-base> <truth-ported> <rtt-base> <rtt-ported>"); process.exit(2); }
+const files = process.argv.slice(2);
+if (files.length !== 4) { console.error("usage: node ports/report-time.mts <floor-base> <floor-ported> <rtt-base> <rtt-ported>"); process.exit(2); }
+const [tb, tp, rb, rp] = files.map(load);
 
 // a pair counts only when the test PASSED in all four runs and every run timed it
 const ids = [...tb.keys()].filter((id) =>

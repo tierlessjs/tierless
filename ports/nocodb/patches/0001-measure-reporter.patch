@@ -23,12 +23,15 @@ diff -ruN a/tests/playwright/playwright.config.ts b/tests/playwright/playwright.
 diff -ruN a/tests/playwright/tierlessMeasureReporter.ts b/tests/playwright/tierlessMeasureReporter.ts
 --- a/tests/playwright/tierlessMeasureReporter.ts	1970-01-01 00:00:00.000000000 +0000
 +++ b/tests/playwright/tierlessMeasureReporter.ts	2026-07-09 13:55:23.789037029 +0000
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,59 @@
 +// Per-test measurement reporter (tierless corpus harness, docs/corpus.md): appends one
 +// JSONL row per test ATTEMPT to TIERLESS_MEASURE_OUT — id, status, retry, durationMs.
 +// With TIERLESS_WIRE_URLS set (comma-separated endpoints returning flat JSON number
 +// counters), reads them around each attempt and records the deltas as wire* fields.
-+// Per-test attribution is sound on this suite because the sqlite lane runs workers=1.
++// The sqlite lane runs workers=1, so no two tests generate traffic at once; but
++// Playwright does NOT await async reporter hooks, so a snapshot can lag its boundary
++// and mis-attribute between ADJACENT tests — per-test deltas are best-effort (fine
++// for medians), while the byte instrument of record is the TCP-true pair of runs.
 +// A counter read that fails INVALIDATES the row (wireError: true, no wire fields)
 +// instead of shipping wrong deltas — a missed BEGIN read would silently attribute all
 +// prior suite traffic to this test; report.mts excludes flagged rows and says so.
