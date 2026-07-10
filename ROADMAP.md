@@ -37,6 +37,13 @@ proven (the executable proofs behind `npm test`).
   stability in real applications, the load-bearing empirical unknown the recorder now
   instruments. Beyond that, Stip.js-style global search over the suspension graph
   (pre-placing or replicating pure helpers) remains the bigger swing.
+- **Byte pricing at the method boundary.** `methodMigrate` migrates on structural
+  evidence alone (a stable ≥2-call same-tier chain) without comparing continuation
+  bytes to the profiled fetch bytes the way `decide()` does — a method carrying a
+  large serializable frame over two tiny responses migrates and pays for it. The
+  fix needs the continuation encoded (or size-estimated) BEFORE the migrate
+  decision, an API change to the §6 callback; do it together with the shipped
+  decide loop above and re-measure the migrate arms.
 
 ## Adoption & measurement
 

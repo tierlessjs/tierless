@@ -29,4 +29,6 @@ attachTierless(server, {
   session: () => ({ exec: restResources(API, { envelopeErrors: true }) }),
 });
 
-server.listen(PORT, () => console.log(`tierless gateway :${PORT} -> ${API}${wire ? " (wire truth on)" : ""}`));
+// loopback only: this is an unauthenticated exec gateway to the localhost backend —
+// on all interfaces any reachable page could use it to bypass CORS
+server.listen(PORT, "127.0.0.1", () => console.log(`tierless gateway 127.0.0.1:${PORT} -> ${API}${wire ? " (wire truth on)" : ""}`));

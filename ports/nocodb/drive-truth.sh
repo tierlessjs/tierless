@@ -26,12 +26,17 @@ Claude-Session: https://claude.ai/code/session_01TV86rbddt84T6DDjTCxwod" || retu
 }
 
 sweep_ports() { # a crashed run leaves detached watchers respawning servers
-  pkill -9 -f "rspack" 2>/dev/null; pkill -9 -f "watch:run" 2>/dev/null
-  pkill -9 -f "nodemon" 2>/dev/null; pkill -9 -f "output/server/index.mjs" 2>/dev/null
+  # SCOPED teardown: harness processes only (cmdline referencing the trees/gateway, the
+  # fixed ports' owners, watchers whose CWD is in the trees) — bare "rspack"/"nodemon"
+  # patterns could kill a developer's unrelated jobs
+  pkill -9 -f "ports/work/nocodb" 2>/dev/null
   pkill -9 -f "nocodb/gateway.mts" 2>/dev/null
   sleep 2
   ss -tlnp 2>/dev/null | grep -E ":8080|:9000|:3000|:8180|:28080|:14991" \
     | grep -oE "pid=[0-9]+" | cut -d= -f2 | sort -u | xargs -r kill -9
+  for pid in $(pgrep -f "rspack|watch:run|nodemon|output/server/index.mjs" 2>/dev/null); do
+    case "$(readlink -f /proc/$pid/cwd 2>/dev/null)" in *ports/work/nocodb*) kill -9 "$pid" 2>/dev/null ;; esac
+  done
   sleep 2
 }
 

@@ -255,7 +255,13 @@ export function buildProfile(records: TraceRecord[], bundle: string): Profile {
       // single-touch occurrences — the method boundary decides per (entry, site).
       const keys = [siteKey(r.fn, r.pc, r.resource)];
       if (r.entry) keys.push(entrySiteKey(r.entry, r.fn, r.pc, r.resource));
-      const suffix = touches.slice(i + 1).filter((x) => x.tier === r.tier);   // future SAME-tier resources
+      // CONTIGUOUS same-tier suffix only: a foreign-tier touch means the continuation
+      // bounced away — later same-tier resources are separate crossings whose bytes a
+      // migration at THIS site cannot fold in (filtering them in would inflate fetchSum
+      // and flip decide() toward migrations that don't deliver)
+      const rest = touches.slice(i + 1);
+      const cut = rest.findIndex((x) => x.tier !== r.tier);
+      const suffix = cut === -1 ? rest : rest.slice(0, cut);
       const sig = suffix.map((x) => siteKey(x.fn, x.pc, x.resource)).join(">");
       for (const k of keys) {
         const s = site(k);

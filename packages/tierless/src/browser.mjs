@@ -62,14 +62,38 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
         onEvent(ws, "error", (e) => rej(new Error("tierless: websocket error" + (e && e.message ? ": " + e.message : ""))));
     });
     if (traceUrl) { // PROFILING run: batch records to the gateway
+        // a lost batch must not go silent: an incomplete run that still delivers its `end`
+        // record would teach buildProfile a FALSE trajectory. Failed batches requeue at the
+        // front and retry on the next tick, bounded; past the bound the run's remaining
+        // records are dropped WITH their end marker, so the run reads incomplete, not wrong.
         const buf = [];
-        const flush = () => { if (!buf.length)
-            return; const body = buf.map((r) => JSON.stringify(r)).join("\n") + "\n"; buf.length = 0; void fetch(traceUrl, { method: "POST", body, keepalive: true }).catch(() => { }); };
+        let poisoned = false;
+        const flush = () => {
+            if (!buf.length || poisoned)
+                return;
+            const batch = buf.splice(0, buf.length);
+            const body = batch.map((r) => JSON.stringify(r)).join("\n") + "\n";
+            void fetch(traceUrl, { method: "POST", body, keepalive: true }).then((r) => {
+                if (!r.ok)
+                    throw new Error(String(r.status));
+            }).catch(() => {
+                if (buf.length + batch.length > 5000) {
+                    poisoned = true;
+                    buf.length = 0;
+                    console.warn("tierless: trace delivery failing — dropping this page's remaining records (runs read incomplete, not wrong)");
+                }
+                else
+                    buf.unshift(...batch);
+            });
+        };
         setInterval(flush, 1000);
         if (typeof addEventListener === "function")
             addEventListener("pagehide", flush);
-        appTrace = { rate: 1, sink: (r) => { buf.push(r); if (buf.length >= 100)
-                flush(); } };
+        appTrace = { rate: 1, sink: (r) => { if (!poisoned) {
+                buf.push(r);
+                if (buf.length >= 100)
+                    flush();
+            } } };
     }
     if (profileUrl) { // COMPARISON run: locked profile, no exploration
         void fetch(profileUrl).then((r) => (r.ok ? r.json() : null)).then((p) => {

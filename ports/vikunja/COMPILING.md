@@ -122,17 +122,18 @@ measured stack stays their own CI's (raw API); this arm answers "what if they
 turned compression on" — gzip cuts stock's API-in bytes 16% (their JSON bodies
 are small; the hard gate in drive-gzip.sh requires ≥10%):
 
-    ported vs RAW stock     32.0 MB -> 28.2 MB  (12% less IO; median 35% per test)
-    ported vs GZIP stock    28.5 MB -> 28.2 MB  ( 1% less IO; median 19% per test)
+    ported vs RAW stock          32.0 MB -> 28.2 MB  (12% less IO; median 35% per test)
+    ported(raw) vs GZIP stock    28.5 MB -> 28.2 MB  ( 1% less IO; median 19% per test)
+    ported+gzip vs GZIP stock    28.4 MB -> 26.6 MB  ( 6% less IO; median 30% per test)
 
-Honest read: on this app, a one-line compression middleware captures most of the
-port's SUITE-WIDE byte advantage — the totals are dominated by uncovered
-endpoints both arms fetch identically over HTTP. Per covered interaction the
-port still wins (19% median) because framing, headers, and cross-request deflate
-context don't come back with gzip. Caveat on symmetry: this pair compresses ALL
-of stock's traffic while the ported arm's residual direct-HTTP stays raw — a
-deployment that compresses would compress both; the same flag on the ported arm
-is the symmetric arm (NocoDB analog: drive-apples2.sh).
+The third line (results/truth-ported-gzip.jsonl) is the SYMMETRIC comparison — a
+deployment that compresses would compress both arms, so the ported arm's residual
+direct-HTTP gets the same flag (its session traffic was already deflated).
+Honest read: on this app, a one-line compression middleware captures half of the
+port's suite-wide byte advantage (12% -> 6%) — the totals are dominated by
+uncovered endpoints both arms fetch identically over HTTP. Per covered
+interaction the port keeps a 30% median saving: framing, headers, and
+cross-request deflate context don't come back with gzip.
 
 ## Shaped timing, native arms (2026-07-07, results/rtt80-*.jsonl)
 
