@@ -87,9 +87,76 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
   };
 
   return async function pump(stack, ownsHere, execHere, incoming = null, sink) {
-    // an op:"home" incoming is the stop rule's park marker, not a resource — the value it
-    // carried home is already in the frame's ret; pump straight on from it
+    // the dynamic call park (docs/migrate-arm.md slice 3), resolved in dispatch order:
+    // twin method on a class-stamped handle / nested machine / plain promise settled
+    // here. Settled promises route rejections like any resource error; a handle with no
+    // local meaning parks the stack to its owner — the machine has ALREADY advanced past
+    // the park (pc sits at the resume state), so the park must CARRY THE CALL
+    // (name "dyn:<member>", args [recv, ...callArgs]) and the owner re-dispatches it
+    // here before stepping on, or the resume would read a stale ret.
+    // Returns a park to ship, or null when the call settled (ret set / frame pushed / unwound).
+    const dispatchDyn = async (stack: Frame[], r: { recv: unknown; member: string; args: unknown[] }): Promise<HomePark | null> => {
+      const top = stack[stack.length - 1];
+      const recv = r.recv;
+      // a THUNK, invoked inside the try: a synchronous throw from the member call
+      // itself (a getter, a sync method body) unwinds exactly like a rejection —
+      // the compiled try/catch around the await must see both
+      const settle = async (call: () => unknown): Promise<void> => {
+        try { top.ret = await call(); } catch (err) { if (!__unwind(stack, err)) throw err; }
+      };
+      if (isHandle(recv)) {
+        const cls = (recv as { cls?: string }).cls;
+        const twin = cls && twins ? twins(cls, { id: recv.id, owner: recv.owner }) : undefined;
+        const prog = cls && PROGRAMS[cls + "$" + r.member] ? cls + "$" + r.member : null;
+        if (twin) {
+          // snapshot JSON IMAGES, not references: this.items.push(x) mutates in place,
+          // so Object.is(pre, post) is true and a reference diff ships nothing
+          const image = (v: unknown): string | undefined => { try { return JSON.stringify(v); } catch { return undefined; } };
+          const pre: Record<string, string | undefined> = {};
+          for (const [k, v] of Object.entries(dataFields(twin))) pre[k] = image(v);
+          try {
+            await settle(() => (twin as Record<string, (...a: unknown[]) => unknown>)[r.member](...r.args));
+          } finally {
+            // diff in a FINALLY: plain JS keeps mutations made before a throw, so an
+            // uncaught error (settle rethrows) must still ship them home
+            if (sink) {
+              const fields: Record<string, unknown> = {};
+              const post = dataFields(twin);
+              for (const [k, v] of Object.entries(post)) {
+                const img = image(v);
+                // ship the JSON IMAGE's value, not the live reference: the delta rides a
+                // JSON-encoded reply, so a circular/unserializable field would crash the
+                // whole session at encode time — unserializable changes can't cross, skip
+                if (img !== undefined && img !== pre[k]) fields[k] = JSON.parse(img);
+              }
+              const gone = Object.keys(pre).filter((k) => !(k in post));   // deletions: assignment can't express them
+              if (Object.keys(fields).length || gone.length) sink.twinDelta({ owner: recv.owner, id: recv.id, fields, ...(gone.length ? { gone } : {}) });
+            }
+          }
+        }
+        else if (prog) stack.push({ fn: prog, pc: 0, args: [recv, ...r.args] });
+        else return { op: "home", tier: recv.owner, name: "dyn:" + r.member, args: [recv, ...r.args] };
+      } else {
+        // the member LOOKUP itself can throw (a getter) — that's part of the awaited
+        // expression, so it unwinds into the compiled catch exactly like the call would
+        let f: ((...a: unknown[]) => unknown) & { __tierless_program?: string } | undefined;
+        try { f = (recv as Record<string, unknown> | null | undefined)?.[r.member] as typeof f; }
+        catch (err) { if (!__unwind(stack, err)) throw err; return null; }
+        if (f && typeof f.__tierless_program === "string") stack.push({ fn: f.__tierless_program, pc: 0, args: [recv, ...r.args] });
+        else await settle(() => f!.apply(recv as object, r.args));
+      }
+      return null;
+    };
+    // an op:"home" incoming is a park marker, not a resource. The stop rule's (a slot
+    // name) carries nothing — the value is already in the frame's ret; a DYNAMIC park
+    // ("dyn:<member>") carries the call, whose receiver decoded to the LIVE local
+    // instance here — dispatch it before stepping (the frame's pc is past the park).
     if (incoming && incoming.op !== "home") await service(stack, incoming, execHere);
+    else if (incoming && incoming.op === "home" && incoming.name.startsWith("dyn:")) {
+      const [recv, ...args] = incoming.args;
+      const park = await dispatchDyn(stack, { recv, member: incoming.name.slice(4), args });
+      if (park) return { done: false, request: park, stack };   // still no meaning here: park onward (misrouted stack)
+    }
     for (;;) {
       const top = stack[stack.length - 1];
       const home = parkHome(top);
@@ -102,57 +169,12 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
       } else if (r.op === "call") {
         stack.push({ fn: r.fn, pc: 0, args: r.args });    // suspendable call: push a sub-frame and run it
       } else if (r.op === "dyn") {
-        // the dynamic call park (docs/migrate-arm.md slice 3), resolved in dispatch order:
-        // twin method on a class-stamped handle / nested machine / plain promise settled
-        // here. Settled promises route rejections like any resource error; a handle with
-        // no local meaning parks the stack to its owner and re-dispatches live there.
-        const recv = r.recv;
-        // a THUNK, invoked inside the try: a synchronous throw from the member call
-        // itself (a getter, a sync method body) unwinds exactly like a rejection —
-        // the compiled try/catch around the await must see both
-        const settle = async (call: () => unknown): Promise<void> => {
-          try { top.ret = await call(); } catch (err) { if (!__unwind(stack, err)) throw err; }
-        };
-        if (isHandle(recv)) {
-          const cls = (recv as { cls?: string }).cls;
-          const twin = cls && twins ? twins(cls, { id: recv.id, owner: recv.owner }) : undefined;
-          const prog = cls && PROGRAMS[cls + "$" + r.member] ? cls + "$" + r.member : null;
-          if (twin) {
-            // snapshot JSON IMAGES, not references: this.items.push(x) mutates in place,
-            // so Object.is(pre, post) is true and a reference diff ships nothing
-            const image = (v: unknown): string | undefined => { try { return JSON.stringify(v); } catch { return undefined; } };
-            const pre: Record<string, string | undefined> = {};
-            for (const [k, v] of Object.entries(dataFields(twin))) pre[k] = image(v);
-            try {
-              await settle(() => (twin as Record<string, (...a: unknown[]) => unknown>)[r.member](...r.args));
-            } finally {
-              // diff in a FINALLY: plain JS keeps mutations made before a throw, so an
-              // uncaught error (settle rethrows) must still ship them home
-              if (sink) {
-                const fields: Record<string, unknown> = {};
-                const post = dataFields(twin);
-                for (const [k, v] of Object.entries(post)) {
-                  const img = image(v);
-                  // ship the JSON IMAGE's value, not the live reference: the delta rides a
-                  // JSON-encoded reply, so a circular/unserializable field would crash the
-                  // whole session at encode time — unserializable changes can't cross, skip
-                  if (img !== undefined && img !== pre[k]) fields[k] = JSON.parse(img);
-                }
-                const gone = Object.keys(pre).filter((k) => !(k in post));   // deletions: assignment can't express them
-                if (Object.keys(fields).length || gone.length) sink.twinDelta({ owner: recv.owner, id: recv.id, fields, ...(gone.length ? { gone } : {}) });
-              }
-            }
-          }
-          else if (prog) stack.push({ fn: prog, pc: 0, args: [recv, ...r.args] });
-          else return { done: false, request: { op: "home", tier: recv.owner, name: r.member, args: [] }, stack };
-        } else {
-          // the member LOOKUP itself can throw (a getter) — that's part of the awaited
-          // expression, so it unwinds into the compiled catch exactly like the call would
-          let f: ((...a: unknown[]) => unknown) & { __tierless_program?: string } | undefined;
-          try { f = (recv as Record<string, unknown> | null | undefined)?.[r.member] as typeof f; }
-          catch (err) { if (!__unwind(stack, err)) throw err; continue; }
-          if (f && typeof f.__tierless_program === "string") stack.push({ fn: f.__tierless_program, pc: 0, args: [recv, ...r.args] });
-          else await settle(() => f!.apply(recv as object, r.args));
+        const park = await dispatchDyn(stack, r);
+        if (park) {
+          // a handle owned HERE that still has no local meaning cannot be dispatched
+          // anywhere — parking it to ourselves would loop, so fail with the member name
+          if (ownsHere(park.tier)) throw new Error("tierless: dynamic call on a handle owned here has no local meaning: " + park.name);
+          return { done: false, request: park, stack };
         }
       } else if (r.op === "throw") {
         stack.pop();

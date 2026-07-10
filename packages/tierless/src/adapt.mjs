@@ -97,7 +97,9 @@ export function httpPins(req) {
     if (!cfg)
         return false;
     const rt = cfg.responseType;
-    return rt === "blob" || rt === "stream" || rt === "arraybuffer"
+    // aligned with adapt-axios's pinned(): text must return the RAW string (the crossing
+    // parses by content-type), document is browser-only decoding
+    return rt === "blob" || rt === "stream" || rt === "arraybuffer" || rt === "text" || rt === "document"
         || !!cfg.withCredentials || !!cfg.signal || !!cfg.cancelToken || (typeof cfg.timeout === "number" && cfg.timeout > 0);
 }
 /** Prepare an http.* request for CROSSING: run the instance's own request-interceptor
@@ -126,6 +128,13 @@ export function crossHttpRequest(instance, req) {
     };
     const finish = (c) => {
         const cUrl = String(c.url || url);
+        // an EXPLICIT other-origin URL is external I/O — it runs on the instance (stock
+        // fetch semantics: this tier's cookies, IP, CORS), never as a tier crossing
+        if (/^(https?:)?\/\//.test(cUrl)) {
+            const bo = c.baseURL && /^https?:\/\//.test(String(c.baseURL)) ? new URL(String(c.baseURL)).origin : null;
+            if (!bo || new URL(cUrl, bo).origin !== bo)
+                return null;
+        }
         const abs = /^https?:\/\//.test(cUrl) ? cUrl : (c.baseURL ? String(c.baseURL).replace(/\/$/, "") + cUrl : cUrl);
         const rawHeaders = c.headers?.toJSON ? c.headers.toJSON() : { ...(c.headers || {}) };
         const headers = {};

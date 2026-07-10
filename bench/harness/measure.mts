@@ -90,8 +90,15 @@ export async function measureJourney(
     let t0 = Date.now();                                           // reset when the journey starts
     const now = (): number => Date.now() - t0;
 
+    let redirSeq = 0;
     cdp.on("Network.requestWillBeSent", (e: any) => {
       if (!recording || ignore(e.request.url)) return;
+      // CDP reuses the requestId across a redirect chain — finalize the prior leg as its
+      // own record (its bytes ride redirectResponse) or every earlier leg vanishes
+      if (e.redirectResponse) {
+        const prev = reqs.get(e.requestId);
+        if (prev) { prev.bytesIn = e.redirectResponse.encodedDataLength ?? 0; prev.tEnd = now(); reqs.set(e.requestId + "#redirect" + redirSeq++, prev); }
+      }
       const body = e.request.postData ? Buffer.byteLength(e.request.postData) : 0;
       const u = new URL(e.request.url);
       reqs.set(e.requestId, {

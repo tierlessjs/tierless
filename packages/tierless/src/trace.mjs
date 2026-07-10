@@ -210,12 +210,13 @@ export function buildProfile(records, bundle) {
             const keys = [siteKey(r.fn, r.pc, r.resource)];
             if (r.entry)
                 keys.push(entrySiteKey(r.entry, r.fn, r.pc, r.resource));
-            // CONTIGUOUS same-tier suffix only: a foreign-tier touch means the continuation
-            // bounced away — later same-tier resources are separate crossings whose bytes a
-            // migration at THIS site cannot fold in (filtering them in would inflate fetchSum
-            // and flip decide() toward migrations that don't deliver)
+            // CONTIGUOUS same-tier, same-SEGMENT suffix only: a foreign-tier touch means the
+            // continuation bounced away, and a hop change means it CROSSED (a §5 home park has
+            // no touch of its own — the hop counter is its trace). Later resources are separate
+            // crossings whose bytes a migration at THIS site cannot fold in; filtering them in
+            // would inflate fetchSum and flip decide() toward migrations that don't deliver.
             const rest = touches.slice(i + 1);
-            const cut = rest.findIndex((x) => x.tier !== r.tier);
+            const cut = rest.findIndex((x) => x.tier !== r.tier || x.hop !== r.hop);
             const suffix = cut === -1 ? rest : rest.slice(0, cut);
             const sig = suffix.map((x) => siteKey(x.fn, x.pc, x.resource)).join(">");
             for (const k of keys) {

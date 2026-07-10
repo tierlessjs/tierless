@@ -362,5 +362,17 @@ const svc6 = new mod.Svc({});
 const v14 = await bhost.runLocal(makePeer(bp5), "Store$flowDrop", [new mod.Store(svc6), 7], migrate);
 check("twin deletion: the deleted field is gone from the live home instance", v14 === "ok" && !("tempThing" in svc6) && (svc6 as any).dropped === true, JSON.stringify({ v14, has: "tempThing" in svc6, dropped: (svc6 as any).dropped }));
 
+// ---- 15. dyn park with NO meaning at the server (no twin, no machine): the park carries
+// the call home and the owner runs it on the LIVE instance — the frame's pc is already
+// past the park, so without re-dispatch the resume would read a stale ret ---------------
+reset();
+const shostNT = makeHost({ bundle, tier: "server", exec: serverExec as never });   // NO twins registry
+const [bp6, sp6] = pair();
+shostNT.answer(makePeer(sp6));
+const svc7 = new mod.Svc({});
+(svc7 as any).tempThing = "x";
+const v15 = await bhost.runLocal(makePeer(bp6), "Store$flowDrop", [new mod.Store(svc7), 7], migrate);
+check("dyn home park: the uncompiled method ran on the LIVE home instance, value correct", v15 === "ok" && (svc7 as any).dropped === true && !("tempThing" in svc7), JSON.stringify({ v15, dropped: (svc7 as any).dropped, has: "tempThing" in svc7 }));
+
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
 console.log("\na chain migrates in one crossing; the stop rule, identity, and unwind hold; the profile decides");

@@ -166,21 +166,32 @@ export function connect({ url, exec, bundle, tier = "browser", heap = true,
     },
     exec: async (req: import("./types.mjs").ResourceRequest): Promise<unknown> => {
       await ready;
-      const value = await execOver(peer, req);
       // observability hook (opt-in via page global): a bounded log of completed
       // crossings, so TEST harnesses whose waits watch the HTTP transport (playwright
       // waitForResponse) can watch the session transport instead — the run-protocol
       // accommodation surface. Zero cost unless the page set the flag.
+      // t (wall clock) rather than an index cursor: navigations reset the page world
+      // and restart the log, but time stays comparable — a harness wait armed before
+      // a goto() still recognizes the new document's crossings.
       const g = globalThis as { __TIERLESS_EXEC_LOG__?: boolean; __tierlessExecLog?: unknown[] };
-      if (g.__TIERLESS_EXEC_LOG__) {
-        const env = value as { status?: number; body?: unknown } | null;
+      const record = (status: number | undefined, body: unknown, hasBody: boolean): void => {
+        if (!g.__TIERLESS_EXEC_LOG__) return;
         const log = (g.__tierlessExecLog ||= []);
-        // t (wall clock) rather than an index cursor: navigations reset the page world
-        // and restart the log, but time stays comparable — a harness wait armed before
-        // a goto() still recognizes the new document's crossings
-        log.push({ t: Date.now(), name: req.name, url: String(req.args?.[0] ?? ""), status: env && typeof env.status === "number" ? env.status : undefined, body: env && "body" in (env as object) ? env.body : undefined });
+        log.push({ t: Date.now(), name: req.name, url: String(req.args?.[0] ?? ""), status, ...(hasBody ? { body } : {}) });
         if (log.length > 500) log.splice(0, log.length - 500);
+      };
+      let value: unknown;
+      try {
+        value = await execOver(peer, req);
+      } catch (err) {
+        // a REJECTED crossing is still a crossing a harness wait may be matching on
+        // (shaped 4xx/5xx errors carry .response) — log it before rethrowing
+        const r = (err as { response?: { status?: number; data?: unknown } } | null)?.response;
+        record(r && typeof r.status === "number" ? r.status : undefined, r?.data, !!r && "data" in r);
+        throw err;
       }
+      const env = value as { status?: number; body?: unknown } | null;
+      record(env && typeof env.status === "number" ? env.status : undefined, env?.body, !!env && "body" in (env as object));
       return value;
     },
     close: () => ws.close(),
