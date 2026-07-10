@@ -25,6 +25,11 @@ check("resource name is api.get", seen!.name === "api.get");
 const [url, body, opts] = seen!.args as [string, unknown, { headers: Record<string, string> }];
 check("url joins base + path, ORIGIN-RELATIVE (the executing tier binds its own base)", url.startsWith("/api/v1/projects/1/views/1/tasks?"), url);
 check("array params serialize as key[]", url.includes("sort_by%5B%5D=position"), url);
+
+// nested objects serialize with bracketed keys and null array elements are skipped,
+// axios's recursive visitor semantics — never JSON strings
+const { serializeParams } = await import("../../packages/tierless/src/adapt-axios.mts");
+check("nested object params serialize as bracketed keys", serializeParams({ filter: { status: "open", tags: ["a", null, "b"] } }) === "filter%5Bstatus%5D=open&filter%5Btags%5D%5B%5D=a&filter%5Btags%5D%5B%5D=b", serializeParams({ filter: { status: "open", tags: ["a", null, "b"] } }));
 check("scalar + empty params kept, undefined dropped", url.includes("page=1") && url.includes("filter=") && !url.includes("skip_me"), url);
 check("GET carries no body", body === undefined);
 check("Authorization header rides the descriptor", opts.headers["authorization"] === "Bearer tok123");
@@ -74,6 +79,14 @@ await withFallback({ method: "get", baseURL: "http://x.test/api/v1", url: "/c", 
 check("cancelToken uses fallback adapter", fell);
 await adapter({ method: "get", baseURL: "http://x.test/api/v1", url: "/t0", timeout: 0, headers: {} });
 check("timeout 0 (axios default: none) still crosses", (seen!.args as [string])[0] === "/api/v1/t0", (seen!.args as [string])[0]);
+
+// --- binary bodies are browser-pinned (they'd JSON-serialize to {} on the crossing) -------
+fell = false;
+await withFallback({ method: "put", baseURL: "http://x.test/api/v1", url: "/bin", data: new Uint8Array([1, 2, 3]), headers: {} });
+check("typed-array body uses fallback adapter", fell);
+fell = false;
+await withFallback({ method: "put", baseURL: "http://x.test/api/v1", url: "/bin2", data: new ArrayBuffer(8), headers: {} });
+check("ArrayBuffer body uses fallback adapter", fell);
 
 // --- per-request paramsSerializer is honored ---------------------------------------------
 canned = { status: 200, headers: {}, body: null };

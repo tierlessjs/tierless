@@ -45,17 +45,21 @@ export interface AxiosAdapterOpts {
   fallback?: (config: AxiosishConfig) => Promise<unknown>;
 }
 
-/** axios-compatible default param serialization: null/undefined skipped, arrays as
- *  repeated `key[]`, Dates as ISO strings. Standard percent-encoding (the backend
- *  parses url-encoding; axios's cosmetic un-escaping of [,] etc. is not semantic). */
+/** axios-compatible default param serialization, the recursive visitor semantics:
+ *  null/undefined/functions skipped (inside arrays too), arrays as repeated `key[]`,
+ *  nested objects as bracketed keys (`filter[status]`), Dates as ISO strings. Standard
+ *  percent-encoding (the backend parses url-encoding; axios's cosmetic un-escaping of
+ *  [,] etc. is not semantic). */
 export function serializeParams(params: Record<string, unknown>): string {
   const q = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) {
-    if (v === null || v === undefined) continue;
-    const one = (x: unknown): string => (x instanceof Date ? x.toISOString() : typeof x === "object" ? JSON.stringify(x) : String(x));
-    if (Array.isArray(v)) for (const item of v) q.append(k + "[]", one(item));
-    else q.append(k, one(v));
-  }
+  const visit = (key: string, v: unknown): void => {
+    if (v === null || v === undefined || typeof v === "function") return;
+    if (v instanceof Date) { q.append(key, v.toISOString()); return; }
+    if (Array.isArray(v)) { for (const item of v) visit(key + "[]", item); return; }
+    if (typeof v === "object") { for (const [k, w] of Object.entries(v as Record<string, unknown>)) visit(key + "[" + k + "]", w); return; }
+    q.append(key, String(v));
+  };
+  for (const [k, v] of Object.entries(params)) visit(k, v);
   return q.toString();
 }
 
@@ -64,7 +68,8 @@ const pinned = (c: AxiosishConfig): boolean =>
     || c.withCredentials   // cookie-jar auth (incl. HttpOnly) exists only in the browser — another tier can't reproduce it
     || c.signal || c.cancelToken || (typeof c.timeout === "number" && c.timeout > 0)   // in-flight abort/timeout semantics don't cross the exec boundary — the adapter owns them, so these run stock
     || (typeof FormData !== "undefined" && c.data instanceof FormData)
-    || (typeof Blob !== "undefined" && c.data instanceof Blob));
+    || (typeof Blob !== "undefined" && c.data instanceof Blob)
+    || (typeof ArrayBuffer !== "undefined" && (c.data instanceof ArrayBuffer || ArrayBuffer.isView(c.data))));   // binary bodies would JSON-serialize to {} on the crossing
 
 export function axiosAdapter({ exec, fallback }: AxiosAdapterOpts) {
   return async function tierlessAxiosAdapter(config: AxiosishConfig): Promise<unknown> {

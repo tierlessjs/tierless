@@ -59,6 +59,12 @@ export interface TierlessPlugin {
     } | null;
     configResolved(config: {
         root?: string;
+        resolve?: {
+            alias?: Array<{
+                find: string | RegExp;
+                replacement: string;
+            }>;
+        };
     }): void;
     buildStart(): void;
     writeBundle(): void;

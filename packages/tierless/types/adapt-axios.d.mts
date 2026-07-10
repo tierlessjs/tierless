@@ -28,8 +28,10 @@ export interface AxiosAdapterOpts {
     /** Axios's own adapter, for browser-pinned configs (progress, blob). */
     fallback?: (config: AxiosishConfig) => Promise<unknown>;
 }
-/** axios-compatible default param serialization: null/undefined skipped, arrays as
- *  repeated `key[]`, Dates as ISO strings. Standard percent-encoding (the backend
- *  parses url-encoding; axios's cosmetic un-escaping of [,] etc. is not semantic). */
+/** axios-compatible default param serialization, the recursive visitor semantics:
+ *  null/undefined/functions skipped (inside arrays too), arrays as repeated `key[]`,
+ *  nested objects as bracketed keys (`filter[status]`), Dates as ISO strings. Standard
+ *  percent-encoding (the backend parses url-encoding; axios's cosmetic un-escaping of
+ *  [,] etc. is not semantic). */
 export declare function serializeParams(params: Record<string, unknown>): string;
 export declare function axiosAdapter({ exec, fallback }: AxiosAdapterOpts): (config: AxiosishConfig) => Promise<unknown>;

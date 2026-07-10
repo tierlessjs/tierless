@@ -223,10 +223,14 @@ export async function bundleResolverFromManifest(manifestPath: string): Promise<
     return cache.get(file)!;
   };
   return async (moduleId: string): Promise<Bundle> => {
+    if (!moduleId) throw new Error("tierless: empty module id on the wire — a malformed client would suffix-match anything");
     let file = manifest.modules[moduleId];
     if (!file) {                                                 // client built under a different root: match by path suffix
-      const hit = Object.keys(manifest.modules).find((k) => k.endsWith(moduleId) || moduleId.endsWith(k));
-      if (hit) file = manifest.modules[hit];
+      // the match must be UNIQUE — resolving an ambiguous id by insertion order could
+      // dispatch a stale client into an unrelated module's machine
+      const hits = Object.keys(manifest.modules).filter((k) => k.endsWith(moduleId) || moduleId.endsWith(k));
+      if (hits.length > 1) throw new Error("tierless: module id " + JSON.stringify(moduleId) + " suffix-matches " + hits.length + " bundles: " + hits.join(", "));
+      if (hits.length === 1) file = manifest.modules[hits[0]];
     }
     if (!file) throw new Error("tierless: no server bundle for module " + JSON.stringify(moduleId));
     return load(file);

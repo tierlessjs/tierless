@@ -12,10 +12,13 @@ fail() { say "BLOCKED: $*"; exit 1; }
 commit_push() {
   local msg="$1"; shift
   git add "$@" || return 1
+  # only an EMPTY staged diff is benign; a real commit failure (hooks, index, repo)
+  # must propagate — otherwise the stage claims durability without ever pushing
+  git diff --cached --quiet && return 0
   git -c user.email=noreply@anthropic.com -c user.name="Claude" commit -m "$msg
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01TV86rbddt84T6DDjTCxwod" || return 0
+Claude-Session: https://claude.ai/code/session_01TV86rbddt84T6DDjTCxwod" || return 1
   for i in 1 2 3; do git push && return 0; sleep $((i * 4)); done
   return 1
 }

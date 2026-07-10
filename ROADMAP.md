@@ -2,7 +2,7 @@
 
 What's genuinely open. Everything that has landed — with its measurements and
 proofs — moved to [`CHANGELOG.md`](./CHANGELOG.md); the mechanism itself is
-proven (38 executable proofs, `npm test`).
+proven (the executable proofs behind `npm test`).
 
 ## Runtime hardening
 

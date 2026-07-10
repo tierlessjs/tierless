@@ -12,7 +12,11 @@ import { encodeGraph, decodeGraph, type Handle, type EncodeOptions, type DecodeO
 import { W, R, isVarInt, writeMagic, checkMagic, makeInterner, writeStrings, readStrings, strAt, rootsOf, rebuildStack, writeFrameHeader, readFrameHeader } from "./wire-io.mjs";
 import type { DeltaFrame, DeltaRequest } from "./wire-delta.mjs";
 
-const MAGIC = "SMW1";
+// SMW2: the handle record's flag byte became a bitfield (bit 1 kind, bit 2 cls) — an
+// SMW1 decoder would read a flags-3 record as the old boolean form and parse the cls
+// bytes as the next field, corrupting the frame. The magic bump makes a version-skewed
+// peer fail cleanly at checkMagic instead.
+const MAGIC = "SMW2";
 
 // The writer/hardened reader, magic header, string table, and frame flatten/rebuild live in
 // wire-io.mts (one copy, shared with the delta wire). This file owns only what is binary-

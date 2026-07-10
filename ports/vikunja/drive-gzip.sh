@@ -13,10 +13,13 @@ fail() { say "BLOCKED: $*"; exit 1; }
 commit_push() {
   local msg="$1"; shift
   git add "$@" || return 1
+  # only an EMPTY staged diff is benign; a real commit failure (hooks, index, repo)
+  # must propagate — otherwise the stage claims durability without ever pushing
+  git diff --cached --quiet && return 0
   git -c user.email=noreply@anthropic.com -c user.name="Claude" commit -m "$msg
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01TV86rbddt84T6DDjTCxwod" || return 0
+Claude-Session: https://claude.ai/code/session_01TV86rbddt84T6DDjTCxwod" || return 1
   for i in 1 2 3; do git push && return 0; sleep $((i * 4)); done
   return 1
 }
@@ -36,8 +39,12 @@ say "gzip gate"
 ( cd ports/work/vikunja-baseline/src && VIKUNJA_TIERLESS_GZIP=1 VIKUNJA_SERVICE_TESTINGTOKEN=tok VIKUNJA_DATABASE_PATH=memory VIKUNJA_DATABASE_TYPE=sqlite VIKUNJA_LOG_LEVEL=ERROR VIKUNJA_SERVICE_PUBLICURL=http://127.0.0.1:3456 ./vikunja & echo $! > /tmp/vgzip.pid )
 for i in $(seq 1 30); do curl -so /dev/null --max-time 2 http://127.0.0.1:3456/api/v1/info && break; sleep 2; done
 ENC=$(curl -s -o /dev/null -D- -H "Accept-Encoding: gzip" http://127.0.0.1:3456/api/v1/info | grep -ci "content-encoding: gzip" || true)
+# $! in the subshell captured a wrapper, not the binary (it survived the kill once and the
+# suite's stale-port guard refused to boot) — kill by socket owner and WAIT for the port
 kill "$(cat /tmp/vgzip.pid)" 2>/dev/null || true
-sleep 2
+ss -tlnp 2>/dev/null | grep ":3456" | grep -oE "pid=[0-9]+" | cut -d= -f2 | sort -u | xargs -r kill -9
+for i in $(seq 1 15); do curl -so /dev/null --max-time 1 http://127.0.0.1:3456/api/v1/info || break; sleep 1; done
+curl -so /dev/null --max-time 1 http://127.0.0.1:3456/api/v1/info && fail "gate server still owns :3456 after kill"
 [ "$ENC" -ge 1 ] || fail "gate: /api/ still identity-encoded under VIKUNJA_TIERLESS_GZIP=1"
 say "gate PASSED (api gzips under the flag)"
 

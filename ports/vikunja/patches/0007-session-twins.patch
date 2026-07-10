@@ -18,7 +18,7 @@
 +export {}
 --- /dev/null
 +++ b/frontend/src/tierlessTwins.ts
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,43 @@
 +// Session twins (tierless, docs/migrate-arm.md): the classes a migrated store chain may
 +// call server-side, as REAL instances of the app's own services — their interceptor
 +// chains (auth header, casing) run for real, and each call's instance-state changes ride
@@ -44,7 +44,7 @@
 +// eslint-disable-next-line @typescript-eslint/no-explicit-any
 +for (const [name, C] of Object.entries(TWIN_CLASSES)) (C.prototype as any).__tierless_cls = name
 +
-+export function makeTwins({token, apiUrl}: {token: string | null; apiUrl: string}): (cls: string) => object | undefined {
++export function makeTwins({token, apiUrl}: {token: string | null; apiUrl: string}): (cls: string, handle?: {id: string; owner: string}) => object | undefined {
 +	// the shims themselves load first (tierlessNodeShims.ts) so module-level service
 +	// singletons can construct; here we bind THIS session's values. Single-session-safe
 +	// (the measurement harness runs one authenticated session at a time); a multi-tenant
@@ -56,5 +56,9 @@
 +		;(globalThis as any).__TIERLESS_TWIN_TOKEN__ = token
 +	}
 +	const twins: Record<string, object> = {}
-+	return (cls: string) => (TWIN_CLASSES[cls] ? (twins[cls] ??= new TWIN_CLASSES[cls]()) : undefined)
++	// keyed by RECEIVER identity, not class alone: these services carry mutable
++	// per-instance fields (totalPages, loading) — two distinct home instances must
++	// not share one twin's state (class-only keying is right only for singletons)
++	return (cls: string, handle?: {id: string; owner: string}) =>
++		TWIN_CLASSES[cls] ? (twins[cls + '/' + (handle ? handle.owner + '#' + handle.id : '')] ??= new TWIN_CLASSES[cls]()) : undefined
 +}

@@ -20,7 +20,7 @@
 //
 // The plugin is a plain object (no vite import), so it is unit-testable headless.
 import { createRequire } from "node:module";
-import { writeFileSync, mkdirSync, readFileSync, appendFileSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync, appendFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { WS_PATH } from "./ws-path.mjs";
@@ -48,15 +48,43 @@ const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 //     already relies on).
 // Only the exact specifiers the compiler reported are touched, and only in `from "…"` / `import "…"`
 // position, so a string literal in the machine body that happens to look like a path is never hit.
-const rewriteRelativeImports = (code, srcDir, outDir, specs, mixByPath) => {
+//
+// The emitted bundle is loaded by NODE, not Vite, so Vite-only specifier forms must not
+// leak into it: an extensionless "./format" resolves to the real .mjs/.js file at emit
+// time, and a target only Vite could load (a .ts file, an alias) FAILS THE BUILD here —
+// a broken import in dist-tierless/ would otherwise surface as a runtime crash in
+// bundleResolverFromManifest, far from its cause.
+const resolveEmitTarget = (srcDir, spec) => {
+    const abs = path.resolve(srcDir, spec);
+    if (existsSync(abs) && path.extname(abs))
+        return abs;
+    for (const ext of [".mjs", ".js"])
+        if (existsSync(abs + ext))
+            return abs + ext;
+    for (const ext of [".mts", ".ts", ".tsx", ".vue"])
+        if (existsSync(abs + ext)) {
+            throw new Error(`tierless: "${spec}" resolves to ${path.basename(abs + ext)} — the server bundle for a "use tierless" module is loaded by Node as-is; import a plain .mjs/.js helper instead`);
+        }
+    return abs; // missing target: leave it to Node to report, same as before
+};
+const rewriteRelativeImports = (code, srcDir, outDir, specs, mixByPath, aliases = {}) => {
     let out = code;
     for (const spec of specs) {
-        const abs = path.resolve(srcDir, spec);
+        const abs = resolveEmitTarget(srcDir, spec);
         const mix = mixByPath.get(abs);
         let rel = mix ? "./" + mix : path.relative(outDir, abs).split(path.sep).join("/");
         if (!rel.startsWith("."))
             rel = "./" + rel;
         out = out.replace(new RegExp(`((?:from|import)\\s*)(['"])${escapeRegExp(spec)}\\2`, "g"), `$1$2${rel}$2`);
+    }
+    // an alias specifier ('@/helpers') reads as a scoped npm package to Node — it would
+    // emit fine and crash at load; the actions path is deliberately NOT esbuild-bundled
+    // (the emitted machine is the compiler's own output, byte-identical), so aliases in a
+    // "use tierless" module are a build error with a fix, never a delayed runtime one
+    for (const find of Object.keys(aliases)) {
+        const hit = new RegExp(`(?:from|import)\\s*['"]${escapeRegExp(find)}[/'"]`).exec(out);
+        if (hit)
+            throw new Error(`tierless: a "use tierless" module imports through the Vite alias "${find}" — the emitted server bundle is not alias-aware; use a relative import to a .mjs/.js helper`);
     }
     return out;
 };
@@ -193,7 +221,7 @@ export default function tierless(opts = {}) {
                 mixByPath.set(path.resolve(id), serverBundleName(id));
             for (const [id, { code, imports }] of machines) {
                 const name = serverBundleName(id);
-                const emitted = imports.length ? rewriteRelativeImports(code, path.dirname(id), outDir, imports, mixByPath) : code;
+                const emitted = rewriteRelativeImports(code, path.dirname(id), outDir, imports, mixByPath, aliases);
                 writeFileSync(path.join(outDir, name), emitted);
                 modules[id] = name;
             }

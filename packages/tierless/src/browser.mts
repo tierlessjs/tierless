@@ -221,7 +221,10 @@ let appUnwindSet = false;
 export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (prog: string, self: unknown, args: unknown[]) => Promise<unknown>) => void }, { module = "", migrate }: { module?: string; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean } = {}): void {
   if (typeof bundle.__bindTierlessMethods !== "function") throw new Error("tierless: bundle has no compiled class methods (rebuild with a compiler that emits __bindTierlessMethods)");
   for (const [k, v] of Object.entries(bundle.PROGRAMS)) {
-    if (APP_MERGED.PROGRAMS[k] && APP_MERGED.PROGRAMS[k] !== v) console.warn("tierless: program name collision across compiled modules: " + k);
+    // a collision is guaranteed wrongness, not a warning: programs are named Class$method,
+    // so a second module defining the same pair would silently execute the first module's
+    // machine for half its calls. Fail at bind time, where the stack names both modules.
+    if (APP_MERGED.PROGRAMS[k] && APP_MERGED.PROGRAMS[k] !== v) throw new Error("tierless: program name collision across compiled modules: " + k + " — rename one class or method (compiled program ids are Class$method, app-wide)");
     APP_MERGED.PROGRAMS[k] = v;
   }
   if (bundle.__slots) Object.assign(APP_MERGED.__slots as Record<string, unknown>, bundle.__slots as Record<string, unknown>);

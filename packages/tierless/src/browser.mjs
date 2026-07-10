@@ -190,8 +190,11 @@ export function bindMethods(bundle, { module = "", migrate } = {}) {
     if (typeof bundle.__bindTierlessMethods !== "function")
         throw new Error("tierless: bundle has no compiled class methods (rebuild with a compiler that emits __bindTierlessMethods)");
     for (const [k, v] of Object.entries(bundle.PROGRAMS)) {
+        // a collision is guaranteed wrongness, not a warning: programs are named Class$method,
+        // so a second module defining the same pair would silently execute the first module's
+        // machine for half its calls. Fail at bind time, where the stack names both modules.
         if (APP_MERGED.PROGRAMS[k] && APP_MERGED.PROGRAMS[k] !== v)
-            console.warn("tierless: program name collision across compiled modules: " + k);
+            throw new Error("tierless: program name collision across compiled modules: " + k + " — rename one class or method (compiled program ids are Class$method, app-wide)");
         APP_MERGED.PROGRAMS[k] = v;
     }
     if (bundle.__slots)
