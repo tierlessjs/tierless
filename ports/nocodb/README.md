@@ -160,12 +160,17 @@ zlib, ≥1 KB compressible bodies — expressjs/compression defaults). The defau
 measured stack stays what their own CI runs (raw); this arm answers "what if they
 deployed compression":
 
-    stock, gzip     26.5 MB -> 16.3 MB api-in (gzip cuts stock's API bytes 63%)
-    ported vs it    16.3 MB -> 1.57 MB   (90% less IO; median per-test 91%)
+    stock, gzip              26.5 MB -> 16.3 MB api-in (gzip cuts stock's API bytes 63%)
+    ported(raw) vs it        16.3 MB -> 1.57 MB   (90% less IO; median per-test 91%)
+    ported+gzip vs it        17.0 MB -> 1.57 MB   (91% less IO; median 91%) — the
+                             SYMMETRIC pair (results/truth-ported-gzip.jsonl); the
+                             ported arm's residual direct HTTP is negligible here
 
 Compression captures barely a third of the gap: the port's win here is
 structural — bodies that never repeat across a deflate window, headers that
-never re-send — not just encoding.
+never re-send — not just encoding. (Contrast Vikunja, where gzip captures half
+the suite-wide advantage: payload-size distribution decides how much of the win
+is compressible — ports/vikunja/COMPILING.md.)
 
 Pass sets: 3 exclusions fail on BOTH arms (columnAttachments, metaLTAR
 delete-over-UI, viewGridShare — the stock CORS-refresh family), and
