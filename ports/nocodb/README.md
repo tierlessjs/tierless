@@ -157,9 +157,10 @@ delete-over-UI, viewGridShare — the stock CORS-refresh family), and
 sourceRestrictions flip-flops between arms (one member failed stock/passed
 ported, the other the reverse — the same unstable family). Ported-only:
 toolbarOperations row-height passes in isolation (load flake);
-accountUserManagement's invite flow fails deterministically at the
-transport-agnostic-wait seam (multi-context flow; neither transport's wait
-matched) — the one known accommodation edge, diagnosis queued. All are
+accountUserManagement's invite flow failed deterministically at the
+transport-agnostic-wait seam — diagnosed and FIXED: the wait's index cursor
+died at goto() navigations (page world resets restart the log); entries now
+carry wall-clock timestamps and the wait scans by time. The flow passes. All are
 pass-parity-excluded; none contribute bytes to the distribution.
 
 The accommodation that made the ported arm runnable: their page objects

@@ -47,7 +47,7 @@ export async function bootNocodb(): Promise<{ close(): void }> {
   // backend URL is overridable (TIERLESS_BROWSER_API_URL routes browser data through
   // a counting relay on wire-truth runs; node-side test seeding hardcodes :8080 in
   // their setup and stays uncounted — the vikunja split, same shape)
-  const frontEnv = { ...env, NUXT_PAGE_TRANSITION_DISABLE: "true", NUXT_PUBLIC_ENV: "CI", NUXT_PUBLIC_NC_BACKEND_URL: process.env.TIERLESS_BROWSER_API_URL || "http://localhost:8080" };
+  const frontEnv = { ...env, NUXT_PAGE_TRANSITION_DISABLE: "true", NUXT_PUBLIC_ENV: "CI", NUXT_PUBLIC_NC_BACKEND_URL: process.env.TIERLESS_BROWSER_API_URL || "http://localhost:8080", NUXT_PUBLIC_TIERLESS_WS_URL: process.env.TIERLESS_WS_URL || "" };
   // detached process GROUPS: pnpm/rspack/nodemon spawn children of their own; killing
   // only the wrapper leaves a stale server owning the port. kill(-pid) takes the group.
   const procs: ChildProcess[] = [

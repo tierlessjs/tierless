@@ -20,8 +20,10 @@ import { delayProxy, type WireCounter } from "../latency-proxy.mts";
 
 const VARIANT = process.argv.includes("--baseline") ? "nocodb-baseline" : "nocodb";
 const TRUTH = !!process.env.TIERLESS_WIRE_TRUTH;
+const RTT = Number(process.env.TIERLESS_RTT_MS || 0);
+if (TRUTH && RTT) { console.error("pick one: TIERLESS_WIRE_TRUTH (bytes) or TIERLESS_RTT_MS (time) — a counting relay inflates request-heavy tests"); process.exit(2); }
 const SRC = fileURLToPath(new URL(`../work/${VARIANT}/src/`, import.meta.url));
-const OUT = fileURLToPath(new URL(`../work/${VARIANT}/measure${TRUTH ? "-truth" : ""}.jsonl`, import.meta.url));
+const OUT = fileURLToPath(new URL(`../work/${VARIANT}/measure${TRUTH ? "-truth" : ""}${RTT ? `-rtt${RTT}` : ""}.jsonl`, import.meta.url));
 
 const wireUrls: string[] = [];
 if (TRUTH) {
@@ -31,6 +33,19 @@ if (TRUTH) {
   process.env.TIERLESS_BROWSER_API_URL = "http://127.0.0.1:28080";   // boot passes it to the frontend serve
   wireUrls.push("http://127.0.0.1:14991", "http://127.0.0.1:8180/__tierless/wire");
   console.log("wire truth: browser api via counting relay :28080, counters :14991, ws bytes at :8180/__tierless/wire");
+}
+
+if (RTT) {
+  // real round-trip latency on every browser-facing hop (websocket included — CDP
+  // throttling can't shape ws): frontend origin, API origin, session gateway. The
+  // gateway->backend hop stays undelayed localhost, as deployed.
+  delayProxy(13000, 3000, RTT / 2).unref();
+  delayProxy(18080, 8080, RTT / 2).unref();
+  delayProxy(18180, 8180, RTT / 2).unref();
+  process.env.TIERLESS_BROWSER_API_URL = "http://127.0.0.1:18080";
+  process.env.TIERLESS_WS_URL = "ws://127.0.0.1:18180/__tierless";
+  process.env.BASE_URL = "http://127.0.0.1:13000";
+  console.log(`RTT injection: ${RTT} ms via 13000->3000, 18080->8080, 18180->8180`);
 }
 
 rmSync(OUT, { force: true });

@@ -1,7 +1,7 @@
 diff -ruN a/packages/nc-gui/composables/useApi/interceptors.ts b/packages/nc-gui/composables/useApi/interceptors.ts
 --- a/packages/nc-gui/composables/useApi/interceptors.ts	2026-07-09 21:36:18.634056670 +0000
-+++ b/packages/nc-gui/composables/useApi/interceptors.ts	2026-07-09 23:02:36.806918936 +0000
-@@ -1,7 +1,21 @@
++++ b/packages/nc-gui/composables/useApi/interceptors.ts	2026-07-10 02:01:14.479204258 +0000
+@@ -1,7 +1,15 @@
  import axios from 'axios'
  import { axiosAdapter } from 'tierless/adapt-axios'
 -import { restResources } from 'tierless/adapt'
@@ -9,22 +9,32 @@ diff -ruN a/packages/nc-gui/composables/useApi/interceptors.ts b/packages/nc-gui
  import type { Api } from 'nocodb-sdk'
 +
 +// The session gateway (corpus port, patch 0003): the UI is served by nuxt on :3000,
-+// the session ws rides the standalone gateway on :8180 (ports/nocodb/gateway.mts) —
-+// explicit URL, preconnected at app boot so the upgrade handshake never lands on the
-+// first interaction's critical path. Measured runs may inject an override global.
-+if (typeof window !== 'undefined') {
-+  // bounded per-crossing log ({url, status, body}) — the suite's transport-agnostic
-+  // waits read it (tests/playwright/pages/Base.ts, test patch 0004)
-+  ;(window as any).__TIERLESS_EXEC_LOG__ = true
-+  configureTierless({
-+    url: () => (window as any).__TIERLESS_WS__ || `ws://${location.hostname}:8180/__tierless`,
-+    preconnect: true,
-+  })
-+}
++// the session ws rides the standalone gateway on :8180 (ports/nocodb/gateway.mts).
++// Configured once, inside the first addAxiosInterceptors call (runtime config needs
++// the nuxt context); preconnected so the upgrade handshake never lands on the first
++// interaction's critical path. tierlessWsUrl (NUXT_PUBLIC_TIERLESS_WS_URL at serve
++// time) lets measured runs route the socket through a shaping relay.
++let tierlessConfigured = false
  const DbNotFoundMsg = 'Database config not found'
  
  const TIMEOUT_RETRY_COUNT = 1
-@@ -21,8 +35,11 @@
+@@ -13,6 +21,15 @@
+   const optimisedQuery = useState('optimisedQuery', () => true)
+   const { $ncSocket } = useNuxtApp()
+ 
++  if (!tierlessConfigured && typeof window !== 'undefined') {
++    tierlessConfigured = true
++    // bounded per-crossing log ({t, url, status, body}) — the suite's transport-
++    // agnostic waits read it (tests/playwright/pages/Base.ts, test patch 0004)
++    ;(window as any).__TIERLESS_EXEC_LOG__ = true
++    const wsUrl = (useRuntimeConfig().public as any).tierlessWsUrl as string
++    configureTierless({ url: () => wsUrl || `ws://${location.hostname}:8180/__tierless`, preconnect: true })
++  }
++
+   const axiosInstance = api.instance
+ 
+   // The tierless I/O bottom (corpus port, patch 0002): axios above this line is
+@@ -21,8 +38,11 @@
    // direct fetch to the API origin — stock behavior. Browser-pinned configs (progress,
    // blobs, FormData) fall through to axios's own XHR adapter (absent under Node/SSR).
    axiosInstance.defaults.adapter = axiosAdapter({
@@ -38,3 +48,17 @@ diff -ruN a/packages/nc-gui/composables/useApi/interceptors.ts b/packages/nc-gui
      fallback: typeof XMLHttpRequest === 'undefined' ? undefined : axios.getAdapter('xhr'),
    })
  
+diff -ruN a/packages/nc-gui/nuxt.config.ts b/packages/nc-gui/nuxt.config.ts
+--- a/packages/nc-gui/nuxt.config.ts	2026-07-10 02:01:14.445137545 +0000
++++ b/packages/nc-gui/nuxt.config.ts	2026-07-10 02:01:14.478785526 +0000
+@@ -140,6 +140,10 @@
+ 
+   runtimeConfig: {
+     public: {
++      // tierless corpus port (patch 0003): the session-gateway ws URL, overridable at
++      // serve time (NUXT_PUBLIC_TIERLESS_WS_URL) so measured runs can route it through
++      // a shaping relay; empty = ws://<page-host>:8180/__tierless
++      tierlessWsUrl: '',
+       ncBackendUrl: '',
+       env: 'production',
+       maxPageDesignerTableRows: 100,
