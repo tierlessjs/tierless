@@ -111,10 +111,13 @@ export function axiosAdapter({ exec, fallback }: AxiosAdapterOpts) {
     const rawHeaders = config.headers?.toJSON ? config.headers.toJSON() : { ...(config.headers || {}) };
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(rawHeaders)) if (v !== undefined && v !== null && typeof v !== "function") headers[k.toLowerCase()] = String(v);
-    // axios's adapter-level Basic auth: overwrites any configured Authorization header
+    // axios's adapter-level Basic auth: overwrites any configured Authorization header.
+    // btoa is Latin-1-only — encode to UTF-8 bytes first so non-ASCII credentials work
     if (config.auth) {
       const cred = (config.auth.username || "") + ":" + (config.auth.password || "");
-      headers.authorization = "Basic " + (typeof btoa === "function" ? btoa(cred) : Buffer.from(cred, "utf8").toString("base64"));
+      headers.authorization = "Basic " + (typeof btoa === "function"
+        ? btoa(String.fromCharCode(...new TextEncoder().encode(cred)))
+        : Buffer.from(cred, "utf8").toString("base64"));
     }
 
     // ORIGIN-RELATIVE on purpose: the api namespace is tier-owned — whoever executes the

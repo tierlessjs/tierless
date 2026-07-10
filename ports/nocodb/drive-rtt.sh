@@ -11,6 +11,9 @@ fail() { say "BLOCKED: $*"; exit 1; }
 
 commit_push() {
   local msg="$1"; shift
+  # refuse a dirty index: git commit takes the WHOLE index, so unrelated staged work
+  # would leak into an unattended benchmark commit — fail loudly instead
+  git diff --cached --quiet || { echo "commit_push: index has unrelated staged work — refusing"; return 1; }
   git add "$@" || return 1
   # only an EMPTY staged diff is benign; a real commit failure (hooks, index, repo)
   # must propagate — otherwise the stage claims durability without ever pushing
