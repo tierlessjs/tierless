@@ -84,7 +84,8 @@ mod.__bindTierlessMethods((prog: string, self: unknown, args: unknown[]) => {
 });
 const inst3 = new mod.Svc(fakeHttp);
 const out3 = await inst3.getAll({ page: 5 });
-check("bound stub routes (program, this, args)", routed !== null && routed!.prog === "Svc$getAll" && routed!.self === inst3 && JSON.stringify(routed!.args) === '[{"page":5}]');
+const got = routed as { prog: string; self: unknown; args: unknown[] } | null;   // TS can't see the callback assignment above
+check("bound stub routes (program, this, args)", got !== null && got.prog === "Svc$getAll" && got.self === inst3 && JSON.stringify(got.args) === '[{"page":5}]');
 check("bound path result matches original semantics", out3.length === 2 && out3[1].tagged && inst3.totalPages === 3);
 
 // ---- awaited member calls compile into dynamic parks; only bare awaits reject ------------

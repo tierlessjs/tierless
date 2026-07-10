@@ -24,6 +24,7 @@ function runMigrating(fn: string): unknown {
     if (r.op === "return") { stack.pop(); if (!stack.length) return r.value; stack[stack.length - 1].ret = r.value; continue; }
     if (r.op === "call") { stack.push({ fn: r.fn, pc: 0, args: r.args }); continue; }   // push a sub-frame
     if (r.op === "throw") { stack.pop(); if (!__unwind(stack, r.value)) throw r.value; continue; }
+    if (r.op !== "resource") throw new Error("this fixture never parks dynamically");   // op:"dyn" joined MachineResult with the migrate arm
     stack = wire(stack);                             // resource: serialize the WHOLE (possibly multi-frame) continuation, then service
     const f = stack[stack.length - 1];
     try { f.ret = exec(r); }

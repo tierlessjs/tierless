@@ -29,6 +29,7 @@ async function pumpLocal(stack: Frame[], ownsHere: (tier: string) => boolean, ex
     if (r.op === "return") { stack.pop(); if (!stack.length) return { done: true, value: r.value }; stack[stack.length - 1].ret = r.value; }
     else if (r.op === "call") { stack.push({ fn: r.fn, pc: 0, args: r.args }); }
     else if (r.op === "throw") { stack.pop(); if (!__unwind(stack, r.value)) throw r.value; }
+    else if (r.op !== "resource") { throw new Error("this fixture never parks dynamically"); }   // op:"dyn" joined MachineResult with the migrate arm
     else if (ownsHere(r.tier)) { await service(r); }
     else return { done: false, request: r, stack };
   }

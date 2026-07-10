@@ -37,8 +37,9 @@ check("POST resource + body", seen!.name === "api.post" && JSON.stringify((seen!
 
 // --- non-2xx honors validateStatus with an AxiosError-shaped rejection -------------------
 canned = { status: 412, headers: { "content-type": "application/json" }, body: { message: "precondition" } };
-let caught: (Error & { response?: { status: number; data: { message: string } }; isAxiosError?: boolean }) | null = null;
-try { await adapter({ method: "get", baseURL: "http://x.test/api/v1", url: "/nope", headers: {} }); } catch (e) { caught = e as typeof caught; }
+type Caught = Error & { response?: { status: number; data: { message: string } }; isAxiosError?: boolean };
+let caught: Caught | null = null;
+try { await adapter({ method: "get", baseURL: "http://x.test/api/v1", url: "/nope", headers: {} }); } catch (e) { caught = e as Caught; }
 check("non-2xx rejects", !!caught);
 check("error carries .response like axios", caught?.isAxiosError === true && caught?.response?.status === 412 && caught?.response?.data.message === "precondition");
 
@@ -70,8 +71,8 @@ check("twin GET hits base+path with axios-style params", g.status === 200 && g.h
 check("twin carries the session token as Bearer", g.headers["x-echo-auth"] === "Bearer tok9");
 const p = await twin.put("/tasks/1", { title: "t" });
 check("twin PUT sends body", p.data.m === "PUT");
-let terr: (Error & { isAxiosError?: boolean; response?: { status: number; data: { message: string } } }) | null = null;
-try { await twin.get("/miss"); } catch (e) { terr = e as typeof terr; }
+let terr: Caught | null = null;
+try { await twin.get("/miss"); } catch (e) { terr = e as Caught; }
 check("twin non-2xx rejects AxiosError-shaped", terr?.isAxiosError === true && terr?.response?.status === 404 && terr?.response?.data.message === "nope");
 srv.close();
 
