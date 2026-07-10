@@ -28,6 +28,7 @@ interface Rec {
   // TCP-true counters (TIERLESS_WIRE_TRUTH runs) — deflate included; the byte
   // measurement of record when present (CDP reports ws frames post-inflate)
   wireWsIn?: number; wireWsOut?: number; wireApiIn?: number; wireApiOut?: number;
+  wireError?: boolean;   // a counter endpoint failed around this attempt — its deltas would be garbage
 }
 
 const [baseFile, portFile] = process.argv.slice(2);
@@ -61,7 +62,12 @@ const port = load(portFile);
 
 const onlyBase = [...base.keys()].filter((id) => !port.has(id));
 const onlyPort = [...port.keys()].filter((id) => !base.has(id));
-const pairs = [...base.keys()].filter((id) => port.has(id)).map((id) => ({ id, b: base.get(id)!, p: port.get(id)! }));
+const allPairs = [...base.keys()].filter((id) => port.has(id)).map((id) => ({ id, b: base.get(id)!, p: port.get(id)! }));
+// a row whose counter read failed carries no valid deltas — the pair is excluded rather
+// than polluting totals (the reporter flags it instead of shipping wrong numbers)
+const wireDropped = allPairs.filter(({ b, p }) => b.wireError || p.wireError);
+const pairs = allPairs.filter(({ b, p }) => !b.wireError && !p.wireError);
+if (wireDropped.length) console.log(`wire-counter failure EXCLUDED (${wireDropped.length}): ${wireDropped.slice(0, 5).map(({ id }) => id).join("; ")}${wireDropped.length > 5 ? " …" : ""}`);
 
 const parityFail = pairs.filter(({ b, p }) => b.status !== "passed" || p.status !== "passed");
 const counted = pairs.filter(({ b, p }) => b.status === "passed" && p.status === "passed");

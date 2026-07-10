@@ -72,7 +72,10 @@ export function axiosAdapter({ exec, fallback }: AxiosAdapterOpts) {
     const method = (config.method || "get").toLowerCase();
     // Full URL from baseURL + url, exactly as axios would combine them; params appended
     // with the config's own serializer when present.
-    const base = config.baseURL ? new URL(config.baseURL, typeof location !== "undefined" ? location.href : undefined) : undefined;
+    // a relative baseURL needs SOME base everywhere this adapter runs — the browser has
+    // location; on a server tier the placeholder origin only anchors path joining and the
+    // origin gate (crossing args stay origin-relative, so it never reaches a socket)
+    const base = config.baseURL ? new URL(config.baseURL, typeof location !== "undefined" ? location.href : "http://localhost") : undefined;
     const baseOrigin = base ? base.origin : (typeof location !== "undefined" ? location.origin : "http://localhost");
     const joined = config.url && /^(https?:)?\/\//.test(config.url)   // absolute or protocol-relative
       ? new URL(config.url, baseOrigin)

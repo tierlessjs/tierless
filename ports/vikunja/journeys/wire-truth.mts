@@ -4,7 +4,7 @@
 // CDP can't do this: it reports ws frames post-inflate.
 //   node wire-truth.mts [--baseline]
 import { createRequire } from "node:module";
-const { chromium } = createRequire("/opt/node22/lib/node_modules/")("playwright");
+const { chromium } = createRequire(process.env.PLAYWRIGHT_REQUIRE || "/opt/node22/lib/node_modules/")("playwright");
 import { delayProxy, type WireCounter } from "../../latency-proxy.mts";
 import { seedProjectWithTasks, API } from "../boot.mts";
 
