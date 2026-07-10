@@ -85,6 +85,7 @@ export type HostReply = {
 } | {
     type: "error";
     message: string;
+    twinDeltas?: TwinDelta[];
 };
 export interface Host {
     pump: Pump;

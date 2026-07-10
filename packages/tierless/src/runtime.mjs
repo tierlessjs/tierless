@@ -111,14 +111,20 @@ export function makePump(bundle, { twins } = {}) {
                         const pre = {};
                         for (const [k, v] of Object.entries(dataFields(twin)))
                             pre[k] = image(v);
-                        await settle(() => twin[r.member](...r.args));
-                        if (sink) {
-                            const fields = {};
-                            for (const [k, v] of Object.entries(dataFields(twin)))
-                                if (image(v) !== pre[k])
-                                    fields[k] = v;
-                            if (Object.keys(fields).length)
-                                sink.twinDelta({ owner: recv.owner, id: recv.id, fields });
+                        try {
+                            await settle(() => twin[r.member](...r.args));
+                        }
+                        finally {
+                            // diff in a FINALLY: plain JS keeps mutations made before a throw, so an
+                            // uncaught error (settle rethrows) must still ship them home
+                            if (sink) {
+                                const fields = {};
+                                for (const [k, v] of Object.entries(dataFields(twin)))
+                                    if (image(v) !== pre[k])
+                                        fields[k] = v;
+                                if (Object.keys(fields).length)
+                                    sink.twinDelta({ owner: recv.owner, id: recv.id, fields });
+                            }
                         }
                     }
                     else if (prog)

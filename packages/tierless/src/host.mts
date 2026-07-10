@@ -176,7 +176,9 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
       return { obj: { type: "suspend", ...carry() }, bin: ship(sid, res) };
     } catch (e: any) {
       rec?.end(flag, "error");
-      return { obj: { type: "error", message: String((e && e.message) || e) } };
+      // error replies carry twin deltas too: mutations made before an uncaught throw
+      // are real (plain JS keeps them) and the home instances must converge
+      return { obj: { type: "error", message: String((e && e.message) || e), ...carry() } };
     }
   }
 
@@ -269,15 +271,17 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
           if (!heapTier) { const objs = new Map<string, unknown>(); let n = 0; heapTier = { id: tier, heapPut: (v) => { const k = "l" + n++; objs.set(k, v); return k; }, heapGet: (hid) => objs.get(hid) }; }
           const enc = (): Uint8Array => encodeWireBinary(stack, req, { tier: heapTier!, excise: ownedUnit });
           const reply = await peer.request({ type: "resume", sid, ...meta }, rec ? rec.ship(stack, req, enc, "migrate") : enc());
-          if (reply.obj.type === "error") throw new Error(reply.obj.message);
           // twin write-back (docs/migrate-arm.md "twins and correctness"): apply the
           // fields the session twins mutated to OUR live instances BEFORE the awaiting
-          // code resumes — it reads its writes exactly as if the method ran at home
+          // code resumes — it reads its writes exactly as if the method ran at home.
+          // Applied on ERROR replies too: mutations made before an uncaught throw are
+          // real, exactly as they would be had the method run here.
           for (const d of (reply.obj.twinDeltas as import("./types.mjs").TwinDelta[] | undefined) ?? []) {
             if (d.owner !== tier) continue;
             const live = heapTier.heapGet(d.id);
             if (live && typeof live === "object") Object.assign(live, d.fields);
           }
+          if (reply.obj.type === "error") throw new Error(reply.obj.message);
           if (reply.obj.type === "done") return reply.obj.value;
           const back = decodeWireBinary(reply.bin!, { tier: heapTier });
           stack = back.stack as Frame[];

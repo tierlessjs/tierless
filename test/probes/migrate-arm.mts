@@ -68,6 +68,7 @@ export class Svc {
     return r.body;
   }
   syncBoom() { throw new Error("sync-nope"); }
+  mutateBoom() { this.hits = (this.hits || 0) + 1; throw new Error("after-mutate"); }
   async pushThing() {
     const r = await this.http.get("/things");
     this.items = this.items || [];
@@ -96,6 +97,11 @@ export class Store {
     const svc = this.svc;
     await svc.chain(id);
     return await svc.pushThing();
+  }
+  async flowMutateBoom(id) {
+    const svc = this.svc;
+    await svc.chain(id);
+    return await svc.mutateBoom();
   }
 }`;
 
@@ -309,6 +315,19 @@ shostT2.answer(makePeer(sp3));
 const svc4 = new mod.Svc({});
 const n12 = await bhost.runLocal(makePeer(bp3), "Store$flowPush", [new mod.Store(svc4), 7], migrate);
 check("twin write-back: in-place array mutation ships home", n12 === 1 && Array.isArray((svc4 as any).items) && (svc4 as any).items.length === 1, JSON.stringify({ n12, items: (svc4 as any).items }));
+
+// ---- 13. twin throw AFTER mutation: the delta still ships home on the error reply ------
+// plain JS keeps mutations made before a throw; the error reply carries the twin diff
+// and the home tier applies it before rethrowing — state converges even when the call fails
+reset();
+const twinSvc3 = new mod.Svc({ get: (url: string) => serverExec({ name: "http.get", args: [url] }) });
+const shostT3 = makeHost({ bundle, tier: "server", exec: serverExec as never, twins: (cls: string) => (cls === "Svc" ? twinSvc3 : undefined) });
+const [bp4, sp4] = pair();
+shostT3.answer(makePeer(sp4));
+const svc5 = new mod.Svc({});
+const err13: any = await bhost.runLocal(makePeer(bp4), "Store$flowMutateBoom", [new mod.Store(svc5), 7], migrate).then(() => null, (e: unknown) => e);
+check("twin throw after mutation: the error still propagates home", err13?.message === "after-mutate", String(err13?.message));
+check("twin throw after mutation: the pre-throw mutation ships home on the error reply", (svc5 as any).hits === 1 && (twinSvc3 as any).hits === 1, JSON.stringify({ home: (svc5 as any).hits, twin: (twinSvc3 as any).hits }));
 
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
 console.log("\na chain migrates in one crossing; the stop rule, identity, and unwind hold; the profile decides");

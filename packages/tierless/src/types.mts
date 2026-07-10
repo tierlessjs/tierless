@@ -72,7 +72,8 @@ export interface Peer {
 export type HostReply =
   | { type: "done"; value: unknown; twinDeltas?: TwinDelta[] }
   | { type: "suspend"; twinDeltas?: TwinDelta[] }
-  | { type: "error"; message: string };
+  // errors carry deltas too: twin mutations made before an uncaught throw are real
+  | { type: "error"; message: string; twinDeltas?: TwinDelta[] };
 
 export interface Host {
   pump: Pump;

@@ -103,11 +103,16 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
             const image = (v: unknown): string | undefined => { try { return JSON.stringify(v); } catch { return undefined; } };
             const pre: Record<string, string | undefined> = {};
             for (const [k, v] of Object.entries(dataFields(twin))) pre[k] = image(v);
-            await settle(() => (twin as Record<string, (...a: unknown[]) => unknown>)[r.member](...r.args));
-            if (sink) {
-              const fields: Record<string, unknown> = {};
-              for (const [k, v] of Object.entries(dataFields(twin))) if (image(v) !== pre[k]) fields[k] = v;
-              if (Object.keys(fields).length) sink.twinDelta({ owner: recv.owner, id: recv.id, fields });
+            try {
+              await settle(() => (twin as Record<string, (...a: unknown[]) => unknown>)[r.member](...r.args));
+            } finally {
+              // diff in a FINALLY: plain JS keeps mutations made before a throw, so an
+              // uncaught error (settle rethrows) must still ship them home
+              if (sink) {
+                const fields: Record<string, unknown> = {};
+                for (const [k, v] of Object.entries(dataFields(twin))) if (image(v) !== pre[k]) fields[k] = v;
+                if (Object.keys(fields).length) sink.twinDelta({ owner: recv.owner, id: recv.id, fields });
+              }
             }
           }
           else if (prog) stack.push({ fn: prog, pc: 0, args: [recv, ...r.args] });
