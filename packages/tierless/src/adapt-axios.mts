@@ -46,6 +46,12 @@ export interface AxiosAdapterOpts {
   fallback?: (config: AxiosishConfig) => Promise<unknown>;
 }
 
+// AUTH CONTRACT: this adapter is for HEADER-authenticated APIs (bearer/API-key tokens the
+// interceptor chain attaches — both measured ports). Browsers also send same-origin
+// cookies implicitly, and a crossing cannot carry the cookie jar: an app whose SAME-ORIGIN
+// api relies on cookie auth must not install this adapter (withCredentials-marked requests
+// pin to the fallback, but bare same-origin cookie reliance is invisible to a config scan).
+
 /** axios-compatible default param serialization, the recursive visitor semantics:
  *  null/undefined/functions skipped (inside arrays too), arrays as repeated `key[]`,
  *  nested objects as bracketed keys (`filter[status]`), Dates as ISO strings. Standard

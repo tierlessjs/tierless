@@ -62,7 +62,7 @@ if [ ! -f "$R/truth-baseline-gzip.jsonl" ]; then
   [ "$n" -ge 190 ] || fail "gzip arm produced only $n rows"
   cp ports/work/vikunja-baseline/measure.jsonl "$R/truth-baseline-gzip.jsonl"
 fi
-commit_push "ports/vikunja: compressed-stock wire-truth arm ($n rows)" "$R/truth-baseline-gzip.jsonl" || fail "push failed"
+commit_push "ports/vikunja: compressed-stock wire-truth arm ($(wc -l < "$R/truth-baseline-gzip.jsonl") rows)" "$R/truth-baseline-gzip.jsonl" || fail "push failed"
 
 # hard gzip gate on the ARM itself: compressed must be measurably smaller than the raw
 # arm on api-in bytes over tests passed in both runs, or the flag was inert.

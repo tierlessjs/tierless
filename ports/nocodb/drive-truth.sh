@@ -81,7 +81,7 @@ if [ ! -f "$R/truth-ported.jsonl" ]; then
   [ "$n" -ge 270 ] || fail "ported truth arm produced only $n rows"
   cp ports/work/nocodb/measure-truth.jsonl "$R/truth-ported.jsonl"
 fi
-commit_push "ports/nocodb: ported wire-truth arm ($n rows)" "$R/truth-ported.jsonl" || fail "push failed for ported arm"
+commit_push "ports/nocodb: ported wire-truth arm ($(wc -l < "$R/truth-ported.jsonl") rows)" "$R/truth-ported.jsonl" || fail "push failed for ported arm"
 say "ported arm committed"
 
 # ---- 4. baseline tree built -------------------------------------------------------------
@@ -100,7 +100,7 @@ if [ ! -f "$R/truth-baseline.jsonl" ]; then
   [ "$n" -ge 270 ] || fail "baseline truth arm produced only $n rows"
   cp ports/work/nocodb-baseline/measure-truth.jsonl "$R/truth-baseline.jsonl"
 fi
-commit_push "ports/nocodb: baseline wire-truth arm ($n rows)" "$R/truth-baseline.jsonl" || fail "push failed for baseline arm"
+commit_push "ports/nocodb: baseline wire-truth arm ($(wc -l < "$R/truth-baseline.jsonl") rows)" "$R/truth-baseline.jsonl" || fail "push failed for baseline arm"
 say "baseline arm committed"
 
 # ---- 6. the comparison ------------------------------------------------------------------

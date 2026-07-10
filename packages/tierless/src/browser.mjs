@@ -36,6 +36,10 @@ export const mergedAppHash = () => "merged:" + [...appHashes].sort().join("+");
 // reject a valid profile. Revalidated on every registration; calls before it settles
 // run on the fetch arm, the same cold-start rule as a late-arriving profile.
 let pendingProfile = null;
+// the comparison-run READINESS BARRIER (docs/corpus.md run protocol): two comparison
+// runs must make the same decisions, so the first compiled-method call cannot race the
+// profile fetch — bindMethods stubs hold until this settles when a profileUrl is set
+let profileFetched = null;
 const tryActivateProfile = () => {
     if (!pendingProfile)
         return;
@@ -96,7 +100,7 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
             } } };
     }
     if (profileUrl) { // COMPARISON run: locked profile, no exploration
-        void fetch(profileUrl).then((r) => (r.ok ? r.json() : null)).then((p) => {
+        profileFetched = fetch(profileUrl).then((r) => (r.ok ? r.json() : null)).then((p) => {
             if (!p)
                 return;
             pendingProfile = p;
@@ -245,6 +249,8 @@ export function bindMethods(bundle, { module = "", migrate } = {}) {
         tryActivateProfile();
     } // the merged world's profile-validity key grew — a pending profile may match now
     bundle.__bindTierlessMethods(async (prog, self, args) => {
+        if (profileFetched)
+            await profileFetched; // comparison-run barrier: no call decides before the profile settled
         const conn = sharedConn();
         conn.register(module, APP_MERGED);
         // pinned requests (declared: blob/stream responses; owned values: callbacks,

@@ -66,7 +66,7 @@ if [ ! -f "$R/truth-ported-gzip.jsonl" ]; then
   [ "$n" -ge 270 ] || fail "ported gzip truth arm produced only $n rows"
   cp ports/work/nocodb/measure-truth-gzip.jsonl "$R/truth-ported-gzip.jsonl"
 fi
-commit_push "ports/nocodb: symmetric compressed arm — ported with gzip ($n rows)" "$R/truth-ported-gzip.jsonl" || fail "push failed"
+commit_push "ports/nocodb: symmetric compressed arm — ported with gzip ($(wc -l < "$R/truth-ported-gzip.jsonl") rows)" "$R/truth-ported-gzip.jsonl" || fail "push failed"
 
 # ---- 2. RTT-80 pair ------------------------------------------------------------------------
 if [ ! -f "$R/rtt80-ported.jsonl" ]; then
@@ -77,7 +77,7 @@ if [ ! -f "$R/rtt80-ported.jsonl" ]; then
   [ "$n" -ge 270 ] || fail "ported rtt80 arm produced only $n rows"
   cp ports/work/nocodb/measure-rtt80.jsonl "$R/rtt80-ported.jsonl"
 fi
-commit_push "ports/nocodb: ported RTT80 arm ($n rows)" "$R/rtt80-ported.jsonl" || fail "push failed"
+commit_push "ports/nocodb: ported RTT80 arm ($(wc -l < "$R/rtt80-ported.jsonl") rows)" "$R/rtt80-ported.jsonl" || fail "push failed"
 if [ ! -f "$R/rtt80-baseline.jsonl" ]; then
   say "baseline arm at RTT 80 (full suite)"
   sweep_ports
@@ -86,7 +86,7 @@ if [ ! -f "$R/rtt80-baseline.jsonl" ]; then
   [ "$n" -ge 270 ] || fail "baseline rtt80 arm produced only $n rows"
   cp ports/work/nocodb-baseline/measure-rtt80.jsonl "$R/rtt80-baseline.jsonl"
 fi
-commit_push "ports/nocodb: baseline RTT80 arm ($n rows)" "$R/rtt80-baseline.jsonl" || fail "push failed"
+commit_push "ports/nocodb: baseline RTT80 arm ($(wc -l < "$R/rtt80-baseline.jsonl") rows)" "$R/rtt80-baseline.jsonl" || fail "push failed"
 
 say "reports"
 say "— bytes, ported+gzip vs stock+gzip (both arms compressed):"

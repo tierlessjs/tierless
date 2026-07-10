@@ -68,7 +68,7 @@ if [ ! -f "$R/floor-ported.jsonl" ]; then
   [ "$n" -ge 270 ] || fail "ported floor produced only $n rows"
   cp ports/work/nocodb/measure.jsonl "$R/floor-ported.jsonl"
 fi
-commit_push "ports/nocodb: ported floor run ($n rows)" "$R/floor-ported.jsonl" || fail "push failed"
+commit_push "ports/nocodb: ported floor run ($(wc -l < "$R/floor-ported.jsonl") rows)" "$R/floor-ported.jsonl" || fail "push failed"
 if [ ! -f "$R/floor-baseline.jsonl" ]; then
   say "floor: baseline arm (plain, full suite)"
   sweep_ports
@@ -77,7 +77,7 @@ if [ ! -f "$R/floor-baseline.jsonl" ]; then
   [ "$n" -ge 270 ] || fail "baseline floor produced only $n rows"
   cp ports/work/nocodb-baseline/measure.jsonl "$R/floor-baseline.jsonl"
 fi
-commit_push "ports/nocodb: baseline floor run ($n rows)" "$R/floor-baseline.jsonl" || fail "push failed"
+commit_push "ports/nocodb: baseline floor run ($(wc -l < "$R/floor-baseline.jsonl") rows)" "$R/floor-baseline.jsonl" || fail "push failed"
 
 # ---- 3. gzip gate: the env-gated layer actually compresses -------------------------------
 if [ ! -f ports/work/nocodb-baseline/.apples-gzip-smoked ]; then
@@ -110,7 +110,7 @@ if [ ! -f "$R/truth-baseline-gzip.jsonl" ]; then
   [ "$n" -ge 270 ] || fail "gzip truth arm produced only $n rows"
   cp ports/work/nocodb-baseline/measure-truth-gzip.jsonl "$R/truth-baseline-gzip.jsonl"
 fi
-commit_push "ports/nocodb: compressed-stock wire-truth arm ($n rows)" "$R/truth-baseline-gzip.jsonl" || fail "push failed"
+commit_push "ports/nocodb: compressed-stock wire-truth arm ($(wc -l < "$R/truth-baseline-gzip.jsonl") rows)" "$R/truth-baseline-gzip.jsonl" || fail "push failed"
 
 # hard gzip gate: the compressed arm must actually be smaller than the raw arm on the
 # wire, or the flag was inert and the whole arm is mislabeled. Compares api-in bytes

@@ -77,7 +77,7 @@ if [ ! -f "$R/rtt20-ported.jsonl" ]; then
   [ "$n" -ge 270 ] || fail "ported rtt arm produced only $n rows"
   cp ports/work/nocodb/measure-rtt20.jsonl "$R/rtt20-ported.jsonl"
 fi
-commit_push "ports/nocodb: ported RTT20 arm ($n rows)" "$R/rtt20-ported.jsonl" || fail "push failed"
+commit_push "ports/nocodb: ported RTT20 arm ($(wc -l < "$R/rtt20-ported.jsonl") rows)" "$R/rtt20-ported.jsonl" || fail "push failed"
 say "ported rtt arm committed"
 
 # ---- 4. baseline arm at RTT 20 -----------------------------------------------------------
@@ -89,7 +89,7 @@ if [ ! -f "$R/rtt20-baseline.jsonl" ]; then
   [ "$n" -ge 270 ] || fail "baseline rtt arm produced only $n rows"
   cp ports/work/nocodb-baseline/measure-rtt20.jsonl "$R/rtt20-baseline.jsonl"
 fi
-commit_push "ports/nocodb: baseline RTT20 arm ($n rows)" "$R/rtt20-baseline.jsonl" || fail "push failed"
+commit_push "ports/nocodb: baseline RTT20 arm ($(wc -l < "$R/rtt20-baseline.jsonl") rows)" "$R/rtt20-baseline.jsonl" || fail "push failed"
 say "baseline rtt arm committed"
 
 say "pairing the arms"

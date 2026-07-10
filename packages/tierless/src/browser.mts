@@ -74,6 +74,10 @@ export const mergedAppHash = (): string => "merged:" + [...appHashes].sort().joi
 // reject a valid profile. Revalidated on every registration; calls before it settles
 // run on the fetch arm, the same cold-start rule as a late-arriving profile.
 let pendingProfile: Profile | null = null;
+// the comparison-run READINESS BARRIER (docs/corpus.md run protocol): two comparison
+// runs must make the same decisions, so the first compiled-method call cannot race the
+// profile fetch — bindMethods stubs hold until this settles when a profileUrl is set
+let profileFetched: Promise<void> | null = null;
 const tryActivateProfile = (): void => {
   if (!pendingProfile) return;
   const prof = loadProfile(pendingProfile, mergedAppHash());
@@ -122,7 +126,7 @@ export function connect({ url, exec, bundle, tier = "browser", heap = true,
     appTrace = { rate: 1, sink: (r) => { if (!poisoned) { buf.push(r); if (buf.length >= 100) flush(); } } };
   }
   if (profileUrl) {                                          // COMPARISON run: locked profile, no exploration
-    void fetch(profileUrl).then((r) => (r.ok ? r.json() : null)).then((p) => {
+    profileFetched = fetch(profileUrl).then((r) => (r.ok ? r.json() : null)).then((p) => {
       if (!p) return;
       pendingProfile = p as Profile;
       tryActivateProfile();
@@ -257,6 +261,7 @@ export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (pro
   if (!appUnwindSet) { APP_MERGED.__unwind = bundle.__unwind; appUnwindSet = true; }   // driver-identical across compiled modules
   if (typeof bundle.BUNDLE_HASH === "string") { appHashes.push(bundle.BUNDLE_HASH); tryActivateProfile(); }   // the merged world's profile-validity key grew — a pending profile may match now
   bundle.__bindTierlessMethods(async (prog, self, args) => {
+    if (profileFetched) await profileFetched;   // comparison-run barrier: no call decides before the profile settled
     const conn = sharedConn();
     conn.register(module, APP_MERGED);
     // pinned requests (declared: blob/stream responses; owned values: callbacks,
