@@ -127,3 +127,45 @@ both arms) are the two knowing, symmetric bypasses.
 Next: the session socket — compile surface (nocodb-sdk HttpClient.request is
 the single generated choke point), plugin entry in nc-gui's nuxt vite block,
 gateway serving http.* against :8080 over localhost.
+
+## The suite at the socket (2026-07-10, results/truth-*.jsonl)
+
+Both arms by one command each (`TIERLESS_WIRE_TRUTH=1 node ports/nocodb/suite.mts
+[--baseline]`, orchestrated end-to-end by drive-truth.sh), TCP-true accounting:
+session ws bytes counted inside the gateway (deflate included), browser API bytes
+through a counting relay (:28080), node-side seeding on the direct :8080 and never
+counted. 282 paired tests; 80 pass-parity pairs (194 EE/pg-gated skips on this
+lane, plus the exclusions below); 78 of 80 touch the session socket.
+
+    total bytes    26.5 MB -> 1.57 MB   (94% less IO)
+    per test       median 94% fewer bytes (p10 92%, p90 95; worst test still 85%)
+    best case      798 KB -> 61 KB (columnMenuOperations: duplicate-column flows)
+    wall clock     54.8 -> 55.0 min (parity — localhost; shaped RTT is the timing
+                   instrument, not yet run for this port)
+
+Why the number dwarfs Vikunja's 13%/35%: **their Express backend serves raw,
+uncompressed JSON** (no compression middleware anywhere in the tree — verified),
+so stock pays full-size bodies plus per-request headers, while the ported arm
+pays one session-long deflate window. Vikunja's Go backend gzipped, leaving only
+cross-request redundancy to win. A NocoDB deployment behind a gzip proxy would
+land between the two; the measured stack is the one their own CI runs. Trips are
+not instrumented on this port (the reporter is wire-counter-based, no CDP
+fixture); ws message counts can be added at the gateway if wanted.
+
+Pass sets: 3 exclusions fail on BOTH arms (columnAttachments, metaLTAR
+delete-over-UI, viewGridShare — the stock CORS-refresh family), and
+sourceRestrictions flip-flops between arms (one member failed stock/passed
+ported, the other the reverse — the same unstable family). Ported-only:
+toolbarOperations row-height passes in isolation (load flake);
+accountUserManagement's invite flow fails deterministically at the
+transport-agnostic-wait seam (multi-context flow; neither transport's wait
+matched) — the one known accommodation edge, diagnosis queued. All are
+pass-parity-excluded; none contribute bytes to the distribution.
+
+The accommodation that made the ported arm runnable: their page objects
+centralize `page.waitForResponse` in pages/Base.ts — the exact HTTP requests
+the session socket eliminates. Test patch 0004 races that wait against the
+page's tierless exec log (same url predicate, method, status, JSON matcher
+applied to the winner's body); on stock the log never exists and the race
+reduces to the original wait exactly. One helper covered the suite where
+Vikunja needed per-site rewrites.
