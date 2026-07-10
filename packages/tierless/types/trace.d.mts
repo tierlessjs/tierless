@@ -46,7 +46,8 @@ export type TraceRecord =
 export type TraceSink = (record: TraceRecord) => void;
 /** Argument FEATURES, never values: numbers stay (they are structure — a row count), everything else reduces to type + size. */
 export declare const argFeatures: (args: unknown[]) => string[];
-/** Measure a resource result the way the fetch path would ship it. -1 when unserializable. */
+/** Measure a resource result the way the fetch path would ship it: encoded bytes,
+ *  not UTF-16 code units (non-ASCII payloads differ). -1 when unserializable. */
 export declare const resultBytes: (v: unknown) => number;
 export interface Recorder {
     /** The head-based sampling decision, made ONCE at spawn and immutable thereafter.

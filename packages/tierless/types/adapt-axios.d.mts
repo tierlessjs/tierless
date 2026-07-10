@@ -16,6 +16,7 @@ export interface AxiosishConfig {
     validateStatus?: ((status: number) => boolean) | null;
     onUploadProgress?: unknown;
     onDownloadProgress?: unknown;
+    withCredentials?: boolean;
     [key: string]: unknown;
 }
 export interface AxiosAdapterOpts {
