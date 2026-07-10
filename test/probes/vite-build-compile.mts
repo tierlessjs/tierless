@@ -35,16 +35,21 @@ writeFileSync(join(dir, "src", "helpers", "factory.mjs"), `globalThis.__browserO
 // alias-imported helper that MACHINE code references (used after a park -> must be bundled)
 writeFileSync(join(dir, "src", "helpers", "fmt.mjs"), `export const fmt = (s) => "[" + s + "]";\n`);
 const svcId = join(dir, "src", "svc.ts");
+// PREFIX and deco: top-level module bindings the MACHINE references — they must join
+// the server emit's closure (esbuild would otherwise treat them as globals and the
+// migrated method dies at runtime)
 writeFileSync(svcId, `import {makeHttp} from '@/helpers/factory.mjs'
 import {fmt} from '@/helpers/fmt.mjs'
+const PREFIX = "/a/"
+const deco = (s: string) => "<" + s + ">"
 export class Svc {
   constructor(http?: any) { this.http = http || makeHttp(); this.total = 0; }
   http: any
   total: number
   async chain(id: string) {
-    const a = await this.http.get("/a/" + id);
+    const a = await this.http.get(PREFIX + id);
     const b = await this.http.get("/b/" + a.data.next);
-    return fmt(b.data.value);
+    return deco(fmt(b.data.value));
   }
 }
 `);
@@ -102,7 +107,7 @@ makeHost({ bundle: serverBundle, tier: "server", exec: twin as never }).answer(m
 const browserMod: any = await import(pathToFileURL(browserId).href);
 const bhost = makeHost({ bundle: { PROGRAMS: browserMod.PROGRAMS, __unwind: browserMod.__unwind }, tier: "browser", exec: (() => { throw new Error("browser owns nothing"); }) });
 const value = await bhost.runLocal(makePeer(mkPort(0, true)), "Svc$chain", [{ http: {}, cb: () => {} }, "7"], { migrate: () => true });
-check("the emitted machine served the whole chain server-side", value === "[v:n7]" && served.join(",") === "/a/7,/b/n7", JSON.stringify({ value, served }));
+check("the emitted machine served the whole chain server-side — top-level const + arrow helper included", value === "<[v:n7]>" && served.join(",") === "/a/7,/b/n7", JSON.stringify({ value, served }));
 check("one resume crossing, zero execs", msgCounts.resume === 1 && !msgCounts.exec, JSON.stringify(msgCounts));
 
 const { pass, fail } = counts();

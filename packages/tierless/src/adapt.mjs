@@ -119,12 +119,26 @@ export function crossHttpRequest(instance, req) {
     const hasBody = verb === "post" || verb === "put" || verb === "patch";
     const [url, a1, a2] = req.args;
     const extra = (hasBody ? a2 : a1);
+    // a CUSTOM paramsSerializer (per-request or instance default) would be bypassed by the
+    // crossing's own serialization — those requests run on the instance, where axios
+    // applies it. (Default transformRequest is reproduced by wireJson; a custom transform
+    // chain is app code the fallback runs faithfully too — it pins via the same rule when
+    // it needs a serializer; other custom transforms are a documented divergence.)
+    if (extra?.paramsSerializer || instance?.defaults?.paramsSerializer)
+        return null;
+    const dfltHeaders = instance?.defaults?.headers;
     let config = {
         method: verb, url,
         baseURL: instance?.defaults?.baseURL,
-        headers: { ...(instance?.defaults?.headers?.common || {}) },
         ...(hasBody ? { data: a1 } : {}),
         ...(extra || {}),
+        // axios precedence: common < method-specific defaults < per-request (the plain
+        // spread above would have REPLACED the merged defaults with the per-request object)
+        headers: {
+            ...(dfltHeaders?.common || {}),
+            ...(dfltHeaders?.[verb] || {}),
+            ...(extra?.headers || {}),
+        },
     };
     const finish = (c) => {
         const cUrl = String(c.url || url);
@@ -135,7 +149,10 @@ export function crossHttpRequest(instance, req) {
             if (!bo || new URL(cUrl, bo).origin !== bo)
                 return null;
         }
-        const abs = /^https?:\/\//.test(cUrl) ? cUrl : (c.baseURL ? String(c.baseURL).replace(/\/$/, "") + cUrl : cUrl);
+        // axios's combineURLs: trailing slashes off the base, leading off the path, ONE
+        // slash between ("https://h/api" + "tasks" must not become "https://h/apitasks")
+        const abs = /^https?:\/\//.test(cUrl) ? cUrl
+            : c.baseURL ? String(c.baseURL).replace(/\/+$/, "") + "/" + cUrl.replace(/^\/+/, "") : cUrl;
         const rawHeaders = c.headers?.toJSON ? c.headers.toJSON() : { ...(c.headers || {}) };
         const headers = {};
         for (const [k, v] of Object.entries(rawHeaders))

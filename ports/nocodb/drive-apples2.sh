@@ -17,9 +17,13 @@ commit_push() {
   # would leak into an unattended benchmark commit — fail loudly instead
   git diff --cached --quiet || { echo "commit_push: index has unrelated staged work — refusing"; return 1; }
   git add "$@" || return 1
-  # only an EMPTY staged diff is benign; a real commit failure (hooks, index, repo)
-  # must propagate — otherwise the stage claims durability without ever pushing
-  git diff --cached --quiet && return 0
+  # an EMPTY staged diff means the artifact is already committed — but maybe not
+  # PUSHED (a failed push on the previous run): push before declaring the stage done.
+  # A real commit failure (hooks, index, repo) still propagates below.
+  if git diff --cached --quiet; then
+    for i in 1 2 3; do git push && return 0; sleep $((i * 4)); done
+    return 1
+  fi
   git -c user.email=noreply@anthropic.com -c user.name="Claude" commit -m "$msg
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
@@ -61,8 +65,8 @@ if [ ! -f "$R/truth-ported-gzip.jsonl" ]; then
   n=$(wc -l < ports/work/nocodb/measure-truth-gzip.jsonl || echo 0)
   [ "$n" -ge 270 ] || fail "ported gzip truth arm produced only $n rows"
   cp ports/work/nocodb/measure-truth-gzip.jsonl "$R/truth-ported-gzip.jsonl"
-  commit_push "ports/nocodb: symmetric compressed arm — ported with gzip ($n rows)" "$R/truth-ported-gzip.jsonl" || fail "push failed"
 fi
+commit_push "ports/nocodb: symmetric compressed arm — ported with gzip ($n rows)" "$R/truth-ported-gzip.jsonl" || fail "push failed"
 
 # ---- 2. RTT-80 pair ------------------------------------------------------------------------
 if [ ! -f "$R/rtt80-ported.jsonl" ]; then
@@ -72,8 +76,8 @@ if [ ! -f "$R/rtt80-ported.jsonl" ]; then
   n=$(wc -l < ports/work/nocodb/measure-rtt80.jsonl || echo 0)
   [ "$n" -ge 270 ] || fail "ported rtt80 arm produced only $n rows"
   cp ports/work/nocodb/measure-rtt80.jsonl "$R/rtt80-ported.jsonl"
-  commit_push "ports/nocodb: ported RTT80 arm ($n rows)" "$R/rtt80-ported.jsonl" || fail "push failed"
 fi
+commit_push "ports/nocodb: ported RTT80 arm ($n rows)" "$R/rtt80-ported.jsonl" || fail "push failed"
 if [ ! -f "$R/rtt80-baseline.jsonl" ]; then
   say "baseline arm at RTT 80 (full suite)"
   sweep_ports
@@ -81,8 +85,8 @@ if [ ! -f "$R/rtt80-baseline.jsonl" ]; then
   n=$(wc -l < ports/work/nocodb-baseline/measure-rtt80.jsonl || echo 0)
   [ "$n" -ge 270 ] || fail "baseline rtt80 arm produced only $n rows"
   cp ports/work/nocodb-baseline/measure-rtt80.jsonl "$R/rtt80-baseline.jsonl"
-  commit_push "ports/nocodb: baseline RTT80 arm ($n rows)" "$R/rtt80-baseline.jsonl" || fail "push failed"
 fi
+commit_push "ports/nocodb: baseline RTT80 arm ($n rows)" "$R/rtt80-baseline.jsonl" || fail "push failed"
 
 say "reports"
 say "— bytes, ported+gzip vs stock+gzip (both arms compressed):"

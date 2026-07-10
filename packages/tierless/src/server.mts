@@ -222,8 +222,29 @@ export async function bundleResolverFromManifest(manifestPath: string): Promise<
     }
     return cache.get(file)!;
   };
+  // compiled APP modules (m:<hash> ids) run in ONE merged machine world, exactly like
+  // the browser's bindMethods merge and the preview server: a migrated continuation can
+  // dynamically enter a method compiled from a DIFFERENT app module, so resolving only
+  // the named module would miss programs preview finds. Same collision rule too.
+  let appMerged: Bundle | null | undefined;
+  const mergedApp = async (): Promise<Bundle | null> => {
+    if (appMerged !== undefined) return appMerged;
+    const merged = { PROGRAMS: {} as Record<string, (f: never) => unknown>, __unwind: null as unknown, __slots: {} as Record<string, unknown> };
+    for (const id of Object.keys(manifest.modules)) {
+      if (!id.startsWith("m:")) continue;
+      const b = await load(manifest.modules[id]);
+      for (const [k, v] of Object.entries(b.PROGRAMS)) {
+        if (merged.PROGRAMS[k] && merged.PROGRAMS[k] !== v) throw new Error("tierless: program name collision across compiled app modules: " + k);
+        merged.PROGRAMS[k] = v as (f: never) => unknown;
+      }
+      if (b.__slots) Object.assign(merged.__slots, b.__slots as Record<string, unknown>);
+      if (!merged.__unwind) merged.__unwind = b.__unwind;
+    }
+    return (appMerged = merged.__unwind ? (merged as unknown as Bundle) : null);
+  };
   return async (moduleId: string): Promise<Bundle> => {
     if (!moduleId) throw new Error("tierless: empty module id on the wire — a malformed client would suffix-match anything");
+    if (moduleId.startsWith("m:")) { const m = await mergedApp(); if (m) return m; }
     let file = manifest.modules[moduleId];
     if (!file) {                                                 // client built under a different root: match by path suffix
       // the match must be UNIQUE — resolving an ambiguous id by insertion order could

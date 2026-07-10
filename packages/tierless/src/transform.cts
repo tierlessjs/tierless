@@ -1358,21 +1358,38 @@ function compile(src: string, preamble: string): { code: string; meta: CompileMe
     const refdIn = (name: string, text: string): boolean => new RegExp(`(?<![.\\w$"'])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text);
     let machineText = progs.join(",\n");
     const included = new Set<number>();
+    // referenced TOP-LEVEL BINDINGS (const config values, arrow helpers) join the closure
+    // like pure fns — the machine text names them, and without their declarations esbuild
+    // treats them as globals and the migrated method dies at runtime. Classes stay
+    // excluded by design (the machine reaches instances through frames, never constructs).
+    const restDecls = rest
+      .map((n) => (t.isExportNamedDeclaration(n) && n.declaration && t.isVariableDeclaration(n.declaration) ? n.declaration : n))
+      .filter((n): n is t.VariableDeclaration => t.isVariableDeclaration(n));
+    const declNames = restDecls.map((n) => n.declarations.map((d) => (t.isIdentifier(d.id) ? d.id.name : null)).filter((x): x is string => !!x));
+    const declIncluded = new Set<number>();
     for (let changed = true; changed;) {
       changed = false;
       meta.pure.forEach((name, i) => {
         if (!included.has(i) && refdIn(name, machineText)) { included.add(i); machineText += "\n" + pure[i]; changed = true; }
       });
+      declNames.forEach((names, i) => {
+        if (!declIncluded.has(i) && names.some((nm) => refdIn(nm, machineText))) { declIncluded.add(i); machineText += "\n" + gen(restDecls[i]); changed = true; }
+      });
     }
     const keptPure = [...included].sort((a, b) => a - b).map((i) => pure[i]);
+    const keptDecls = [...declIncluded].sort((a, b) => a - b).map((i) => gen(restDecls[i]));   // original order: decls may reference each other
     const refd = (name: string): boolean => refdIn(name, machineText);
     const keptImports = rest
       .filter((n): n is t.ImportDeclaration => t.isImportDeclaration(n))
-      .filter((n) => n.specifiers.some((s) => refd(s.local.name)))
+      // side-effect-only imports (no specifiers — polyfills, global registrations) are
+      // KEPT: the browser machine runs them; dropping them would make the tiers diverge.
+      // A non-Node-safe one fails the emit-time bundling loudly instead.
+      .filter((n) => n.specifiers.length === 0 || n.specifiers.some((s) => refd(s.local.name)))
       .map((n) => gen(n));
     meta.serverCode = [
       ...keptImports,
       helpers.trimEnd(),
+      ...keptDecls,
       ...keptPure,
       "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};",
       slotsOut.trimEnd(),

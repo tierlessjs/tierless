@@ -16,9 +16,13 @@ commit_push() {
   # would leak into an unattended benchmark commit — fail loudly instead
   git diff --cached --quiet || { echo "commit_push: index has unrelated staged work — refusing"; return 1; }
   git add "$@" || return 1
-  # only an EMPTY staged diff is benign; a real commit failure (hooks, index, repo)
-  # must propagate — otherwise the stage claims durability without ever pushing
-  git diff --cached --quiet && return 0
+  # an EMPTY staged diff means the artifact is already committed — but maybe not
+  # PUSHED (a failed push on the previous run): push before declaring the stage done.
+  # A real commit failure (hooks, index, repo) still propagates below.
+  if git diff --cached --quiet; then
+    for i in 1 2 3; do git push && return 0; sleep $((i * 4)); done
+    return 1
+  fi
   git -c user.email=noreply@anthropic.com -c user.name="Claude" commit -m "$msg
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
@@ -63,8 +67,8 @@ if [ ! -f "$R/floor-ported.jsonl" ]; then
   n=$(wc -l < ports/work/nocodb/measure.jsonl || echo 0)
   [ "$n" -ge 270 ] || fail "ported floor produced only $n rows"
   cp ports/work/nocodb/measure.jsonl "$R/floor-ported.jsonl"
-  commit_push "ports/nocodb: ported floor run ($n rows)" "$R/floor-ported.jsonl" || fail "push failed"
 fi
+commit_push "ports/nocodb: ported floor run ($n rows)" "$R/floor-ported.jsonl" || fail "push failed"
 if [ ! -f "$R/floor-baseline.jsonl" ]; then
   say "floor: baseline arm (plain, full suite)"
   sweep_ports
@@ -72,8 +76,8 @@ if [ ! -f "$R/floor-baseline.jsonl" ]; then
   n=$(wc -l < ports/work/nocodb-baseline/measure.jsonl || echo 0)
   [ "$n" -ge 270 ] || fail "baseline floor produced only $n rows"
   cp ports/work/nocodb-baseline/measure.jsonl "$R/floor-baseline.jsonl"
-  commit_push "ports/nocodb: baseline floor run ($n rows)" "$R/floor-baseline.jsonl" || fail "push failed"
 fi
+commit_push "ports/nocodb: baseline floor run ($n rows)" "$R/floor-baseline.jsonl" || fail "push failed"
 
 # ---- 3. gzip gate: the env-gated layer actually compresses -------------------------------
 if [ ! -f ports/work/nocodb-baseline/.apples-gzip-smoked ]; then
@@ -105,8 +109,8 @@ if [ ! -f "$R/truth-baseline-gzip.jsonl" ]; then
   n=$(wc -l < ports/work/nocodb-baseline/measure-truth-gzip.jsonl || echo 0)
   [ "$n" -ge 270 ] || fail "gzip truth arm produced only $n rows"
   cp ports/work/nocodb-baseline/measure-truth-gzip.jsonl "$R/truth-baseline-gzip.jsonl"
-  commit_push "ports/nocodb: compressed-stock wire-truth arm ($n rows)" "$R/truth-baseline-gzip.jsonl" || fail "push failed"
 fi
+commit_push "ports/nocodb: compressed-stock wire-truth arm ($n rows)" "$R/truth-baseline-gzip.jsonl" || fail "push failed"
 
 # hard gzip gate: the compressed arm must actually be smaller than the raw arm on the
 # wire, or the flag was inert and the whole arm is mislabeled. Compares api-in bytes

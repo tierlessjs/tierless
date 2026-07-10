@@ -16,9 +16,13 @@ commit_push() {
   # would leak into an unattended benchmark commit — fail loudly instead
   git diff --cached --quiet || { echo "commit_push: index has unrelated staged work — refusing"; return 1; }
   git add "$@" || return 1
-  # only an EMPTY staged diff is benign; a real commit failure (hooks, index, repo)
-  # must propagate — otherwise the stage claims durability without ever pushing
-  git diff --cached --quiet && return 0
+  # an EMPTY staged diff means the artifact is already committed — but maybe not
+  # PUSHED (a failed push on the previous run): push before declaring the stage done.
+  # A real commit failure (hooks, index, repo) still propagates below.
+  if git diff --cached --quiet; then
+    for i in 1 2 3; do git push && return 0; sleep $((i * 4)); done
+    return 1
+  fi
   git -c user.email=noreply@anthropic.com -c user.name="Claude" commit -m "$msg
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
@@ -57,8 +61,8 @@ if [ ! -f "$R/truth-baseline-gzip.jsonl" ]; then
   n=$(wc -l < ports/work/vikunja-baseline/measure.jsonl || echo 0)
   [ "$n" -ge 190 ] || fail "gzip arm produced only $n rows"
   cp ports/work/vikunja-baseline/measure.jsonl "$R/truth-baseline-gzip.jsonl"
-  commit_push "ports/vikunja: compressed-stock wire-truth arm ($n rows)" "$R/truth-baseline-gzip.jsonl" || fail "push failed"
 fi
+commit_push "ports/vikunja: compressed-stock wire-truth arm ($n rows)" "$R/truth-baseline-gzip.jsonl" || fail "push failed"
 
 # hard gzip gate on the ARM itself: compressed must be measurably smaller than the raw
 # arm on api-in bytes over tests passed in both runs, or the flag was inert.

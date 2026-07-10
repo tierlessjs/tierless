@@ -15,9 +15,13 @@ commit_push() {
   # would leak into an unattended benchmark commit — fail loudly instead
   git diff --cached --quiet || { echo "commit_push: index has unrelated staged work — refusing"; return 1; }
   git add "$@" || return 1
-  # only an EMPTY staged diff is benign; a real commit failure (hooks, index, repo)
-  # must propagate — otherwise the stage claims durability without ever pushing
-  git diff --cached --quiet && return 0
+  # an EMPTY staged diff means the artifact is already committed — but maybe not
+  # PUSHED (a failed push on the previous run): push before declaring the stage done.
+  # A real commit failure (hooks, index, repo) still propagates below.
+  if git diff --cached --quiet; then
+    for i in 1 2 3; do git push && return 0; sleep $((i * 4)); done
+    return 1
+  fi
   git -c user.email=noreply@anthropic.com -c user.name="Claude" commit -m "$msg
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
@@ -72,9 +76,9 @@ if [ ! -f "$R/rtt20-ported.jsonl" ]; then
   n=$(wc -l < ports/work/nocodb/measure-rtt20.jsonl || echo 0)
   [ "$n" -ge 270 ] || fail "ported rtt arm produced only $n rows"
   cp ports/work/nocodb/measure-rtt20.jsonl "$R/rtt20-ported.jsonl"
-  commit_push "ports/nocodb: ported RTT20 arm ($n rows)" "$R/rtt20-ported.jsonl" || fail "push failed"
-  say "ported rtt arm committed"
 fi
+commit_push "ports/nocodb: ported RTT20 arm ($n rows)" "$R/rtt20-ported.jsonl" || fail "push failed"
+say "ported rtt arm committed"
 
 # ---- 4. baseline arm at RTT 20 -----------------------------------------------------------
 if [ ! -f "$R/rtt20-baseline.jsonl" ]; then
@@ -84,9 +88,9 @@ if [ ! -f "$R/rtt20-baseline.jsonl" ]; then
   n=$(wc -l < ports/work/nocodb-baseline/measure-rtt20.jsonl || echo 0)
   [ "$n" -ge 270 ] || fail "baseline rtt arm produced only $n rows"
   cp ports/work/nocodb-baseline/measure-rtt20.jsonl "$R/rtt20-baseline.jsonl"
-  commit_push "ports/nocodb: baseline RTT20 arm ($n rows)" "$R/rtt20-baseline.jsonl" || fail "push failed"
-  say "baseline rtt arm committed"
 fi
+commit_push "ports/nocodb: baseline RTT20 arm ($n rows)" "$R/rtt20-baseline.jsonl" || fail "push failed"
+say "baseline rtt arm committed"
 
 say "pairing the arms"
 node ports/report.mts "$R/rtt20-baseline.jsonl" "$R/rtt20-ported.jsonl" | tail -12
