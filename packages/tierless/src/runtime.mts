@@ -39,15 +39,20 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
   // segment entered there references; if any currently holds a handle, park the stack to
   // the handle's owner BEFORE stepping. "args" means the unpack block reads F.args — its
   // elements are checked too (a nested call can pass a handle as an argument).
-  // the wire codec descends into arrays/Maps/Sets, so a slot can arrive as a CONTAINER
-  // holding a handle ([svc], a Map of services) — scan those too, depth-capped (deeper
-  // object graphs excise at their own slots; they don't smuggle handles into this one)
-  const findHandle = (v: unknown, depth: number): { owner: string } | null => {
+  // the wire codec descends into arrays/Maps/Sets/plain objects, so a slot can arrive as
+  // ANY container shape holding a handle ([svc], {service: h}, a Map of services) — scan
+  // every own data property the codec would have serialized, cycle-guarded (the codec
+  // itself bounds what can arrive, so traversal terminates on real frames)
+  const findHandle = (v: unknown, seen: Set<object>): { owner: string } | null => {
     if (isHandle(v)) return v;
-    if (depth <= 0 || v === null || typeof v !== "object") return null;
-    const items = Array.isArray(v) ? v : v instanceof Map ? [...v.values()] : v instanceof Set ? [...v] : null;
-    if (!items) return null;
-    for (const x of items) { const h = findHandle(x, depth - 1); if (h) return h; }
+    if (v === null || typeof v !== "object" || seen.has(v)) return null;
+    seen.add(v);
+    const items = Array.isArray(v) ? v
+      : v instanceof Map ? [...v.keys(), ...v.values()]
+      : v instanceof Set ? [...v]
+      : v instanceof Date || v instanceof Uint8Array ? []
+      : Object.values(v);
+    for (const x of items) { const h = findHandle(x, seen); if (h) return h; }
     return null;
   };
   const parkHome = (top: Frame): HomePark | null => {
@@ -57,7 +62,7 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
       const v = k === "args" ? top.args
         : k.startsWith("args[") ? (Array.isArray(top.args) ? top.args[Number(k.slice(5, -1))] : top.args)
         : (top as Record<string, unknown>)[k];
-      const h = findHandle(v, 2);
+      const h = findHandle(v, new Set());
       if (h) return { op: "home", tier: h.owner, name: k, args: [] };
     }
     return null;

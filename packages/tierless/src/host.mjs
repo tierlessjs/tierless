@@ -44,6 +44,12 @@ function ownsValues(v, depth = 0) {
         return false;
     if (Array.isArray(v))
         return v.some((x) => ownsValues(x, depth + 1));
+    // the graph codec descends Maps and Sets, so owned values hide in them too
+    // (Object.values sees neither); Map KEYS cross as well
+    if (v instanceof Map)
+        return [...v.entries()].some(([k, x]) => ownsValues(k, depth + 1) || ownsValues(x, depth + 1));
+    if (v instanceof Set)
+        return [...v].some((x) => ownsValues(x, depth + 1));
     return Object.values(v).some((x) => ownsValues(x, depth + 1)); // own enumerable props — what crosses; prototypes stay home like axios's JSON pass
 }
 // The migrate arm's §5 excision predicate (docs/migrate-arm.md): consulted per VALUE while

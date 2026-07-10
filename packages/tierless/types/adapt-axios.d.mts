@@ -4,10 +4,10 @@ export interface AxiosishConfig {
     method?: string;
     url?: string;
     baseURL?: string;
-    params?: Record<string, unknown>;
+    params?: Record<string, unknown> | URLSearchParams;
     paramsSerializer?: {
-        serialize?: (p: Record<string, unknown>) => string;
-    } | ((p: Record<string, unknown>) => string);
+        serialize?: (p: any) => string;
+    } | ((p: any) => string);
     data?: unknown;
     headers?: Record<string, unknown> & {
         toJSON?: () => Record<string, unknown>;

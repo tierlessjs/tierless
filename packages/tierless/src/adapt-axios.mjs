@@ -63,10 +63,12 @@ export function axiosAdapter({ exec, fallback }) {
             return fallback(config);
         }
         let path = joined.pathname + joined.search;
-        if (config.params && Object.keys(config.params).length) {
+        if (config.params) {
+            // axios accepts URLSearchParams directly (Object.keys sees nothing in one)
             const s = typeof config.paramsSerializer === "function" ? config.paramsSerializer(config.params)
                 : config.paramsSerializer?.serialize ? config.paramsSerializer.serialize(config.params)
-                    : serializeParams(config.params);
+                    : config.params instanceof URLSearchParams ? config.params.toString()
+                        : serializeParams(config.params);
             if (s)
                 path += (joined.search ? "&" : "?") + s;
         }

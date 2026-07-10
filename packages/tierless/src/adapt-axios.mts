@@ -23,8 +23,8 @@ export interface AxiosishConfig {
   method?: string;
   url?: string;
   baseURL?: string;
-  params?: Record<string, unknown>;
-  paramsSerializer?: { serialize?: (p: Record<string, unknown>) => string } | ((p: Record<string, unknown>) => string);
+  params?: Record<string, unknown> | URLSearchParams;
+  paramsSerializer?: { serialize?: (p: any) => string } | ((p: any) => string);   // axios's own serializer contract — it receives whatever `params` is
   data?: unknown;
   headers?: Record<string, unknown> & { toJSON?: () => Record<string, unknown> };
   responseType?: string;
@@ -98,9 +98,11 @@ export function axiosAdapter({ exec, fallback }: AxiosAdapterOpts) {
       return fallback(config);
     }
     let path = joined.pathname + joined.search;
-    if (config.params && Object.keys(config.params).length) {
+    if (config.params) {
+      // axios accepts URLSearchParams directly (Object.keys sees nothing in one)
       const s = typeof config.paramsSerializer === "function" ? config.paramsSerializer(config.params)
         : config.paramsSerializer?.serialize ? config.paramsSerializer.serialize(config.params)
+        : config.params instanceof URLSearchParams ? config.params.toString()
         : serializeParams(config.params);
       if (s) path += (joined.search ? "&" : "?") + s;
     }

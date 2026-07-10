@@ -70,6 +70,10 @@ function ownsValues(v: unknown, depth = 0): boolean {
   if (typeof Blob !== "undefined" && v instanceof Blob) return true;
   if (v instanceof Date || v instanceof Uint8Array) return false;
   if (Array.isArray(v)) return v.some((x) => ownsValues(x, depth + 1));
+  // the graph codec descends Maps and Sets, so owned values hide in them too
+  // (Object.values sees neither); Map KEYS cross as well
+  if (v instanceof Map) return [...v.entries()].some(([k, x]) => ownsValues(k, depth + 1) || ownsValues(x, depth + 1));
+  if (v instanceof Set) return [...v].some((x) => ownsValues(x, depth + 1));
   return Object.values(v as object).some((x) => ownsValues(x, depth + 1));   // own enumerable props — what crosses; prototypes stay home like axios's JSON pass
 }
 

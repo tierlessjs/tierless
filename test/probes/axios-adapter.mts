@@ -93,6 +93,11 @@ fell = false;
 await withFallback({ method: "put", baseURL: "http://x.test/api/v1", url: "/bin2", data: new ArrayBuffer(8), headers: {} });
 check("ArrayBuffer body uses fallback adapter", fell);
 
+// --- URLSearchParams params serialize like axios (Object.keys sees nothing in one) -------
+canned = { status: 200, headers: {}, body: null };
+await adapter({ method: "get", baseURL: "http://x.test/api/v1", url: "/u", params: new URLSearchParams([["a", "1"], ["a", "2"], ["b", "x y"]]), headers: {} });
+check("URLSearchParams params serialize via toString", (seen!.args as [string])[0] === "/api/v1/u?a=1&a=2&b=x+y", (seen!.args as [string])[0]);
+
 // --- per-request paramsSerializer is honored ---------------------------------------------
 canned = { status: 200, headers: {}, body: null };
 await adapter({ method: "get", baseURL: "http://x.test/api/v1", url: "/f", params: { a: 1 }, paramsSerializer: { serialize: () => "custom=1" }, headers: {} });
