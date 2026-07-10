@@ -38,9 +38,12 @@ async function runRoute(path) {
         const params = matchRoute(pattern, path);
         if (!params)
             continue;
-        // one workflow run per (module, primary param) within the freshness window: link hrefs,
-        // pushState, and router redirects all describe the same navigation in different depths
-        const key = moduleId + ":" + params[0];
+        // one workflow run per (module, FULL param vector) within the freshness window: link
+        // hrefs and pushState describe the same navigation twice, but sibling routes that
+        // differ in a later param (/projects/1/views/2 vs .../views/3) are DIFFERENT
+        // navigations — keying on the primary param alone served the first view's data to
+        // the second. A router redirect to a deeper default re-runs once; correctness over dedupe.
+        const key = moduleId + ":" + params.join("/");
         if (inflight && inflightKey === key && Date.now() < inflightUntil) {
             dbg("dedupe", path);
             return;

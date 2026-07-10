@@ -150,9 +150,12 @@ export function crossHttpRequest(instance, req) {
                 return null;
         }
         // axios's combineURLs: trailing slashes off the base, leading off the path, ONE
-        // slash between ("https://h/api" + "tasks" must not become "https://h/apitasks")
+        // slash between ("https://h/api" + "tasks" must not become "https://h/apitasks");
+        // a same-origin PROTOCOL-RELATIVE url (passed the gate above) is absolute, not a
+        // path — resolve it against the base's protocol instead of appending it
         const abs = /^https?:\/\//.test(cUrl) ? cUrl
-            : c.baseURL ? String(c.baseURL).replace(/\/+$/, "") + "/" + cUrl.replace(/^\/+/, "") : cUrl;
+            : /^\/\//.test(cUrl) && c.baseURL ? new URL(cUrl, String(c.baseURL)).toString()
+                : c.baseURL ? String(c.baseURL).replace(/\/+$/, "") + "/" + cUrl.replace(/^\/+/, "") : cUrl;
         const rawHeaders = c.headers?.toJSON ? c.headers.toJSON() : { ...(c.headers || {}) };
         const headers = {};
         for (const [k, v] of Object.entries(rawHeaders))
