@@ -27,11 +27,12 @@ const load = (f: string): Map<string, Rec> => {
 const files = process.argv.slice(2);
 if (files.length !== 4) { console.error("usage: node ports/report-time.mts <floor-base> <floor-ported> <rtt-base> <rtt-ported>"); process.exit(2); }
 const [tb, tp, rb, rp] = files.map(load);
-
 // a pair counts only when the test PASSED in all four runs and every run timed it
 const ids = [...tb.keys()].filter((id) =>
   [tb, tp, rb, rp].every((m) => m.get(id)?.status === "passed" && m.get(id)!.durationMs !== undefined));
 const dropped = [...tb.keys()].length - ids.length;
+// bail before medians over nothing print NaN as if it were a result
+if (!ids.length) { console.error(`no test passed in all four runs (${dropped} dropped) — nothing to decompose`); process.exit(1); }
 
 interface Row { id: string; netB: number; netP: number; base0: number; port0: number }
 const rows: Row[] = ids.map((id) => ({

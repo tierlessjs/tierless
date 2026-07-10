@@ -129,14 +129,20 @@ const replay = (xhr: XMLHttpRequest, m: Memo): void => {
   xhr.dispatchEvent(new ProgressEvent("loadend"));
 };
 
-/** Send for real, memoizing the response under `url` for identical followers. */
-const sendMemoized = (xhr: XMLHttpRequest, url: string, body: Document | XMLHttpRequestBodyInit | null): void => {
-  memo.set(url, {
+// two requests are "identical" only when everything that can change the RESPONSE
+// matches: url, the auth material, and the response mode — a URL-only key could hand
+// one principal's cached data to another within the freshness window
+const memoKey = (xhr: XMLHttpRequest & { __t?: { url: string; auth?: string } }): string =>
+  (xhr.__t?.url ?? "") + " " + (xhr.__t?.auth ?? "") + " " + (xhr.responseType || "");
+
+/** Send for real, memoizing the response under the full request key for identical followers. */
+const sendMemoized = (xhr: XMLHttpRequest, key: string, body: Document | XMLHttpRequestBodyInit | null): void => {
+  memo.set(key, {
     at: Date.now(),
     p: new Promise<Memo>((resolve, reject) => {
       xhr.addEventListener("load", () => resolve({ status: xhr.status, headers: xhr.getAllResponseHeaders(), contentType: xhr.getResponseHeader("content-type"), value: xhr.response }));
-      xhr.addEventListener("error", () => { memo.delete(url); reject(new Error("network")); });
-      xhr.addEventListener("abort", () => { memo.delete(url); reject(new Error("abort")); });
+      xhr.addEventListener("error", () => { memo.delete(key); reject(new Error("network")); });
+      xhr.addEventListener("abort", () => { memo.delete(key); reject(new Error("abort")); });
     }),
   });
   SEND.call(xhr, body);
@@ -144,19 +150,25 @@ const sendMemoized = (xhr: XMLHttpRequest, url: string, body: Document | XMLHttp
 
 /** Route a GET through the memo: replay a fresh entry, else go to the network as the one
  *  request identical followers will piggyback on. */
-const sendViaMemo = (xhr: XMLHttpRequest, url: string, body: Document | XMLHttpRequestBodyInit | null): void => {
-  const e = memo.get(url);
+const sendViaMemo = (xhr: XMLHttpRequest, key: string, body: Document | XMLHttpRequestBodyInit | null): void => {
+  const e = memo.get(key);
   if (e && Date.now() - e.at < MEMO_MS) {
-    dbg("memo", url);
+    dbg("memo", key);
     void e.p.then((m) => replay(xhr, m), () => SEND.call(xhr, body));
     return;
   }
-  sendMemoized(xhr, url, body);
+  sendMemoized(xhr, key, body);
 };
 
-RealXHR.prototype.open = function (this: XMLHttpRequest & { __t?: { method: string; url: string } }, method: string, url: string | URL, ...rest: unknown[]) {
+RealXHR.prototype.open = function (this: XMLHttpRequest & { __t?: { method: string; url: string; auth?: string } }, method: string, url: string | URL, ...rest: unknown[]) {
   this.__t = { method: String(method).toUpperCase(), url: String(url) };
   return (OPEN as (...a: unknown[]) => void).call(this, method, url, ...(rest as []));
+};
+
+const SET_HEADER = RealXHR.prototype.setRequestHeader;
+RealXHR.prototype.setRequestHeader = function (this: XMLHttpRequest & { __t?: { auth?: string } }, name: string, value: string) {
+  if (this.__t && name.toLowerCase() === "authorization") this.__t.auth = value;   // auth material is part of request identity (memoKey)
+  return SET_HEADER.call(this, name, value);
 };
 
 RealXHR.prototype.send = function (this: XMLHttpRequest & { __t?: { method: string; url: string } }, body?: Document | XMLHttpRequestBodyInit | null) {
@@ -171,7 +183,7 @@ RealXHR.prototype.send = function (this: XMLHttpRequest & { __t?: { method: stri
     (t.url.startsWith(api) || t.url.startsWith("/"));
   const isApiGet = t && t.method === "GET" && (t.url.startsWith(api) || t.url.startsWith("/"));
   if (!interceptable) {
-    if (isApiGet) { dbg("passthrough", t!.url, "inflight=" + (inflight !== null)); return sendViaMemo(this, t!.url, body ?? null); }
+    if (isApiGet) { dbg("passthrough", t!.url, "inflight=" + (inflight !== null)); return sendViaMemo(this, memoKey(this), body ?? null); }
     return SEND.call(this, body ?? null);
   }
 
@@ -181,7 +193,7 @@ RealXHR.prototype.send = function (this: XMLHttpRequest & { __t?: { method: stri
   void inflight!.then((bundle) => {
     const hit = Object.prototype.hasOwnProperty.call(bundle, key) ? bundle[key] : undefined;
     dbg(hit === undefined ? "miss" : "serve", key, hit === undefined ? Object.keys(bundle) : "");
-    if (hit === undefined) return sendViaMemo(this, t!.url, body ?? null);   // miss: the real network (deduped), unchanged
+    if (hit === undefined) return sendViaMemo(this, memoKey(this), body ?? null);   // miss: the real network (deduped), unchanged
     // workflow entries are restResources envelopes ({status, headers, body}) or raw values
     const env: Envelope = hit !== null && typeof hit === "object" && "body" in (hit as object) && ("headers" in (hit as object) || "status" in (hit as object)) ? hit as Envelope : { body: hit };
     const headers: Record<string, string> = { "content-type": "application/json", ...(env.headers || {}) };

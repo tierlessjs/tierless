@@ -424,7 +424,10 @@ export function batchExec(peer: Peer): Peer {
     request(payload: any, bin?: Uint8Array) {
       if (!payload || payload.type !== "exec" || !bin) return peer.request(payload, bin);
       return new Promise((res, rej) => {
-        const key = JSON.stringify([payload.tier, payload.module ?? null]);
+        // the WHOLE payload is the batch identity (sorted keys): execOver carries
+        // arbitrary routing metadata, and merging requests that differ in any of it
+        // would replay every element under the first request's routing context
+        const key = JSON.stringify(Object.keys(payload).sort().map((k) => [k, payload[k]]));
         let q = queues.get(key);
         if (!q) queues.set(key, (q = { payload, waiters: [] }));
         q.waiters.push({ bin, res, rej });

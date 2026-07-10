@@ -50,7 +50,9 @@ export type TraceSink = (record: TraceRecord) => void;
  *  argument reduces to a coarse fallback feature instead. */
 export declare const argFeatures: (args: unknown[]) => string[];
 /** Measure a resource result the way the fetch path would ship it: encoded bytes,
- *  not UTF-16 code units (non-ASCII payloads differ). -1 when unserializable. */
+ *  not UTF-16 code units (non-ASCII payloads differ). bigint is a wire-codec leaf the
+ *  fetch path CAN carry, so it sizes as its digits instead of poisoning the whole
+ *  result as unserializable (-1 would force decide() toward migration wrongly). */
 export declare const resultBytes: (v: unknown) => number;
 export interface Recorder {
     /** The head-based sampling decision, made ONCE at spawn and immutable thereafter.

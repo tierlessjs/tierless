@@ -72,15 +72,16 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
         // records are dropped WITH their end marker, so the run reads incomplete, not wrong.
         const buf = [];
         let poisoned = false;
+        let sending = Promise.resolve(); // SERIALIZED: a later batch must not land while an earlier one is failing — an out-of-order `end` would mark an incomplete run complete
         const flush = () => {
             if (!buf.length || poisoned)
                 return;
             const batch = buf.splice(0, buf.length);
             const body = batch.map((r) => JSON.stringify(r)).join("\n") + "\n";
-            void fetch(traceUrl, { method: "POST", body, keepalive: true }).then((r) => {
+            sending = sending.then(() => fetch(traceUrl, { method: "POST", body, keepalive: true }).then((r) => {
                 if (!r.ok)
                     throw new Error(String(r.status));
-            }).catch(() => {
+            })).catch(() => {
                 if (buf.length + batch.length > 5000) {
                     poisoned = true;
                     buf.length = 0;

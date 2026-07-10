@@ -37,6 +37,17 @@ proven (the executable proofs behind `npm test`).
   stability in real applications, the load-bearing empirical unknown the recorder now
   instruments. Beyond that, Stip.js-style global search over the suspension graph
   (pre-placing or replicating pure helpers) remains the bigger swing.
+- **Profile fidelity: record FAILED touches.** A resource call that rejects is
+  invisible to the recorder (rec.res runs after a successful exec), so a run
+  whose compiled code catches the failure reads as a complete trajectory with a
+  missing touch — suffix stability can be learned from a path that didn't run.
+  Needs an error-touch record kind (not a fetchable zero-byte result) and
+  decide()/stability treatment for it.
+- **Session auth transport.** The vite shim carries the login token as a ws URL
+  query parameter, which reverse proxies and tracing systems log as the request
+  target. Move it to a first-message/subprotocol handshake (a protocol change
+  across shim, browser, and server) before any deployment posture beyond the
+  dev/demo flow.
 - **Byte pricing at the method boundary.** `methodMigrate` migrates on structural
   evidence alone (a stable ≥2-call same-tier chain) without comparing continuation
   bytes to the profiled fetch bytes the way `decide()` does — a method carrying a

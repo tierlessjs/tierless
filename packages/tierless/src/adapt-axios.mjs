@@ -3,6 +3,12 @@
 // cookies implicitly, and a crossing cannot carry the cookie jar: an app whose SAME-ORIGIN
 // api relies on cookie auth must not install this adapter (withCredentials-marked requests
 // pin to the fallback, but bare same-origin cookie reliance is invisible to a config scan).
+//
+// INSTALLATION CONTRACT: install on the app's OWN api client instance — that instance's
+// baseURL IS the tier-owned api by definition, wherever it is hosted (both ports serve the
+// api on a different origin than the page; that is normal). External services belong on
+// separate axios instances without the adapter; only an explicit ABSOLUTE url on the api
+// client that leaves the api's own origin falls through to the stock adapter.
 /** axios-compatible default param serialization, the recursive visitor semantics:
  *  null/undefined/functions skipped (inside arrays too), arrays as repeated `key[]`,
  *  nested objects as bracketed keys (`filter[status]`), Dates as ISO strings. Standard
@@ -18,8 +24,11 @@ export function serializeParams(params) {
             return;
         }
         if (Array.isArray(v)) {
-            for (const item of v)
-                visit(key + "[]", item);
+            // axios's flat-array rule: primitives repeat as `key[]`; an element that needs
+            // further descent (object/array) gets its INDEX (`items[0][id]`) — repeated
+            // `items[][id]` parses differently on many backends
+            const flat = v.every((x) => x === null || x === undefined || typeof x !== "object" || x instanceof Date);
+            v.forEach((item, i) => visit(key + (flat ? "[]" : "[" + i + "]"), item));
             return;
         }
         if (typeof v === "object") {
@@ -59,7 +68,11 @@ export function axiosAdapter({ exec, fallback }) {
         const baseOrigin = base ? base.origin : (typeof location !== "undefined" ? location.origin : "http://localhost");
         const joined = config.url && /^(https?:)?\/\//.test(config.url) // absolute or protocol-relative
             ? new URL(config.url, baseOrigin)
-            : new URL((base ? base.pathname.replace(/\/$/, "") : "") + "/" + String(config.url || "").replace(/^\//, ""), baseOrigin);
+            : base
+                ? new URL(base.pathname.replace(/\/$/, "") + "/" + String(config.url || "").replace(/^\//, ""), baseOrigin)
+                // no baseURL: axios resolves against the DOCUMENT, not the origin root — on a
+                // page at /app/, get("items") targets /app/items
+                : new URL(String(config.url || ""), typeof location !== "undefined" ? location.href : baseOrigin + "/");
         // only the app's OWN api crosses as a resource request; an explicit other-origin URL
         // is external I/O — stock behavior via the fallback, never a tier crossing
         if (joined.origin !== baseOrigin) {

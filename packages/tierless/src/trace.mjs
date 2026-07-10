@@ -75,10 +75,12 @@ export const argFeatures = (args) => args.map((a) => {
 });
 const utf8 = new TextEncoder();
 /** Measure a resource result the way the fetch path would ship it: encoded bytes,
- *  not UTF-16 code units (non-ASCII payloads differ). -1 when unserializable. */
+ *  not UTF-16 code units (non-ASCII payloads differ). bigint is a wire-codec leaf the
+ *  fetch path CAN carry, so it sizes as its digits instead of poisoning the whole
+ *  result as unserializable (-1 would force decide() toward migration wrongly). */
 export const resultBytes = (v) => {
     try {
-        const s = JSON.stringify(v);
+        const s = JSON.stringify(v, (_k, x) => (typeof x === "bigint" ? x.toString() : x));
         return s === undefined ? 0 : utf8.encode(s).length;
     }
     catch {

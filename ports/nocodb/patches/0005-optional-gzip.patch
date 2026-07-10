@@ -7,7 +7,7 @@ diff -ruN a/packages/nocodb/src/run/testDocker.ts b/packages/nocodb/src/run/test
  import axios from 'axios';
  import cors from 'cors';
  import express from 'express';
-@@ -23,6 +24,45 @@
+@@ -23,6 +24,50 @@
    }),
  );
  
@@ -20,7 +20,12 @@ diff -ruN a/packages/nocodb/src/run/testDocker.ts b/packages/nocodb/src/run/test
 +// FULLY BUFFERED (backpressure deliberately absorbed — bounded harness JSON bodies).
 +if (process.env.NC_TIERLESS_GZIP) {
 +  server.use((req, res, next) => {
-+    if (!/\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) return next();
++    // negotiation honors q-values (gzip;q=0 forbids gzip), and the response VARIES on
++    // the header so a shared cache cannot serve gzip to a client that refused it
++    const ae = String(req.headers['accept-encoding'] || '');
++    const gz = /(?:^|,)\s*(?:gzip|\*)\s*(?:;\s*q\s*=\s*([0-9.]+))?/i.exec(ae);
++    if (!gz || (gz[1] !== undefined && parseFloat(gz[1]) === 0)) return next();
++    res.setHeader('vary', 'accept-encoding');
 +    const chunks: Buffer[] = [];
 +    const origEnd = res.end.bind(res);
 +    const origWrite = res.write.bind(res);

@@ -20,7 +20,7 @@
 //
 // The plugin is a plain object (no vite import), so it is unit-testable headless.
 import { createRequire } from "node:module";
-import { writeFileSync, mkdirSync, readFileSync, appendFileSync, existsSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync, appendFileSync, existsSync, rmSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { WS_PATH } from "./ws-path.mjs";
@@ -211,8 +211,15 @@ export default function tierless(opts = {}) {
         // `bundleResolverFromManifest` — no hand-written module resolver, no re-compile. Runs on build
         // only (Vite never calls writeBundle in dev serve).
         writeBundle() {
-            if (!machines.size && !appMachines.size)
+            if (!machines.size && !appMachines.size) {
+                // dist-tierless/ lives OUTSIDE Vite's cleaned outDir: a build with no tierless
+                // modules must not leave the PREVIOUS build's manifest for a server to mount
+                try {
+                    rmSync(path.resolve(root, serverOutDir, "tierless.manifest.json"), { force: true });
+                }
+                catch { /* nothing stale */ }
                 return;
+            }
             const outDir = path.resolve(root, serverOutDir);
             mkdirSync(outDir, { recursive: true });
             const modules = {};

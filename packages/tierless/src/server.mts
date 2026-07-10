@@ -246,10 +246,21 @@ export async function bundleResolverFromManifest(manifestPath: string): Promise<
     if (!moduleId) throw new Error("tierless: empty module id on the wire — a malformed client would suffix-match anything");
     if (moduleId.startsWith("m:")) { const m = await mergedApp(); if (m) return m; }
     let file = manifest.modules[moduleId];
-    if (!file) {                                                 // client built under a different root: match by path suffix
-      // the match must be UNIQUE — resolving an ambiguous id by insertion order could
-      // dispatch a stale client into an unrelated module's machine
-      const hits = Object.keys(manifest.modules).filter((k) => k.endsWith(moduleId) || moduleId.endsWith(k));
+    if (!file) {
+      // client built under a different absolute root (/build-a/... vs /build-b/...):
+      // whole-string endsWith can never relate those, so compare PATH-SEGMENT suffixes —
+      // the shorter side's full segment list must equal the longer side's tail. The match
+      // must be UNIQUE: resolving an ambiguous id by insertion order could dispatch a
+      // stale client into an unrelated module's machine.
+      const segs = moduleId.split("/").filter(Boolean);
+      const tailMatches = (k: string): boolean => {
+        const ks = k.split("/").filter(Boolean);
+        const n = Math.min(ks.length, segs.length);
+        if (!n) return false;
+        for (let i = 1; i <= n; i++) if (ks[ks.length - i] !== segs[segs.length - i]) return false;
+        return true;
+      };
+      const hits = Object.keys(manifest.modules).filter(tailMatches);
       if (hits.length > 1) throw new Error("tierless: module id " + JSON.stringify(moduleId) + " suffix-matches " + hits.length + " bundles: " + hits.join(", "));
       if (hits.length === 1) file = manifest.modules[hits[0]];
     }
