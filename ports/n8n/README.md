@@ -96,11 +96,19 @@ Runtime facts, verified in this sandbox (2026-07-12):
 
 - Node >= 22.22 required by their engines field; sandbox node 22.22.2 passes.
   pnpm 10.32.1 pinned by their `packageManager` field; corepack activates it.
-- `pnpm agent:setup install|build` is their own memory-capped fresh-checkout
-  path (turbo, concurrency 4) — setup.sh uses it rather than reinventing.
+- Full turbo build: 266 s at concurrency 4 (their agent-setup memory caps).
 - `@playwright/test` pinned at 1.60.0; its chromium fetches from the Playwright
   CDN into `$HOME/pw-browsers` (the sandbox's preinstalled set is a different
   revision).
+- **740 tests in 139 files** survive the local lane's container-only
+  grep-invert (`--project=e2e --list`) — the honest workload count, vs the
+  884 spec-level total.
+- n8n's default listen address `::` needs IPv6 (absent here) —
+  `N8N_LISTEN_ADDRESS=127.0.0.1` in boot.mts.
+- Their readiness bar (poll `/rest/e2e/reset` until non-404) has a hole this
+  sandbox hits: the "starting up" middleware answers 503 BEFORE controllers
+  mount. boot.mts treats only a response that is neither 404 nor "starting
+  up" as ready.
 
 ## Status
 

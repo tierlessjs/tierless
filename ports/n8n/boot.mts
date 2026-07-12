@@ -19,17 +19,19 @@ const BROKER_PORT = "5681";                      // task-runner broker (default 
 
 const serving = (url: string): Promise<boolean> => fetch(url).then(() => true, () => false);
 
-// their readiness bar (run-local-isolated.mjs): POST /rest/e2e/reset until the route
-// answers as a registered controller — /favicon.ico is up long before controllers are
+// their readiness bar (run-local-isolated.mjs), tightened: POST /rest/e2e/reset until
+// the CONTROLLER answers. Their non-404 check has a hole this sandbox hits: n8n's
+// "starting up" middleware answers 503 before controllers mount, and the plain-Express
+// window 404s "Cannot POST" — ready is only a response that is neither.
 async function waitForN8n(ms: number): Promise<void> {
   const t0 = Date.now();
   let last = "connection refused";
   for (;;) {
     try {
       const r = await fetch(`${APP}/rest/e2e/reset`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      const body = await r.text();
       last = `HTTP ${r.status}`;
-      if (r.status !== 404) return;
-      if (!(await r.text()).includes("Cannot POST")) return;
+      if (r.status !== 404 && !body.includes("starting up")) return;   // controller reached ({} body -> its own 4xx/5xx)
     } catch (err) { last = err instanceof Error ? err.message : String(err); }
     if (Date.now() - t0 > ms) throw new Error(`n8n not ready in ${ms}ms (last: ${last})`);
     await new Promise((r) => setTimeout(r, 1000));
@@ -55,6 +57,8 @@ export async function bootN8n(): Promise<{ close(): void }> {
     DB_SQLITE_POOL_SIZE: "40",
     E2E_TESTS: "true",
     N8N_PORT: "5680",
+    N8N_LISTEN_ADDRESS: "127.0.0.1",   // their default '::' needs IPv6, absent in this sandbox
+    N8N_WORKER_SERVER_ADDRESS: "127.0.0.1",
     N8N_RUNNERS_BROKER_PORT: BROKER_PORT,
     N8N_USER_FOLDER: userFolder,
     N8N_LOG_LEVEL: "debug",
