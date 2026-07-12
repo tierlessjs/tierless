@@ -19,6 +19,7 @@
   },
   "patches": [],
   "testPatches": [
-    "patches/0001-measure-reporter.patch"
+    "patches/0001-measure-reporter.patch",
+    "patches/0003-local-lane-queue-gating.patch"
   ]
 }
