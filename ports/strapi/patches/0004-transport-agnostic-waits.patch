@@ -1,12 +1,12 @@
 --- a/tests/utils/shared.ts	2026-07-12 20:40:54.933712119 +0000
-+++ b/tests/utils/shared.ts	2026-07-12 20:41:59.119238590 +0000
++++ b/tests/utils/shared.ts	2026-07-12 23:23:20.461204677 +0000
 @@ -1,4 +1,4 @@
 -import { test, expect, type Page, type Locator, type Response } from '@playwright/test';
 +import { test, expect, type Page, type Locator } from '@playwright/test';
  
  type NavItem = string | [string, string] | Locator | { text: string; exact?: boolean };
  
-@@ -115,6 +115,59 @@
+@@ -115,6 +115,104 @@
  // `withContentManagerPublish` when you click Save/Publish so the listener is always registered first.
  // ---------------------------------------------------------------------------
  
@@ -63,10 +63,55 @@
 +  return Promise.race([httpWait, tierlessWait]);
 +};
 +
++/**
++ * Transport-agnostic REQUEST-BODY wait (same test-patch posture as
++ * `waitForTransportResponse`): resolves to the matching request's JSON payload —
++ * `page.waitForRequest(...).postDataJSON()` on stock, the exec log's recorded request
++ * body on the ported build. The assertion on what the app SENDS is preserved intact.
++ */
++export const waitForTransportRequestBody = (
++  page: Page,
++  { method, urlIncludes }: { method: string; urlIncludes: string[] }
++): Promise<unknown> => {
++  const httpWait = page
++    .waitForRequest(
++      (request) =>
++        request.method() === method && urlIncludes.every((s) => request.url().includes(s))
++    )
++    .then((request) => request.postDataJSON());
++  const from = Date.now();
++  const tierlessWait = page
++    .waitForFunction(
++      ({ from, method, urlIncludes }) => {
++        const log = ((window as unknown as { __tierlessExecLog?: unknown[] }).__tierlessExecLog ||
++          []) as { t: number; name: string; url: string; reqBody?: unknown }[];
++        for (const e of log) {
++          if (
++            e &&
++            e.t >= from &&
++            ((e.name || '').split('.')[1] || '').toUpperCase() === method &&
++            urlIncludes.every((s) => (e.url || '').includes(s)) &&
++            'reqBody' in e
++          ) {
++            // materialize AT MATCH TIME (a later navigation would reset the log); the
++            // app's fetch client pre-stringifies JSON bodies, so parse strings back
++            return JSON.stringify(typeof e.reqBody === 'string' ? JSON.parse(e.reqBody) : e.reqBody);
++          }
++        }
++        return '';
++      },
++      { from, method, urlIncludes }
++    )
++    .then(async (handle) => JSON.parse((await handle.jsonValue()) as string));
++  void httpWait.catch(() => {});
++  void tierlessWait.catch(() => {});
++  return Promise.race([httpWait, tierlessWait]);
++};
++
  /** What to wait for after a Content Manager write (see `waitForContentManagerMutation`). */
  export type ContentManagerWritePhase = 'save' | 'publish';
  
-@@ -130,23 +183,20 @@
+@@ -130,23 +228,20 @@
  export const waitForContentManagerMutation = (
    page: Page,
    phase: ContentManagerWritePhase
@@ -268,3 +313,101 @@
  
      await navToHeader(
        page,
+--- a/tests/e2e/tests/i18n/create-edit.spec.ts	2026-07-12 23:24:11.297206043 +0000
++++ b/tests/e2e/tests/i18n/create-edit.spec.ts	2026-07-12 23:23:41.179595533 +0000
+@@ -1,7 +1,12 @@
+ import { test, expect } from '@playwright/test';
+ 
+ import { login } from '../../../utils/login';
+-import { clickAndWait, findAndClose, navToHeader } from '../../../utils/shared';
++import {
++  clickAndWait,
++  findAndClose,
++  navToHeader,
++  waitForTransportRequestBody,
++} from '../../../utils/shared';
+ import { waitForRestart } from '../../../utils/restart';
+ import { resetFiles } from '../../../utils/file-reset';
+ import { resetDatabaseAndImportDataFromPath } from '../../../utils/dts-import';
+@@ -71,10 +76,14 @@
+      */
+     await expect
+       .poll(async () => {
+-        const requestPromise = page.waitForRequest('**/content-manager/uid/generate?locale=es');
++        // transport-agnostic (test patch): the request payload assertion is preserved —
++        // resolved from HTTP postData or the ported build's exec log (tests/utils/shared.ts)
++        const requestPromise = waitForTransportRequestBody(page, {
++          method: 'POST',
++          urlIncludes: ['/content-manager/uid/generate?locale=es'],
++        });
+         await page.getByRole('button', { name: 'Regenerate' }).click();
+-        const req = await requestPromise;
+-        return req.postDataJSON();
++        return await requestPromise;
+       })
+       .toMatchObject({
+         contentTypeUID: 'api::product.product',
+@@ -184,10 +193,14 @@
+     await expect
+       .poll(
+         async () => {
+-          const requestPromise = page.waitForRequest('**/content-manager/uid/generate?locale=es');
++          // transport-agnostic (test patch): the request payload assertion is preserved —
++          // resolved from HTTP postData or the ported build's exec log (tests/utils/shared.ts)
++          const requestPromise = waitForTransportRequestBody(page, {
++            method: 'POST',
++            urlIncludes: ['/content-manager/uid/generate?locale=es'],
++          });
+           await page.getByRole('button', { name: 'Regenerate' }).click();
+-          const body = (await requestPromise).postDataJSON();
+-          return body;
++          return await requestPromise;
+         },
+         {
+           intervals: [1000, 2000, 4000, 8000],
+--- a/tests/e2e/tests/i18n/editview.spec.ts	2026-07-12 23:24:11.302635299 +0000
++++ b/tests/e2e/tests/i18n/editview.spec.ts	2026-07-12 23:23:48.805908402 +0000
+@@ -8,6 +8,7 @@
+   describeOnCondition,
+   findAndClose,
+   navToHeader,
++  waitForTransportRequestBody,
+ } from '../../../utils/shared';
+ import { waitForRestart } from '../../../utils/restart';
+ 
+@@ -86,10 +87,14 @@
+      */
+     await expect
+       .poll(async () => {
+-        const requestPromise = page.waitForRequest('**/content-manager/uid/generate?locale=es');
++        // transport-agnostic (test patch): the request payload assertion is preserved —
++        // resolved from HTTP postData or the ported build's exec log (tests/utils/shared.ts)
++        const requestPromise = waitForTransportRequestBody(page, {
++          method: 'POST',
++          urlIncludes: ['/content-manager/uid/generate?locale=es'],
++        });
+         await page.getByRole('button', { name: 'Regenerate' }).click();
+-        const req = await requestPromise;
+-        return req.postDataJSON();
++        return await requestPromise;
+       })
+       .toMatchObject({
+         contentTypeUID: 'api::product.product',
+@@ -200,10 +205,14 @@
+     await expect
+       .poll(
+         async () => {
+-          const requestPromise = page.waitForRequest('**/content-manager/uid/generate?locale=es');
++          // transport-agnostic (test patch): the request payload assertion is preserved —
++          // resolved from HTTP postData or the ported build's exec log (tests/utils/shared.ts)
++          const requestPromise = waitForTransportRequestBody(page, {
++            method: 'POST',
++            urlIncludes: ['/content-manager/uid/generate?locale=es'],
++          });
+           await page.getByRole('button', { name: 'Regenerate' }).click();
+-          const body = (await requestPromise).postDataJSON();
+-          return body;
++          return await requestPromise;
+         },
+         {
+           intervals: [1000, 2000, 4000, 8000],

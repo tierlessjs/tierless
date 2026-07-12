@@ -82,6 +82,10 @@ const env: Record<string, string | undefined> = {
   ...process.env,
   STRAPI_E2E_EDITION: "ce",                    // their CE lane — no license in this recipe
   TIERLESS_MEASURE_OUT: OUT,
+  // this sandbox MITMs outbound TLS: without this the admin's github release check
+  // never "finishes" in Playwright's accounting and wedges networkidle waits (see
+  // playwright.base.config.js, test patch 0001) — identical on both arms
+  TIERLESS_IGNORE_HTTPS_ERRORS: process.env.TIERLESS_IGNORE_HTTPS_ERRORS ?? "true",
 };
 
 const wireUrls: string[] = [];

@@ -1,6 +1,6 @@
 --- a/playwright.base.config.js	2026-07-12 20:17:59.165605647 +0000
-+++ b/playwright.base.config.js	2026-07-12 20:18:26.625458419 +0000
-@@ -77,26 +77,35 @@
++++ b/playwright.base.config.js	2026-07-12 23:37:12.589185644 +0000
+@@ -77,26 +77,44 @@
      /* Opt out of parallel tests on CI. */
      workers: 1,
      /* Reporter to use. See https://playwright.dev/docs/test-reporters */
@@ -50,6 +50,15 @@
 +      // direct port (node-side seeding is never counted). Strapi serves admin assets
 +      // and API on one origin, so the relay sees both; the counting proxy classifies.
 +      baseURL: getEnvString(process.env.TIERLESS_BASE_URL, `http://127.0.0.1:${port}`),
++
++      // Sandboxes that MITM outbound TLS break the admin's github release check in a
++      // way Playwright never sees finish (ERR_CERT_AUTHORITY_INVALID without a
++      // loadingFailed) — the phantom in-flight request wedges every later networkidle
++      // wait. Accepting the proxy's certificate lets the request complete (fast 403)
++      // on BOTH arms; on a normal network this flag changes nothing.
++      ...(getEnvBool(process.env.TIERLESS_IGNORE_HTTPS_ERRORS, false)
++        ? { ignoreHTTPSErrors: true }
++        : {}),
  
        /** Set timezone for consistency across any machine*/
        timezoneId: 'Europe/Paris',
