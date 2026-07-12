@@ -17,7 +17,9 @@
     "git": "c98889539842d751e7d17acdbf4886199ea1913b0595484fb09c483e758ab771",
     "codeload": null
   },
-  "patches": [],
+  "patches": [
+    "patches/0002-tierless-axios-adapter.patch"
+  ],
   "testPatches": [
     "patches/0001-measure-reporter.patch",
     "patches/0003-local-lane-queue-gating.patch"
