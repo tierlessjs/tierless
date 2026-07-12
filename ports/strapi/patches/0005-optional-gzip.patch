@@ -1,0 +1,15 @@
+--- a/tests/app-template/config/middlewares.js	2026-07-12 20:44:31.214963920 +0000
++++ b/tests/app-template/config/middlewares.js	2026-07-12 20:44:55.456437481 +0000
+@@ -1,6 +1,12 @@
++// tierless corpus harness (test patch, both arms): STRAPI_TIERLESS_GZIP=1 inserts
++// Strapi's own stock compression middleware (koa-compress, their `strapi::compression`
++// — shipped but not enabled in this template or their CI lane). The default measured
++// stack stays exactly what their CI runs (raw responses); the gzip arm answers "what
++// if they deployed compression" for the apples-to-apples comparison.
+ module.exports = [
+   'strapi::logger',
+   'strapi::errors',
++  ...(process.env.STRAPI_TIERLESS_GZIP ? ['strapi::compression'] : []),
+   'strapi::security',
+   'strapi::cors',
+   'strapi::poweredBy',

@@ -1,0 +1,29 @@
+{
+  "name": "strapi",
+  "repo": "strapi/strapi",
+  "sha": "e2c7129f034175fce2d72969e97f2faa2088055c",
+  "sources": [
+    {
+      "kind": "git",
+      "url": "https://github.com/strapi/strapi.git",
+      "ref": "v5.50.1"
+    },
+    {
+      "kind": "codeload",
+      "zip": "https://codeload.github.com/strapi/strapi/zip/e2c7129f034175fce2d72969e97f2faa2088055c"
+    }
+  ],
+  "treeHash": {
+    "git": "d560b3b0d5b474832360842c8f55bb88e7b578e70a75222aeb9ef6f56d29685a",
+    "codeload": null
+  },
+  "patches": [
+    "patches/0002-tierless-fetch-adapter.patch",
+    "patches/0003-session-socket.patch"
+  ],
+  "testPatches": [
+    "patches/0001-measure-reporter.patch",
+    "patches/0004-transport-agnostic-waits.patch",
+    "patches/0005-optional-gzip.patch"
+  ]
+}

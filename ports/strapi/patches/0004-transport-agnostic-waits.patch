@@ -1,0 +1,270 @@
+--- a/tests/utils/shared.ts	2026-07-12 20:40:54.933712119 +0000
++++ b/tests/utils/shared.ts	2026-07-12 20:41:59.119238590 +0000
+@@ -1,4 +1,4 @@
+-import { test, expect, type Page, type Locator, type Response } from '@playwright/test';
++import { test, expect, type Page, type Locator } from '@playwright/test';
+ 
+ type NavItem = string | [string, string] | Locator | { text: string; exact?: boolean };
+ 
+@@ -115,6 +115,59 @@
+ // `withContentManagerPublish` when you click Save/Publish so the listener is always registered first.
+ // ---------------------------------------------------------------------------
+ 
++/**
++ * Transport-agnostic wait (tierless corpus run protocol, test patch — applied to BOTH
++ * arms): the ported build serves API requests over a session socket, so no HTTP
++ * response ever fires for them. Race the HTTP wait against the page's tierless exec
++ * log (same method, same url-substring predicate, 2xx). On the stock build the log
++ * never exists and the race reduces to the original HTTP wait exactly.
++ *
++ * `urlIncludes` is AND; `urlIncludesAny` (when given) additionally requires one of its
++ * members. Resolves when either transport reports a matching success; no assertion is
++ * weakened — every replaced wait matched exactly method + url substrings + ok().
++ */
++export const waitForTransportResponse = (
++  page: Page,
++  {
++    method,
++    urlIncludes,
++    urlIncludesAny,
++  }: { method: string; urlIncludes: string[]; urlIncludesAny?: string[] }
++): Promise<unknown> => {
++  const httpWait = page.waitForResponse(
++    (response) =>
++      response.request().method() === method &&
++      urlIncludes.every((s) => response.url().includes(s)) &&
++      (!urlIncludesAny || urlIncludesAny.some((s) => response.url().includes(s))) &&
++      response.ok()
++  );
++  // a wall-clock lower bound, not an index cursor: navigations reset the page world and
++  // restart the log, but time stays comparable across documents (same machine clock)
++  const from = Date.now();
++  const tierlessWait = page.waitForFunction(
++    ({ from, method, urlIncludes, urlIncludesAny }) => {
++      const log = ((window as unknown as { __tierlessExecLog?: unknown[] }).__tierlessExecLog ||
++        []) as { t: number; name: string; url: string; status?: number }[];
++      return log.some(
++        (e) =>
++          e &&
++          e.t >= from &&
++          ((e.name || '').split('.')[1] || '').toUpperCase() === method &&
++          urlIncludes.every((s) => (e.url || '').includes(s)) &&
++          (!urlIncludesAny || urlIncludesAny.some((s) => (e.url || '').includes(s))) &&
++          typeof e.status === 'number' &&
++          e.status >= 200 &&
++          e.status < 300
++      );
++    },
++    { from, method, urlIncludes, urlIncludesAny: urlIncludesAny ?? null }
++  );
++  // the losing transport's eventual timeout must not surface as an unhandled rejection
++  void httpWait.catch(() => {});
++  void tierlessWait.catch(() => {});
++  return Promise.race([httpWait, tierlessWait]);
++};
++
+ /** What to wait for after a Content Manager write (see `waitForContentManagerMutation`). */
+ export type ContentManagerWritePhase = 'save' | 'publish';
+ 
+@@ -130,23 +183,20 @@
+ export const waitForContentManagerMutation = (
+   page: Page,
+   phase: ContentManagerWritePhase
+-): Promise<Response> => {
++): Promise<unknown> => {
++  // transport-agnostic (test patch): same predicates, raced across HTTP and the
++  // session socket's exec log — no caller reads the Response, only awaits it
+   if (phase === 'save') {
+-    return page.waitForResponse(
+-      (response) =>
+-        response.request().method() === 'PUT' &&
+-        response.url().includes('/content-manager/') &&
+-        (response.url().includes('/collection-types/') ||
+-          response.url().includes('/single-types/')) &&
+-        response.ok()
+-    );
++    return waitForTransportResponse(page, {
++      method: 'PUT',
++      urlIncludes: ['/content-manager/'],
++      urlIncludesAny: ['/collection-types/', '/single-types/'],
++    });
+   }
+-  return page.waitForResponse(
+-    (response) =>
+-      response.request().method() === 'POST' &&
+-      response.url().includes('/actions/publish') &&
+-      response.ok()
+-  );
++  return waitForTransportResponse(page, {
++    method: 'POST',
++    urlIncludes: ['/actions/publish'],
++  });
+ };
+ 
+ /** Same as `waitForContentManagerMutation(page, 'save')`. */
+--- a/tests/e2e/tests/content-manager/publish-draft-relations-by-relation-type.spec.ts	2026-07-12 20:40:54.939856441 +0000
++++ b/tests/e2e/tests/content-manager/publish-draft-relations-by-relation-type.spec.ts	2026-07-12 20:43:52.743918569 +0000
+@@ -11,6 +11,7 @@
+   findAndClose,
+   navToHeader,
+   withContentManagerPublish,
++  waitForTransportResponse,
+ } from '../../../utils/shared';
+ import {
+   BIDIRECTIONAL_M2M_LAB_FIELD,
+@@ -203,12 +204,12 @@
+   test('Shop product carousel warns when linking an unpublished product', async ({ page }) => {
+     await clickAndWait(page, page.getByRole('link', { name: 'Content Manager' }));
+     await clickAndWait(page, page.getByRole('link', { name: 'Shop' }));
+-    await page.waitForResponse(
+-      (response) =>
+-        response.request().method() === 'GET' &&
+-        response.url().includes('/actions/countDraftRelations') &&
+-        response.ok()
+-    );
++    await waitForTransportResponse(page, {
++      // transport-agnostic (test patch): same predicate, raced across HTTP and the
++      // ported build's session socket — see tests/utils/shared.ts
++      method: 'GET',
++      urlIncludes: ['/actions/countDraftRelations'],
++    });
+ 
+     await clickAndWait(page, page.getByRole('button', { name: 'Product carousel - 23/24 kits' }));
+     await page.getByRole('combobox', { name: 'products' }).click();
+@@ -230,12 +231,12 @@
+ 
+     await clickAndWait(page, page.getByRole('link', { name: 'Content Manager' }));
+     await clickAndWait(page, page.getByRole('link', { name: 'Shop' }));
+-    await page.waitForResponse(
+-      (response) =>
+-        response.request().method() === 'GET' &&
+-        response.url().includes('/actions/countDraftRelations') &&
+-        response.ok()
+-    );
++    await waitForTransportResponse(page, {
++      // transport-agnostic (test patch): same predicate, raced across HTTP and the
++      // ported build's session socket — see tests/utils/shared.ts
++      method: 'GET',
++      urlIncludes: ['/actions/countDraftRelations'],
++    });
+ 
+     await clickAndWait(page, page.getByRole('button', { name: 'Product carousel - 23/24 kits' }));
+     await page.getByRole('combobox', { name: 'products' }).click();
+--- a/tests/e2e/tests/content-manager/publish-draft-relations-warning.spec.ts	2026-07-12 20:40:54.945926282 +0000
++++ b/tests/e2e/tests/content-manager/publish-draft-relations-warning.spec.ts	2026-07-12 20:43:52.744197312 +0000
+@@ -1,7 +1,7 @@
+ import { test, expect } from '@playwright/test';
+ import { login } from '../../../utils/login';
+ import { resetDatabaseAndImportDataFromPath } from '../../../utils/dts-import';
+-import { clickAndWait, findAndClose } from '../../../utils/shared';
++import { clickAndWait, findAndClose, waitForTransportResponse } from '../../../utils/shared';
+ 
+ const CREATE_URL =
+   /\/admin\/content-manager\/collection-types\/api::article.article\/create(\?.*)?/;
+@@ -60,12 +60,12 @@
+   test('warns on publish with oneToMany draft relations in a dynamic zone', async ({ page }) => {
+     await clickAndWait(page, page.getByRole('link', { name: 'Content Manager' }));
+     await clickAndWait(page, page.getByRole('link', { name: 'Shop' }));
+-    await page.waitForResponse(
+-      (response) =>
+-        response.request().method() === 'GET' &&
+-        response.url().includes('/actions/countDraftRelations') &&
+-        response.ok()
+-    );
++    await waitForTransportResponse(page, {
++      // transport-agnostic (test patch): same predicate, raced across HTTP and the
++      // ported build's session socket — see tests/utils/shared.ts
++      method: 'GET',
++      urlIncludes: ['/actions/countDraftRelations'],
++    });
+ 
+     await clickAndWait(page, page.getByRole('button', { name: 'Product carousel - 23/24 kits' }));
+     await page.getByRole('combobox', { name: 'products' }).click();
+--- a/tests/e2e/tests/content-manager/blocks.spec.ts	2026-07-12 20:40:54.951061039 +0000
++++ b/tests/e2e/tests/content-manager/blocks.spec.ts	2026-07-12 20:44:13.932776418 +0000
+@@ -1,7 +1,7 @@
+ import { test, expect } from '@playwright/test';
+ import { login } from '../../../utils/login';
+ import { resetDatabaseAndImportDataFromPath } from '../../../utils/dts-import';
+-import { findAndClose, navToHeader } from '../../../utils/shared';
++import { findAndClose, navToHeader, waitForTransportResponse } from '../../../utils/shared';
+ 
+ test.describe('Blocks editor', () => {
+   test.beforeEach(async ({ page }) => {
+@@ -47,12 +47,12 @@
+ 
+     // Save and reload to make sure the change is persisted. Await the PUT — the toast can resolve before
+     // the request finishes on fast machines.
+-    const savePut = page.waitForResponse(
+-      (response) =>
+-        response.request().method() === 'PUT' &&
+-        response.url().includes('/content-manager/single-types/api::homepage.homepage') &&
+-        response.ok()
+-    );
++    const savePut = waitForTransportResponse(page, {
++      // transport-agnostic (test patch): same predicate, raced across HTTP and the
++      // ported build's session socket — see tests/utils/shared.ts
++      method: 'PUT',
++      urlIncludes: ['/content-manager/single-types/api::homepage.homepage'],
++    });
+     await page.getByRole('button', { name: 'Save' }).click();
+     await savePut;
+     await findAndClose(page, 'Saved document');
+--- a/tests/e2e/tests/admin/home.spec.ts	2026-07-12 20:40:54.956453570 +0000
++++ b/tests/e2e/tests/admin/home.spec.ts	2026-07-12 20:44:13.933210599 +0000
+@@ -1,7 +1,7 @@
+ import { test, expect } from '@playwright/test';
+ import { login } from '../../../utils/login';
+ import { resetDatabaseAndImportDataFromPath } from '../../../utils/dts-import';
+-import { clickAndWait, findAndClose, navToHeader } from '../../../utils/shared';
++import { clickAndWait, findAndClose, navToHeader, waitForTransportResponse } from '../../../utils/shared';
+ import { waitForRestart } from '../../../utils/restart';
+ import { EDITOR_EMAIL_ADDRESS, EDITOR_PASSWORD } from '../../constants';
+ 
+@@ -246,12 +246,12 @@
+       await page.getByRole('button', { name: /save/i }).click();
+ 
+       // Go back to the home page and wait for refreshed statistics
+-      const keyStatisticsReady = page.waitForResponse(
+-        (response) =>
+-          response.request().method() === 'GET' &&
+-          response.url().includes('/homepage/key-statistics') &&
+-          response.ok()
+-      );
++      const keyStatisticsReady = waitForTransportResponse(page, {
++        // transport-agnostic (test patch): same predicate, raced across HTTP and the
++        // ported build's session socket — see tests/utils/shared.ts
++        method: 'GET',
++        urlIncludes: ['/homepage/key-statistics'],
++      });
+       await clickAndWait(page, page.getByRole('link', { name: /^home$/i }));
+       await keyStatisticsReady;
+ 
+--- a/tests/e2e/tests/admin/admin-tokens.spec.ts	2026-07-12 20:40:54.962667278 +0000
++++ b/tests/e2e/tests/admin/admin-tokens.spec.ts	2026-07-12 20:44:13.933462227 +0000
+@@ -1,5 +1,5 @@
+ import { test, expect, type Page } from '@playwright/test';
+-import { navToHeader } from '../../../utils/shared';
++import { navToHeader, waitForTransportResponse } from '../../../utils/shared';
+ import { sharedSetup } from '../../../utils/setup';
+ import { login } from '../../../utils/login';
+ import {
+@@ -228,12 +228,12 @@
+   });
+ 
+   test('Super admin has no ceiling on Settings permissions', async ({ page }) => {
+-    const waitForPermissionsLayout = page.waitForResponse(
+-      (response) =>
+-        response.request().method() === 'GET' &&
+-        response.url().includes('/admin/permissions') &&
+-        response.ok()
+-    );
++    const waitForPermissionsLayout = waitForTransportResponse(page, {
++      // transport-agnostic (test patch): same predicate, raced across HTTP and the
++      // ported build's session socket — see tests/utils/shared.ts
++      method: 'GET',
++      urlIncludes: ['/admin/permissions'],
++    });
+ 
+     await navToHeader(
+       page,
