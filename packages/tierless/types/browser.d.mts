@@ -1,6 +1,11 @@
 import type { Bundle, Exec, Host } from "./types.mjs";
 export interface ConnectOpts {
     url?: string | (() => string);
+    /** WebSocket subprotocols, offered at CONNECT time (thunk, like url). The browser cannot
+     *  set handshake headers, so a credential travels here as "bearer.<base64url(token)>" —
+     *  never in the URL, where proxy access logs would capture it. The server echoes only
+     *  the plain protocol (server.mts handleProtocols), keeping it out of response headers. */
+    protocols?: string | string[] | (() => string | string[] | undefined);
     /** Services browser-pinned resources (dom.commit in the full-tierless mode, ui.* if pinned). */
     exec?: Exec;
     bundle?: Bundle;
@@ -43,7 +48,7 @@ export interface Connection {
     close(): void;
 }
 export declare const mergedAppHash: () => string;
-export declare function connect({ url, exec, bundle, tier, heap, traceUrl, profileUrl, }?: ConnectOpts): Connection;
+export declare function connect({ url, protocols, exec, bundle, tier, heap, traceUrl, profileUrl, }?: ConnectOpts): Connection;
 /** The shared connection's exec crossing as a tierless Exec — what an I/O-bottom
  *  adapter plugs in to route the app's requests over the session socket:
  *  `axiosAdapter({ exec: sessionExec(), ... })`. Lazy: the socket opens on first use

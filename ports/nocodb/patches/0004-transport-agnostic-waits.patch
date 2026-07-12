@@ -34,15 +34,15 @@ diff -ruN a/tests/playwright/pages/Base.ts b/tests/playwright/pages/Base.ts
 +    );
 +    const tierlessWait = this.rootPage.waitForFunction(
 +      ({ from, reSrc, reFlags, sub, methods, status }) => {
-+        const log = ((window as any).__tierlessExecLog || []) as { t: number; name: string; url: string; status?: number }[];
++        const log = ((window as any).__tierlessExecLog || []) as { t: number; name: string; url: string; status?: number; body?: unknown }[];
 +        for (let i = 0; i < log.length; i++) {
 +          const e = log[i];
 +          if (!e || e.t < from) continue;
 +          const method = (e.name || '').split('.')[1]?.toUpperCase() || '';
 +          const urlOk = reSrc !== null ? new RegExp(reSrc, reFlags || '').test(e.url) : e.url.includes(sub as string);
-+          if (urlOk && e.status === status && (methods as string[]).includes(method)) return i + 1;
++          if (urlOk && e.status === status && (methods as string[]).includes(method)) return JSON.stringify(e.body ?? null);
 +        }
-+        return 0;
++        return '';
 +      },
 +      {
 +        from: logFrom,
@@ -60,7 +60,9 @@ diff -ruN a/tests/playwright/pages/Base.ts b/tests/playwright/pages/Base.ts
 +    const [winner] = await Promise.all([
 +      Promise.race([
 +        httpWait.then(res => ({ kind: 'http' as const, res })),
-+        tierlessWait.then(handle => ({ kind: 'tierless' as const, handle })),
++        // materialize the matched body AT MATCH TIME: uiAction may navigate afterwards,
++        // which destroys the matching document — a late read would hit a restarted log
++        tierlessWait.then(async h => ({ kind: 'tierless' as const, body: (await h.jsonValue()) as string })),
 +      ]),
        uiAction(),
      ]);
@@ -74,9 +76,7 @@ diff -ruN a/tests/playwright/pages/Base.ts b/tests/playwright/pages/Base.ts
 +        if (winner.kind === 'http') {
 +          isResJsonMatched = responseJsonMatcher(await winner.res.json());
 +        } else {
-+          const idx = (await winner.handle.jsonValue()) as number;
-+          const body = await this.rootPage.evaluate(i => ((window as any).__tierlessExecLog || [])[i]?.body, idx - 1);
-+          isResJsonMatched = responseJsonMatcher(body);
++          isResJsonMatched = responseJsonMatcher(JSON.parse(winner.body));
 +        }
        } catch {
          isResJsonMatched = false;

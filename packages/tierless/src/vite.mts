@@ -190,7 +190,8 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
   // The shim virtual module: the compiled adapt-shim body plus this build's route table.
   // Workflow modules load through dynamic import, so they pass through the transform above
   // and land in dist-tierless like any mix module; the session socket carries the user's
-  // token (read at connect) as a query param the preview gateway forwards to the backend.
+  // token (read at connect) as a bearer.<base64url> subprotocol the preview gateway
+  // forwards to the backend — subprotocol, not query param, so it never reaches access logs.
   const shimSource = (): string => {
     const configure = [
       // the twins module's browser side effect stamps each twinned class's identity onto
@@ -200,7 +201,7 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
       // url is a thunk (token read at connect time, not page load); preconnect only when a
       // session already exists — the handshake then overlaps app bootstrap instead of
       // landing on the first navigation's critical path. Fresh visitors stay lazy.
-      `configureTierless({ url: () => (location.protocol === "https:" ? "wss" : "ws") + "://" + location.host + ${JSON.stringify(wsPath || WS_PATH)} + "?token=" + encodeURIComponent(localStorage.getItem("token") || ""), preconnect: !!localStorage.getItem("token") });`,
+      `configureTierless({ url: () => (location.protocol === "https:" ? "wss" : "ws") + "://" + location.host + ${JSON.stringify(wsPath || WS_PATH)}, protocols: () => { const t = localStorage.getItem("token"); return t ? ["tierless", "bearer." + btoa(t).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "")] : ["tierless"]; }, preconnect: !!localStorage.getItem("token") });`,
     ];
     if (!workflows) return configure.join("\n");                   // compile-only: session config, no route/XHR machinery
     const body = readFileSync(fileURLToPath(new URL("./adapt-shim.mjs", import.meta.url)), "utf8");
@@ -360,7 +361,7 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
     async configurePreviewServer(server: unknown): Promise<void> {
       if (!workflows && !hasCompile) return;
       const s = server as { httpServer: HttpServer; middlewares: { use(route: string, fn: (req: unknown, res: { setHeader(n: string, v: string): void; end(s: string): void }) => void): void } };
-      const { attachTierless, bundleResolverFromManifest, makeWireStats } = await import("./server.mjs");
+      const { attachTierless, bundleResolverFromManifest, makeWireStats, bearerFromUpgrade } = await import("./server.mjs");
       const { restResources, httpResources, twinHttp } = await import("./adapt.mjs");
       // TCP-true session byte counter for measured runs (suite truth protocol): CDP sees
       // ws frames post-inflate, so the gateway itself is the only honest place to count
@@ -414,7 +415,7 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
           return EXEC_ONLY as never;
         },
         session: async (req) => {
-          const token = new URL(req.url || "/", "http://x").searchParams.get("token") || undefined;
+          const token = bearerFromUpgrade(req);
           const rest = restResources(apiUrl, { token });
           // the twin of the app's own axios instance: http.* from compiled class methods
           const twin = httpResources(twinHttp(apiUrl, { token }));

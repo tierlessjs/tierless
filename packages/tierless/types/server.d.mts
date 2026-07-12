@@ -52,6 +52,11 @@ export interface WireStats {
 }
 export declare function makeWireStats(): WireStats;
 export declare const DEFAULT_MAX_CONNECTIONS = 100;
+/** The session token from an upgrade request's subprotocol list. Browsers cannot set
+ *  handshake headers, so the shim offers the credential as "bearer.<base64url(token)>"
+ *  alongside the plain protocol — this reads it back without it ever touching a URL
+ *  (where reverse-proxy access logs capture query strings) or the echoed protocol. */
+export declare function bearerFromUpgrade(req: IncomingMessage): string | undefined;
 export declare function attachTierless(httpServer: HttpServer, { bundle, tier, session, path: wsPath, wire, heap, maxConnections }: AttachOptions): {
     close(): void;
 };

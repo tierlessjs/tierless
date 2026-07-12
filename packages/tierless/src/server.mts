@@ -94,6 +94,17 @@ let liveConnections = 0;   // process-wide: every attachTierless endpoint draws 
 
 // Mount the session endpoint on an EXISTING http server (Express/Fastify/Vite — anything
 // that emits 'upgrade'); co-mountable with other websocket handlers.
+/** The session token from an upgrade request's subprotocol list. Browsers cannot set
+ *  handshake headers, so the shim offers the credential as "bearer.<base64url(token)>"
+ *  alongside the plain protocol — this reads it back without it ever touching a URL
+ *  (where reverse-proxy access logs capture query strings) or the echoed protocol. */
+export function bearerFromUpgrade(req: IncomingMessage): string | undefined {
+  const offered = String(req.headers["sec-websocket-protocol"] || "").split(",").map((s) => s.trim());
+  const b = offered.find((p) => p.startsWith("bearer."));
+  if (!b) return undefined;
+  try { return Buffer.from(b.slice(7).replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8") || undefined; } catch { return undefined; }
+}
+
 export function attachTierless(httpServer: HttpServer, { bundle, tier = "server", session, path: wsPath = WS_PATH, wire, heap = true, maxConnections = DEFAULT_MAX_CONNECTIONS }: AttachOptions): { close(): void } {
   // STREAMING compression, not per-message: with context takeover the deflate window
   // persists across messages, so every exec's headers, URL prefixes, and JSON field
@@ -105,7 +116,15 @@ export function attachTierless(httpServer: HttpServer, { bundle, tier = "server"
     threshold: 64,
     serverNoContextTakeover: false, clientNoContextTakeover: false,
     zlibDeflateOptions: { level: 6 },
-  } });
+  },
+    // A client that offers subprotocols must have one echoed or the browser fails the
+    // handshake. Echo the plain protocol, never a bearer.<token> — a credential offered
+    // there (see bearerFromUpgrade) must not reflect into the response headers.
+    handleProtocols: (ps: Set<string>) => {
+      for (const p of ps) if (!p.startsWith("bearer.")) return p;
+      return ps.values().next().value ?? false;
+    },
+  });
   const resolveBundle = typeof bundle === "function" ? bundle : () => bundle;
 
   const onUpgrade = (req: IncomingMessage, socket: any, head: any): void => {

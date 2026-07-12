@@ -49,12 +49,13 @@ const tryActivateProfile = () => {
         pendingProfile = null;
     }
 };
-export function connect({ url, exec, bundle, tier = "browser", heap = true, 
+export function connect({ url, protocols, exec, bundle, tier = "browser", heap = true, 
 // run-protocol wiring can also come from page globals (a measured run's driver injects
 // them into the built index.html, like their CI's window.TESTING) — build-time shims
 // can't know a preview-time mode
 traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PROFILE__, } = {}) {
-    const ws = new WebSocket((typeof url === "function" ? url() : url) || defaultUrl());
+    const resolvedProtocols = typeof protocols === "function" ? protocols() : protocols;
+    const ws = new WebSocket((typeof url === "function" ? url() : url) || defaultUrl(), resolvedProtocols);
     // burst coalescing (host.mts batchExec): concurrent execs merge into one crossing.
     // DEFAULT OFF — measured neutral on time and bytes for the first corpus app (frame
     // count only, ports/vikunja); opt in via the page global (same pattern as the

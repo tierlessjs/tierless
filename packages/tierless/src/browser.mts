@@ -28,6 +28,11 @@ const defaultUrl = (): string => {
 export interface ConnectOpts {
   url?: string | (() => string);     // thunk: evaluated at CONNECT time, so a session
                                      // token read from storage is current, not page-load stale
+  /** WebSocket subprotocols, offered at CONNECT time (thunk, like url). The browser cannot
+   *  set handshake headers, so a credential travels here as "bearer.<base64url(token)>" —
+   *  never in the URL, where proxy access logs would capture it. The server echoes only
+   *  the plain protocol (server.mts handleProtocols), keeping it out of response headers. */
+  protocols?: string | string[] | (() => string | string[] | undefined);
   /** Services browser-pinned resources (dom.commit in the full-tierless mode, ui.* if pinned). */
   exec?: Exec;
   bundle?: Bundle;
@@ -84,14 +89,15 @@ const tryActivateProfile = (): void => {
   if (prof) { appMigrate = methodMigrate(prof); pendingProfile = null; }
 };
 
-export function connect({ url, exec, bundle, tier = "browser", heap = true,
+export function connect({ url, protocols, exec, bundle, tier = "browser", heap = true,
   // run-protocol wiring can also come from page globals (a measured run's driver injects
   // them into the built index.html, like their CI's window.TESTING) — build-time shims
   // can't know a preview-time mode
   traceUrl = (globalThis as { __TIERLESS_TRACE__?: string }).__TIERLESS_TRACE__,
   profileUrl = (globalThis as { __TIERLESS_PROFILE__?: string }).__TIERLESS_PROFILE__,
 }: ConnectOpts = {}): Connection {
-  const ws = new WebSocket((typeof url === "function" ? url() : url) || defaultUrl());
+  const resolvedProtocols = typeof protocols === "function" ? protocols() : protocols;
+  const ws = new WebSocket((typeof url === "function" ? url() : url) || defaultUrl(), resolvedProtocols);
   // burst coalescing (host.mts batchExec): concurrent execs merge into one crossing.
   // DEFAULT OFF — measured neutral on time and bytes for the first corpus app (frame
   // count only, ports/vikunja); opt in via the page global (same pattern as the
