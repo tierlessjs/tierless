@@ -31,13 +31,22 @@ if ! curl -sfI --max-time 15 "https://codeload.github.com/rhashimoto/wa-sqlite/t
   # every other TLS fetch in this install)
   cat ${NODE_EXTRA_CA_CERTS:+"$NODE_EXTRA_CA_CERTS"} "$PORTS_DIR/work/codeload-shim/cert.pem" > "$PORTS_DIR/work/codeload-shim/ca-bundle.pem"
   export NODE_EXTRA_CA_CERTS="$PORTS_DIR/work/codeload-shim/ca-bundle.pem"
+  # all three spellings: pnpm reads npm config (npm_config_noproxy), curl/node read the
+  # env pair — missing one routes codeload back through the proxy and 403s
   export NO_PROXY="codeload.github.com${NO_PROXY:+,$NO_PROXY}"
   export no_proxy="codeload.github.com${no_proxy:+,$no_proxy}"
+  export npm_config_noproxy="codeload.github.com${npm_config_noproxy:+,$npm_config_noproxy}"
 fi
 
-# their own memory-capped fresh-checkout path: install --frozen-lockfile, then
-# turbo run build (concurrency 4 ≈ this sandbox's cores; logs in .agent-setup/)
-corepack pnpm run agent:setup install --concurrency 4
+# DOCKER_BUILD=1 is upstream's own switch to skip the lefthook prepare hook (the
+# recipe tree has no .git for it to install into). Verified sequence in this sandbox:
+# one plain frozen install; if a git-dep build breaks it mid-way (seen once with
+# wa-sqlite arriving through the shim), the ignore-scripts + rebuild pass recovers
+# the same end state.
+DOCKER_BUILD=1 corepack pnpm install --frozen-lockfile || {
+  DOCKER_BUILD=1 corepack pnpm install --frozen-lockfile --ignore-scripts
+  DOCKER_BUILD=1 corepack pnpm rebuild -r
+}
 cleanup; SHIM_PID=""; trap - EXIT
 
 # ported tree only (adapter patch imports tierless): the runtime as a linked
