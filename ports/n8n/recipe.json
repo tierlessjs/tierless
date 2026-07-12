@@ -1,0 +1,24 @@
+{
+  "name": "n8n",
+  "repo": "n8n-io/n8n",
+  "sha": "5c9574c2f1c021d5d57a0c642fa3e37ad05d3269",
+  "sources": [
+    {
+      "kind": "git",
+      "url": "https://github.com/n8n-io/n8n.git",
+      "ref": "n8n@2.30.3"
+    },
+    {
+      "kind": "codeload",
+      "zip": "https://codeload.github.com/n8n-io/n8n/zip/5c9574c2f1c021d5d57a0c642fa3e37ad05d3269"
+    }
+  ],
+  "treeHash": {
+    "git": "c98889539842d751e7d17acdbf4886199ea1913b0595484fb09c483e758ab771",
+    "codeload": null
+  },
+  "patches": [],
+  "testPatches": [
+    "patches/0001-measure-reporter.patch"
+  ]
+}
