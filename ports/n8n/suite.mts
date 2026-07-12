@@ -62,7 +62,12 @@ const suite = spawn("corepack", ["pnpm", "exec", "playwright", "test", "--projec
   env: {
     ...process.env,
     COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
-    N8N_BASE_URL: "http://127.0.0.1:5680",                       // node-side seeding: direct, uncounted
+    // "localhost", not 127.0.0.1: n8n's auth cookie is Secure by default, and
+    // Playwright's NODE-side cookie jar honors the Secure flag over plain http for a
+    // literal IP while special-casing the name localhost — with an IP here every
+    // authenticated api-helper call 401s while browser flows (which treat both as
+    // secure contexts) pass. Their own scripts say localhost for the same reason.
+    N8N_BASE_URL: "http://localhost:5680",                       // node-side seeding: direct, uncounted
     ...(editorUrl ? { N8N_EDITOR_URL: editorUrl } : {}),          // the page's origin: shaped/counted
     RESET_E2E_DB: "true",
     PLAYWRIGHT_SKIP_WEBSERVER: "true",                            // boot.mts owns the process
