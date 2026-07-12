@@ -21,6 +21,11 @@ export type MachineResult = {
     tier: string;
     name: string;
     args: unknown[];
+} | {
+    op: "dyn";
+    recv: unknown;
+    member: string;
+    args: unknown[];
 };
 /** A compiled bundle (transform.cjs output): named state machines + the frame unwinder. */
 export interface Bundle {
@@ -35,14 +40,41 @@ export interface ResourceRequest {
     name: string;
     args: unknown[];
 }
+/** The §5 stop rule's park marker (docs/migrate-arm.md): the stack must go to `tier` —
+ *  where the handle in slot `name` lives — before its next segment can run. Pump-internal;
+ *  never handed to an `Exec`. */
+export interface HomePark {
+    op: "home";
+    tier: string;
+    name: string;
+    args: unknown[];
+}
+/** What a pump can park on: a real resource crossing, or the stop rule's home park. */
+export type PumpRequest = ResourceRequest | HomePark;
 export type Exec = (req: ResourceRequest) => unknown | Promise<unknown>;
+/** A twin call's observable effect on instance state (docs/migrate-arm.md): the fields
+ *  the twin mutated, addressed by the receiver HANDLE so the home tier can apply them to
+ *  the live instance before the awaiting code resumes — read-your-writes at method
+ *  return, carried on the crossing that was already coming home. Field values ride the
+ *  reply's JSON payload, so they must be JSON-safe (true of instance counters/flags;
+ *  a Date-valued field would come home as its ISO string). */
+export interface TwinDelta {
+    owner: string;
+    id: string;
+    fields: Record<string, unknown>;
+    /** Own data fields the twin DELETED during the call — Object.assign can't express
+     *  removal, so the home tier deletes these keys explicitly. */
+    gone?: string[];
+}
 /** Runs a continuation on the local tier until it finishes or parks at a foreign resource. */
-export type Pump = (stack: Frame[], ownsHere: (tier: string) => boolean, execHere: Exec, incoming?: ResourceRequest | null) => Promise<{
+export type Pump = (stack: Frame[], ownsHere: (tier: string) => boolean, execHere: Exec, incoming?: PumpRequest | null, sink?: {
+    twinDelta(d: TwinDelta): void;
+}) => Promise<{
     done: true;
     value: unknown;
 } | {
     done: false;
-    request: ResourceRequest;
+    request: PumpRequest;
     stack: Frame[];
 }>;
 /** The RPC peer from tierless/transport (structural — anything with request/on works). */
@@ -58,23 +90,61 @@ export interface Peer {
 export type HostReply = {
     type: "done";
     value: unknown;
+    twinDeltas?: TwinDelta[];
 } | {
     type: "suspend";
+    twinDeltas?: TwinDelta[];
 } | {
     type: "error";
     message: string;
+    twinDeltas?: TwinDelta[];
 };
 export interface Host {
     pump: Pump;
-    /** Start entry(...args) on THIS tier and drive it to completion with the peer. */
-    run(peer: Peer, entry: string, args?: unknown[]): Promise<unknown>;
+    /** Start entry(...args) on THIS tier and drive it to completion with the peer.
+     *  opts.trace forces (true) or suppresses (false) trace recording for this one run;
+     *  absent = the host's sampling rate decides. */
+    run(peer: Peer, entry: string, args?: unknown[], opts?: {
+        trace?: boolean;
+    }): Promise<unknown>;
     /** Ask the PEER to start entry(...args) over there; service any bounces back here. */
-    call(peer: Peer, entry: string, args?: unknown[]): Promise<unknown>;
+    call(peer: Peer, entry: string, args?: unknown[], opts?: {
+        trace?: boolean;
+    }): Promise<unknown>;
+    /** Run entry(...args) entirely on THIS tier; foreign resources are FETCHED (only the
+     *  request and result cross — the stack never ships). The frame may therefore hold
+     *  unserializable values (live class instances, reactive proxies): the §6 fetch arm,
+     *  and the path compiled class methods run on. A PINNED request — the family's
+     *  declared semantics (opts.pins) or args closing over tier-owned values (callbacks,
+     *  host objects) — executes here through opts.exec instead of crossing. opts.migrate
+     *  flips a park to the migrate arm (docs/migrate-arm.md): the continuation ships to
+     *  the resource's tier and comes home by the stop rule. */
+    runLocal(peer: Peer, entry: string, args?: unknown[], opts?: {
+        exec?: (req: ResourceRequest, frame?: Frame) => unknown | Promise<unknown>;
+        pins?: (req: ResourceRequest) => boolean;
+        map?: (req: ResourceRequest, frame?: Frame) => ResourceRequest | null | Promise<ResourceRequest | null>;
+        migrate?: (req: ResourceRequest, site: {
+            fn: string;
+            pc: number;
+            entry?: string;
+        }) => boolean;
+        trace?: boolean;
+    }): Promise<unknown>;
     handleStart(payload: any, bin: Uint8Array | null, peer?: Peer): Promise<{
         obj: HostReply;
         bin?: Uint8Array;
     }>;
     handleResume(payload: any, bin: Uint8Array | null, peer?: Peer): Promise<{
+        obj: HostReply;
+        bin?: Uint8Array;
+    }>;
+    /** Serve one fetched resource for a peer's runLocal. */
+    handleExec(payload: any, bin: Uint8Array | null): Promise<{
+        obj: HostReply;
+        bin?: Uint8Array;
+    }>;
+    /** Serve a coalesced BURST of fetched resources in one crossing (per-element results). */
+    handleExecBatch(payload: any, bin: Uint8Array | null): Promise<{
         obj: HostReply;
         bin?: Uint8Array;
     }>;

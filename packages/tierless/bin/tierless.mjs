@@ -20,7 +20,10 @@
 //       so `api.getQuote(...)` in a mix module is checked against the real surface. Each
 //       endpoint's parameter list is read from its run signature where statically visible
 //       (the `run: ([sym, n]) => …` array destructure IS the caller's signature); endpoints
-//       whose run takes the raw args array fall back to (...args: any[]).
+//       whose run takes the raw args array fall back to (...args: any[]). Return types are
+//       inferred by the TypeScript checker over each run body (Promise-unwrapped — the
+//       monitor awaits run's result) and kept only when self-contained in a standalone
+//       d.ts; typescript resolves from the consumer's project (it's who checks the output).
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -116,6 +119,88 @@ function paramList(s) {
         out.push(`...${s.rest}: any[]`);
     return out.join(", ");
 }
+// typescript is not a dependency of tierless — it resolves from the project running the CLI,
+// which is whoever consumes the emitted d.ts. Without it the surface keeps `any` returns.
+let tsMod; // undefined = not tried, null = unavailable
+function loadTS() {
+    if (tsMod !== undefined)
+        return tsMod;
+    try {
+        tsMod = require("typescript");
+    }
+    catch {
+        tsMod = null;
+        console.error("tierless: typescript not found — return types emitted as any (npm i -D typescript to infer them)");
+    }
+    return tsMod;
+}
+// Infer each endpoint's RETURN type with the TypeScript checker over the run body — this is what
+// a parse can't do (roadmap: "needs a type checker over the service body"). The monitor awaits
+// run's result before answering (api.mts _call), so a Promise-returning run unwraps to the value
+// the mix-module caller actually receives; literal types widen the way tsc's own declaration
+// emit would. `any` results are dropped so the fallback stays a single spelling.
+function serviceReturnTypes(abs) {
+    const rets = new Map();
+    const ts = loadTS();
+    if (!ts)
+        return rets;
+    const program = ts.createProgram([abs], { allowJs: true, noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext });
+    const sf = program.getSourceFile(abs);
+    if (!sf)
+        return rets;
+    const checker = program.getTypeChecker();
+    const record = (name, obj) => {
+        if (typeof name !== "string" || !obj || !ts.isObjectLiteralExpression(obj))
+            return;
+        const run = obj.properties.find((p) => ts.isPropertyAssignment(p) && !ts.isComputedPropertyName(p.name) && p.name.text === "run");
+        const fn = run && run.initializer;
+        if (!fn || (!ts.isArrowFunction(fn) && !ts.isFunctionExpression(fn)))
+            return;
+        const sig = checker.getSignatureFromDeclaration(fn);
+        if (!sig)
+            return;
+        const ret = sig.getReturnType();
+        const t = checker.getWidenedType(checker.getAwaitedType(ret) ?? ret);
+        const text = checker.typeToString(t, undefined, ts.TypeFormatFlags.NoTruncation).replace(/\s+/g, " ");
+        if (text !== "any")
+            rets.set(name, text);
+    };
+    (function walk(n) {
+        if (ts.isPropertyAssignment(n) && !ts.isComputedPropertyName(n.name) && ts.isObjectLiteralExpression(n.initializer))
+            record(n.name.text, n.initializer);
+        if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === "fn" && n.arguments[0] && ts.isStringLiteral(n.arguments[0]))
+            record(n.arguments[0].text, n.arguments[1]);
+        ts.forEachChild(n, walk);
+    })(sf);
+    return rets;
+}
+// The emitted d.ts is STANDALONE (`declare const api`), so an inferred return type may only use
+// globals — a type naming a service-local class or an unresolvable import would break the
+// consumer's typecheck, which is worse than `any`. Check the assembled declaration with the same
+// compiler that will consume it; each endpoint is exactly two lines (doc comment + signature), so
+// a diagnostic's line maps straight back to the endpoint to downgrade.
+function invalidReturnTypes(dts, fns) {
+    const ts = loadTS();
+    if (!ts)
+        return [];
+    const name = "tierless-api-check.d.ts";
+    const sf = ts.createSourceFile(name, dts, ts.ScriptTarget.ES2022, true);
+    const opts = { noEmit: true };
+    const host = ts.createCompilerHost(opts);
+    const orig = host.getSourceFile.bind(host);
+    host.getSourceFile = (f, ...a) => (f === name ? sf : orig(f, ...a));
+    const program = ts.createProgram([name], opts, host);
+    const bad = new Set();
+    for (const d of [...program.getSyntacticDiagnostics(sf), ...program.getSemanticDiagnostics(sf)]) {
+        if (d.start == null)
+            continue;
+        const line = sf.getLineAndCharacterOfPosition(d.start).line; // 0: GENERATED, 1: declare, then 2 lines per endpoint
+        const f = fns[Math.floor((line - 2) / 2)];
+        if (f)
+            bad.add(f.name);
+    }
+    return [...bad];
+}
 // Find the service definition in a module: the default export or any named export that is
 // a defineApi() result ({ create }) or a plain (secret) => Api factory. Arbitrary user code,
 // so there is no static shape to check beyond this runtime duck-typing.
@@ -185,11 +270,18 @@ else if (cmd === "types") {
         die(usage);
     const api = await loadService(file);
     const sigs = serviceSignatures(readFileSync(file, "utf8"));
-    const lines = api.fns().map((f) => {
-        const s = sigs.get(f.name);
-        return `  /** authorize: ${f.authorize} */\n  ${f.name}(${s ? paramList(s) : "...args: any[]"}): any;`;
-    });
-    const dts = `// GENERATED by \`tierless types ${file}\` — the api surface a mix module calls.\ndeclare const api: {\n${lines.join("\n")}\n};\n`;
+    const fns = api.fns();
+    const rets = serviceReturnTypes(path.resolve(file));
+    const assemble = () => {
+        const lines = fns.map((f) => {
+            const s = sigs.get(f.name);
+            return `  /** authorize: ${f.authorize} */\n  ${f.name}(${s ? paramList(s) : "...args: any[]"}): ${rets.get(f.name) || "any"};`;
+        });
+        return `// GENERATED by \`tierless types ${file}\` — the api surface a mix module calls.\ndeclare const api: {\n${lines.join("\n")}\n};\n`;
+    };
+    for (const name of invalidReturnTypes(assemble(), fns))
+        rets.delete(name); // a type the standalone d.ts can't express -> honest any
+    const dts = assemble();
     if (out) {
         writeFileSync(out, dts);
         console.log("wrote " + out);

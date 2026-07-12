@@ -1,0 +1,26 @@
+--- a/frontend/src/helpers/fetcher.ts
++++ b/frontend/src/helpers/fetcher.ts
+@@ -1,8 +1,22 @@
+ import axios from 'axios'
++import {axiosAdapter} from 'tierless/adapt-axios'
++import {restResources} from 'tierless/adapt'
+ import {getToken} from '@/helpers/auth'
+ 
++// The tierless I/O bottom: axios above this line is untouched (interceptors, services,
++// models all run as always); requests are fulfilled as tierless resource requests. In
++// the browser the exec is a direct fetch to the API origin — stock behavior. Browser-
++// pinned configs (progress, blobs, FormData) fall through to axios's own XHR adapter.
++const tierlessBottom = axiosAdapter({
++	// read window.API_URL per request, like the interceptor below keeps baseURL fresh —
++	// and in a session TWIN (this same module constructed server-side) window is shimmed
++	// per session and the exec's fetch works identically in Node
++	exec: (req) => restResources(new URL(window.API_URL, typeof location === 'undefined' ? window.API_URL : location.href).origin, {envelopeErrors: true})(req),
++	fallback: typeof XMLHttpRequest === 'undefined' ? undefined : axios.getAdapter('xhr'),
++})
++
+ export function HTTPFactory() {
+-	const instance = axios.create({baseURL: window.API_URL})
++	const instance = axios.create({baseURL: window.API_URL, adapter: tierlessBottom})
+ 
+ 	instance.interceptors.request.use((config) => {
+ 		// by setting the baseURL fresh for every request

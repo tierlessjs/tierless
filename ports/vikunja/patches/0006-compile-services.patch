@@ -1,0 +1,18 @@
+--- a/frontend/vite.config.ts
++++ b/frontend/vite.config.ts
+@@ -2,6 +2,7 @@
+ import {defineConfig, type PluginOption, loadEnv} from 'vite'
+ import {configDefaults} from 'vitest/config'
+ import vue from '@vitejs/plugin-vue'
++import tierless from 'tierless/vite'
+ import {URL, fileURLToPath} from 'node:url'
+ import {dirname, resolve} from 'node:path'
+ 
+@@ -118,6 +119,7 @@
+ 		},
+ 		plugins: [
+ 			vue(),
++			tierless({apiUrl: process.env.TIERLESS_API_URL || 'http://127.0.0.1:3456', compile: ['src/services/abstractService.ts', 'src/stores/tasks.ts', 'src/stores/projects.ts', 'src/stores/kanban.ts'], twins: 'src/tierlessTwins.ts', twinsStubs: ['@/message', '@/router', '@/stores/base', '@/stores/projects']}),
+ 			svgLoader({
+ 				// Since the svgs are already manually optimized via https://jakearchibald.github.io/svgomg/
+ 				// we don't need to optimize them again.

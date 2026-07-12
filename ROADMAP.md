@@ -2,37 +2,7 @@
 
 What's genuinely open. Everything that has landed — with its measurements and
 proofs — moved to [`CHANGELOG.md`](./CHANGELOG.md); the mechanism itself is
-proven (34 executable proofs, `npm test`).
-
-## Packaging & release
-
-`tierless` and `create-tierless` are published — `npm i tierless` /
-`npm create tierless@latest` work. Still open:
-
-- **Verified-provenance badge.** The publish workflow is in place
-  (`.github/workflows/publish.yml`: a `v*` tag runs the full CI gate, then
-  `npm publish --provenance` for both packages via npm OIDC trusted publishing —
-  no token). Remaining: the one-time trusted-publisher config on npmjs.com for
-  each package, then the next tag publishes with the green ✓ tying the release
-  to its exact source commit and build.
-- **TypeScript everywhere.** The framework's own source
-  (`packages/tierless/src/*.mts`/`*.cts`, `bin/`, `create-tierless`, `test/`, `bench/`) is
-  TypeScript, compiled or type-checked by `tsc` on every build — checked against
-  the real implementation, not hand-maintained separately. `"use tierless"` mix
-  modules can be authored in TypeScript too (`app.src.ts`): the compiler
-  detects the extension and strips erasable TS syntax (`node:module`'s
-  `stripTypeScriptTypes`, the same ceiling as `node --experimental-strip-types` —
-  no enums, no namespaces, no parameter properties) before parsing, so the rest
-  of the compiler stays untouched. `tierless types` reads each endpoint's
-  parameter list from its `run: ([sym, n = 1, ...rest]) => …` destructure (the
-  caller's real signature), so a wrong-arity `api.*` call in a mix module fails
-  to type-check; a run that takes the raw args array keeps the honest
-  `(...args: any[])` fallback. Still open: return types are `any` — inferring
-  them needs a type checker over the service body, not a parse.
-- **Production build story for the Vite plugin.** Dev is first-class (the
-  plugin hosts the endpoint on Vite's own server); prod works today by mounting
-  `attachTierless` with a CLI-built machine (see `docs/production.md` and
-  `examples/react-vite/server.prod.mjs`) but should become a build-time output.
+proven (the executable proofs behind `npm test`).
 
 ## Runtime hardening
 
@@ -57,10 +27,62 @@ proven (34 executable proofs, `npm test`).
   FORCED to cross as a §5 handle (never inlined into a continuation headed client-ward),
   and every deref of it is a monitored, per-principal call. Data-flow confidentiality for
   tier-crossing values without whole-program interposition.
-- **Whole-program placement optimization.** §6 prices one hop at a time (greedy);
-  Stip.js's search-based tier assignment optimized placement globally (total
-  communication, offline availability). A PDG-style global view over the suspension
-  graph could pre-place or replicate pure helpers better than local decisions.
+- **Whole-program placement optimization.** Trajectory pricing (`tierless/trace`,
+  `docs/trajectory.md`) now prices a site's whole recorded same-tier suffix instead of
+  one hop — measured 57% fewer bytes on a workflow where every greedy hop was locally
+  correct. Still open, in order of leverage: land the §6 decide loop in the shipped host
+  (fetch as a first-class protocol message — today the host always migrates and the
+  driver lives in the tests); a suffix horizon for long-running sessions (price up to
+  the first foreign-tier return, say — settle against real traces); and per-site suffix
+  stability in real applications, the load-bearing empirical unknown the recorder now
+  instruments. Beyond that, Stip.js-style global search over the suspension graph
+  (pre-placing or replicating pure helpers) remains the bigger swing.
+- **Profile fidelity: record FAILED touches.** A resource call that rejects is
+  invisible to the recorder (rec.res runs after a successful exec), so a run
+  whose compiled code catches the failure reads as a complete trajectory with a
+  missing touch — suffix stability can be learned from a path that didn't run.
+  Needs an error-touch record kind (not a fetchable zero-byte result) and
+  decide()/stability treatment for it.
+- **Session auth transport.** The vite shim carries the login token as a ws URL
+  query parameter, which reverse proxies and tracing systems log as the request
+  target. Move it to a first-message/subprotocol handshake (a protocol change
+  across shim, browser, and server) before any deployment posture beyond the
+  dev/demo flow.
+- **Byte pricing at the method boundary.** `methodMigrate` migrates on structural
+  evidence alone (a stable ≥2-call same-tier chain) without comparing continuation
+  bytes to the profiled fetch bytes the way `decide()` does — a method carrying a
+  large serializable frame over two tiny responses migrates and pays for it. The
+  fix needs the continuation encoded (or size-estimated) BEFORE the migrate
+  decision, an API change to the §6 callback; do it together with the shipped
+  decide loop above and re-measure the migrate arms.
+
+## Adoption & measurement
+
+- **Burst coalescing: review after more ports, or remove.** Implemented and
+  measured on Vikunja (ports/vikunja/COMPILING.md, 2026-07-09): merging
+  concurrent exec crossings into one `execBatch` frame cut session ws frames
+  24% with zero time or byte movement — concurrent requests already overlap
+  their RTTs, and deflate already absorbs payload repetition. Default OFF
+  (`__TIERLESS_EXEC_BATCH__` opts in). Decision rule: if no later port
+  surfaces a case where frame count is the paid unit (per-message pricing,
+  mobile radio budgets), remove the mechanism and keep the Vikunja results
+  as the recorded answer.
+
+- **The corpus program** (`docs/corpus.md`): a statistical claim over real apps —
+  "median X× less network wait, Y% less IO across N apps' own e2e journeys."
+  Rungs 1–3 are built (harness verified against socket ground truth; REST-proxy
+  adapter + route-workflow shim; Vikunja ported at a 2-line diff, 196/196 pass
+  parity, 13% less suite IO / 16% fewer round trips — median per test 35%
+  fewer bytes, 22% fewer trips). Open: the 10–20-app study reporting medians
+  and full distributions, losers included.
+
+- **Cash the measured 486 ms data-path lead** (ports/vikunja README, timing
+  section). Under real 80 ms RTT the port delivers all route data at t=260 vs
+  stock's t=746, yet click-to-render is at parity (859 vs 870 ms) because the
+  code path forfeits the lead. In order: preload workflow modules at boot (the
+  lazy chunk costs the first RTT before the ws send); let the router's guard
+  fetch race the network instead of waiting on the workflow hold (first answer
+  wins); then profile the remaining ~380 ms render tail on the ported arm.
 
 ## Bigger swings
 

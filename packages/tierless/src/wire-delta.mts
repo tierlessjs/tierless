@@ -66,7 +66,9 @@ export interface PlanDeltaOpts extends DeltaOpts {
   exact?: boolean;
 }
 
-const MAGIC = "SMD1";
+// SMD2: the handle record's flag byte became a bitfield (bit 1 kind, bit 2 cls) — same
+// versioning rule as wire-binary's SMW2; a skewed peer fails cleanly at checkMagic.
+const MAGIC = "SMD2";
 const isObj = (v: unknown): v is object => v !== null && typeof v === "object";
 const isMap = (v: unknown): v is Map<unknown, unknown> => v instanceof Map;
 const isSet = (v: unknown): v is Set<unknown> => v instanceof Set;
@@ -200,7 +202,7 @@ function emit(session: Session, rootVals: unknown[], frames: RootFrame[], req: R
   rootVals.forEach(internVal);
   for (const r of records) {
     si(r.id);
-    if (r.kind === "H") { si(r.v.owner); si(String(r.v.id)); if (r.v.kind) si(r.v.kind); }
+    if (r.kind === "H") { si(r.v.owner); si(String(r.v.id)); if (r.v.kind) si(r.v.kind); if (r.v.cls) si(r.v.cls); }
     else if (r.kind === "o") for (const k of ownKeys(r.v)) { si(k); internVal(r.v[k]); }
     else if (r.kind === "a") for (const e of r.v) internVal(e);
     else if (r.kind === "m") for (const [k, val] of r.v) { internVal(k); internVal(val); }
@@ -231,7 +233,7 @@ function emit(session: Session, rootVals: unknown[], frames: RootFrame[], req: R
   w.varu(records.length);
   for (const r of records) {
     w.varu(si(r.id));
-    if (r.kind === "H") { w.u8(2); w.varu(si(r.v.owner)); w.varu(si(String(r.v.id))); if (r.v.kind) { w.u8(1); w.varu(si(r.v.kind)); } else w.u8(0); }
+    if (r.kind === "H") { w.u8(2); w.varu(si(r.v.owner)); w.varu(si(String(r.v.id))); w.u8((r.v.kind ? 1 : 0) | (r.v.cls ? 2 : 0)); if (r.v.kind) w.varu(si(r.v.kind)); if (r.v.cls) w.varu(si(r.v.cls)); }
     else if (r.kind === "o") { const ks = ownKeys(r.v); w.u8(0); w.varu(ks.length); for (const k of ks) { w.varu(si(k)); node(r.v[k]); } }
     else if (r.kind === "a") { w.u8(1); w.varu(r.v.length); for (const e of r.v) node(e); }
     else if (r.kind === "m") { w.u8(3); w.varu(r.v.size); for (const [k, val] of r.v) { node(k); node(val); } }
@@ -262,7 +264,7 @@ function parseDelta(bytes: Uint8Array | ArrayBufferLike): { frames: RootFrame[];
     const sid = S(r.varu()); const kind = r.u8();
     if (kind === 0) { const c = r.count(), fields: [string, any][] = []; for (let j = 0; j < c; j++) { const k = S(r.varu()); fields.push([k, node()]); } changed.push({ sid, kind, fields }); }                       // whole object
     else if (kind === 1) { const c = r.count(), e: any[] = []; for (let j = 0; j < c; j++) e.push(node()); changed.push({ sid, kind, elems: e }); }                                                                 // whole array
-    else if (kind === 2) { const owner = S(r.varu()), id = S(r.varu()); const h: Handle = { __tierless_handle__: true, owner, id }; if (r.u8()) h.kind = S(r.varu()) as "array" | "object"; changed.push({ sid, kind, handle: h }); }       // §5 handle
+    else if (kind === 2) { const owner = S(r.varu()), id = S(r.varu()); const h: Handle = { __tierless_handle__: true, owner, id }; const fl = r.u8(); if (fl & 1) h.kind = S(r.varu()) as "array" | "object"; if (fl & 2) h.cls = S(r.varu()); changed.push({ sid, kind, handle: h }); }       // §5 handle (flags: 1 kind, 2 cls)
     else if (kind === 3) { const c = r.count(), entries: [any, any][] = []; for (let j = 0; j < c; j++) { const k = node(); entries.push([k, node()]); } changed.push({ sid, kind, entries }); }                            // whole Map
     else if (kind === 4) { const c = r.count(), vals: any[] = []; for (let j = 0; j < c; j++) vals.push(node()); changed.push({ sid, kind, vals }); }                                                                // whole Set
     else if (kind === 5) { const sc = r.count(), sets: [string, any][] = []; for (let j = 0; j < sc; j++) { const k = S(r.varu()); sets.push([k, node()]); } const dc = r.count(), dels: string[] = []; for (let j = 0; j < dc; j++) dels.push(S(r.varu())); changed.push({ sid, kind, sets, dels }); } // object PATCH
@@ -320,7 +322,7 @@ function scan(session: Session, rootVals: unknown[]): { reach: Map<string, objec
   const canon = (v: unknown): string => { v = sub(v); return isObj(v) ? "r" + session.idOf.get(v) : v === undefined ? "u" : typeof v === "bigint" ? "B" + v : typeof v + ":" + v; };
   const ver = new Map<string, number>();
   for (const [id, v] of reach) {
-    const c = isHandle(v) ? "H|" + v.owner + "|" + v.id + "|" + (v.kind || "")
+    const c = isHandle(v) ? "H|" + v.owner + "|" + v.id + "|" + (v.kind || "") + "|" + (v.cls || "")
       : isMap(v) ? "M|" + [...v].map(([k, val]) => canon(k) + "=" + canon(val)).join("|")
         : isSet(v) ? "S|" + [...v].map(canon).join("|")
           : Array.isArray(v) ? "a|" + v.map(canon).join("|")

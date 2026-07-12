@@ -20,6 +20,9 @@ export interface Handle {
   owner: string;
   id: string;
   kind?: "array" | "object";
+  /** Class identity of an excised compiled-class instance (the __tierless_cls stamp):
+   *  what a dynamic call park dispatches on without the live object (migrate-arm.md). */
+  cls?: string;
 }
 
 export function isHandle(x: unknown): x is Handle {
@@ -70,23 +73,50 @@ export interface EncodeOptions {
   tier?: EncodeTier | null;
   threshold?: number;
   content?: { store: ContentStoreView; peer: ContentPeerView } | null;
+  /** §5 excision by OWNERSHIP, not size: a value this predicate claims stays home as a
+   *  handle regardless of its size (functions always consult it — they otherwise cross
+   *  as undefined). The migrate arm passes an ownsValues-style scan here so live
+   *  instances and callbacks keep their identity across a round trip. Needs `tier`. */
+  excise?: ((v: unknown) => boolean) | null;
 }
 export interface DecodeOptions {
   content?: { store: ContentStoreView } | null;
+  /** Resolve handles OWNED HERE back to the live object (master in place): a stack
+   *  coming home gets its excised locals back by identity. Foreign handles stay opaque.
+   *  An owned handle the heap no longer holds throws — a corrupt session, never a
+   *  silently different object. */
+  tier?: { id: string; heapGet(hid: string): unknown } | null;
 }
 export interface EncodedGraph {
   roots: unknown[];
   objs: unknown[];
 }
 
-export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1024, content = null }: EncodeOptions = {}): EncodedGraph {
+export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1024, content = null, excise = null }: EncodeOptions = {}): EncodedGraph {
   const objs: any[] = [];          // id -> { k:"a"|"o"|"H"|"c", ... }
   const idOf = new Map<unknown, number>();   // object -> id (identity + cycle handling)
+
+  // §5 excision: park v in the local heap, emit the handle leaf (identity-deduped).
+  // The class stamp rides ONLY for DIRECT instances of the stamped class: a subclass
+  // may override the very method a far-side dispatch would resolve to the BASE machine,
+  // silently running the wrong code. Subclass instances stay unstamped — their calls
+  // park home (or hit a session twin, which constructs the real subclass and is exact).
+  const exciseTo = (v: unknown): any => {
+    const id = objs.length; idOf.set(v, id);
+    const proto = v && typeof v === "object" ? Object.getPrototypeOf(v) : null;
+    const cls = proto && Object.prototype.hasOwnProperty.call(proto, "__tierless_cls") ? (proto as { __tierless_cls?: unknown }).__tierless_cls : undefined;
+    objs.push({ k: "H", h: { __tierless_handle__: true, owner: tier!.id, id: tier!.heapPut(v), kind: Array.isArray(v) ? "array" : "object", ...(typeof cls === "string" ? { cls } : {}) } });
+    return { k: "r", id };
+  };
 
   function enc(v: unknown): any {
     let cah: string | undefined;                                      // set if v is a registered immutable subgraph shipped inline this once (tags its slot for the receiver to cache)
     if (v === undefined) return { k: "u" };
     if (typeof v === "bigint") return { k: "big", v: v.toString() };   // BigInt isn't JSON-safe
+    if (typeof v === "function" && tier && excise && excise(v)) {      // a function's effect lives in this heap — keep its identity home
+      if (idOf.has(v)) return { k: "r", id: idOf.get(v) };
+      return exciseTo(v);
+    }
     if (typeof v === "symbol") {                                       // well-known by name; Symbol.for by key; unique by graph node (identity within a round-trip)
       if (WELLKNOWN.has(v)) return { k: "symw", name: WELLKNOWN.get(v) };
       const key = Symbol.keyFor(v); if (key !== undefined) return { k: "symf", key };
@@ -103,12 +133,9 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
         content.peer.add(h); cah = h;                                 // first time: ship inline once and tag so the receiver caches it by hash
       }
     }
-    // big subgraph -> §5 handle into the owning tier's heap (stays tier-local)
-    if (tier && approxExceeds(v, threshold)) {
-      const id = objs.length; idOf.set(v, id);
-      objs.push({ k: "H", h: { __tierless_handle__: true, owner: tier.id, id: tier.heapPut(v), kind: Array.isArray(v) ? "array" : "object" } });
-      return { k: "r", id };
-    }
+    // §5 handle into the owning tier's heap (stays tier-local): claimed by ownership
+    // (the migrate arm's live instances/host objects) or simply too big to ship
+    if (tier && ((excise && excise(v)) || approxExceeds(v, threshold))) return exciseTo(v);
     const id = objs.length; idOf.set(v, id);              // reserve id BEFORE recursing (cycle-safe)
     if (v instanceof Map) { const slot: any = { k: "map", e: [] }; objs.push(slot); if (cah !== undefined) slot.cah = cah; for (const [mk, mv] of v) slot.e.push([enc(mk), enc(mv)]); return { k: "r", id }; }
     if (v instanceof Set) { const slot: any = { k: "set", e: [] }; objs.push(slot); if (cah !== undefined) slot.cah = cah; for (const sv of v) slot.e.push(enc(sv)); return { k: "r", id }; }
@@ -138,8 +165,14 @@ export function toBigInt(s: string): bigint {
   try { return BigInt(s); } catch { throw new RangeError("wire: invalid bigint literal"); }
 }
 
-export function decodeGraph({ roots, objs }: EncodedGraph, { content = null }: DecodeOptions = {}): unknown[] {
-  const built: any[] = (objs as any[]).map((s) => (s.k === "a" ? [] : s.k === "o" ? {} : s.k === "map" ? new Map() : s.k === "set" ? new Set() : s.k === "symu" ? Symbol(s.d) : s.k === "c" ? (content && content.store.get(s.h)) : s.h)); // pre-create for cycles/sharing; k:"c" resolves to the held immutable subgraph
+export function decodeGraph({ roots, objs }: EncodedGraph, { content = null, tier = null }: DecodeOptions = {}): unknown[] {
+  const home = (h: Handle): unknown => {   // an owned handle resolves to the live object; foreign ones stay opaque leaves
+    if (!tier || h.owner !== tier.id) return h;
+    const v = tier.heapGet(h.id);
+    if (v === undefined) throw new RangeError("wire: unknown local handle " + h.id);
+    return v;
+  };
+  const built: any[] = (objs as any[]).map((s) => (s.k === "a" ? [] : s.k === "o" ? {} : s.k === "map" ? new Map() : s.k === "set" ? new Set() : s.k === "symu" ? Symbol(s.d) : s.k === "c" ? (content && content.store.get(s.h)) : home(s.h))); // pre-create for cycles/sharing; k:"c" resolves to the held immutable subgraph
   const dec = (n: any): any => (n.k === "u" ? undefined : n.k === "big" ? toBigInt(n.v) : n.k === "glob" ? GLOBALS[n.name] : n.k === "symw" ? (Symbol as any)[n.name] : n.k === "symf" ? Symbol.for(n.key) : n.k === "p" ? n.v : built[n.id]);
   (objs as any[]).forEach((s, i) => {
     if (s.k === "a") for (const n of s.e) built[i].push(dec(n));

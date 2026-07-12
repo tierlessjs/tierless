@@ -9,6 +9,7 @@ export default [
   {
     ignores: [
       "node_modules/**",
+      "ports/work/**",   // fetched third-party source (no-vendor port work dir)
       // Compiler INPUTS (.src.js): plain developer code with free tier globals (api/commit) by design.
       "test/e2e/app/App.src.js",
       "test/e2e/cf-fixtures.src.js",
@@ -16,6 +17,7 @@ export default [
       "test/e2e/heap-auto.src.js",
       "test/e2e/heap-write.src.js",
       "test/e2e/policy-app.src.js",
+      "test/e2e/trio-app.src.js",
       "test/e2e/track-app.src.js",
       "test/e2e/delta-app.src.js",
       "test/e2e/conduit/App.src.js",
@@ -32,6 +34,7 @@ export default [
       "test/e2e/heap-auto.gen.mjs",
       "test/e2e/heap-write.gen.mjs",
       "test/e2e/policy-app.gen.mjs",
+      "test/e2e/trio-app.gen.mjs",
       "test/e2e/track-app.gen.mjs",
       "test/e2e/delta-app.gen.mjs",
       "test/e2e/conduit/bundle.gen.mjs",

@@ -166,6 +166,20 @@ hooks. `api.*` and `commit()` look like ordinary calls.
    intact) — with no `deref`/`writeBack` in the source. On the owning tier the read guard and
    write-back are no-ops/local. Reads auto-fetch on touch; writes auto-propagate on mutation.
 
+10. **Trajectory-priced placement, live** (`trio-app.src.js` → `trio-app.gen.mjs`,
+    `trio-live.mts`; the library is `tierless/trace`). The per-hop §6 rule (item 8) is
+    trajectory-blind: Trio's working set + three sequential server resources are sized so
+    fetch is locally cheaper at **every** hop — greedy fetches three times, each fetched
+    result inflating the continuation it later prices — yet one migration at the first hop
+    serves the rest inline and crosses **~57% fewer bytes**. The information that flips
+    hop A ("two more server resources follow") exists only in a **trace of a prior run**:
+    traced runs through the real host (`makeHost({ trace })`, the flag riding the
+    continuation itself as `F0.__trace`, both tiers' records sharing one stack-carried
+    order) feed `buildProfile()`, and `decide()` prices fetchA's whole same-tier suffix —
+    gated per site on suffix stability, and refusing a profile whose `BUNDLE_HASH` doesn't
+    match the running machine (a stale profile silently misattributes sites: pcs change
+    meaning across edits).
+
 ## Files
 
 | file | what |
@@ -198,6 +212,8 @@ hooks. `api.*` and `commit()` look like ordinary calls.
 | `heap-write.mts` | proof of **transparent write-back**: a browser edit auto-propagates to the server master under §5 CAS — in `npm test` |
 | `policy-app.src.js` → `policy-app.gen.mjs` | a Survey that builds a working set then needs a server data resource (the §6 boundary) |
 | `policy-live.mts` | **§6 migrate-vs-fetch over a real socket**: prices both from real bytes and steers what crosses — in `npm test` |
+| `trio-app.src.js` → `trio-app.gen.mjs` | a working set + THREE sequential server resources: the suffix greedy §6 can't see |
+| `trio-live.mts` | **trajectory-priced placement over a real socket**: traced runs → profile → the suffix flips a locally-losing hop — in `npm test` |
 | `verify-live.mts` | headless check of the live page via real Chromium clicks (run on demand) |
 
 ## Running
@@ -224,6 +240,7 @@ npm i -D @babel/parser@8 @babel/traverse@8 @babel/generator@8 @babel/types@8
 node packages/tierless/src/transform.cjs test/e2e/app/App.src.js test/e2e/app/bundle.gen.mjs
 node packages/tierless/src/transform.cjs test/e2e/cf-fixtures.src.js test/e2e/cf-fixtures.gen.mjs --bare
 node packages/tierless/src/transform.cjs test/e2e/policy-app.src.js test/e2e/policy-app.gen.mjs --bare
+node packages/tierless/src/transform.cjs test/e2e/trio-app.src.js test/e2e/trio-app.gen.mjs --bare
 node packages/tierless/src/transform.cjs test/e2e/heap-write.src.js test/e2e/heap-write.gen.mjs --bare --auto-deref --auto-writeback
 ```
 

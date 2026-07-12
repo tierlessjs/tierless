@@ -10,7 +10,11 @@
 // safe (Uint8Array/DataView/TextEncoder, no Buffer); ships as one binary frame.
 import { encodeGraph, decodeGraph } from "./graph.mjs";
 import { W, R, isVarInt, writeMagic, checkMagic, makeInterner, writeStrings, readStrings, strAt, rootsOf, rebuildStack, writeFrameHeader, readFrameHeader } from "./wire-io.mjs";
-const MAGIC = "SMW1";
+// SMW2: the handle record's flag byte became a bitfield (bit 1 kind, bit 2 cls) — an
+// SMW1 decoder would read a flags-3 record as the old boolean form and parse the cls
+// bytes as the next field, corrupting the frame. The magic bump makes a version-skewed
+// peer fail cleanly at checkMagic instead.
+const MAGIC = "SMW2";
 // The writer/hardened reader, magic header, string table, and frame flatten/rebuild live in
 // wire-io.mts (one copy, shared with the delta wire). This file owns only what is binary-
 // format-specific: the shape table, the node/slot tag encodings, and the numeric-array packs.
@@ -97,9 +101,9 @@ function readNode(r, S) {
 }
 // Serialize a continuation, mirroring encodeWire's frame-flattening, then writing the
 // {frames, req, {roots, objs}} structure as bytes. opts (tier/threshold) drive §5 excision.
-export function encodeWireBinary(stack, request, { tier = null, threshold = 8192, content = null } = {}) {
+export function encodeWireBinary(stack, request, { tier = null, threshold = 8192, content = null, excise = null } = {}) {
     const { rootVals, frames, req } = rootsOf(stack, request);
-    const graph = encodeGraph(rootVals, { tier, threshold, content });
+    const graph = encodeGraph(rootVals, { tier, threshold, content, excise });
     // pass 1: intern strings and collect object shapes ------------------------------------
     const { strs, intern } = makeInterner();
     const shapeMap = new Map(), shapes = []; // sig -> idx; shapes[idx] = [[keyStrIdx, nonEnum], ...]
@@ -164,6 +168,8 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
             intern(String(s.h.id));
             if (s.h.kind)
                 intern(s.h.kind);
+            if (s.h.cls)
+                intern(s.h.cls);
         }
         else if (s.k === "symu") {
             if (s.d !== undefined)
@@ -269,12 +275,11 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
             w.u8(4);
             w.varu(intern(s.h.owner));
             w.varu(intern(String(s.h.id)));
-            if (s.h.kind) {
-                w.u8(1);
+            w.u8((s.h.kind ? 1 : 0) | (s.h.cls ? 2 : 0));
+            if (s.h.kind)
                 w.varu(intern(s.h.kind));
-            }
-            else
-                w.u8(0);
+            if (s.h.cls)
+                w.varu(intern(s.h.cls));
         }
         else if (s.k === "symu") {
             w.u8(5);
@@ -288,7 +293,7 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
     }
     return w.done();
 }
-export function decodeWireBinary(bytes, { content = null } = {}) {
+export function decodeWireBinary(bytes, { content = null, tier = null } = {}) {
     const r = new R(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), "wire-binary");
     checkMagic(r, MAGIC);
     const strs = readStrings(r);
@@ -370,8 +375,11 @@ export function decodeWireBinary(bytes, { content = null } = {}) {
         else if (t === 4) {
             const owner = S(r.varu()), id = S(r.varu());
             const h = { __tierless_handle__: true, owner, id };
-            if (r.u8())
+            const fl = r.u8();
+            if (fl & 1)
                 h.kind = S(r.varu());
+            if (fl & 2)
+                h.cls = S(r.varu());
             slot = { k: "H", h };
         }
         else if (t === 5) {
@@ -410,7 +418,7 @@ export function decodeWireBinary(bytes, { content = null } = {}) {
         for (let i = 0; i < n; i++)
             objs.push(readSlot());
     }
-    const vals = decodeGraph({ roots, objs }, { content });
+    const vals = decodeGraph({ roots, objs }, { content, tier });
     return rebuildStack(frames, req, vals);
 }
 // A fresh start ships only the entry args — no continuation and no resource yet. Carry them through

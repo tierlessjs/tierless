@@ -1,0 +1,16 @@
+diff -ruN a/pkg/routes/static.go b/pkg/routes/static.go
+--- a/pkg/routes/static.go	2026-07-10 11:46:30.645608306 +0000
++++ b/pkg/routes/static.go	2026-07-10 11:46:30.670949010 +0000
+@@ -291,6 +291,12 @@
+ 		Level:     6,
+ 		MinLength: 256,
+ 		Skipper: func(c *echo.Context) bool {
++			// tierless corpus harness (test patch, both arms, OFF by default): include
++			// /api/ under gzip when VIKUNJA_TIERLESS_GZIP is set — the compressed-stock
++			// measurement arm. The default (skip /api/: raw JSON) is their shipped shape.
++			if os.Getenv("VIKUNJA_TIERLESS_GZIP") != "" {
++				return false
++			}
+ 			return strings.HasPrefix(c.Path(), "/api/")
+ 		},
+ 	}))

@@ -27,7 +27,9 @@
 // non-enumerable props extend mechanically (same node table as wire-binary).
 import { isHandle, approxExceeds, toBigInt } from "./graph.mjs";
 import { W, R, isVarInt, writeMagic, checkMagic, makeInterner, writeStrings, readStrings, strAt, rootsOf, rebuildStack, writeFrameHeader, readFrameHeader } from "./wire-io.mjs";
-const MAGIC = "SMD1";
+// SMD2: the handle record's flag byte became a bitfield (bit 1 kind, bit 2 cls) — same
+// versioning rule as wire-binary's SMW2; a skewed peer fails cleanly at checkMagic.
+const MAGIC = "SMD2";
 const isObj = (v) => v !== null && typeof v === "object";
 const isMap = (v) => v instanceof Map;
 const isSet = (v) => v instanceof Set;
@@ -236,6 +238,8 @@ function emit(session, rootVals, frames, req, changed, full = false) {
             si(String(r.v.id));
             if (r.v.kind)
                 si(r.v.kind);
+            if (r.v.cls)
+                si(r.v.cls);
         }
         else if (r.kind === "o")
             for (const k of ownKeys(r.v)) {
@@ -324,12 +328,11 @@ function emit(session, rootVals, frames, req, changed, full = false) {
             w.u8(2);
             w.varu(si(r.v.owner));
             w.varu(si(String(r.v.id)));
-            if (r.v.kind) {
-                w.u8(1);
+            w.u8((r.v.kind ? 1 : 0) | (r.v.cls ? 2 : 0));
+            if (r.v.kind)
                 w.varu(si(r.v.kind));
-            }
-            else
-                w.u8(0);
+            if (r.v.cls)
+                w.varu(si(r.v.cls));
         }
         else if (r.kind === "o") {
             const ks = ownKeys(r.v);
@@ -454,10 +457,13 @@ function parseDelta(bytes) {
             else if (kind === 2) {
                 const owner = S(r.varu()), id = S(r.varu());
                 const h = { __tierless_handle__: true, owner, id };
-                if (r.u8())
+                const fl = r.u8();
+                if (fl & 1)
                     h.kind = S(r.varu());
+                if (fl & 2)
+                    h.cls = S(r.varu());
                 changed.push({ sid, kind, handle: h });
-            } // §5 handle
+            } // §5 handle (flags: 1 kind, 2 cls)
             else if (kind === 3) {
                 const c = r.count(), entries = [];
                 for (let j = 0; j < c; j++) {
@@ -616,7 +622,7 @@ function scan(session, rootVals) {
     const canon = (v) => { v = sub(v); return isObj(v) ? "r" + session.idOf.get(v) : v === undefined ? "u" : typeof v === "bigint" ? "B" + v : typeof v + ":" + v; };
     const ver = new Map();
     for (const [id, v] of reach) {
-        const c = isHandle(v) ? "H|" + v.owner + "|" + v.id + "|" + (v.kind || "")
+        const c = isHandle(v) ? "H|" + v.owner + "|" + v.id + "|" + (v.kind || "") + "|" + (v.cls || "")
             : isMap(v) ? "M|" + [...v].map(([k, val]) => canon(k) + "=" + canon(val)).join("|")
                 : isSet(v) ? "S|" + [...v].map(canon).join("|")
                     : Array.isArray(v) ? "a|" + v.map(canon).join("|")

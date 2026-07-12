@@ -23,7 +23,9 @@ import type { Handle } from "tierless/graph";
 
 const { WebSocketServer, WebSocket } = createRequire(import.meta.url)("ws");
 const { check, ok } = makeCheck();
-type ResourceReq = Extract<MachineResult, { op: "resource" }>;
+// the EXEC parameter type is the full request union (op:"home" joined it with the
+// migrate arm); execs only ever SEE op:"resource" but must be assignable to Exec
+type ResourceReq = import("../../packages/tierless/src/types.mts").ResourceRequest;
 
 interface Row { id: number; title: string; score: number; body: string }
 interface Commit { total: number; count: number }

@@ -37,6 +37,8 @@ const cases: Case[] = [
   { file: "test/probes/types.mts", needs: ["the public surface is typed end to end: every exports-map entry resolves a declaration under strict nodenext, and misuse is rejected"] },
   { file: "test/probes/cli.mts", needs: ["the tierless CLI works end to end: build (custom resources), explain (the analysis made visible), api (load-time pre-ship check), types (the api surface as a declaration)"] },
   { file: "test/probes/vite-plugin.mts", needs: ["the Vite plugin turns a \"use tierless\" module into monitor-backed actions: transform + dev-server endpoint + ssr-loaded machine + sidecar authorization, end to end"] },
+  { file: "test/probes/vite-build.mts", needs: ["`vite build` emits the server machine + manifest and a prod server mounts it end to end, no second compile and no hand-written resolver"] },
+  { file: "test/probes/vite-build-compile.mts", needs: ["vite build emits a machine-only server bundle for compiled app modules; the gateway resumes a migrated chain from it"] },
   { file: "test/probes/create-app.mts", needs: ["create-tierless scaffolds a WORKING two-tier app: build, boot (api sidecar forked), seeded render, authorized write, monitor denial caught across the tier, clean end"] },
   { file: "test/e2e/heap-probe.mts",     needs: ["big locals stay home, fetched on deref, single-writer coherent"] },
   { file: "test/e2e/heap-live.mts",      needs: ["the dataset stayed on the server, crossing only when the browser derefed it"] },
@@ -47,8 +49,18 @@ const cases: Case[] = [
   { file: "test/e2e/evict-safety.mts",   needs: ["the served cache is byte-bounded: a long session of distinct derefs stays within a memory budget, LRU-evicts by recency, and every eviction costs at most a correct refetch"] },
   { file: "test/e2e/heap-serve.mts",     needs: ["the full §5 heap is wired into the real serving path: excision, deref-over-socket, CAS write-back in place, byte-bounded pinned cache, per-continuation owner-heap release, per-bundle gating on mixed endpoints — all through makeHost/serveApp/connect"] },
   { file: "test/e2e/connection-cap.mts", needs: ["the per-process connection cap refuses over-cap upgrades with 503, spares live sessions, and recycles freed slots"] },
+  { file: "test/e2e/ws-auth-live.mts",   needs: ["the session token rides a bearer subprotocol — read by the gateway, absent from URLs, never echoed — and protocol-less clients connect unchanged"] },
   { file: "test/e2e/policy-live.mts",    needs: ["informed FETCH", "priced migrate vs fetch from real bytes and steered the socket"] },
+  { file: "test/probes/trace.mts",       needs: ["run-level sampling, a wire-borne trace flag with one cross-tier order, truncation-safe profiles with per-feature size models, and a stability-gated trajectory rule over a greedy floor"] },
+  { file: "test/e2e/trio-live.mts",      needs: ["traces recorded through the real host priced fetchA's whole suffix and flipped a locally-losing hop", "the hash gate refuses stale history"] },
+  { file: "test/e2e/sink-throw.mts",     needs: ["a throwing sink is contained and counted: observability never changes the observed run's outcome"] },
   { file: "test/e2e/delta-live.mts",     needs: ["bounce + min(delta,full) + §5 excision + deref all compose, end to end"] },
+  { file: "test/probes/axios-adapter.mts", needs: ["all adapter translations hold"] },
+  { file: "test/probes/method-compile.mts", needs: ["class methods compile, park, and fall back correctly"] },
+  { file: "test/e2e/method-live.mts",      needs: ["frame and instance stay put, resources fetch, errors unwind, unbound falls back"] },
+  { file: "test/probes/migrate-arm.mts",   needs: ["a chain migrates in one crossing; the stop rule, identity, and unwind hold; the profile decides"] },
+  { file: "test/e2e/migrate-live.mts",     needs: ["the migrate arm runs live: a chain is one crossing, home segments see the real instance"] },
+  { file: "test/probes/store-compile.mts", needs: ["setup-store functions compile with call-time caps; captures rewrite precisely; the chain still batches"] },
 ];
 
 let failed = 0;

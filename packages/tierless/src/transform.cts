@@ -122,11 +122,21 @@ const DEFAULT_RESOURCES: Record<string, string> = { api: "server", commit: "brow
 let TIER_OF: Record<string, string> = { ...DEFAULT_RESOURCES };
 function allowlist(ast: t.File): void {
   traverse(ast, { CallExpression(p) {
+    // class bodies are handled per-method by compileClassMethods (which re-runs this pass
+    // on the isolated method); an uncompiled method must keep its RAW calls, not yields
+    if (p.findParent((q) => q.isClassBody())) return;
     const c = p.node.callee;
     let tier: string | null = null, name: string | null = null;
     const args = p.node.arguments;
     if (t.isMemberExpression(c) && t.isIdentifier(c.object) && TIER_OF[c.object.name] && t.isIdentifier(c.property)) {
       tier = TIER_OF[c.object.name]; name = c.object.name + "." + c.property.name;     // api.getTasks(...)
+    } else if (t.isMemberExpression(c) && t.isMemberExpression(c.object) && t.isIdentifier(c.property)
+      && (t.isThisExpression(c.object.object) || (t.isIdentifier(c.object.object) && c.object.object.name === "__self"))
+      && t.isIdentifier(c.object.property) && TIER_OF["this." + c.object.property.name]) {
+      // this.http.get(...) — an instance-held resource (config key "this.http"). The
+      // receiver is dropped from the request: the namespace is bound per tier by the
+      // exec, not carried as data (the instance itself never crosses for the call).
+      tier = TIER_OF["this." + c.object.property.name]; name = c.object.property.name + "." + c.property.name;
     } else if (t.isIdentifier(c) && TIER_OF[c.name]) {
       tier = TIER_OF[c.name]; name = "dom." + c.name;                                   // commit(...)
     } else if (t.isIdentifier(c) && c.name === "deref") {
@@ -136,7 +146,8 @@ function allowlist(ast: t.File): void {
     const y = t.yieldExpression(t.callExpression(t.identifier("R"),
       [t.stringLiteral(tier), t.stringLiteral(name), ...args]));
     y.loc = p.node.loc;                                            // keep the call site for analyze()/--source-map reporting
-    p.replaceWith(y);
+    // real code writes `await this.http.get(...)` — the await IS the suspension, absorb it
+    if (p.parentPath.isAwaitExpression()) p.parentPath.replaceWith(y); else p.replaceWith(y);
     // no p.skip(): keep traversing so nested tier calls in the args (e.g. api.f(api.g())) get rewritten too
   } });
 }
@@ -147,6 +158,7 @@ function allowlist(ast: t.File): void {
 // handlers and refuses to silently skip a finally.
 let blocks: Block[], suspSet: Set<string>, AUTO_DEREF = false, AUTO_WRITEBACK = false, TRACK_WRITES = false;
 let SOURCE_MAP = false, curLine = 0, srcFile = "", fnSites: Record<string, Record<number, number | undefined>> = {};   // --source-map: stamp each block with its source line so a migrated frame reports file:line, not just a pc
+let fnSlots: Record<string, Record<number, string[]>> = {};   // §5 stop rule: per program per state, the frame slots its segment references (docs/migrate-arm.md)
 const nb = (): number => { const b: Block = { lines: [], term: null }; if (SOURCE_MAP) b.line = curLine; blocks.push(b); return blocks.length - 1; };
 const isSusp = (s: t.Statement): boolean =>
   (t.isVariableDeclaration(s) && s.declarations.length === 1 && t.isYieldExpression(s.declarations[0].init)) ||
@@ -157,8 +169,16 @@ const isSusp = (s: t.Statement): boolean =>
 function suspInfo(s: t.Statement): { assign: string | null; op: string } {
   const y = (t.isVariableDeclaration(s) ? s.declarations[0].init : (s as t.ExpressionStatement).expression) as t.YieldExpression;
   const assign = t.isVariableDeclaration(s) ? (s.declarations[0].id as t.Identifier).name : null;
-  const a = (y.argument as t.CallExpression).arguments as t.Node[];   // R(tier, name, ...args)
-  return { assign, op: `{ op: "resource", tier: ${gen(a[0])}, name: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` };
+  const call = y.argument as t.CallExpression;
+  const a = call.arguments as t.Node[];
+  if ((call.callee as t.Identifier).name === "D") {
+    // D(recv, "member", ...args) — the DYNAMIC call park (docs/migrate-arm.md slice 3).
+    // The machine only DESCRIBES the call; the pump dispatches it (twin instance on a
+    // class-stamped handle / nested machine on a stamped stub / promise settled in
+    // place), because only the pump holds PROGRAMS, isHandle, and the twin registry.
+    return { assign, op: `{ op: "dyn", recv: ${gen(a[0])}, member: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` };
+  }
+  return { assign, op: `{ op: "resource", tier: ${gen(a[0])}, name: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` };   // R(tier, name, ...args)
 }
 // a statement that calls another suspendable (compiled) function -> push a sub-frame
 function callSusp(s: t.Statement): { assign: string | null; fn: string; args: string } | null {
@@ -192,8 +212,9 @@ function containsSuspCall(node: t.Node | t.Node[] | null | undefined): boolean {
 // which is all compileStmt knows how to lower. This is what lets ordinary code compile:
 // `return f(x)`, `out = api.get()`, `a + f(x)`, `g(f(x))`, `if (api.check())`, `while (...)`.
 const isResYield = (n: t.Node | null | undefined): n is t.YieldExpression => !!n && t.isYieldExpression(n) && t.isCallExpression(n.argument) && t.isIdentifier(n.argument.callee, { name: "R" });
+const isDynYield = (n: t.Node | null | undefined): n is t.YieldExpression => !!n && t.isYieldExpression(n) && t.isCallExpression(n.argument) && t.isIdentifier(n.argument.callee, { name: "D" });   // the dynamic call park (slice 3)
 const isSuspCallNode = (n: t.Node | null | undefined): n is t.CallExpression => !!n && t.isCallExpression(n) && t.isIdentifier(n.callee) && suspSet.has(n.callee.name);
-const isSuspExpr = (n: t.Node | null | undefined): n is t.YieldExpression | t.CallExpression => isResYield(n) || isSuspCallNode(n);
+const isSuspExpr = (n: t.Node | null | undefined): n is t.YieldExpression | t.CallExpression => isResYield(n) || isDynYield(n) || isSuspCallNode(n);
 // Same "generic walk, untyped inner walker" shape as containsSuspCall.
 function hasSuspInside(node: t.Node | t.Node[] | null | undefined, exclSelf: boolean): boolean {
   let found = false;
@@ -570,8 +591,58 @@ function compileFn(node: t.FunctionDeclaration): string {
     }
     throw new Error("bad terminator " + (tm as { kind: string }).kind);
   };
-  const cases = ids.map((id) => { const blk = blocks[id]; const lines = blk.lines.slice(); lines.push(emitTerm(blk.term!)); return `      case ${R(id)}:\n        ${lines.join("\n        ")}`; }).join("\n");
+  const caseText = new Map<number, string>();   // raw id -> the case's full emitted text (lines + term)
+  const cases = ids.map((id) => { const blk = blocks[id]; const lines = blk.lines.slice(); lines.push(emitTerm(blk.term!)); caseText.set(id, lines.join("\n")); return `      case ${R(id)}:\n        ${lines.join("\n        ")}`; }).join("\n");
   if (SOURCE_MAP) { const sites: Record<number, number | undefined> = {}; for (const id of ids) sites[R(id)] = blocks[id].line; fnSites[fnName] = sites; }  // pc -> source line
+
+  // §5 stop-rule metadata (docs/migrate-arm.md): per resume state, the frame slots the
+  // segment entered there references before its next suspension. Computed on the EMITTED
+  // text (F.<name> occurrences — reads, writes, and term expressions alike), closed over
+  // every successor a step can reach without returning from the step function. Throw and
+  // finally terms over-approximate with every handler in the function: coming home early
+  // is a lost optimization, running a segment beside a handle is a wrong program.
+  {
+    const allCatch: number[] = [], allFin: number[] = [], allAbrupt: number[] = [];
+    for (const id of ids) { const tm = blocks[id].term!;
+      if (tm.kind === "pushTry") { if (tm.catch != null) allCatch.push(tm.catch); if (tm.fin != null) allFin.push(tm.fin); }
+      if (tm.kind === "abrupt" && tm.targetRaw != null) allAbrupt.push(tm.targetRaw);
+    }
+    const succs = (id: number): number[] => { const tm = blocks[id].term!;
+      switch (tm.kind) {
+        case "jump": return [tm.to];
+        case "branch": return [tm.then, tm.else];
+        case "pushTry": return [tm.to];
+        case "throw": return [...allCatch, ...allFin];
+        case "finish": return [tm.after, ...allCatch, ...allFin, ...allAbrupt];
+        case "abrupt": return [...(tm.targetRaw != null ? [tm.targetRaw] : []), ...allFin];
+        default: return [];                       // susp/call/ret end the step — the next segment gets its own check
+      }
+    };
+    // args are referenced by ELEMENT (`this` lowers to F.args[0], params to F.args[i]) —
+    // keep that precision, or one excised instance would park every param-using segment.
+    // A dyn park whose RECEIVER is a DIRECT slot (F.x / F.args[i]) is exempted first:
+    // the pump's dispatch is handle-aware by construction (twin / machine / home), so a
+    // handle IN that slot must not trip the stop rule. A receiver that is a PATH through
+    // a slot (F.args[0].svc) stays scanned — evaluating it on a handle would misread,
+    // so the segment correctly parks home. Argument expressions always stay scanned.
+    const refsOf = (id: number): Set<string> => {
+      const out = new Set<string>();
+      const text = caseText.get(id)!.replace(/\bop: "dyn", recv: F\.(?:args\[\d+\]|[A-Za-z_$][\w$]*)(?=,)/g, 'op: "dyn"');
+      for (const m of text.matchAll(/\bF\.([A-Za-z_$][\w$]*)(\[(\d+)\])?/g)) {
+        if (m[1] === "pc") continue;
+        out.add(m[1] === "args" && m[3] !== undefined ? `args[${m[3]}]` : m[1]);
+      }
+      return out;
+    };
+    const table: Record<number, string[]> = {};
+    for (const id of ids) {
+      const seen = new Set<number>([id]), refs = new Set<string>();
+      const walk = [id];
+      while (walk.length) { const b = walk.pop()!; for (const r of refsOf(b)) refs.add(r); for (const s of succs(b)) if (!seen.has(s)) { seen.add(s); walk.push(s); } }
+      if (refs.size) table[R(id)] = [...refs].sort();
+    }
+    fnSlots[fnName] = table;
+  }
   // default: every reachable pc has a case, so landing here means a corrupt frame — a transform bug, or
   // a continuation mangled in transit. Hard-error at once instead of letting `while (true)` spin forever:
   // fail fast and loud rather than hang. (No valid run reaches it; this is a safety net, not control flow.)
@@ -992,20 +1063,263 @@ function collectProgram(ast: t.File) {
   return { fnPaths, rest, susp, directly, calls };
 }
 
+// The module's own top-level RELATIVE import/export-from specifiers (`./`, `../`), in source
+// form. The compiled machine keeps these verbatim (they sit in `kept`); when the Vite plugin
+// emits the server copy to a different directory it rewrites them relative to that directory
+// (see vite.mts). Bare specifiers (packages) resolve from node_modules unchanged, so they're
+// not listed.
+function relativeImports(rest: t.Statement[]): string[] {
+  const specs: string[] = [];
+  for (const n of rest) {
+    const src = t.isImportDeclaration(n) || t.isExportNamedDeclaration(n) || t.isExportAllDeclaration(n) ? n.source : null;
+    if (src && t.isStringLiteral(src) && src.value.startsWith(".")) specs.push(src.value);
+  }
+  return [...new Set(specs)];
+}
+
+// ---- top-level class methods as PROGRAMS ------------------------------------------------
+// The unit real apps actually write is the class method (service layers), so each method
+// of a top-level named class that makes tier calls compiles into a PROGRAM named
+// Cls$method, with the receiver as frame arg 0 (`this` -> __self, arrow-aware). The kept
+// class's method becomes a stub routing through the module's bound method host
+// (__bindTierlessMethods) and falling back to the untouched original — an unbound bundle
+// behaves stock, byte for byte. Per-method and graceful: a method the compiler can't
+// carry stays original and is reported in meta.methods with the reason.
+function compileClassMethods(ast: t.File, progs: string[], meta: CompileMeta, rest: t.Statement[]): void {
+  const stubProps: t.Statement[] = [];   // Cls.prototype.m.__tierless_program = "Cls$m" — what the dynamic call park dispatches on
+  for (const top of ast.program.body) {
+    const cls = t.isClassDeclaration(top) ? top
+      : (t.isExportNamedDeclaration(top) || t.isExportDefaultDeclaration(top)) && t.isClassDeclaration(top.declaration) ? top.declaration
+        : null;
+    if (!cls) continue;
+    if (!cls.id) { meta.methods.push({ class: "(default)", method: "*", program: null, error: "anonymous default-export class — name it to compile its methods" }); continue; }
+    const clsName = cls.id.name;
+    let compiledAny = false;
+    // sibling methods with DIRECT tier calls return promises by construction — a sync
+    // wrapper's `return this.post(...)` may safely become a dyn park (see lowerMethod)
+    const tierSiblings = new Set<string>();
+    for (const m of cls.body.body) {
+      if (!t.isClassMethod(m) || !t.isIdentifier(m.key)) continue;
+      let hit = false;
+      t.traverseFast(m, (n) => {
+        if (t.isCallExpression(n) && t.isMemberExpression(n.callee) && t.isMemberExpression(n.callee.object)
+          && t.isThisExpression(n.callee.object.object) && t.isIdentifier(n.callee.object.property) && TIER_OF["this." + n.callee.object.property.name]) hit = true;
+      });
+      if (hit) tierSiblings.add(m.key.name);
+    }
+    for (const m of [...cls.body.body]) {
+      if (!t.isClassMethod(m) || m.kind !== "method" || m.static || m.computed || !t.isIdentifier(m.key)) continue;
+      const mName = m.key.name;
+      const progName = clsName + "$" + mName;
+      try {
+        const prog = lowerMethod(clsName, mName, m, progName, tierSiblings);
+        if (!prog) continue;                                       // no tier calls — stays a plain method
+        progs.push(prog);
+        meta.programs.push(progName);
+        meta.methods.push({ class: clsName, method: mName, program: progName });
+        // keep the original under a mangled name; the visible method becomes the stub
+        cls.body.body.push(t.classMethod("method", t.identifier("__tierless_orig_" + mName), m.params, m.body, false, false, false, m.async));
+        m.params = [];                                             // stub reads `arguments`; original params would re-evaluate defaults
+        m.body = t.blockStatement([t.returnStatement(t.conditionalExpression(
+          t.binaryExpression("===", t.unaryExpression("typeof", t.identifier("__TIERLESS_METHOD__")), t.stringLiteral("function")),
+          t.callExpression(t.identifier("__TIERLESS_METHOD__"), [t.stringLiteral(progName), t.thisExpression(),
+            t.callExpression(t.memberExpression(t.identifier("Array"), t.identifier("from")), [t.identifier("arguments")])]),
+          t.callExpression(t.memberExpression(t.thisExpression(), t.identifier("__tierless_orig_" + mName)), [t.spreadElement(t.identifier("arguments"))]),
+        ))]);
+        // stamp the stub with its program name: a compiled CALLER's dynamic park reads it
+        // to push this method as a nested machine instead of awaiting an opaque promise
+        stubProps.push(t.expressionStatement(t.assignmentExpression("=",
+          t.memberExpression(t.memberExpression(t.memberExpression(t.identifier(clsName), t.identifier("prototype")), t.identifier(mName)), t.identifier("__tierless_program")),
+          t.stringLiteral(progName))));
+        compiledAny = true;
+      } catch (e) {
+        meta.methods.push({ class: clsName, method: mName, program: null, error: (e as Error).message.split("\n")[0] });
+      }
+    }
+    // class identity for §5: excision stamps it onto the handle (h.cls), so a dynamic
+    // call park can dispatch to a session twin or this class's machine WITHOUT the live
+    // instance (docs/migrate-arm.md "the dispatch problem")
+    if (compiledAny) stubProps.push(t.expressionStatement(t.assignmentExpression("=",
+      t.memberExpression(t.memberExpression(t.identifier(clsName), t.identifier("prototype")), t.identifier("__tierless_cls")),
+      t.stringLiteral(clsName))));
+  }
+  rest.push(...stubProps);   // `kept` is generated from rest — program-body pushes would never emit
+}
+
+// Residual awaits of MEMBER CALLS become dynamic call parks (docs/migrate-arm.md
+// slice 3): `await x.m(a)` -> `yield D(x, "m", a)` — resolved at RUNTIME by the pump.
+// Shared by the method and store-function lowerings; awaits that survive it reject.
+// Only awaits BELONGING to the lowered function rewrite (an await's owner is its nearest
+// enclosing function, arrows included) — an await inside a nested function is that
+// closure's own suspension: it stays plain JS, runs wherever its segment runs, and any
+// escaping promise is ownedUnit, so the §5 stop rule fences it.
+function rewriteDynAwaits(file: t.File, fnNode: t.FunctionDeclaration): void {
+  traverse(file, { AwaitExpression(ap) {
+    if (ap.getFunctionParent()?.node !== fnNode) return;
+    const arg = ap.node.argument;
+    if (t.isCallExpression(arg) && t.isMemberExpression(arg.callee) && !arg.callee.computed && t.isIdentifier(arg.callee.property) && !arg.arguments.some((x) => t.isSpreadElement(x))) {
+      const y = t.yieldExpression(t.callExpression(t.identifier("D"),
+        [arg.callee.object as t.Expression, t.stringLiteral(arg.callee.property.name), ...(arg.arguments as t.Expression[])]));
+      y.loc = ap.node.loc;
+      ap.replaceWith(y);
+    }
+  } });
+}
+
+// ---- Pinia-style setup-store functions as PROGRAMS (docs/migrate-arm.md slice 3) --------
+// The other unit real apps write: `defineStore(key, () => { ... async function f() {...}
+// ... })`. Each async function DECLARED in the setup body whose awaits reach tier calls
+// (directly or through awaited member calls) compiles into a PROGRAM named key$f, with
+// its free setup-scope bindings (refs, service instances, sibling stores) rewritten to
+// `__caps.<name>` — frame arg 0, built AT CALL TIME from the live closure, excised whole
+// under §5 like a method's __self. The kept function becomes the same routing stub the
+// class path uses, falling back to the untouched original. Per-function and graceful.
+function compileStoreFunctions(ast: t.File, progs: string[], meta: CompileMeta): void {
+  traverse(ast, { CallExpression(csp) {
+    if (!t.isIdentifier(csp.node.callee, { name: "defineStore" })) return;
+    const keyArg = csp.node.arguments[0];
+    const setup = csp.get("arguments.1") as NodePath;
+    if (!t.isStringLiteral(keyArg) || !(setup.isArrowFunctionExpression() || setup.isFunctionExpression())) return;
+    const storeKey = keyArg.value.replace(/[^A-Za-z0-9_$]/g, "_");
+    const body = setup.get("body");
+    if (!body || Array.isArray(body) || !body.isBlockStatement()) return;
+
+    for (const stmtPath of body.get("body")) {
+      if (!stmtPath.isFunctionDeclaration() || !stmtPath.node.async || !stmtPath.node.id) continue;
+      const fnName = stmtPath.node.id.name;
+      const progName = storeKey + "$" + fnName;
+      try {
+        // free bindings — the caps. EVERYTHING bound outside the function captures:
+        // setup-scope refs and services, and MODULE-scope imports/consts alike. Module
+        // singletons (a router, i18n, a base store) are browser-owned live values the
+        // slot rule couldn't fence as imports — through the caps handle they fence like
+        // any owned slot, and the machine's server bundle needs (almost) no app imports.
+        // An ASSIGNMENT to a captured binding can't be carried (the caps object is a
+        // snapshot of bindings, not the bindings themselves) — the function stays original.
+        const captures: string[] = [];
+        const seen = new Set<string>();
+        const within = (p: NodePath, anc: NodePath): boolean => p === anc || !!p.findParent((q) => q === anc);
+        stmtPath.traverse({ ReferencedIdentifier(ip) {
+          const name = ip.node.name;
+          if (seen.has(name)) return;
+          const b = ip.scope.getBinding(name);
+          if (!b || within(b.scope.path, stmtPath)) return;               // fn-local or a true global: stays as-is
+          seen.add(name); captures.push(name);
+          for (const v of b.constantViolations) if (within(v, stmtPath)) throw new Error(`tierless: ${storeKey}.${fnName} assigns to captured binding '${name}' — a caps snapshot can't carry the write; the function stays uncompiled`);
+        } });
+
+        // isolated machine copy: function key$f(__caps, ...params) { body }, captures
+        // rewritten to __caps.<name> — precisely, via the isolated file's own scope
+        // (a nested shadowing declaration keeps its local meaning)
+        const fnNode = t.functionDeclaration(t.identifier(progName), [t.identifier("__caps"), ...(stmtPath.node.params.map((x) => t.cloneNode(x, true)) as t.FunctionDeclaration["params"])], t.cloneNode(stmtPath.node.body, true));
+        const file = t.file(t.program([fnNode]));
+        const capSet = new Set(captures);
+        traverse(file, { ReferencedIdentifier(ip) {
+          if (!capSet.has(ip.node.name) || ip.scope.getBinding(ip.node.name)) return;   // bound in the copy = shadowed
+          ip.replaceWith(t.memberExpression(t.identifier("__caps"), t.identifier(ip.node.name)));
+        } });
+        allowlist(file);
+        rewriteDynAwaits(file, fnNode);
+        let yields = 0;
+        traverse(file, { YieldExpression(yp) { if (isResYield(yp.node) || isDynYield(yp.node)) yields++; } });
+        if (!yields) continue;                                            // no tier-reaching awaits: stays a plain function
+        traverse(file, { ThisExpression(tp) {
+          throw new Error(`tierless: ${storeKey}.${fnName} uses \`this\` (line ${tp.node.loc?.start.line ?? "?"}) — setup-store functions have no instance; the function stays uncompiled`);
+        } });
+        traverse(file, { AwaitExpression(ap) {
+          if (ap.getFunctionParent()?.node !== fnNode) return;     // a nested closure's own await: plain JS, stays
+          throw new Error(`tierless: ${storeKey}.${fnName} awaits a non-call value (line ${ap.node.loc?.start.line ?? "?"}) — a pending native promise can't migrate; the function stays uncompiled`);
+        } });
+        let mpath: NodePath<t.FunctionDeclaration> | null = null;
+        traverse(file, { FunctionDeclaration(p) { if (p.node.id?.name === progName) { mpath = p; p.stop(); } } });
+        progs.push(lower(mpath!));
+        meta.programs.push(progName);
+        meta.methods.push({ class: "store:" + storeKey, method: fnName, program: progName });
+
+        // keep the original under a mangled name; the visible function becomes the stub.
+        // The caps literal is built AT CALL TIME from the live closure — always current,
+        // no declaration-order constraints (function declarations hoist).
+        const origName = "__tierless_orig_" + fnName;
+        const orig = t.functionDeclaration(t.identifier(origName), stmtPath.node.params, stmtPath.node.body, false, stmtPath.node.async);
+        const capsLit = t.objectExpression(captures.map((n) => t.objectProperty(t.identifier(n), t.identifier(n), false, true)));
+        stmtPath.node.params = [];
+        stmtPath.node.body = t.blockStatement([t.returnStatement(t.conditionalExpression(
+          t.binaryExpression("===", t.unaryExpression("typeof", t.identifier("__TIERLESS_METHOD__")), t.stringLiteral("function")),
+          t.callExpression(t.identifier("__TIERLESS_METHOD__"), [t.stringLiteral(progName), capsLit,
+            t.callExpression(t.memberExpression(t.identifier("Array"), t.identifier("from")), [t.identifier("arguments")])]),
+          t.callExpression(t.identifier(origName), [t.spreadElement(t.identifier("arguments"))]),
+        ))]);
+        stmtPath.insertAfter([orig,
+          // the stamp a compiled CALLER's dynamic park dispatches on (sibling store calls)
+          t.expressionStatement(t.assignmentExpression("=",
+            t.memberExpression(t.identifier(fnName), t.identifier("__tierless_program")), t.stringLiteral(progName)))]);
+      } catch (e) {
+        meta.methods.push({ class: "store:" + storeKey, method: fnName, program: null, error: (e as Error).message.split("\n")[0] });
+      }
+    }
+  } });
+}
+
+// Lower ONE method in isolation: synthesize `function Cls$m(__self, ...params) { body }`
+// in its own File, rewrite `this` (through arrows — they share the method's this; not
+// through nested functions — they have their own), run the allow-list on it (which also
+// absorbs `await` around tier calls), and reject what can't migrate with a precise
+// reason. Returns null when the method makes no tier calls at all.
+function lowerMethod(clsName: string, mName: string, m: t.ClassMethod, progName: string, tierSiblings: Set<string> = new Set()): string | null {
+  const fnNode = t.functionDeclaration(t.identifier(progName), [t.identifier("__self"), ...(m.params.map((x) => t.cloneNode(x, true)) as t.FunctionDeclaration["params"])], t.cloneNode(m.body, true));
+  const file = t.file(t.program([fnNode]));
+  allowlist(file);                                                 // recognizes both this.<ns> and __self.<ns>, so it can run before the this-rewrite
+  rewriteDynAwaits(file, fnNode);                                  // awaited member calls -> dynamic parks; bare awaits still reject below
+  // a WRAPPER's `return this.m(...)` where m is a tier-calling sibling: the callee is
+  // promise-returning by construction, so the tail joins the run as a dyn park — the
+  // chains real services build out of delegation (update -> post) stay ONE traced run.
+  traverse(file, { ReturnStatement(rp) {
+    if (rp.getFunctionParent()?.node !== fnNode) return;
+    const arg = rp.node.argument;
+    if (t.isCallExpression(arg) && t.isMemberExpression(arg.callee) && !arg.callee.computed && t.isIdentifier(arg.callee.property)
+      && tierSiblings.has(arg.callee.property.name)
+      && (t.isThisExpression(arg.callee.object) || t.isIdentifier(arg.callee.object, { name: "__self" }))
+      && !arg.arguments.some((x) => t.isSpreadElement(x))) {
+      rp.node.argument = t.yieldExpression(t.callExpression(t.identifier("D"),
+        [arg.callee.object as t.Expression, t.stringLiteral(arg.callee.property.name), ...(arg.arguments as t.Expression[])]));
+    }
+  } });
+  let yields = 0;
+  traverse(file, { YieldExpression(yp) { if (isResYield(yp.node) || isDynYield(yp.node)) yields++; } });
+  if (!yields) return null;                                        // no tier calls: not a compilation candidate, no report either
+  traverse(file, { Super(sp) {
+    throw new Error(`tierless: ${clsName}.${mName} uses super (line ${sp.node.loc?.start.line ?? "?"}) — super dispatch can't be carried by the frame yet; the method stays uncompiled`);
+  } });
+  traverse(file, { ThisExpression(tp) {
+    let f = tp.getFunctionParent();                                // arrows share the enclosing this
+    while (f && f.isArrowFunctionExpression()) f = f.getFunctionParent();
+    if (f && f.node === fnNode) tp.replaceWith(t.identifier("__self"));
+  } });
+  traverse(file, { AwaitExpression(ap) {
+    if (ap.getFunctionParent()?.node !== fnNode) return;           // a nested closure's own await: plain JS, stays
+    throw new Error(`tierless: ${clsName}.${mName} awaits a non-resource value (line ${ap.node.loc?.start.line ?? "?"}) — a pending native promise can't migrate; the method stays uncompiled`);
+  } });
+  let path: NodePath<t.FunctionDeclaration> | null = null;
+  traverse(file, { FunctionDeclaration(p) { if (p.node.id?.name === progName) { path = p; p.stop(); } } });
+  return lower(path!);
+}
+
 function compile(src: string, preamble: string): { code: string; meta: CompileMeta } {
   const ast = parser.parse(src, { sourceType: "module" }) as unknown as t.File;
   allowlist(ast);
   checkNestedSuspensions(ast);
   USED_FORIN = false; USED_OBJREST = false;
-  fnSites = {};
+  fnSites = {}; fnSlots = {};
   const { fnPaths, rest, susp } = collectProgram(ast);
   suspSet = susp;
 
-  const pure: string[] = [], progs: string[] = [], meta: CompileMeta = { programs: [], exported: [], pure: [] };
+  const pure: string[] = [], progs: string[] = [], meta: CompileMeta = { programs: [], exported: [], pure: [], imports: relativeImports(rest), methods: [] };
   for (const [name, { p, exported }] of fnPaths) {                // pure single-tier fns run wholesale (lower() handles suspendable ones)
     if (suspSet.has(name)) { progs.push(lower(p!)); meta.programs.push(name); if (exported) meta.exported.push(name); }
     else { if (TRACK_WRITES) insertDirtyBarriers(p!); pure.push((exported ? "export " : "") + gen(p!.node)); meta.pure.push(name); }  // a pure helper can still mutate continuation state
   }
+  compileClassMethods(ast, progs, meta, rest);                    // class methods with tier calls (their nodes sit in `rest` — the stub swap lands in `kept`)
+  compileStoreFunctions(ast, progs, meta);                        // setup-store functions (defineStore closures) — stub swaps mutate nodes already in `rest`
   const head = preamble + (TRACK_WRITES ? "\n" + TRACK_PREAMBLE : "");
   const kept = rest.length ? rest.map(gen).join("\n") + "\n" : ""; // imports / top-level state the module declared
   // for-of/for-in and object-rest emit a tiny pure helper — but ONLY when a source actually uses
@@ -1014,8 +1328,82 @@ function compile(src: string, preamble: string): { code: string; meta: CompileMe
   // --source-map: a pc->line table per program + a frameSite helper, so a migrated frame reports a
   // portable file:line. Gated, so without the flag the bundle is byte-for-byte what it was before.
   const sm = SOURCE_MAP ? `\nexport const SOURCE_FILE = ${JSON.stringify(srcFile)};\nexport const SITES = ${JSON.stringify(fnSites)};\nexport const frameSite = (f) => { const m = SITES[f.fn], ln = m && m[f.pc]; return SOURCE_FILE + ":" + (ln || "?"); };\nexport const stackSites = (stack) => stack.map(frameSite);\n` : "";
-  const code = head + "\n" + kept + helpers + (pure.length ? pure.join("\n") + "\n" : "") + "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};\n" + DRIVER + sm;
+  // __slots: the §5 stop-rule table the pump consults before stepping a frame (only states
+  // that reference any slot appear; programs with no entries are omitted entirely).
+  const slotTable = Object.fromEntries(Object.entries(fnSlots).filter(([, t]) => Object.keys(t).length));
+  const slotsOut = Object.keys(slotTable).length ? `export const __slots = ${JSON.stringify(slotTable)};\n` : "";
+  const body = head + "\n" + kept + helpers + (pure.length ? pure.join("\n") + "\n" : "") + "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};\n" + slotsOut + DRIVER + sm;
+  // BUNDLE_HASH: identity of this exact compiled machine, for trace/profile validity (§6 of the
+  // trajectory design: a site key is (fn, pc) and pcs silently change meaning across edits, so a
+  // profile is only valid against the bundle whose traces built it). Hashed over the emitted code,
+  // which is identical on both tiers.
+  const hash = fnv1a(body);
+  const code = body + `export const BUNDLE_HASH = ${JSON.stringify(hash)};\n`;
+
+  // Machine-only server module (meta.serverCode): what a gateway needs to RESUME a
+  // migrated method — programs, slots, driver, the module's own helper functions, and
+  // only the imports that machine text references. The classes (and their constructor
+  // graph: http factories, framework glue, window-touching modules) never load in Node;
+  // the stop rule guarantees segments touching the live instance run at home, so the
+  // machine never misses them. Same BUNDLE_HASH: it names the MACHINE, which is shared.
+  if (meta.methods.some((m) => m.program)) {
+    // Module helper functions ride ONLY if machine text (transitively) references them:
+    // an app file's unrelated helpers routinely touch browser graphs (services, vue,
+    // routers) that must never load in Node. Fixpoint over the pure list; imports then
+    // filter against exactly what ships. The reference test requires the name NOT be
+    // preceded by '.' or a word char: `__caps.router` is a property walk through the
+    // caps handle, not a use of the router import.
+    // not preceded by . (property walk), a word char, or a quote (a dyn park's member
+    // STRING names the callee — it is data, not a binding reference)
+    const refdIn = (name: string, text: string): boolean => new RegExp(`(?<![.\\w$"'])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text);
+    let machineText = progs.join(",\n");
+    const included = new Set<number>();
+    // referenced TOP-LEVEL BINDINGS (const config values, arrow helpers) join the closure
+    // like pure fns — the machine text names them, and without their declarations esbuild
+    // treats them as globals and the migrated method dies at runtime. Classes stay
+    // excluded by design (the machine reaches instances through frames, never constructs).
+    const restDecls = rest
+      .map((n) => (t.isExportNamedDeclaration(n) && n.declaration && t.isVariableDeclaration(n.declaration) ? n.declaration : n))
+      .filter((n): n is t.VariableDeclaration => t.isVariableDeclaration(n));
+    const declNames = restDecls.map((n) => n.declarations.map((d) => (t.isIdentifier(d.id) ? d.id.name : null)).filter((x): x is string => !!x));
+    const declIncluded = new Set<number>();
+    for (let changed = true; changed;) {
+      changed = false;
+      meta.pure.forEach((name, i) => {
+        if (!included.has(i) && refdIn(name, machineText)) { included.add(i); machineText += "\n" + pure[i]; changed = true; }
+      });
+      declNames.forEach((names, i) => {
+        if (!declIncluded.has(i) && names.some((nm) => refdIn(nm, machineText))) { declIncluded.add(i); machineText += "\n" + gen(restDecls[i]); changed = true; }
+      });
+    }
+    const keptPure = [...included].sort((a, b) => a - b).map((i) => pure[i]);
+    const keptDecls = [...declIncluded].sort((a, b) => a - b).map((i) => gen(restDecls[i]));   // original order: decls may reference each other
+    const refd = (name: string): boolean => refdIn(name, machineText);
+    const keptImports = rest
+      .filter((n): n is t.ImportDeclaration => t.isImportDeclaration(n))
+      // side-effect-only imports (no specifiers — polyfills, global registrations) are
+      // KEPT: the browser machine runs them; dropping them would make the tiers diverge.
+      // A non-Node-safe one fails the emit-time bundling loudly instead.
+      .filter((n) => n.specifiers.length === 0 || n.specifiers.some((s) => refd(s.local.name)))
+      .map((n) => gen(n));
+    meta.serverCode = [
+      ...keptImports,
+      helpers.trimEnd(),
+      ...keptDecls,
+      ...keptPure,
+      "export const PROGRAMS = {\n" + progs.join(",\n") + "\n};",
+      slotsOut.trimEnd(),
+      DRIVER,
+      `export const BUNDLE_HASH = ${JSON.stringify(hash)};`,
+    ].filter(Boolean).join("\n") + "\n";
+  }
   return { code, meta };
+}
+
+function fnv1a(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(16).padStart(8, "0");
 }
 
 interface CompileOptions {
@@ -1033,6 +1421,17 @@ interface CompileMeta {
   /** Exported suspendable functions — the module's actions surface. */
   exported: string[];
   pure: string[];
+  /** Top-level relative import/export-from specifiers, in source form (for server-emit rewriting). */
+  imports: string[];
+  /** Per-method outcome for top-level classes: compiled into `program`, or kept
+   *  original with the blocking `error`. Methods without tier calls aren't listed. */
+  methods: Array<{ class: string; method: string; program: string | null; error?: string }>;
+  /** MACHINE-ONLY server module for class-method compilation (docs/migrate-arm.md): the
+   *  programs, module-level helper functions, and ONLY the imports machine code actually
+   *  references — the kept classes and their construction-time graph (http factories,
+   *  framework wiring) stay out, so the module loads in plain Node. The migrate arm's
+   *  gateway resolves this; absent when no class method compiled. */
+  serverCode?: string;
 }
 interface FunctionReport {
   name: string;
@@ -1114,6 +1513,11 @@ export function __unwind(stack, err) {
   while (stack.length) { const tpc = __dispatch(stack[stack.length - 1], err); if (tpc != null) { stack[stack.length - 1].pc = tpc; return true; } stack.pop(); }
   return false;
 }
+// Real-code seam: compiled class-method stubs route through this binding when a page or
+// runtime set it (a function (program, thisArg, args) -> Promise); unbound, every stub
+// falls back to the kept original method — the bundle behaves stock.
+export let __TIERLESS_METHOD__ = null;
+export function __bindTierlessMethods(fn) { __TIERLESS_METHOD__ = fn; }
 // Single-tier driver: step the machine, push sub-frames for calls, stop at every resource
 // request. The two-tier runtime (../runtime.mjs) drives PROGRAMS directly and only stops
 // at resources THIS tier doesn't own; this local driver keeps the bundle runnable alone.

@@ -1,0 +1,204 @@
+// Probe: the Vite build emit + prod mount. `vite build` compiles each "use tierless" module
+// ONCE (the transform, for the browser) and — at writeBundle — emits the SAME machine for the
+// server plus a manifest keyed by the module id the browser stamps onto the wire. A prod server
+// mounts it with `bundleResolverFromManifest`: no second `tierless build` pass, no hand-written
+// module resolver. This drives the plugin's build hooks headless, then stands up the real prod
+// path (resolver + serveApp + sidecar) and calls an action across a socket, end to end.
+import { writeFileSync, mkdtempSync, mkdirSync, existsSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL, fileURLToPath } from "node:url";
+import tierless from "tierless/vite";
+import { serveApp, bundleResolverFromManifest, WS_PATH } from "tierless/server";
+import { startSidecar, makeApiExec } from "tierless/api";
+import { configureTierless } from "tierless/browser";
+import { makeCounter } from "../lib/check.mts";
+
+const SRC_DIR = fileURLToPath(new URL("../../packages/tierless/src/", import.meta.url));
+const dir = mkdtempSync(join(tmpdir(), "vite-build-"));
+const { check, counts } = makeCounter();
+
+// ---- fixtures: the trusted service + the app's "use tierless" actions module -----------
+writeFileSync(join(dir, "api.server.mjs"), `
+import { defineApi, PUBLIC } from ${JSON.stringify(pathToFileURL(join(SRC_DIR, "api/api.mjs")).href)};
+import { sidecarMain } from ${JSON.stringify(pathToFileURL(join(SRC_DIR, "api/sidecar.mjs")).href)};
+export const def = defineApi((api) => ({
+  login: { authorize: PUBLIC, run: ([c]) => { if (!c || c.pass !== "demo") throw new Error("bad credentials"); return api.issue({ sub: c.user }, 60); } },
+  getQuote: { authorize: PUBLIC, run: ([sym]) => sym.length * 10 },
+  placeOrder: { authorize: (p) => p != null, run: ([o], p) => ({ by: p.sub, sym: o.sym, at: o.at }) },
+}));
+sidecarMain(def);
+`);
+const ACTIONS = `"use tierless";
+export function rebalance(syms) {
+  const orders = [];
+  for (const s of syms) {
+    const q = api.getQuote(s);
+    if (q > 20) { const o = api.placeOrder({ sym: s, at: q }); orders.push(o.by + ":" + o.sym + "@" + o.at); }
+  }
+  return orders.join(",");
+}
+`;
+const actionsId = join(dir, "actions.mjs");
+
+// A second mix module that imports a RELATIVE helper from a subdir — the server copy lands in
+// dist-tierless/ so its `./lib/fmt.mjs` must be rewritten to resolve from there.
+mkdirSync(join(dir, "lib"));
+writeFileSync(join(dir, "lib", "fmt.mjs"), `export const tag = (s) => "<" + s + ">";\n`);
+const WITHIMPORT = `"use tierless";
+import { tag } from "./lib/fmt.mjs";
+export function decideOne(sym) {
+  const q = api.getQuote(sym);        // suspends → runs server-side, where the rewritten import must resolve
+  return tag(sym + ":" + q);
+}
+`;
+const withImportId = join(dir, "decide.mjs");
+
+// Two mix modules where one imports the other: `report` (mix) pulls the pure helper `label` from
+// `format` (also mix). The server copy of report must import format's SERVER bundle, not its
+// untransformed source.
+const FORMAT = `"use tierless";
+export function label(s) { return "<<" + s + ">>"; }   // pure export
+export function priceOf(sym) { return api.getQuote(sym); }  // an action → format is a real mix module
+`;
+const formatId = join(dir, "format.mjs");
+const REPORT = `"use tierless";
+import { label } from "./format.mjs";
+export function report(sym) {
+  const q = api.getQuote(sym);        // suspends → runs server-side, where label (from format's server bundle) must resolve
+  return label(sym + ":" + q);
+}
+`;
+const reportId = join(dir, "report.mjs");
+
+// An EXTENSIONLESS relative import (valid for Vite) — the emit must resolve it to the
+// real .mjs file, since Node loads the server bundle as-is.
+const BARE = `"use tierless";
+import { tag } from "./lib/fmt";
+export function bareOne(sym) {
+  const q = api.getQuote(sym);
+  return tag("b:" + q);
+}
+`;
+const bareId = join(dir, "bare.mjs");
+
+console.log("Probe: the Vite build emit — one compile, a manifest, a prod mount with no re-compile\n");
+
+const plugin = tierless({ api: "api.server.mjs", runtime: pathToFileURL(join(SRC_DIR, "browser.mjs")).href });
+
+// ---- the client build: transform stamps the module id, writes the browser module ------------
+const out = await plugin.transform(ACTIONS, actionsId);
+if (!out) throw new Error("transform returned null for a \"use tierless\" module");
+writeFileSync(actionsId, out.code);
+const out2 = await plugin.transform(WITHIMPORT, withImportId);
+if (!out2) throw new Error("transform returned null for the helper-importing module");
+writeFileSync(withImportId, out2.code);
+for (const [src, id] of [[FORMAT, formatId], [REPORT, reportId], [BARE, bareId]] as const) {
+  const o = await plugin.transform(src, id);
+  if (!o) throw new Error("transform returned null for " + id);
+  writeFileSync(id, o.code);
+}
+
+// ---- the build emit: writeBundle drops the server bundles + manifest ----------------------
+plugin.configResolved({ root: dir });
+plugin.writeBundle();
+
+const manifestPath = join(dir, "dist-tierless", "tierless.manifest.json");
+check("writeBundle emits a manifest", existsSync(manifestPath));
+const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+check("the manifest keys the module by the build-time id the browser puts on the wire",
+  manifest.modules[actionsId] !== undefined, Object.keys(manifest.modules));
+check("the manifest records the endpoint path", manifest.path === WS_PATH, manifest.path);
+const serverFile = join(dir, "dist-tierless", manifest.modules[actionsId]);
+const serverMod: any = await import(pathToFileURL(serverFile).href);
+check("the emitted server bundle IS the machine — same compiler output, no second pass",
+  !!(serverMod.PROGRAMS && serverMod.PROGRAMS.rebalance) && typeof serverMod.__unwind === "function");
+
+// ---- the helper-importing module: its relative import is rewritten for the emit dir -------
+const serverFile2 = join(dir, "dist-tierless", manifest.modules[withImportId]);
+const emitted2 = readFileSync(serverFile2, "utf8");
+check("the server bundle's relative import is rewritten to resolve from dist-tierless/",
+  emitted2.includes(`"../lib/fmt.mjs"`) && !emitted2.includes(`"./lib/fmt.mjs"`), emitted2.split("\n")[1]);
+const serverMod2: any = await import(pathToFileURL(serverFile2).href);   // executes the rewritten import
+check("the rewritten import resolves — the server bundle imports its helper from the new location",
+  !!(serverMod2.PROGRAMS && serverMod2.PROGRAMS.decideOne));
+
+// ---- mix imports mix: report's server bundle imports format's SERVER bundle, not its source ----
+const reportServer = readFileSync(join(dir, "dist-tierless", manifest.modules[reportId]), "utf8");
+const formatServerName = manifest.modules[formatId];
+check("a mix module's import of another mix module points at that module's server bundle",
+  reportServer.includes(`"./${formatServerName}"`) && !reportServer.includes("format.mjs"), reportServer.split("\n")[1]);
+const reportMod: any = await import(pathToFileURL(join(dir, "dist-tierless", manifest.modules[reportId])).href);
+check("it resolves — dist-tierless/ is self-contained for the mix-to-mix graph", !!reportMod.PROGRAMS.report);
+
+// ---- extensionless import: resolved to the real .mjs at emit (Node loads the bundle) -------
+const bareServer = readFileSync(join(dir, "dist-tierless", manifest.modules[bareId]), "utf8");
+check("an extensionless relative import resolves to the real .mjs in the emitted bundle",
+  bareServer.includes(`"../lib/fmt.mjs"`) && !bareServer.includes(`"./lib/fmt"`), bareServer.split("\n")[1]);
+const bareMod: any = await import(pathToFileURL(join(dir, "dist-tierless", manifest.modules[bareId])).href);
+check("it loads under Node", !!bareMod.PROGRAMS.bareOne);
+
+// ---- an alias import in a mix module fails the BUILD, not the gateway at runtime -----------
+{
+  const aliasPlugin = tierless({ api: "api.server.mjs", runtime: pathToFileURL(join(SRC_DIR, "browser.mjs")).href });
+  const aliasDir = mkdtempSync(join(tmpdir(), "tlvite-alias-"));
+  const ALIAS = `"use tierless";
+import { tag } from "@/lib/fmt.mjs";
+export function aliasOne(sym) { const q = api.getQuote(sym); return tag(q); }
+`;
+  const aliasId = join(aliasDir, "aliased.mjs");
+  const ao = await aliasPlugin.transform(ALIAS, aliasId);
+  if (!ao) throw new Error("transform returned null for the alias module");
+  writeFileSync(aliasId, ao.code);
+  aliasPlugin.configResolved({ root: aliasDir, resolve: { alias: [{ find: "@", replacement: join(aliasDir, "src") }] } });
+  let buildErr: Error | null = null;
+  try { aliasPlugin.writeBundle(); } catch (e) { buildErr = e as Error; }
+  check("a Vite-alias import in a mix module is a BUILD error with a fix in the message",
+    !!buildErr && buildErr.message.includes("alias") && buildErr.message.includes("@"), String(buildErr?.message));
+}
+
+// ---- the prod mount: resolver + serveApp + sidecar, action call end to end ----------------
+const apiService = startSidecar(pathToFileURL(join(dir, "api.server.mjs")));
+await apiService.ready();
+const bundle = await bundleResolverFromManifest(manifestPath);
+const app = await serveApp({
+  port: 0,
+  bundle,                                                        // the whole server side: no hand-written dispatch
+  session: async () => {
+    const login = await apiService.call("login", [{ user: "ana", pass: "demo" }]);
+    if (!login.ok) throw new Error("login failed: " + login.error);
+    return { exec: makeApiExec(apiService, login.value as string) };
+  },
+});
+
+configureTierless({ url: `ws://localhost:${app.port}${WS_PATH}` });
+const mod: any = await import(pathToFileURL(actionsId).href);
+const v = await mod.rebalance(["abc", "a", "abcd"]);
+check("the prod path serves the action from the manifest bundle, monitor-authorized",
+  v === "ana:abc@30,ana:abcd@40", v);
+
+// the helper-importing action runs on the server, using the imported (rewritten) helper there
+const mod2: any = await import(pathToFileURL(withImportId).href);
+const v2 = await mod2.decideOne("abc");
+check("an action that imports a relative helper runs server-side with it, end to end",
+  v2 === "<abc:30>", v2);
+
+// report (mix) calls label imported from format (mix) — server-side, via format's server bundle
+const reportBrowser: any = await import(pathToFileURL(reportId).href);
+const v3 = await reportBrowser.report("abc");
+check("a mix module importing another runs end to end, the helper served from its server bundle",
+  v3 === "<<abc:30>>", v3);
+
+// a module the manifest never saw is a clear error, not a silent wrong machine
+const missing = await bundle("/nope/unknown.mjs").then(() => null, (e: any) => String(e && e.message || e));
+check("an unknown module id is rejected", missing !== null && missing.includes("no server bundle"), missing);
+
+app.close();
+apiService.close();
+
+const { pass, fail } = counts();
+const ok = fail === 0;
+console.log(ok
+  ? `\nOK — \`vite build\` emits the server machine + manifest and a prod server mounts it end to end, no second compile and no hand-written resolver (${pass} checks)`
+  : `\nFAILED (${pass} passed, ${fail} failed)`);
+process.exit(ok ? 0 : 1);

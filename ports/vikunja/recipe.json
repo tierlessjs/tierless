@@ -1,0 +1,29 @@
+{
+  "name": "vikunja",
+  "repo": "go-vikunja/vikunja",
+  "sha": "3ba5192b1bd0607998bdaf9259d795fb14530384",
+  "sources": [
+    {
+      "kind": "goproxy",
+      "zip": "https://proxy.golang.org/github.com/go-vikunja/vikunja/@v/v1.0.0.zip"
+    },
+    {
+      "kind": "codeload",
+      "zip": "https://codeload.github.com/go-vikunja/vikunja/zip/3ba5192b1bd0607998bdaf9259d795fb14530384"
+    }
+  ],
+  "treeHash": {
+    "goproxy": "26c77fd8875a11f93f1fbbffcacb9b2493a9ec8df6c0f16d54c00cd8d0569a5e",
+    "codeload": "0277d7dd29a1c82a92cc15eb0d75562577880e1daaba9226b9bd99ade3525cb5"
+  },
+  "patches": [
+    "patches/0005-tierless-axios-adapter.patch",
+    "patches/0006-compile-services.patch",
+    "patches/0007-session-twins.patch"
+  ],
+  "testPatches": [
+    "patches/0003-measure-fixture.patch",
+    "patches/0004-transport-agnostic-waits.patch",
+    "patches/0008-optional-api-gzip.patch"
+  ]
+}

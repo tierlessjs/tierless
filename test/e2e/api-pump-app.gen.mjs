@@ -92,3 +92,4 @@ export function run(stack) {
   }
 }
 export const start = (fn, args = []) => run([{ fn, pc: 0, args }]);
+export const BUNDLE_HASH = "01e7c018";

@@ -1,0 +1,60 @@
+diff -ruN a/packages/nocodb/src/run/testDocker.ts b/packages/nocodb/src/run/testDocker.ts
+--- a/packages/nocodb/src/run/testDocker.ts	2026-07-10 11:36:37.004562738 +0000
++++ b/packages/nocodb/src/run/testDocker.ts	2026-07-10 11:36:37.067357315 +0000
+@@ -1,4 +1,5 @@
+ import dns from 'node:dns';
++import { gzipSync } from 'node:zlib';
+ import axios from 'axios';
+ import cors from 'cors';
+ import express from 'express';
+@@ -23,6 +24,50 @@
+   }),
+ );
+ 
++// tierless corpus harness (test patch, BOTH arms, OFF by default): an env-gated gzip
++// layer (NC_TIERLESS_GZIP=1), so the byte comparison can also be made against a
++// COMPRESSED stock deployment — this tree ships no compression middleware, so raw JSON
++// is its native serving shape. Dependency-free (node zlib), buffered per response,
++// thresholds mirroring expressjs/compression defaults (>=1k, compressible types only).
++// write/end keep their (chunk, encoding, callback) argument forms; the response is
++// FULLY BUFFERED (backpressure deliberately absorbed — bounded harness JSON bodies).
++if (process.env.NC_TIERLESS_GZIP) {
++  server.use((req, res, next) => {
++    // negotiation honors q-values (gzip;q=0 forbids gzip), and the response VARIES on
++    // the header so a shared cache cannot serve gzip to a client that refused it
++    const ae = String(req.headers['accept-encoding'] || '');
++    const gz = /(?:^|,)\s*(?:gzip|\*)\s*(?:;\s*q\s*=\s*([0-9.]+))?/i.exec(ae);
++    if (!gz || (gz[1] !== undefined && parseFloat(gz[1]) === 0)) return next();
++    res.setHeader('vary', 'accept-encoding');
++    const chunks: Buffer[] = [];
++    const origEnd = res.end.bind(res);
++    const origWrite = res.write.bind(res);
++    (res as any).write = (chunk: any, enc?: any, cb?: any) => {
++      if (typeof enc === 'function') { cb = enc; enc = undefined; }
++      if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, enc));
++      if (typeof cb === 'function') process.nextTick(cb);
++      return true;
++    };
++    (res as any).end = (chunk: any, enc?: any, cb?: any) => {
++      if (typeof chunk === 'function') { cb = chunk; chunk = undefined; }
++      else if (typeof enc === 'function') { cb = enc; enc = undefined; }
++      if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, enc));
++      res.write = origWrite;
++      res.end = origEnd;
++      const body = Buffer.concat(chunks);
++      const type = String(res.getHeader('content-type') || '');
++      if (body.length >= 1024 && /json|text|javascript|xml/.test(type) && !res.getHeader('content-encoding')) {
++        const gz = gzipSync(body);
++        res.setHeader('content-encoding', 'gzip');
++        res.removeHeader('content-length');
++        return origEnd(gz, cb);
++      }
++      return origEnd(body, cb);
++    };
++    next();
++  });
++}
++
+ server.set('view engine', 'ejs');
+ 
+ process.env[`DEBUG`] = 'xc*';
