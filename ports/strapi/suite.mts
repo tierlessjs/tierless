@@ -19,7 +19,7 @@
 // Node-side test seeding (DTS reset per test) talks to :8000 directly and is never
 // counted. TIERLESS_RTT_MS: real RTT on both browser-facing hops via raw TCP relays.
 import { spawn } from "node:child_process";
-import { openSync, rmSync } from "node:fs";
+import { openSync, readdirSync, rmSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -122,26 +122,35 @@ process.on("exit", closeGateway);
 for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => { closeGateway(); process.exit(1); });
 await waitFor(`http://127.0.0.1:${GATEWAY}`, 30_000);
 
-// THEIR runner, one test app at a time (-c 1): domains run sequentially against
-// test-app-0 on :8000; each domain's playwright webServer boots `develop
+// THEIR runner, one test app at a time (-c 1) and ONE DOMAIN PER INVOCATION: their
+// runner's domain loop aborts on a domain whose playwright run exits nonzero (any
+// failing test), which would silently drop every later domain from a measured arm —
+// invoking it per domain makes each domain's outcome independent, exactly the rows a
+// comparison needs. Each domain's playwright webServer boots `develop
 // --no-watch-admin` (vite-builds the admin from the yalc-linked packages) and tears it
 // down — their CI's own lifecycle. chromium only (their docs' local-iteration lane).
 // Heavier shaping needs headroom over their 90 s per-test timeout; both arms equally.
-const domains = (process.env.TIERLESS_DOMAINS || "").split(/\s+/).filter(Boolean);
+const domains = (process.env.TIERLESS_DOMAINS || "").split(/\s+/).filter(Boolean).length
+  ? (process.env.TIERLESS_DOMAINS || "").split(/\s+/).filter(Boolean)
+  : readdirSync(path.join(SRC, "tests/e2e/tests")).sort();
 const specs = (process.env.TIERLESS_SPEC || "").split(/\s+/).filter(Boolean);
-// -f forces test-app regeneration: yalc's push→app propagation is unreliable for
-// packages the app's installations registry missed (observed for @strapi/admin), and a
-// measured arm must never run a stale admin bundle — regeneration re-links every
-// package from the store their runner just published.
-const args = ["tests/scripts/run-e2e-tests.js", "-c", "1", "-f",
-  ...domains.flatMap((d) => ["--domains", d]),
-  "--", ...specs, "--project=chromium"];
 if (RTT >= 50) env.PLAYWRIGHT_TIMEOUT = "180000";
-const suite = spawn(process.execPath, args, { cwd: SRC, stdio: "inherit", env: env as NodeJS.ProcessEnv });
-const code = await new Promise<number>((resolve) => {
-  suite.on("error", (err) => { console.error("suite spawn failed:", err.message); resolve(1); });
-  suite.on("exit", (c) => resolve(c ?? 1));
-});
+let failures = 0;
+for (let i = 0; i < domains.length; i++) {
+  // -f on the FIRST domain only: yalc's push→app propagation is unreliable for
+  // packages the app's installations registry missed (observed for @strapi/admin), so
+  // the arm starts from a regenerated app linked to the store the run just published;
+  // later domains reuse it (no builds happen mid-arm), their runner's own flow.
+  const args = ["tests/scripts/run-e2e-tests.js", "-c", "1", ...(i === 0 ? ["-f"] : []),
+    "--domains", domains[i], "--", ...specs, "--project=chromium"];
+  console.log(`\n[suite] domain ${domains[i]} (${i + 1}/${domains.length})`);
+  const suite = spawn(process.execPath, args, { cwd: SRC, stdio: "inherit", env: env as NodeJS.ProcessEnv });
+  const code = await new Promise<number>((resolve) => {
+    suite.on("error", (err) => { console.error("suite spawn failed:", err.message); resolve(1); });
+    suite.on("exit", (c) => resolve(c ?? 1));
+  });
+  if (code !== 0) failures++;
+}
 closeGateway();
-console.log(`\nmeasured arm (${VARIANT}): ${path.relative(process.cwd(), OUT)}`);
-process.exitCode = code;   // nonzero = some tests failed; every attempt is in the JSONL regardless — callers tolerating failures say `|| true`
+console.log(`\nmeasured arm (${VARIANT}): ${path.relative(process.cwd(), OUT)}${failures ? ` (${failures} domain(s) had failing tests)` : ""}`);
+process.exitCode = failures ? 1 : 0;   // nonzero = some tests failed; every attempt is in the JSONL regardless — callers tolerating failures say `|| true`
