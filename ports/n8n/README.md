@@ -60,25 +60,79 @@ fetch exactly as they rode the XHR (n8n sets `withCredentials` only in dev
 builds, so production requests never pin on it). Blob/FormData/binary configs
 and external origins (`api.n8n.io`) fall through to axios's own XHR adapter.
 
-## The session-socket stage (next; requirements find)
+## The session-socket stage (patch 0005 — BUILT and certified)
 
-The NocoDB shape — `sessionExec()` over a ws gateway, one exec crossing per
-request — needs authority the browser cannot attach per request here: the JWT
-lives in an **httpOnly cookie**, and n8n logs in/out as an SPA transition, so
-a socket opened on the signin page outlives an auth change. The design that
-unblocks it is **sealed gateway-mediated cookie authority** (ROADMAP.md has
-the full shape): the gateway seals the upgrade-time cookie under a boot-time
-secret and hands the BLOB to the browser runtime instead of storing it — every
-crossing carries the blob, the gateway decrypts/uses/forgets, so authority
-travels with the request as in the header-auth ports. Rotation is in-band and
-exec-path-wide (n8n rolls the cookie near expiry on arbitrary responses): a
-mediated `set-cookie` rides down as a new blob. The browser-jar copy syncs via
-a claim request (blob + 30 s nonce) whose HTTP response emits the Set-Cookie —
-script cannot write httpOnly, so a ws frame cannot plant it. A session-exec
-401 drops the blob and re-upgrades: recovery for invalidation that never
-crossed this socket (another tab's logout or password change). This recipe
-ships the direct-fetch exec (patch 0002); the sealed-authority gateway is the
-next stage and where the wire numbers come from.
+Same-origin `/rest` now crosses a **session websocket** to a standalone gateway
+(`ports/n8n/gateway.mts`, :5780 = page-port+100) as one exec crossing each:
+preflights gone (same-origin socket), envelope headers trimmed to what the
+code reads, one session-long deflate window. External origins (`api.n8n.io`)
+keep the direct-fetch exec.
+
+**Sealed cookie authority** solves the auth problem the direct-fetch stage
+dodged. The JWT lives in an **httpOnly cookie**, and n8n logs in/out as an SPA
+transition, so a socket opened on signin outlives an auth change. The gateway
+(packages/tierless/src/session-auth.mts) mints a secret key at boot, seals the
+upgrade-time cookie under it, and hands the BLOB to the browser runtime instead
+of storing it — every crossing carries the blob, the gateway decrypts/uses/
+forgets, so authority travels with the request as in the header-auth ports (the
+gateway holds no credentials). Rotation is in-band and exec-path-wide (n8n rolls
+the cookie near expiry on arbitrary responses): a mediated `set-cookie` rides
+down as a new blob; a claim request (blob + 30 s nonce) replays the Set-Cookie
+into the real jar for reload continuity (script cannot write httpOnly, so a ws
+frame cannot); BroadcastChannel propagates rotation across tabs (reseal, the
+claim's mirror); a session-exec 401 drops the blob and re-upgrades, the
+catch-all for out-of-band invalidation. Full shape and the SharedWorker
+alternative: ROADMAP.md. Framework probe: `test/probes/session-auth.mts`.
+
+**Proven live**, not assumed: logging in through the page rides the ws, the
+claim plants `n8n-auth` (httpOnly=true) in the real jar, gateway HTTP is exactly
+reseal+claim, ZERO page-origin `/rest` over HTTP, and a hard reload stays
+authenticated.
+
+### The session socket's defining limitation (requirements find)
+
+Moving I/O off the browser makes it **invisible to browser network
+interception** — service workers, extensions, devtools, and (where it surfaced)
+a test harness's response mocking. Playwright's `route()` hooks the browser's
+own fetch, so a request that leaves as a ws frame is never seen: on the first
+full ported run, 33 tests that inject feature flags by mocking `/rest/settings`
+and friends silently went unmocked. The answer is a **force-browser seam**
+(patch 0005 `forceBrowser`): a page global lists URL globs that must stay on the
+browser's own fetch; matching same-origin requests take the direct-fetch exec
+instead of the socket. Empty in production — a real embedder control (keep a
+resource SW/extension-visible), not a test device. Test patch 0007 populates it
+by wrapping `route()`, so every intercepted glob auto-registers; both arms,
+inert on stock.
+
+A second class the socket surfaces: tests that assert the **transport** —
+`waitForResponse`/`waitForRequest` for a request the socket carries, or
+`.postDataJSON()` on it — can never fire against browser HTTP. Patch 0006
+relocates these to a race between the HTTP wait and the page's exec log (same
+predicate; request bodies served from the log), so the request still crosses
+the socket AND the test observes it. Both arms; only transport moves, never an
+assertion.
+
+### Certification (results/cert-0005-session-socket.jsonl)
+
+Full suite on the session-socket build, same command as the baseline. An
+earlier ported run surfaced the two limitation classes above (network mocking,
+transport-assertion) as ~17 regressions; patches 0006/0007 resolve them, and
+each residual reruns green or is a baseline-symmetric exclusion. Final tally
+and pairing land here from the cert run.
+
+No wire numbers yet — the byte/trip A/B is the next run (both arms under the
+counting relay; the gateway counts its ws bytes TCP-true, deflate included).
+Wire-truth reproduce:
+
+    bash ports/n8n/setup.sh --baseline                        # build the stock arm tree
+    TIERLESS_WIRE_TRUTH=1 node ports/n8n/suite.mts --baseline
+    TIERLESS_WIRE_TRUTH=1 node ports/n8n/suite.mts
+    node ports/report.mts ports/work/n8n-baseline/measure-truth.jsonl ports/work/n8n/measure-truth.jsonl
+
+Provenance note for that report: the reseal/claim auth requests are small and
+currently uncounted (the gateway's wire counter tracks ws sockets only); the
+app relay counts assets + force-browser `/rest`, the ws counter counts the
+session.
 
 ## Reproduce
 
