@@ -28,6 +28,7 @@ const cases: Case[] = [
   { file: "test/e2e/api-pump.mts",       needs: ["the live pump services api.* through the trusted monitor: a migrating continuation is authorized per principal in a separate process on every call"] },
   { file: "test/e2e/api-live.mts",       needs: ["the default api.* path IS the reference monitor: the runtime pump serviced every api call over the pipe"] },
   { file: "test/probes/host.mts",   needs: ["serveApp/connect assemble the full host: client-started actions (with mid-flight bounces and concurrency) and server-started sessions both run over one socket"] },
+  { file: "test/probes/session-auth.mts", needs: ["sealed cookie authority: blob crossings, in-band rotation, claim/reseal, expiry, and the two-tab 401 recovery all hold"] },
   { file: "test/e2e/control-flow.mts",   needs: ["extended control flow survives migration"] },
   { file: "test/probes/deref-liveness.mts", needs: ["the --auto-deref liveness pass prunes redundant guards within a straight-line run and re-guards after any hop"] },
   { file: "test/probes/source-maps.mts", needs: ["--source-map carries each frame's source position through the transform, so a migrated continuation reports a portable file:line"] },

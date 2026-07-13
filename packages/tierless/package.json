@@ -111,6 +111,14 @@
     "./adapt-axios": {
       "types": "./types/adapt-axios.d.mts",
       "default": "./src/adapt-axios.mjs"
+    },
+    "./session-auth": {
+      "types": "./types/session-auth.d.mts",
+      "default": "./src/session-auth.mjs"
+    },
+    "./adapt-session-auth": {
+      "types": "./types/adapt-session-auth.d.mts",
+      "default": "./src/adapt-session-auth.mjs"
     }
   },
   "bin": {
