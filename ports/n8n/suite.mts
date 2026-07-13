@@ -41,14 +41,18 @@ if (TRUTH) {
   // "app" origin serves both api and assets here — single origin — but the field name
   // is what the report keys on). Assets are identical in both arms and wash out.
   createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ apiOut: app.toServer, apiIn: app.toClient })); }).listen(14990, "127.0.0.1").unref();
-  editorUrl = "http://127.0.0.1:25680";
+  // "localhost", matching N8N_BASE_URL's hostname: their fixture's cross-context auth
+  // cookie copy takes the well-formed domain+path branch only when the seeding origin
+  // and the page origin share a hostname (a mismatch hits an addCookies that throws);
+  // and localhost keeps the node-side Secure-cookie jar working (see N8N_BASE_URL).
+  editorUrl = "http://localhost:25680";
   wireUrls.push("http://127.0.0.1:14990", "http://127.0.0.1:5780/__tierless/wire");
   console.log("wire truth: browser origin via counting relay :25680, counters :14990, ws bytes at :5780/__tierless/wire");
 }
 if (RTT) {
   delayProxy(15680, 5680, RTT / 2).unref();
   delayProxy(15780, 5780, RTT / 2).unref();   // the page derives ws/gateway as page-port+100, so the relayed origin lands here
-  editorUrl = "http://127.0.0.1:15680";
+  editorUrl = "http://localhost:15680";   // localhost, matching N8N_BASE_URL (see the wire-truth note)
   console.log(`RTT injection: ${RTT} ms via 15680->5680, 15780->5780`);
 }
 
