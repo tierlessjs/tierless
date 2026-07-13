@@ -66,17 +66,19 @@ The NocoDB shape — `sessionExec()` over a ws gateway, one exec crossing per
 request — needs authority the browser cannot attach per request here: the JWT
 lives in an **httpOnly cookie**, and n8n logs in/out as an SPA transition, so
 a socket opened on the signin page outlives an auth change. The design that
-unblocks it is **gateway-mediated cookie authority** (ROADMAP.md has the full
-shape): bind the cookie at ws upgrade (cookies ignore ports, so a same-host
-gateway receives it); re-bind on `set-cookie` seen on ANY mediated response —
-a property of the exec path, not a login special case, because n8n rolls the
-cookie near expiry on arbitrary responses; plant the browser-jar copy via a
-one-time-ticket claim request whose HTTP response carries the Set-Cookie
-(script cannot write httpOnly, so a ws frame cannot); and on a session-exec
-401, drop the binding and re-upgrade — recovery for invalidation that never
+unblocks it is **sealed gateway-mediated cookie authority** (ROADMAP.md has
+the full shape): the gateway seals the upgrade-time cookie under a boot-time
+secret and hands the BLOB to the browser runtime instead of storing it — every
+crossing carries the blob, the gateway decrypts/uses/forgets, so authority
+travels with the request as in the header-auth ports. Rotation is in-band and
+exec-path-wide (n8n rolls the cookie near expiry on arbitrary responses): a
+mediated `set-cookie` rides down as a new blob. The browser-jar copy syncs via
+a claim request (blob + 30 s nonce) whose HTTP response emits the Set-Cookie —
+script cannot write httpOnly, so a ws frame cannot plant it. A session-exec
+401 drops the blob and re-upgrades: recovery for invalidation that never
 crossed this socket (another tab's logout or password change). This recipe
-ships the direct-fetch exec (patch 0002); the mediated-authority gateway is
-the next stage and where the wire numbers come from.
+ships the direct-fetch exec (patch 0002); the sealed-authority gateway is the
+next stage and where the wire numbers come from.
 
 ## Reproduce
 

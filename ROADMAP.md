@@ -48,20 +48,28 @@ proven (the executable proofs behind `npm test`).
   target. Move it to a first-message/subprotocol handshake (a protocol change
   across shim, browser, and server) before any deployment posture beyond the
   dev/demo flow.
-- **Gateway-mediated cookie authority** (from the n8n port, ports/n8n/README.md
-  — the design that unblocks cookie-authed SPAs at the session socket).
-  Bind the httpOnly cookie to the session at ws upgrade (cookies ignore ports,
-  so a same-host gateway receives it); watch `set-cookie` on EVERY mediated
-  response and re-bind in place (n8n rolls the cookie near expiry on arbitrary
-  responses, so this is a property of the exec path, not a login special
-  case); sync the browser jar via a one-time-ticket claim request whose HTTP
-  response carries the Set-Cookie (script cannot write httpOnly — a ws frame
-  cannot plant it); on a 401 from the session exec, drop the binding and
-  re-upgrade (recovery for out-of-band invalidation: another tab's logout or
-  password change bumps the token version without crossing THIS socket).
-  Posture note for SECURITY.md when it lands: this gateway holds a copy of the
-  session cookie, a heavier trust posture than the header-auth ports where it
-  held no credentials.
+- **Gateway-mediated cookie authority, sealed** (from the n8n port,
+  ports/n8n/README.md — the design that unblocks cookie-authed SPAs at the
+  session socket, with the gateway authority-STATELESS). The gateway mints a
+  secret key at boot and never shares it. At ws upgrade the browser presents
+  the httpOnly cookie (cookies ignore ports); the gateway SEALS it under the
+  key and hands the blob to the browser runtime instead of storing it. Every
+  crossing carries the blob; the gateway decrypts, uses, forgets — authority
+  travels with the request, as in the header-auth ports. Rotation is in-band
+  and exec-path-wide, not a login special case (n8n rolls the cookie near
+  expiry on arbitrary responses): a mediated `set-cookie` rides down as a new
+  blob and the runtime swaps. The browser jar syncs via a claim request
+  carrying the blob plus a 30 s nonce, whose HTTP response emits the
+  Set-Cookie (script cannot write httpOnly — a ws frame cannot plant it).
+  On a session-exec 401, drop the blob and re-upgrade (recovery for
+  invalidation that never crossed this socket: another tab's logout or
+  password change). Properties to state when it lands: page script can hold
+  the blob but not read the JWT inside — XSS can use the session (as it can
+  stock same-origin XHR) but not exfiltrate the token, which is httpOnly's
+  actual guarantee; and the blob adds no lifetime — the backend still
+  validates the decrypted JWT, so a stolen blob is worth exactly a stolen
+  browser session. A gateway restart self-heals: blobs die with the key,
+  sockets reconnect, the fresh upgrade re-presents the jar cookie.
 - **Byte pricing at the method boundary.** `methodMigrate` migrates on structural
   evidence alone (a stable ≥2-call same-tier chain) without comparing continuation
   bytes to the profiled fetch bytes the way `decide()` does — a method carrying a
