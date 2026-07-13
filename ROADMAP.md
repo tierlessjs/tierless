@@ -48,9 +48,11 @@ proven (the executable proofs behind `npm test`).
   target. Move it to a first-message/subprotocol handshake (a protocol change
   across shim, browser, and server) before any deployment posture beyond the
   dev/demo flow.
-- **Gateway-mediated cookie authority, sealed** (from the n8n port,
-  ports/n8n/README.md — the design that unblocks cookie-authed SPAs at the
-  session socket, with the gateway authority-STATELESS). The gateway mints a
+- **Gateway-mediated cookie authority, sealed** — BUILT (packages/tierless/src/
+  session-auth.mts + adapt-session-auth.mts; probe test/probes/session-auth.mts;
+  live in the n8n port, ports/n8n/README.md). The design that unblocks
+  cookie-authed SPAs at the session socket, with the gateway
+  authority-STATELESS. The gateway mints a
   secret key at boot and never shares it. At ws upgrade the browser presents
   the httpOnly cookie (cookies ignore ports); the gateway SEALS it under the
   key and hands the blob to the browser runtime instead of storing it. Every
@@ -82,6 +84,21 @@ proven (the executable proofs behind `npm test`).
   validates the decrypted JWT, so a stolen blob is worth exactly a stolen
   browser session. A gateway restart self-heals: blobs die with the key,
   sockets reconnect, the fresh upgrade re-presents the jar cookie.
+- **Browser network interception is defeated by the session socket** (from the
+  n8n port — the session-socket stage's defining limitation, and a first-class
+  entry on the requirements list). Moving I/O off the browser makes it
+  invisible to anything that hooks the browser's own fetch/XHR: service
+  workers, extensions, devtools, and — where it surfaced — a test harness's
+  response mocking (Playwright `route()` saw none of the socket traffic, so 33
+  of the ported suite's tests went unmocked). The port answers with a
+  **force-browser seam** (packages/tierless, consulted in the n8n patch 0005):
+  a page global lists URL globs that must stay on the browser's own fetch;
+  matching same-origin requests take the direct-fetch exec instead of the
+  socket. Empty in production, so it is a real embedder control (keep a
+  resource SW/extension-visible), not a test hack; the n8n test patch 0007
+  auto-populates it by wrapping `route()`. Open question for any consumer of
+  the socket: which resources must remain browser-observable is an app-level
+  policy the framework can only expose, not decide.
 - **Byte pricing at the method boundary.** `methodMigrate` migrates on structural
   evidence alone (a stable ≥2-call same-tier chain) without comparing continuation
   bytes to the profiled fetch bytes the way `decide()` does — a method carrying a
