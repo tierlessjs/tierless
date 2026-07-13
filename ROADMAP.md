@@ -68,7 +68,14 @@ proven (the executable proofs behind `npm test`).
   out; same boot key, both stateless). The channel's reach (same-origin,
   same-profile tabs) is exactly the jar's. On a session-exec 401, drop the
   blob and re-upgrade — the catch-all for tabs that missed the broadcast
-  (frozen/bfcached) or invalidation with no broadcast at all. Properties to state when it lands: page script can hold
+  (frozen/bfcached) or invalidation with no broadcast at all.
+  Alternative for the exec-only stage: a SharedWorker owning ONE socket per
+  jar dissolves the multi-tab problem instead of coordinating it (one blob,
+  one deflate window across tabs; n8n's push-ref is a per-REQUEST header, so
+  per-tab push routing survives a shared transport). Deferred, not dismissed:
+  it needs a per-tab-socket fallback where SharedWorker is absent, and the
+  full-tierless session is per-page today (merged machine world, twins) —
+  sharing one session across tabs needs per-tab namespacing first. Properties to state when it lands: page script can hold
   the blob but not read the JWT inside — XSS can use the session (as it can
   stock same-origin XHR) but not exfiltrate the token, which is httpOnly's
   actual guarantee; and the blob adds no lifetime — the backend still
