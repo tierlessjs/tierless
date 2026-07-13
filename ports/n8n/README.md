@@ -134,20 +134,47 @@ The 37 remaining failures are env/flake classes (largest: 10× a null
 `services` read; OAuth popups needing external network; assorted timeouts) —
 arm-symmetric by construction, dropped by report.mts's pass-parity gate.
 
-## Adapter certification (in progress)
+## Patch 0002 certified behaviorally invisible (2026-07-13, results/cert-0002-adapter.jsonl)
 
-The first ported build was **silently a no-op**: their build leaves
-`import.meta.env.NODE_ENV` undefined, so a dev-only `withCredentials` branch
-runs in production builds too, and the adapter pins any withCredentials config
-to the XHR fallback. Engagement is now PROVEN, not assumed — a page probe
-shows `/rest/settings` and `/rest/login` as initiatorType `fetch` (the
-adapter's exec) where stock shows `xhr`; patch 0002 sets the flag only when
-the target origin differs from the page origin (same-origin XHR sends cookies
-regardless of the flag, so this changes nothing upstream).
+Full suite on the ported tree, same command as the baseline:
 
-Ported smoke (workflows/list + credentials): 40/41, the 1 failure is the
-baseline-failing OAuth-popup spec. Full certification arm runs next; its
-JSONL lands in results/ and the report pairs it against the baseline.
+    740 discovered · 667 passed · 36 failed · 33 skipped · 1.6 h — 736 tests
+    paired, 663 pass-parity pairs
+
+Engagement is PROVEN, not assumed. The first ported build was **silently a
+no-op**: their build leaves `import.meta.env.NODE_ENV` undefined, so a
+dev-only `withCredentials` branch runs in production builds too, and the
+adapter pins any withCredentials config to the XHR fallback. A page probe
+showed `/rest/settings` as initiatorType `xhr`; after amending 0002 (set the
+flag only when the target origin differs from the page origin — same-origin
+XHR sends cookies regardless of it, so upstream behavior is unchanged), the
+probe shows `fetch`, the adapter's exec. Lesson recorded: **certify
+engagement before certifying invisibility.**
+
+Of the 3 tests that flipped passed→failed against the baseline (5 flipped the
+other way): two rerun green (canvas switch-node, demo chat-trigger — known
+flake classes; their runner quarantines 8 titles for the same reason), and one
+was REAL and reproducible — the corpus's first transport-timing find:
+
+- `templates.spec.ts` "should save template id with the workflow": the flow
+  saves on execute-click, and the save is valid only after the imported
+  workflow's NAME lands (upstream sequences it after a `/rest/workflows/new`
+  fetch; the import composer waits only for the URL redirect). Stock XHR
+  interleaving happened to apply the name by click time; the adapter's fetch
+  interleaving didn't — the save 400s on an empty name and the app converges
+  by creating a second workflow. A one-macrotask resolution hop in the adapter
+  (XHR settles from a task, fetch from a microtask) did NOT fix it and was
+  reverted — the reorder is between two concurrent requests' apply-effects,
+  not a single response's settle stage. Patch 0004 relocates the wait to the
+  page state the test already assumes (name applied), assertions unchanged —
+  the docs/corpus.md test-accommodation contract. Verified 3× green ported;
+  the stock arm demonstrably reaches the awaited state (its save carried the
+  name). 0004 landed after the two committed runs, so those JSONLs predate it;
+  the next full pair folds it in.
+
+No byte/trip movement is claimed at this stage — the exec is a direct fetch
+(stock wire shape, by design). The wire numbers come with the session-socket
+stage, which is blocked on the auth-rotation requirement above.
 
 Sandbox caveat for rebuilds: turbo trusts stale hashes on the no-git recipe
 tree after patch(1) edits — rebuild the ported frontend with

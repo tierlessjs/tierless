@@ -48,6 +48,13 @@ proven (the executable proofs behind `npm test`).
   target. Move it to a first-message/subprotocol handshake (a protocol change
   across shim, browser, and server) before any deployment posture beyond the
   dev/demo flow.
+- **Session re-key on auth rotation** (from the n8n port, ports/n8n/README.md).
+  A cookie-authed SPA can bind authority to the session at ws upgrade (the
+  browser sends the httpOnly cookie to a same-host gateway), but n8n logs
+  in/out as an SPA transition — a socket opened on the signin page outlives the
+  auth change, and `browser.mts` holds one connection per page with no rotation
+  hook. Until the session can drop/re-upgrade when a pinned auth request
+  succeeds, cookie-authed SPAs port only at the direct-fetch exec.
 - **Byte pricing at the method boundary.** `methodMigrate` migrates on structural
   evidence alone (a stable ≥2-call same-tier chain) without comparing continuation
   bytes to the profiled fetch bytes the way `decide()` does — a method carrying a
