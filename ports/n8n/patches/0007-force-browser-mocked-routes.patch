@@ -1,0 +1,106 @@
+--- a/packages/testing/playwright/utils/force-browser-routes.ts
++++ b/packages/testing/playwright/utils/force-browser-routes.ts
+@@ -0,0 +1,85 @@
++// Force-browser route recorder (tierless corpus harness, test patch 0007 — applied to
++// BOTH arms; docs/corpus.md test accommodations). The ported build serves same-origin
++// /rest over a session websocket, which is INVISIBLE to browser network interception:
++// Playwright's context.route/page.route hook the browser's own fetch/XHR, so a request
++// that leaves as a ws frame is never seen and its mock never fires.
++//
++// The port exposes a seam for exactly this (patch 0005 `forceBrowser`): a page global
++// listing URL globs that must stay on the browser's fetch. This recorder wraps route()
++// so every pattern a test intercepts is registered there automatically — the mocked
++// request stays browser-side, the intercept fires, and the assertion is unchanged. On
++// the stock arm the global is inert (those requests are already HTTP), so it is a
++// no-op. Only the TRANSPORT of intercepted requests is affected, never what a test
++// asserts about the page; the report notes these paths stayed on HTTP.
++import type { BrowserContext, Page } from '@playwright/test';
++
++type Matcher = string | RegExp | ((url: URL) => boolean);
++type ForceGlob = { glob: string } | { re: [string, string] };
++
++// a predicate matcher (function) can't be serialized into the page; it is also the rare
++// case (fixtures/tests here use string globs and RegExps). Skip it — worst case that one
++// request rides the socket and its (uncommon) mock misses, which the run would surface.
++function describe(url: Matcher): ForceGlob | null {
++	if (typeof url === 'string') return { glob: url };
++	if (url instanceof RegExp) return { re: [url.source, url.flags] };
++	return null;
++}
++
++const seed = (page: Page, d: ForceGlob): void => {
++	// current document (route may be added after the page loaded)…
++	void page
++		.evaluate((g) => {
++			(
++				window as unknown as { __tierlessForceBrowser?: unknown[] }
++			).__tierlessForceBrowser ??= [];
++			(window as unknown as { __tierlessForceBrowser: unknown[] }).__tierlessForceBrowser.push(g);
++		}, d as unknown)
++		.catch(() => {});
++	// …and every future document (navigations reset window; addInitScript re-runs per doc)
++	void page
++		.addInitScript((g) => {
++			(
++				window as unknown as { __tierlessForceBrowser?: unknown[] }
++			).__tierlessForceBrowser ??= [];
++			(window as unknown as { __tierlessForceBrowser: unknown[] }).__tierlessForceBrowser.push(g);
++		}, d as unknown)
++		.catch(() => {});
++};
++
++/** Wrap a context's route() and every page it makes, so intercepted globs register as
++ *  force-browser. Idempotent per target. */
++export function recordForceBrowserRoutes(context: BrowserContext): void {
++	const ctx = context as BrowserContext & { __tierlessWrapped?: boolean };
++	if (ctx.__tierlessWrapped) return;
++	ctx.__tierlessWrapped = true;
++
++	// context.route applies to every page incl. future ones — remember its globs and
++	// seed them onto each new page so a page created after the route() call still forces
++	const ctxGlobs: ForceGlob[] = [];
++
++	const wrapPage = (page: Page): void => {
++		const p = page as Page & { __tierlessWrapped?: boolean };
++		if (p.__tierlessWrapped) return;
++		p.__tierlessWrapped = true;
++		for (const d of ctxGlobs) seed(page, d);
++		const orig = page.route.bind(page);
++		page.route = ((url: Matcher, handler: Parameters<typeof orig>[1], opts?: Parameters<typeof orig>[2]) => {
++			const d = describe(url);
++			if (d) seed(page, d);
++			return orig(url as Parameters<typeof orig>[0], handler, opts);
++		}) as typeof page.route;
++	};
++
++	const origCtxRoute = context.route.bind(context);
++	context.route = ((url: Matcher, handler: Parameters<typeof origCtxRoute>[1], opts?: Parameters<typeof origCtxRoute>[2]) => {
++		const d = describe(url);
++		if (d) {
++			ctxGlobs.push(d);
++			for (const page of context.pages()) seed(page, d);
++		}
++		return origCtxRoute(url as Parameters<typeof origCtxRoute>[0], handler, opts);
++	}) as typeof context.route;
++
++	context.pages().forEach(wrapPage);
++	context.on('page', wrapPage);
++}
+--- a/packages/testing/playwright/config/intercepts.ts
++++ b/packages/testing/playwright/config/intercepts.ts
+@@ -1,4 +1,5 @@
+ import type { BrowserContext, Route } from '@playwright/test';
++import { recordForceBrowserRoutes } from '../utils/force-browser-routes';
+ import cloneDeep from 'lodash/cloneDeep';
+ import merge from 'lodash/merge';
+ 
+@@ -16,6 +17,9 @@
+ }
+ 
+ export async function setupDefaultInterceptors(target: BrowserContext) {
++	// tierless corpus harness (test patch 0007, both arms): record every intercepted
++	// glob into the port's force-browser seam so mocked requests stay browser-visible
++	recordForceBrowserRoutes(target);
+ 	// Global /rest/settings intercept - always active like Cypress
+ 	// TODO: Remove this as a global and move it per test
+ 	await target.route('**/rest/settings', async (route: Route) => {

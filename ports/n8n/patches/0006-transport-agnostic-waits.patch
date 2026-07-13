@@ -153,9 +153,34 @@
  
  			await this.n8n.canvas.clickExecuteWorkflowButton();
  			await responsePromise;
+--- a/packages/testing/playwright/composables/journeys/admin-views-executions-list.ts
++++ b/packages/testing/playwright/composables/journeys/admin-views-executions-list.ts
+@@ -1,4 +1,5 @@
+ import { expect } from '@playwright/test';
++import { waitForRestResponseOrCrossing } from '../../utils/transport-wait';
+ import type { IWorkflowBase } from 'n8n-workflow';
+ import { nanoid } from 'nanoid';
+ 
+@@ -84,10 +85,12 @@
+ 	n8n: n8nPage,
+ 	ctx: AdminViewsExecutionsListContext,
+ ): Promise<void> {
+-	const executionsResponse = n8n.page.waitForResponse(
+-		(r) => r.url().includes('/rest/executions') && r.status() === 200,
+-		{ timeout: 120_000 },
+-	);
++	// tierless corpus harness (test patch 0006, both arms): over HTTP or the session socket
++	const executionsResponse = waitForRestResponseOrCrossing(n8n.page, {
++		url: ['/rest/executions'],
++		status: 200,
++		timeout: 120_000,
++	});
+ 	await n8n.page.goto(`/projects/${ctx.project.id}/executions`, {
+ 		waitUntil: 'commit',
+ 		timeout: 120_000,
 --- a/packages/testing/playwright/utils/transport-wait.ts
 +++ b/packages/testing/playwright/utils/transport-wait.ts
-@@ -0,0 +1,97 @@
+@@ -0,0 +1,104 @@
 +// Transport-agnostic REST wait (tierless corpus harness, test patch 0006 — applied to
 +// BOTH arms; docs/corpus.md test accommodations). The ported build serves same-origin
 +// /rest requests over a session websocket, so `page.waitForResponse` can never fire
@@ -170,6 +195,8 @@
 +	url: string[] | RegExp;
 +	/** Uppercase methods to accept; empty/omitted accepts any. */
 +	methods?: string[];
++	/** Require this response status; omitted accepts any. */
++	status?: number;
 +	timeout?: number;
 +}
 +
@@ -204,7 +231,7 @@
 +
 +export async function waitForRestResponseOrCrossing(
 +	page: Page,
-+	{ url, methods = [], timeout }: RestWaitOptions,
++	{ url, methods = [], status, timeout }: RestWaitOptions,
 +): Promise<RestResponseLike> {
 +	const urlOk = (u: string): boolean =>
 +		url instanceof RegExp ? url.test(u) : url.every((s) => u.includes(s));
@@ -212,16 +239,20 @@
 +	// the page world and restarts the log — wall clock stays comparable across documents
 +	const logFrom = await page.evaluate(() => Date.now()).catch(() => Date.now());
 +	const httpWait = page.waitForResponse(
-+		(res) => urlOk(res.url()) && (methods.length === 0 || methods.includes(res.request().method())),
++		(res) =>
++			urlOk(res.url()) &&
++			(methods.length === 0 || methods.includes(res.request().method())) &&
++			(status === undefined || res.status() === status),
 +		timeout !== undefined ? { timeout } : undefined,
 +	);
 +	const crossingWait = page
 +		.waitForFunction(
-+			({ from, reSrc, reFlags, subs, ms }) => {
++			({ from, reSrc, reFlags, subs, ms, st }) => {
 +				const log = ((window as unknown as { __tierlessExecLog?: ExecLogEntry[] })
 +					.__tierlessExecLog ?? []) as ExecLogEntry[];
 +				for (const e of log) {
 +					if (!e || e.t < from || e.status === undefined) continue;
++					if (st !== null && e.status !== st) continue;
 +					const method = (e.name || '').split('.')[1]?.toUpperCase() ?? '';
 +					const ok =
 +						reSrc !== null
@@ -238,6 +269,7 @@
 +				reFlags: url instanceof RegExp ? url.flags : null,
 +				subs: url instanceof RegExp ? [] : url,
 +				ms: methods,
++				st: status ?? null,
 +			},
 +			timeout !== undefined ? { timeout } : undefined,
 +		)

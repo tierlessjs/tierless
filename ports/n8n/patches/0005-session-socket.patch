@@ -9,7 +9,7 @@
  
  import type { IRestApiContext } from './types';
  
-@@ -18,6 +20,32 @@
+@@ -18,6 +20,68 @@
  	return browserId;
  };
  
@@ -39,10 +39,46 @@
 +	return tierlessSession;
 +}
 +
++// FORCE-BROWSER (corpus port, patch 0005): a request whose URL matches a glob the page
++// registered in `window.__tierlessForceBrowser` stays on the browser's own fetch
++// instead of the socket. Moving I/O off the browser makes it invisible to anything
++// that intercepts browser network traffic — service workers, extensions, and (the
++// reason it surfaced) a test harness's response mocking. The embedder lists the
++// resources that MUST stay browser-visible; empty/absent in production, so this is a
++// no-op there. Populated by test patch 0007 from the suite's own route() registrations.
++type ForceGlob = { glob: string } | { re: [string, string] };
++function forceBrowser(path: string): boolean {
++	const list = (window as { __tierlessForceBrowser?: ForceGlob[] }).__tierlessForceBrowser;
++	if (!list || !list.length) return false;
++	const full = location.origin + path;
++	const candidates = [full, full.split('?')[0]];
++	const globToRe = (g: string): RegExp =>
++		new RegExp(
++			'^' +
++				g
++					.replace(/[.+^${}()|[\]\\]/g, '\\$&')
++					.replace(/\*\*|\*|\?/g, (m) => (m === '**' ? '.*' : m === '*' ? '[^/]*' : '.')) +
++				'$',
++		);
++	return list.some((d) => {
++		const re = 're' in d ? new RegExp(d.re[0], d.re[1]) : globToRe(d.glob);
++		return candidates.some((c) => re.test(c));
++	});
++}
++
++// same-origin exec: force-browser paths take the direct fetch (interceptable), the rest
++// cross the session socket. Built once per origin; the per-request choice is inside.
++function tierlessSameOriginExec(origin: string) {
++	const direct = restResources(origin, { envelopeErrors: true });
++	const session = tierlessSessionExec();
++	return (req: Parameters<typeof session>[0]) =>
++		forceBrowser(String((req.args ?? [])[0] ?? '')) ? direct(req) : session(req);
++}
++
  export const NO_NETWORK_ERROR_CODE = 999;
  export const STREAM_SEPARATOR = '⧉⇋⇋➽⌑⧉§§\n';
  
-@@ -123,11 +151,17 @@
+@@ -123,11 +187,17 @@
  		// builds, so production requests never pin on it). Browser-pinned configs
  		// (blobs, FormData, binary bodies) fall through to axios's own XHR adapter.
  		adapter: axiosAdapter({
@@ -59,7 +95,7 @@
 +					typeof location === 'undefined' ? 'http://localhost' : location.href,
 +				).origin;
 +				return typeof location !== 'undefined' && origin === location.origin
-+					? tierlessSessionExec()
++					? tierlessSameOriginExec(origin)
 +					: restResources(origin, { envelopeErrors: true });
 +			})(),
  			fallback: typeof XMLHttpRequest === 'undefined' ? undefined : axios.getAdapter('xhr'),
