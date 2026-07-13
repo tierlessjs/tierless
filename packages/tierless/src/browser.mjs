@@ -163,7 +163,9 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
                 if (!g.__TIERLESS_EXEC_LOG__)
                     return;
                 const log = (g.__tierlessExecLog ||= []);
-                log.push({ t: Date.now(), name: req.name, url: String(req.args?.[0] ?? ""), status, ...(hasBody ? { body } : {}) });
+                // reqBody too: harness waits shaped as `resp.request().postDataJSON()` need the
+                // request side of the crossing (opt-in log; entry count is bounded above)
+                log.push({ t: Date.now(), name: req.name, url: String(req.args?.[0] ?? ""), status, ...(req.args?.[1] !== undefined ? { reqBody: req.args[1] } : {}), ...(hasBody ? { body } : {}) });
                 if (log.length > 500)
                     log.splice(0, log.length - 500);
             };

@@ -70,11 +70,18 @@ export async function bootN8n(): Promise<{ close(): void }> {
   // detached process GROUPS (n8n spawns task runners); kill(-pid) takes the whole tree
   const procs: ChildProcess[] = [
     spawn(process.execPath, ["bin/n8n"], { cwd: path.join(SRC, "packages/cli"), env, stdio: log("n8n"), detached: true }),
+    // the session gateway (both variants — env symmetry; the baseline build never connects)
+    spawn(process.execPath, [fileURLToPath(new URL("./gateway.mts", import.meta.url))], { env, stdio: log("gateway"), detached: true }),
   ];
   const close = (): void => procs.forEach((p) => { try { process.kill(-p.pid!, "SIGTERM"); } catch { p.kill(); } });
   process.on("exit", close);
   try {
     await waitForN8n(300_000);
+    const t0 = Date.now();
+    while (!(await serving(GATEWAY))) {
+      if (Date.now() - t0 > 60_000) throw new Error("timeout waiting for " + GATEWAY);
+      await new Promise((r) => setTimeout(r, 500));
+    }
   } catch (err) {
     close();
     throw err;

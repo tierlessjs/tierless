@@ -36,6 +36,7 @@ const wireUrls: string[] = [];
 if (TRUTH) {
   const app: WireCounter = { toServer: 0, toClient: 0 };
   delayProxy(25680, 5680, 0, app).unref();
+  delayProxy(25780, 5780, 0).unref();   // ws passthrough (page port+100 rule); the gateway counts its own TCP-true bytes
   createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ appOut: app.toServer, appIn: app.toClient })); }).listen(14990, "127.0.0.1").unref();
   editorUrl = "http://127.0.0.1:25680";
   wireUrls.push("http://127.0.0.1:14990", "http://127.0.0.1:5780/__tierless/wire");
@@ -43,9 +44,8 @@ if (TRUTH) {
 }
 if (RTT) {
   delayProxy(15680, 5680, RTT / 2).unref();
-  delayProxy(15780, 5780, RTT / 2).unref();
+  delayProxy(15780, 5780, RTT / 2).unref();   // the page derives ws/gateway as page-port+100, so the relayed origin lands here
   editorUrl = "http://127.0.0.1:15680";
-  process.env.TIERLESS_WS_URL = "ws://127.0.0.1:15780/__tierless";
   console.log(`RTT injection: ${RTT} ms via 15680->5680, 15780->5780`);
 }
 
