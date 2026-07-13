@@ -1,0 +1,643 @@
+
+paired 736 tests (736 baseline, 736 ported)
+bytes are TCP-TRUE (socket-level, compression included; browser data path only — node-side seeding excluded)
+
+pass-parity EXCLUDED (85) — status baseline/ported:
+  skipped/skipped  tests/e2e/workflows/checklist/production-checklist.spec.ts:109 › Workflow Production Checklist › should show completed state for configured actions
+  passed/failed  tests/e2e/workflows/editor/canvas/canvas-nodes.spec.ts:23 › Canvas Node Manipulation and Navigation › should add switch node and test connections
+  failed/passed  tests/e2e/api/wait-form-resume.spec.ts:65 › Wait Node Form Resume › manual execution form popup › should open form when Wait node enters waiting state
+  failed/failed  tests/e2e/api/waiting-endpoint-security.spec.ts:75 › Waiting Endpoint Security › form-waiting signature validation › should reject unsigned and tampered requests, accept valid signature
+  failed/passed  tests/e2e/app-config/demo-reimport.spec.ts:21 › Demo reimport › Workflow reimport — connections and layout › should preserve connections when same workflow is reimported
+  failed/passed  tests/e2e/app-config/demo-reimport.spec.ts:49 › Demo reimport › Workflow reimport — connections and layout › should show all nodes in viewport after reimport (fitView)
+  skipped/skipped  tests/e2e/app-config/nps-survey.spec.ts:43 › NPS Survey
+  skipped/skipped  tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:247 › Canvas Zoom Functionality › should open and close the about modal on keyboard shortcut
+  failed/failed  tests/e2e/workflows/editor/code/code-node.spec.ts:102 › Code node › Run Once for Each Item › should show lint errors in `runOnceForEachItem` mode
+  failed/failed  tests/e2e/credentials/oauth.spec.ts:9 › OAuth Credentials › should create and connect with Google OAuth2
+  passed/failed  tests/e2e/workflows/editor/editor-after-route-changes.spec.ts:16 › Editor zoom should work after route changes › should maintain zoom functionality after switching between Editor and Workflow history and Workflow list
+  skipped/skipped  tests/e2e/data-tables/details.spec.ts:364 › Data Table details view › Should filter correctly using column filters
+  passed/failed  tests/e2e/workflows/editor/execution/debug.spec.ts:55 › Debug mode › should exit debug mode after successful execution
+  skipped/skipped  tests/e2e/workflows/editor/execution/debug.spec.ts:102 › Debug mode › should show error for pinned data mismatch
+  skipped/skipped  tests/e2e/workflows/editor/execution/execution.spec.ts:96 › Execution › should test manual workflow stop
+  skipped/skipped  tests/e2e/workflows/editor/execution/execution.spec.ts:238 › Execution › connections should be colored differently for pinned data › when executing the workflow
+  skipped/skipped  tests/e2e/workflows/editor/execution/execution.spec.ts:242 › Execution › connections should be colored differently for pinned data › when executing a node
+  skipped/skipped  tests/e2e/workflows/editor/execution/execution.spec.ts:246 › Execution › connections should be colored differently for pinned data › when connecting pinned node by output drag and drop
+  skipped/skipped  tests/e2e/workflows/editor/execution/execution.spec.ts:250 › Execution › connections should be colored differently for pinned data › when connecting pinned node after adding an unconnected node
+  failed/failed  tests/e2e/workflows/editor/execution/inject-previous.spec.ts:14 › Inject previous execution › can map keys from previous execution
+  skipped/skipped  tests/e2e/workflows/editor/execution/previous-nodes.spec.ts:12 › Execute previous nodes › should execute only previous nodes and not the current node
+  skipped/skipped  tests/e2e/workflows/editor/expressions/inline.spec.ts:39 › Inline expression editor › Basic UI functionality › should switch between expression and fixed using keyboard
+  skipped/skipped  tests/e2e/node-creator/navigation.spec.ts:30 › Node Creator Navigation › should search for nodes with various queries
+  skipped/skipped  tests/e2e/workflows/editor/expressions/mapping.spec.ts:268 › Data Mapping › maps expressions to updated fields correctly
+  failed/failed  tests/e2e/nodes/form-trigger-node.spec.ts:78 › Form Trigger › should create and submit a multi-page form
+  failed/failed  tests/e2e/nodes/form-trigger-node.spec.ts:140 › Form Trigger › form execution with basic auth › form submission works with basic auth
+  failed/failed  tests/e2e/nodes/form-trigger-node.spec.ts:207 › Form Trigger › form execution with basic auth › multi-step form submission works with basic auth
+  failed/passed  tests/e2e/nodes/if-node.spec.ts:41 › If Node (filter component) › should correctly evaluate conditions
+  passed/failed  tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:71 › NDV Data Display › Schema View › should not display pagination for schema
+  failed/failed  tests/e2e/projects/folders-operations.spec.ts:10 › Folders - Operations › Rename and delete folders › should rename folder from breadcrumb dropdown
+  failed/failed  tests/e2e/projects/folders-operations.spec.ts:47 › Folders - Operations › Rename and delete folders › should warn before deleting non-empty folder from breadcrumb dropdown
+  failed/failed  tests/e2e/workflows/editor/ndv/ndv-floating-nodes.spec.ts:88 › NDV Floating Nodes Navigation › should connect floating sub-nodes
+  passed/failed  tests/e2e/projects/folders-operations.spec.ts:184 › Folders - Operations › Move folders and workflows › should move folder with contents to another folder - from list dropdown
+  skipped/skipped  tests/e2e/workflows/editor/ndv/pinning.spec.ts:209 › Data pinning › Advanced pinning scenarios › should not use pin data in production webhook executions
+  passed/failed  tests/e2e/regression/CAT-726-canvas-node-connectors-not-rendered-when-nodes-inserted.spec.ts:10 › CAT-726 Node connectors not rendered when nodes inserted on the canvas › should correctly append a No Op node when Loop Over Items node is added (from add button)
+  failed/failed  tests/e2e/settings/users/users.spec.ts:10 › Users Settings › should prevent non-owners to access UM settings
+  failed/failed  tests/e2e/settings/users/users.spec.ts:45 › Users Settings › should delete user and transfer their data
+  failed/failed  tests/e2e/sharing/access-control.spec.ts:41 › Access Control Boundaries › should allow admin full access to credentials created by others
+  failed/failed  tests/e2e/sharing/credential-sharing.spec.ts:13 › Credential Sharing › should share credential with another user via UI
+  failed/failed  tests/e2e/sharing/credential-visibility.spec.ts:57 › Credential Visibility Rules › should show personal and shared credentials for members
+  failed/failed  tests/e2e/sharing/workflow-sharing.spec.ts:11 › Workflow Sharing › should share workflow with another user via UI
+  skipped/skipped  tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:217 › Workflow Archive › should unpublish a published workflow
+  skipped/skipped  tests/e2e/workflows/editor/workflow-actions/copy-paste.spec.ts:19 › Workflow Copy Paste › should copy nodes
+  skipped/skipped  tests/e2e/workflows/editor/workflow-actions/copy-paste.spec.ts:39 › Workflow Copy Paste › should paste nodes (both current and old node versions)
+  skipped/skipped  tests/e2e/workflows/editor/workflow-actions/copy-paste.spec.ts:53 › Workflow Copy Paste › should allow importing nodes without names
+  skipped/skipped  tests/e2e/workflows/editor/workflow-actions/duplicate.spec.ts:16 › Workflow Duplicate › should duplicate unsaved workflow
+  skipped/skipped  tests/e2e/workflows/editor/workflow-actions/duplicate.spec.ts:24 › Workflow Duplicate › should duplicate saved workflow
+  failed/failed  tests/e2e/workflows/editor/workflow-actions/publish.spec.ts:44 › Workflow Publish › should be able to publish workflow when nodes with errors are disabled
+  skipped/skipped  tests/e2e/workflows/editor/workflow-actions/run.spec.ts:19 › Workflow Run › should keep endpoint click working when switching between execution and editor tab
+  skipped/skipped  tests/e2e/workflows/editor/workflow-actions/run.spec.ts:38 › Workflow Run › should run workflow on button click
+  skipped/skipped  tests/e2e/workflows/editor/workflow-actions/run.spec.ts:47 › Workflow Run › should run workflow using keyboard shortcut
+  skipped/skipped  tests/e2e/workflows/editor/workflow-actions/run.spec.ts:56 › Workflow Run › should not run empty workflows
+  skipped/skipped  tests/e2e/workflows/editor/workflow-actions/settings.spec.ts:15 › Workflow Settings › should update workflow settings
+  skipped/skipped  tests/e2e/workflows/editor/workflow-actions/settings.spec.ts:67 › Workflow Settings › Menu entry Push To Git › should not show up in the menu for members @auth:member
+  skipped/skipped  tests/e2e/workflows/editor/workflow-actions/settings.spec.ts:72 › Workflow Settings › Menu entry Push To Git › should show up for owners @auth:owner
+  skipped/skipped  tests/e2e/workflows/executions/list.spec.ts:19 › Executions Filter › should keep popover open when selecting from dropdown inside it
+  failed/failed  tests/e2e/workflows/executions/list.spec.ts:79 › Workflow Executions › when workflow is saved › should render executions tab correctly
+  skipped/skipped  tests/e2e/workflows/executions/list.spec.ts:193 › Workflow Executions › when workflow is saved › should show workflow data in executions tab after hard reload and modify name and tags
+  skipped/skipped  tests/e2e/workflows/executions/list.spec.ts:199 › Workflow Executions › when workflow is saved › should load items and auto scroll after filter change
+  failed/failed  tests/e2e/workflows/templates/templates.spec.ts:177 › Workflow templates › For api.n8n.io › Redirects to website when visiting templates page directly
+  failed/failed  tests/e2e/api/workflow-publication-service.spec.ts:75 › Workflow Publication Service › reconciles a webhook that went missing from storage on re-publish
+  skipped/skipped  tests/e2e/instance-ai/instance-ai-timeouts.spec.ts:8 › Instance AI timeouts › should show a timeout message when a stuck background task times out
+  skipped/skipped  tests/e2e/node-creator/categories.spec.ts:6 › Node Creator Categories
+  passed/failed  tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:269 › Redaction enforcement › when floor is "production" › redacts production executions
+  passed/skipped  tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:280 › Redaction enforcement › when floor is "production" › leaves manual executions unredacted
+  passed/skipped  tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:291 › Redaction enforcement › when floor is "production" › rejects workflow redaction changes that fall below the floor
+  passed/skipped  tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:313 › Redaction enforcement › when floor is "all" › locks both selects in the workflow settings
+  passed/skipped  tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:334 › Redaction enforcement › when floor is "all" › redacts production executions
+  passed/skipped  tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:345 › Redaction enforcement › when floor is "all" › redacts manual executions
+  passed/skipped  tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:356 › Redaction enforcement › when floor is "all" › redacts execution data served via the public API
+  passed/skipped  tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:381 › Redaction enforcement › when floor is "off" and workflow redaction is "non-manual" › redacts production executions
+  passed/skipped  tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:392 › Redaction enforcement › when floor is "off" and workflow redaction is "non-manual" › leaves manual executions unredacted
+  passed/skipped  tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:404 › Redaction enforcement › does not retroactively redact executions captured before the floor was raised
+  failed/failed  tests/e2e/workflows/editor/execution/logs.spec.ts:28 › Logs › should populate logs as manual execution progresses
+  failed/failed  tests/e2e/workflows/editor/execution/logs.spec.ts:80 › Logs › should show the actions menu when the overflow button is clicked
+  failed/failed  tests/e2e/workflows/editor/execution/logs.spec.ts:92 › Logs › should allow to trigger partial execution
+  failed/failed  tests/e2e/workflows/editor/execution/logs.spec.ts:118 › Logs › should show input and output data in the selected display mode
+  failed/failed  tests/e2e/workflows/editor/execution/logs.spec.ts:163 › Logs › should show input and output data of correct run index and branch
+  failed/failed  tests/e2e/workflows/editor/execution/logs.spec.ts:215 › Logs › should keep populated logs unchanged when workflow get edits after the execution
+  failed/failed  tests/e2e/workflows/editor/execution/logs.spec.ts:232 › Logs › should show logs for a past execution
+  failed/failed  tests/e2e/workflows/editor/execution/logs.spec.ts:262 › Logs › should show logs for a workflow with a node that waits for webhook
+  failed/failed  tests/e2e/workflows/editor/execution/logs.spec.ts:295 › Logs › should allow to cancel a workflow with a node that waits for webhook
+  failed/failed  tests/e2e/workflows/editor/viewer-permissions.spec.ts:74 › Workflow Viewer Permissions › user without workflow:update scope cannot drag nodes @auth:owner
+  skipped/skipped  tests/e2e/workflows/editor/viewer-permissions.spec.ts:94 › Workflow Viewer Permissions › user without workflow:update can copy but cannot paste @auth:owner
+  skipped/skipped  tests/e2e/workflows/editor/viewer-permissions.spec.ts:110 › Workflow Viewer Permissions › user with workflow:update scope can drag and paste @auth:owner
+
+== suite-wide (651 pass-parity pairs; 537 touch the port) ==
+  total bytes   11139154.9 KB -> 5694158.6 KB   (49% less IO)
+  trips: n/a (wire-only rows carry no request/frame counts)
+  median per-test bytes saved   50%
+
+== elapsed time (real, wall clock of each test; compare only same-RTT runs) ==
+  total   88.8 min -> 78.5 min   (12% less)
+  median per-test time saved   12%
+  covered subset: total 87.0 -> 77.2 min (11% less), median per-test 11% less
+
+== covered subset (537 tests whose interaction the port serves) ==
+  total bytes   11009324.9 KB -> 5693408.7 KB   (48% less IO)
+  median per-test: bytes 49% less (trips n/a)
+
+  per-test detail (bytes before -> after):
+    62357.1 -> 24349.5 KB  tests/e2e/workflows/list/workflows.spec.ts:121 › Workflows › should delete an archived workflow
+    43974.9 -> 8721.8 KB  tests/e2e/ai/ai-2505-pdf-embed.spec.ts:18 › AI-2505 — PDF embed regression › embeds a PDF through De
+    56907.3 -> 24345.9 KB  tests/e2e/workflows/list/workflows.spec.ts:97 › Workflows › should archive and unarchive a workflow
+    52049.8 -> 19507.4 KB  tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:196 › Canvas Zoom Functionality › should prese
+    63163.0 -> 35271.6 KB  tests/e2e/sharing/credential-visibility.spec.ts:99 › Credential Visibility Rules › should only show 
+    44662.8 -> 17798.7 KB  tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:43 › NDV Data Display › Schema View › should
+    44229.8 -> 17378.4 KB  tests/e2e/workflows/editor/ndv/ndv-floating-nodes.spec.ts:99 › NDV Floating Nodes Navigation › shoul
+    37275.8 -> 10560.3 KB  tests/e2e/nodes/webhook.spec.ts:20 › Webhook Trigger node › should listen for all HTTP methods (GET,
+    42463.3 -> 16582.9 KB  tests/e2e/credentials/oauth.spec.ts:42 › OAuth Credentials › should connect when the callback notifi
+    32652.3 -> 8835.5 KB  tests/e2e/workflows/editor/execution/executions-list-infinite-scroll.spec.ts:32 › Executions list in
+    32463.7 -> 8869.4 KB  tests/e2e/workflows/editor/workflow-actions/publish.spec.ts:25 › Workflow Publish › should be able t
+    32040.4 -> 8849.0 KB  tests/e2e/workflows/editor/code/editors.spec.ts:41 › Editors › SQL Editor › should update expression
+    33321.8 -> 10953.9 KB  tests/e2e/workflows/editor/code/code-node.spec.ts:57 › Code node › Code editor › should allow switch
+    31247.1 -> 8898.1 KB  tests/e2e/workflows/editor/workflow-actions/publish.spec.ts:36 › Workflow Publish › should not be ab
+    31026.2 -> 8745.1 KB  tests/e2e/nodes/webhook.spec.ts:102 › Webhook Trigger node › should listen for a GET request and res
+    40079.8 -> 17809.3 KB  tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:129 › NDV Data Display › Search and Renderin
+    40934.8 -> 18868.0 KB  tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:14 › NDV Parameters › Parameter Hints › should
+    60964.8 -> 39182.9 KB  tests/e2e/data-tables/tables.spec.ts:21 › Data Table list view › Should correctly render project dat
+    30532.4 -> 8835.5 KB  tests/e2e/workflows/editor/execution/executions-list-infinite-scroll.spec.ts:52 › Executions list in
+    38846.3 -> 17387.5 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:391 › Canvas node groups — collapse / expand ›
+    48046.4 -> 26750.7 KB  tests/e2e/building-blocks/credential-mismatch.spec.ts:105 › HTTP Request credential picker with mism
+    39065.7 -> 17809.5 KB  tests/e2e/workflows/list/workflows.spec.ts:141 › Workflows › should unpublish a published workflow f
+    40499.7 -> 19778.1 KB  tests/e2e/data-tables/tables.spec.ts:104 › Data Table list view › Should create data table from work
+    40277.5 -> 19666.3 KB  tests/e2e/data-tables/tables.spec.ts:118 › Data Table list view › Should delete data table from card
+    39814.6 -> 19215.6 KB  tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:34 › NDV Data Display › Schema View › should
+    39716.2 -> 19215.0 KB  tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:53 › NDV Data Display › Schema View › should
+    28992.9 -> 8833.1 KB  tests/e2e/mcp-registry/mcp-registry.spec.ts:12 › MCP Registry › exposes Notion MCP as a tool with hi
+    32127.4 -> 11999.9 KB  tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:175 › Undo/Redo › should undo/redo disabling mul
+    38750.1 -> 18838.0 KB  tests/e2e/workflows/editor/routing.spec.ts:59 › Routing › should open ndv via URL
+    28373.0 -> 8710.0 KB  tests/e2e/workflows/editor/execution/execution.spec.ts:132 › Execution › should test webhook workflo
+    30014.4 -> 10412.0 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:154 › Canvas Actions › should copy selected nodes
+    30385.2 -> 10886.2 KB  tests/e2e/workflows/editor/code/code-node.spec.ts:75 › Code node › Code editor › should show lint er
+    29503.9 -> 10118.8 KB  tests/e2e/workflows/editor/tags.spec.ts:18 › Workflow tags - Tag creation › should create and attach
+    29715.7 -> 10559.5 KB  tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:160 › Undo/Redo › should undo/redo disabling a n
+    48161.9 -> 29014.1 KB  tests/e2e/workflows/editor/canvas/canvas-nodes.spec.ts:64 › Canvas Node Manipulation and Navigation 
+    29420.0 -> 10287.2 KB  tests/e2e/workflows/executions/list.spec.ts:203 › Workflow Executions › when workflow is saved › sho
+    40321.9 -> 21234.5 KB  tests/e2e/projects/folders-advanced.spec.ts:49 › Folders - Advanced Operations › Duplicate workflows
+    27885.7 -> 8882.2 KB  tests/e2e/workflows/editor/code/code-node.spec.ts:129 › Code node › Ask AI › Enabled › tab should ex
+    27737.1 -> 8767.6 KB  tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:80 › NDV Parameters › Remote Options & Network
+    29421.2 -> 10559.5 KB  tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:193 › Undo/Redo › should undo/redo duplicating a
+    32493.1 -> 13652.8 KB  tests/e2e/data-tables/tables.spec.ts:137 › Data Table list view › Should paginate data table list co
+    37566.5 -> 18826.1 KB  tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:93 › NDV Data Display › Schema View › should
+    27431.5 -> 8721.2 KB  tests/e2e/workflows/editor/ndv/resource-locator.spec.ts:117 › Resource Locator › should reset resour
+    27637.8 -> 8995.2 KB  tests/e2e/workflows/editor/expressions/modal.spec.ts:94 › Expression editor modal › Dynamic data › s
+    38266.8 -> 19665.2 KB  tests/e2e/data-tables/tables.spec.ts:91 › Data Table list view › Should create project data table fr
+    28899.3 -> 10409.3 KB  tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:102 › Canvas Zoom Functionality › should disab
+    31264.2 -> 13377.1 KB  tests/e2e/credentials/crud.spec.ts:203 › Credentials › should edit credential for non-standard crede
+    26507.2 -> 8693.8 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:84 › Canvas node groups › commits a new title 
+    48766.8 -> 30988.6 KB  tests/e2e/building-blocks/user-service.spec.ts:47 › User API Service › Internal API (Cookie Auth) › 
+    32517.3 -> 14792.9 KB  tests/e2e/workflows/editor/execution/debug.spec.ts:74 › Debug mode › should handle pinned data confl
+    35298.1 -> 17615.3 KB  tests/e2e/workflows/editor/expressions/inline.spec.ts:83 › Inline expression editor › Static data › 
+    26222.5 -> 8855.4 KB  tests/e2e/workflows/editor/ndv/paired-item.spec.ts:180 › NDV Paired Items › can pair items between i
+    27389.8 -> 10137.8 KB  tests/e2e/ai/assistant-basic.spec.ts:122 › AI Assistant::enabled › should render and handle quick re
+    32494.5 -> 15492.6 KB  tests/e2e/workflows/list/workflows.spec.ts:30 › Workflows › should create a new workflow using add w
+    34466.5 -> 17777.6 KB  tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:109 › NDV Data Display › Search and Renderin
+    35722.4 -> 19039.4 KB  tests/e2e/workflows/editor/expressions/inline.spec.ts:69 › Inline expression editor › Static data › 
+    35513.0 -> 18846.3 KB  tests/e2e/workflows/editor/subworkflows/workflow-selector.spec.ts:85 › Workflow Selector Parameter ›
+    33880.3 -> 17388.8 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:195 › Canvas node groups › persists groups aft
+    25165.2 -> 8693.8 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:58 › Canvas node groups › expands the group fr
+    25100.7 -> 8836.8 KB  tests/e2e/workflows/editor/code/editors.spec.ts:104 › Editors › SQL Editor › should trigger dirty fl
+    26662.9 -> 10409.3 KB  tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:140 › Canvas Zoom Functionality › should renam
+    24908.1 -> 8693.8 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:231 › Canvas node groups › auto-extends the gr
+    24996.4 -> 8869.1 KB  tests/e2e/workflows/checklist/production-checklist.spec.ts:147 › Workflow Production Checklist › sho
+    24722.2 -> 8741.6 KB  tests/e2e/workflows/executions/list.spec.ts:107 › Workflow Executions › when workflow is saved › sho
+    24774.5 -> 8834.9 KB  tests/e2e/regression/ADO-1338-ndv-missing-input-panel.spec.ts:16 › ADO-1338-ndv-missing-input-panel 
+    24564.2 -> 8689.4 KB  tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:226 › Redaction enforcement › when flo
+    26293.2 -> 10436.4 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:75 › Canvas Actions › should add node between two 
+    24700.2 -> 8872.2 KB  tests/e2e/workflows/checklist/production-checklist.spec.ts:54 › Workflow Production Checklist › shou
+    35438.3 -> 19770.4 KB  tests/e2e/workflows/list/workflows.spec.ts:198 › Workflows › should preserve search and filters in U
+    24387.7 -> 8722.8 KB  tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:225 › Undo/Redo › should be able to copy and pas
+    25714.0 -> 10157.5 KB  tests/e2e/nodes/form-trigger-node.spec.ts:28 › Form Trigger › should fill up form fields
+    26252.4 -> 10817.5 KB  tests/e2e/ai/assistant-code-help.spec.ts:59 › AI Assistant::enabled › Code Node Error Help › should 
+    24080.9 -> 8692.2 KB  tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:242 › Redaction enforcement › when flo
+    32844.0 -> 17485.1 KB  tests/e2e/workflows/editor/ndv/ndv-floating-nodes.spec.ts:13 › NDV Floating Nodes Navigation › shoul
+    24170.6 -> 8861.3 KB  tests/e2e/workflows/editor/code/editors.spec.ts:176 › Editors › HTML Editor › should not trigger dir
+    23906.2 -> 8706.6 KB  tests/e2e/workflows/editor/execution/execution.spec.ts:54 › Execution › should test manual workflow
+    28395.5 -> 13202.0 KB  tests/e2e/projects/folders-operations.spec.ts:164 › Folders - Operations › Move folders and workflow
+    23790.4 -> 8855.0 KB  tests/e2e/workflows/editor/ndv/paired-item.spec.ts:81 › NDV Paired Items › maps paired input and out
+    23518.7 -> 8728.9 KB  tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:213 › NDV › Complex Edge Cases › ADO-2931 - should h
+    27992.8 -> 13291.2 KB  tests/e2e/credentials/crud.spec.ts:179 › Credentials › should rename credentials from NDV
+    24807.7 -> 10232.0 KB  tests/e2e/ai/assistant-basic.spec.ts:144 › AI Assistant::enabled › should warn before starting a new
+    21304.8 -> 6806.4 KB  tests/e2e/settings/personal/personal.spec.ts:33 › Personal Settings › should allow to change first a
+    27684.2 -> 13203.1 KB  tests/e2e/projects/folders-operations.spec.ts:241 › Folders - Operations › Move folders and workflow
+    34939.7 -> 20463.5 KB  tests/e2e/workflows/editor/expressions/inline.spec.ts:95 › Inline expression editor › Static data › 
+    23195.7 -> 8723.3 KB  tests/e2e/workflows/editor/subworkflows/workflow-selector.spec.ts:50 › Workflow Selector Parameter ›
+    29936.6 -> 15469.6 KB  tests/e2e/workflows/list/workflows.spec.ts:221 › Workflows › should share a workflow
+    24498.7 -> 10089.0 KB  tests/e2e/workflows/editor/tags.spec.ts:86 › Workflow tags - Tag operations › should delete all tags
+    23101.8 -> 8702.2 KB  tests/e2e/workflows/editor/canvas/focus-panel.spec.ts:17 › Focus panel › With experimental NDV in fo
+    23058.8 -> 8693.8 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:45 › Canvas node groups › shows the Group tool
+    23123.2 -> 8768.9 KB  tests/e2e/workflows/editor/ndv/paired-item.spec.ts:9 › NDV Paired Items › maps paired input and outp
+    24952.0 -> 10651.0 KB  tests/e2e/workflows/editor/ndv/io-filter.spec.ts:50 › Node IO Filter › should filter input/output da
+    23006.0 -> 8711.0 KB  tests/e2e/workflows/editor/execution/execution.spec.ts:319 › Execution › should execute workflow par
+    31336.2 -> 17049.1 KB  tests/e2e/building-blocks/credentials.spec.ts:11 › Credentials › composer: createFromList creates cr
+    23087.2 -> 8800.6 KB  tests/e2e/workflows/editor/ndv/resource-locator.spec.ts:129 › Resource Locator › should retrieve lis
+    23086.6 -> 8805.3 KB  tests/e2e/regression/SUG-38-inline-expression-preview.spec.ts:16 › SUG-38 Inline expression previews
+    24448.2 -> 10175.7 KB  tests/e2e/building-blocks/credentials.spec.ts:37 › Credentials › composer: createFromApi creates cre
+    22918.3 -> 8705.0 KB  tests/e2e/building-blocks/canvas-actions.spec.ts:83 › Canvas Node Actions › Node Creator Interaction
+    23040.7 -> 8838.1 KB  tests/e2e/workflows/editor/ndv/paired-item.spec.ts:257 › NDV Paired Items › can resolve expression w
+    33750.0 -> 19549.7 KB  tests/e2e/projects/project-settings.spec.ts:237 › Project Settings - Member Management › should pers
+    23067.5 -> 8870.1 KB  tests/e2e/workflows/checklist/production-checklist.spec.ts:15 › Workflow Production Checklist › shou
+    25091.2 -> 10903.2 KB  tests/e2e/workflows/editor/code/code-node.spec.ts:208 › Code node › Ask AI › Enabled › should show e
+    23316.1 -> 9151.5 KB  tests/e2e/workflows/executions/filter.spec.ts:48 › Executions Filter › should reset filter and remov
+    29591.9 -> 15447.5 KB  tests/e2e/projects/folders-basic.spec.ts:122 › Folders - Basic Operations › should create workflow i
+    27772.3 -> 13682.1 KB  tests/e2e/workflows/editor/execution/partial.spec.ts:61 › Manual partial execution › partial executi
+    24548.6 -> 10575.2 KB  tests/e2e/workflows/executions/filter.spec.ts:28 › Executions Filter › should filter executions by s
+    24115.8 -> 10155.2 KB  tests/e2e/nodes/webhook.spec.ts:229 › Webhook Trigger node › CAT-1253-bug-cant-run-workflow-when-unc
+    24233.7 -> 10344.1 KB  tests/e2e/workflows/checklist/production-checklist.spec.ts:32 › Workflow Production Checklist › shou
+    31603.3 -> 17757.0 KB  tests/e2e/projects/folders-operations.spec.ts:266 › Folders - Operations › Move folders and workflow
+    22797.3 -> 8993.3 KB  tests/e2e/workflows/editor/expressions/inline.spec.ts:125 › Inline expression editor › Dynamic data 
+    31498.7 -> 17746.5 KB  tests/e2e/projects/folders-advanced.spec.ts:10 › Folders - Advanced Operations › Duplicate workflows
+    22424.1 -> 8739.2 KB  tests/e2e/workflows/editor/execution/partial.spec.ts:26 › Manual partial execution › should report a
+    22416.9 -> 8733.9 KB  tests/e2e/nodes/webhook.spec.ts:80 › Webhook Trigger node › should listen for a GET request and resp
+    25513.0 -> 11836.1 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:324 › Canvas Actions › Node insertion positioning 
+    26829.8 -> 13274.4 KB  tests/e2e/credentials/crud.spec.ts:273 › Credentials › should setup generic authentication for HTTP 
+    22109.8 -> 8683.1 KB  tests/e2e/ai/builder-setup-wizard.spec.ts:66 › Builder Setup Wizard @auth:owner @ai › should allow s
+    22146.2 -> 8723.9 KB  tests/e2e/nodes/webhook.spec.ts:152 › Webhook Trigger node › should listen for a GET request with Ba
+    22101.6 -> 8693.7 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:328 › Canvas node groups — collapse / expand ›
+    26449.3 -> 13061.2 KB  tests/e2e/projects/project-settings.spec.ts:95 › Project Settings - Member Management › should displ
+    22545.2 -> 9186.1 KB  tests/e2e/workflows/editor/expressions/mapping.spec.ts:102 › Data Mapping › maps expressions from pr
+    23297.6 -> 10137.8 KB  tests/e2e/ai/assistant-basic.spec.ts:78 › AI Assistant::enabled › should start chat session from nod
+    23350.6 -> 10253.4 KB  tests/e2e/workflows/editor/code/editors.spec.ts:59 › Editors › SQL Editor › should not push NDV head
+    20043.1 -> 7017.9 KB  tests/e2e/data-tables/details.spec.ts:349 › Data Table details view › Should rename data table from 
+    23231.7 -> 10235.9 KB  tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:229 › Canvas Zoom Functionality › should remov
+    23896.7 -> 10904.4 KB  tests/e2e/workflows/editor/code/code-node.spec.ts:158 › Code node › Ask AI › Enabled › should send c
+    26220.1 -> 13276.0 KB  tests/e2e/credentials/crud.spec.ts:250 › Credentials › should set a default credential when editing 
+    21592.3 -> 8726.9 KB  tests/e2e/ai/assistant-credential-help.spec.ts:73 › AI Assistant::enabled › Credential Help › should
+    29607.9 -> 16743.2 KB  tests/e2e/building-blocks/credential-mismatch.spec.ts:11 › HTTP Request credential picker with misma
+    30236.2 -> 17442.8 KB  tests/e2e/workflows/editor/subworkflows/extraction.spec.ts:85 › Subworkflow Extraction › disconnecte
+    22130.8 -> 9343.5 KB  tests/e2e/workflows/editor/ndv/pinning.spec.ts:136 › Data pinning › Error handling › should show err
+    22891.1 -> 10117.9 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:101 › Canvas node groups › removes the overlay
+    22796.2 -> 10098.8 KB  tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:42 › Undo/Redo › should undo/redo deleting node 
+    25965.6 -> 13282.7 KB  tests/e2e/credentials/crud.spec.ts:61 › Credentials › should create credentials from NDV for node wi
+    21509.2 -> 8864.1 KB  tests/e2e/workflows/editor/subworkflows/debugging.spec.ts:36 › Subworkflow debugging › can inspect s
+    22774.2 -> 10140.7 KB  tests/e2e/workflows/editor/workflow-actions/publish.spec.ts:18 › Workflow Publish › should not be ab
+    21274.0 -> 8764.0 KB  tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:100 › NDV Parameters › Parameter Management - 
+    21363.5 -> 8871.4 KB  tests/e2e/ai/assistant-credential-help.spec.ts:19 › AI Assistant::enabled › Credential Help › should
+    21201.1 -> 8745.0 KB  tests/e2e/workflows/editor/ndv/resource-mapper.spec.ts:40 › Resource Mapper › should correctly delet
+    21173.6 -> 8725.1 KB  tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:127 › NDV Parameters › Parameter Management - 
+    23590.5 -> 11155.1 KB  tests/e2e/projects/folders-basic.spec.ts:88 › Folders - Basic Operations › should find nested folder
+    22860.9 -> 10426.1 KB  tests/e2e/workflows/editor/code/code-node.spec.ts:208 › Code node › Ask AI › Enabled › should show e
+    22545.2 -> 10148.0 KB  tests/e2e/nodes/webhook.spec.ts:190 › Webhook Trigger node › should listen for a GET request with He
+    21182.0 -> 8872.0 KB  tests/e2e/workflows/checklist/production-checklist.spec.ts:72 › Workflow Production Checklist › shou
+    21268.1 -> 8963.3 KB  tests/e2e/workflows/editor/expressions/modal.spec.ts:53 › Expression editor modal › Static data › sh
+    21070.9 -> 8768.8 KB  tests/e2e/workflows/editor/ndv/paired-item.spec.ts:119 › NDV Paired Items › maps paired input and ou
+    20991.1 -> 8694.9 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:169 › Canvas node groups › includes nodeGroups
+    19087.2 -> 6794.4 KB  tests/e2e/settings/personal/personal.spec.ts:47 › Personal Settings › should not allow malicious val
+    20951.3 -> 8693.8 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:137 › Canvas node groups › keeps a single-node
+    22006.2 -> 9804.5 KB  tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:183 › Canvas Zoom Functionality › should dupli
+    21010.0 -> 8842.4 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:27 › Canvas Actions › should add a connected node 
+    20889.0 -> 8803.2 KB  tests/e2e/regression/ADO-2372-prevent-clipping-params.spec.ts:9 › ADO-2362 ADO-2350 NDV Prevent clip
+    20932.8 -> 8878.1 KB  tests/e2e/workflows/editor/ndv/pinning.spec.ts:155 › Data pinning › Advanced pinning scenarios › sho
+    38425.1 -> 26432.9 KB  tests/e2e/building-blocks/user-service.spec.ts:107 › User API Service › Public API (API Key Auth) › 
+    32223.7 -> 20259.0 KB  tests/e2e/workflows/editor/routing.spec.ts:75 › Routing › should open show warning and drop nodeId f
+    20603.9 -> 8641.1 KB  tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:88 › Workflow Archive › should not trigg
+    24344.9 -> 12476.1 KB  tests/e2e/building-blocks/credentials.spec.ts:52 › Credentials › create a new credential from empty 
+    32099.9 -> 20239.3 KB  tests/e2e/workflows/editor/ndv/pinning.spec.ts:188 › Data pinning › Advanced pinning scenarios › sho
+    22416.7 -> 10570.2 KB  tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:61 › Undo/Redo › should undo/redo deleting node 
+    20560.6 -> 8716.0 KB  tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:44 › NDV Parameters › Remote Options & Network
+    20560.7 -> 8723.7 KB  tests/e2e/nodes/webhook.spec.ts:134 › Webhook Trigger node › should listen for a GET request and res
+    56102.6 -> 44285.6 KB  tests/e2e/sharing/credential-visibility.spec.ts:13 › Credential Visibility Rules › should only show 
+    20622.6 -> 8809.0 KB  tests/e2e/workflows/editor/execution/execution.spec.ts:182 › Execution › should execute workflow fro
+    20533.7 -> 8725.3 KB  tests/e2e/workflows/editor/ndv/resource-locator.spec.ts:69 › Resource Locator › should show appropri
+    22240.7 -> 10441.6 KB  tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:232 › NDV › Execution Indicators - Multi-Node › shou
+    20549.5 -> 8754.5 KB  tests/e2e/building-blocks/credentials.spec.ts:64 › Credentials › create a new credential from the ND
+    20530.2 -> 8735.2 KB  tests/e2e/nodes/webhook.spec.ts:40 › Webhook Trigger node › should listen for a GET request and resp
+    20527.8 -> 8735.5 KB  tests/e2e/credentials/global.spec.ts:67 › Global credentials › member should execute workflow with H
+    20617.1 -> 8888.1 KB  tests/e2e/workflows/editor/expressions/mapping.spec.ts:223 › Data Mapping › maps keys to path
+    20439.1 -> 8710.4 KB  tests/e2e/node-creator/navigation.spec.ts:14 › Node Creator Navigation › should open node creator on
+    22698.5 -> 10974.7 KB  tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:194 › NDV › should allow editing code in fullscreen 
+    20599.7 -> 8882.4 KB  tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:172 › NDV › should not push NDV header out with a lo
+    21904.3 -> 10191.2 KB  tests/e2e/regression/ADO-2230-ndv-reset-data-pagination.spec.ts:9 › ADO-2230 NDV Pagination Reset › 
+    31350.6 -> 19664.9 KB  tests/e2e/data-tables/tables.spec.ts:78 › Data Table list view › Should create data table from proje
+    20234.4 -> 8732.8 KB  tests/e2e/building-blocks/node-details-configuration.spec.ts:25 › Node Details Configuration › shoul
+    20189.4 -> 8701.5 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:268 › Canvas node groups with multi-output bou
+    20189.5 -> 8716.7 KB  tests/e2e/workflows/editor/execution/execution.spec.ts:255 › Execution › should send proper payload 
+    20134.8 -> 8693.8 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:369 › Canvas node groups — collapse / expand ›
+    21552.7 -> 10135.9 KB  tests/e2e/ai/chat-session.spec.ts:16 › Chat session ID reset › should update session ID in node outp
+    20171.3 -> 8783.1 KB  tests/e2e/regression/ADO-2372-prevent-clipping-params.spec.ts:61 › ADO-2362 ADO-2350 NDV Prevent cli
+    20085.1 -> 8710.4 KB  tests/e2e/node-creator/navigation.spec.ts:67 › Node Creator Navigation › should check correct view p
+    20714.4 -> 9343.5 KB  tests/e2e/workflows/editor/ndv/pinning.spec.ts:107 › Data pinning › Error handling › should show err
+    22508.8 -> 11155.7 KB  tests/e2e/projects/folders-basic.spec.ts:55 › Folders - Basic Operations › should navigate from nest
+    20036.7 -> 8694.0 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:348 › Canvas node groups — collapse / expand ›
+    19645.0 -> 8321.0 KB  tests/e2e/app-config/demo-reimport.spec.ts:33 › Demo reimport › Workflow reimport — connections and 
+    20038.0 -> 8755.0 KB  tests/e2e/workflows/executions/list.spec.ts:159 › Workflow Executions › when workflow is saved › sho
+    19988.3 -> 8716.4 KB  tests/e2e/building-blocks/node-details-configuration.spec.ts:49 › Node Details Configuration › shoul
+    20143.0 -> 8889.4 KB  tests/e2e/workflows/editor/ndv/pinning.spec.ts:40 › Data pinning › Pin data operations › should be a
+    22146.0 -> 10932.5 KB  tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:136 › NDV › should properly show node execution indi
+    19858.9 -> 8664.5 KB  tests/e2e/workflows/list/import.spec.ts:53 › Import workflow › From URL › canceling modal should not
+    19905.5 -> 8718.4 KB  tests/e2e/workflows/editor/ndv/resource-locator.spec.ts:23 › Resource Locator › should render both R
+    20022.1 -> 8835.0 KB  tests/e2e/workflows/editor/code/editors.spec.ts:19 › Editors › SQL Editor › should preserve changes 
+    19899.0 -> 8721.3 KB  tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:111 › NDV Parameters › Parameter Management - 
+    20140.8 -> 8971.0 KB  tests/e2e/workflows/editor/ndv/pinning.spec.ts:58 › Data pinning › Pin data operations › should be a
+    18162.3 -> 7017.0 KB  tests/e2e/data-tables/details.spec.ts:456 › Data Table details view › Should reorder columns using d
+    19896.7 -> 8772.2 KB  tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:136 › Workflow Archive › should archive 
+    21231.6 -> 10122.4 KB  tests/e2e/ai/assistant-basic.spec.ts:97 › AI Assistant::enabled › should render chat input correctly
+    33408.4 -> 22304.5 KB  tests/e2e/projects/folders-advanced.spec.ts:28 › Folders - Advanced Operations › Duplicate workflows
+    19770.4 -> 8693.8 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:159 › Canvas node groups › keeps the group whe
+    21176.5 -> 10117.9 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:70 › Canvas node groups › drags the group when
+    21179.2 -> 10126.4 KB  tests/e2e/ai/assistant-support-chat.spec.ts:74 › AI Assistant::enabled › Support Chat › should not s
+    19763.3 -> 8729.5 KB  tests/e2e/workflows/editor/subworkflows/extraction.spec.ts:53 › Subworkflow Extraction › should extr
+    17585.2 -> 6597.6 KB  tests/e2e/projects/folders-operations.spec.ts:21 › Folders - Operations › Rename and delete folders 
+    21122.9 -> 10145.9 KB  tests/e2e/regression/AI-812-partial-execs-broken-when-using-chat-trigger.spec.ts:46 › AI-812-partial
+    22226.4 -> 11253.2 KB  tests/e2e/ai/rag-callout.spec.ts:30 › RAG callout experiment › search callout › should show callout 
+    21003.1 -> 10076.9 KB  tests/e2e/ai/assistant-basic.spec.ts:63 › AI Assistant::enabled › should show resizer when chat is o
+    24034.3 -> 13122.7 KB  tests/e2e/projects/project-settings.spec.ts:116 › Project Settings - Member Management › should show
+    19703.0 -> 8807.2 KB  tests/e2e/workflows/editor/expressions/mapping.spec.ts:11 › Data Mapping › Expression Preview › maps
+    19639.2 -> 8757.5 KB  tests/e2e/workflows/executions/list.spec.ts:306 › Workflow Executions › when new workflow is not sav
+    21419.0 -> 10559.4 KB  tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:81 › Undo/Redo › should undo/redo deleting whole
+    21298.1 -> 10445.7 KB  tests/e2e/workflows/editor/code/code-node.spec.ts:208 › Code node › Ask AI › Enabled › should show e
+    19718.6 -> 8869.0 KB  tests/e2e/workflows/checklist/production-checklist.spec.ts:89 › Workflow Production Checklist › shou
+    21073.2 -> 10300.1 KB  tests/e2e/capabilities/task-runner.spec.ts:27 › Task Runner › should execute Python with task runner
+    23807.7 -> 13123.4 KB  tests/e2e/projects/project-settings.spec.ts:185 › Project Settings - Member Management › should allo
+    19435.8 -> 8762.7 KB  tests/e2e/workflows/executions/preview-isolation.spec.ts:48 › Execution preview isolation › should k
+    18636.8 -> 7975.0 KB  tests/e2e/credentials/global.spec.ts:17 › Global credentials › owner should create HTTP header crede
+    20388.0 -> 9727.3 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:290 › Canvas Actions › Node insertion positioning 
+    22632.8 -> 11983.5 KB  tests/e2e/workflows/editor/canvas/canvas-nodes.spec.ts:168 › Canvas Node Manipulation and Navigation
+    20818.3 -> 10170.0 KB  tests/e2e/nodes/http-request-node.spec.ts:13 › HTTP Request node › should make a request with a URL 
+    19421.1 -> 8866.3 KB  tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:257 › Undo/Redo › should not undo/redo when NDV 
+    19402.7 -> 8875.7 KB  tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:172 › Canvas Zoom Functionality › should not a
+    17839.8 -> 7398.9 KB  tests/e2e/data-tables/details.spec.ts:219 › Data Table details view › Should automatically move to s
+    28187.3 -> 17750.5 KB  tests/e2e/projects/folders-advanced.spec.ts:98 › Folders - Advanced Operations › Drag and drop › sho
+    20512.7 -> 10114.9 KB  tests/e2e/regression/ADO-2929-can-load-old-switch-node-workflows.spec.ts:16 › ADO-2929 can load Swit
+    20516.1 -> 10231.8 KB  tests/e2e/workflows/editor/expressions/mapping.spec.ts:302 › Data Mapping › renders expression previ
+    19146.7 -> 8876.6 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:175 › Canvas Actions › should select nodes using a
+    18921.0 -> 8693.8 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:148 › Canvas node groups › removes the group w
+    19028.6 -> 8808.3 KB  tests/e2e/regression/AI-812-partial-execs-broken-when-using-chat-trigger.spec.ts:28 › AI-812-partial
+    20604.0 -> 10399.6 KB  tests/e2e/sharing/workflow-sharing.spec.ts:65 › Workflow Sharing › should allow shared user to edit 
+    28968.0 -> 18769.2 KB  tests/e2e/workflows/editor/ndv/pinning.spec.ts:223 › Data pinning › Advanced pinning scenarios › sho
+    20665.7 -> 10559.5 KB  tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:146 › Undo/Redo › should undo/redo disabling a n
+    18942.9 -> 8841.4 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:39 › Canvas Actions › should add a connected node 
+    18813.4 -> 8716.4 KB  tests/e2e/building-blocks/node-details-configuration.spec.ts:40 › Node Details Configuration › shoul
+    20622.1 -> 10531.0 KB  tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:24 › Undo/Redo › should undo/redo deleting node 
+    18944.0 -> 8854.3 KB  tests/e2e/ai/assistant-basic.spec.ts:251 › AI Assistant::enabled › should not reset assistant sessio
+    29078.5 -> 19009.7 KB  tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:153 › Workflow Archive › should archive 
+    20348.9 -> 10299.8 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:101 › Canvas Actions › should delete connections b
+    18788.0 -> 8745.0 KB  tests/e2e/workflows/editor/ndv/resource-mapper.spec.ts:63 › Resource Mapper › should correctly delet
+    20212.1 -> 10175.9 KB  tests/e2e/building-blocks/credentials.spec.ts:80 › Credentials › add an existing credential from the
+    23158.5 -> 13123.0 KB  tests/e2e/projects/project-settings.spec.ts:166 › Project Settings - Member Management › should disp
+    23132.5 -> 13122.8 KB  tests/e2e/projects/project-settings.spec.ts:138 › Project Settings - Member Management › should hand
+    27084.8 -> 17098.5 KB  tests/e2e/credentials/crud.spec.ts:29 › Credentials › should sort credentials
+    16575.8 -> 6593.7 KB  tests/e2e/settings/environments/variables.spec.ts:117 › Variables › licensed › should search for a v
+    27379.2 -> 17410.4 KB  tests/e2e/credentials/crud.spec.ts:324 › Credentials › ADO-2583 should show notifications above cred
+    18657.7 -> 8716.1 KB  tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:18 › NDV › should show up when double clicked on a n
+    23999.5 -> 14062.2 KB  tests/e2e/auth/signin.spec.ts:10 › Sign In › should login and logout @auth:none
+    18700.5 -> 8771.5 KB  tests/e2e/node-creator/vector-stores.spec.ts:15 › Node Creator Vector Stores › should show vector st
+    16939.8 -> 7016.7 KB  tests/e2e/data-tables/details.spec.ts:162 › Data Table details view › Should display empty state wit
+    21758.0 -> 11839.0 KB  tests/e2e/data-tables/tables.spec.ts:54 › Data Table list view › Should create data table in persona
+    21285.4 -> 11368.5 KB  tests/e2e/settings/users/users.spec.ts:32 › Users Settings › should delete user and their data
+    20030.2 -> 10117.8 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:317 › Canvas node groups — collapse / expand ›
+    18548.7 -> 8663.1 KB  tests/e2e/workflows/editor/canvas/stickies.spec.ts:35 › Canvas Actions › opens the color picker from
+    18754.8 -> 8876.7 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:144 › Canvas Actions › Node hover actions › should
+    18562.0 -> 8705.0 KB  tests/e2e/building-blocks/canvas-actions.spec.ts:18 › Canvas Node Actions › Node Search and Add › sh
+    18718.4 -> 8875.6 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:190 › Canvas Actions › should select nodes using s
+    20641.9 -> 10811.8 KB  tests/e2e/ai/assistant-code-help.spec.ts:17 › AI Assistant::enabled › Code Node Error Help › should 
+    16421.4 -> 6597.6 KB  tests/e2e/projects/folders-advanced.spec.ts:127 › Folders - Advanced Operations › Drag and drop › sh
+    16406.2 -> 6594.7 KB  tests/e2e/app-config/security-notifications.spec.ts:93 › Security Notifications › Notifications disa
+    16400.4 -> 6596.9 KB  tests/e2e/projects/folders-basic.spec.ts:135 › Folders - Basic Operations › should not create folder
+    19883.3 -> 10087.2 KB  tests/e2e/workflows/editor/canvas/stickies.spec.ts:9 › Canvas Actions › adds sticky to canvas with d
+    18511.0 -> 8726.3 KB  tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:112 › NDV › webhook should fallback to webhookId if 
+    18617.5 -> 8837.1 KB  tests/e2e/workflows/editor/expressions/mapping.spec.ts:147 › Data Mapping › maps expressions from ta
+    20096.7 -> 10317.2 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:127 › Canvas Actions › Node hover actions › should
+    18514.7 -> 8738.3 KB  tests/e2e/regression/PAY-4367-node-shifting-cyclic.spec.ts:94 › PAY-4367: Node shifting in cyclic wo
+    19915.3 -> 10140.2 KB  tests/e2e/regression/PAY-4367-node-shifting-cyclic.spec.ts:31 › PAY-4367: Node shifting in cyclic wo
+    19910.3 -> 10135.2 KB  tests/e2e/nodes/community-nodes.spec.ts:89 › Community and custom nodes in canvas › should render cu
+    19912.0 -> 10144.6 KB  tests/e2e/node-creator/actions.spec.ts:13 › Node Creator Actions › should add node to canvas from ac
+    18475.8 -> 8720.2 KB  tests/e2e/workflows/editor/ndv/resource-locator.spec.ts:50 › Resource Locator › should show create c
+    18580.1 -> 8825.4 KB  tests/e2e/node-creator/workflows.spec.ts:27 › Node Creator Workflow Building › should append manual 
+    20650.0 -> 10903.1 KB  tests/e2e/workflows/editor/code/code-node.spec.ts:208 › Code node › Ask AI › Enabled › should show e
+    20000.5 -> 10254.1 KB  tests/e2e/building-blocks/canvas-actions.spec.ts:58 › Canvas Node Actions › Node Search and Add › sh
+    18712.5 -> 8988.1 KB  tests/e2e/workflows/editor/expressions/transformation.spec.ts:99 › Data transformation expressions ›
+    19790.8 -> 10081.3 KB  tests/e2e/building-blocks/workflow-entry-points.spec.ts:24 › UI Test Entry Points › Entry Point: Bas
+    19834.3 -> 10130.7 KB  tests/e2e/nodes/pdf-node.spec.ts:9 › PDF Test › Can read and write PDF files and extract text
+    20103.0 -> 10409.3 KB  tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:100 › Undo/Redo › should undo/redo moving nodes
+    18523.1 -> 8883.1 KB  tests/e2e/nodes/schedule-trigger-node.spec.ts:13 › Schedule Trigger node › should execute schedule t
+    18623.0 -> 8988.2 KB  tests/e2e/workflows/editor/expressions/transformation.spec.ts:42 › Data transformation expressions ›
+    26965.2 -> 17331.8 KB  tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:86 › NDV › should show all validation errors when op
+    28540.5 -> 18912.9 KB  tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:95 › NDV › should render run errors correctly
+    18311.3 -> 8693.7 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:340 › Canvas node groups — collapse / expand ›
+    19751.2 -> 10171.6 KB  tests/e2e/sharing/credential-visibility.spec.ts:159 › Credential Visibility Rules › should show owne
+    21934.1 -> 12365.7 KB  tests/e2e/workflows/list/workflows.spec.ts:70 › Workflows › should search workflows in command bar
+    23058.1 -> 13546.9 KB  tests/e2e/workflows/editor/canvas/canvas-nodes.spec.ts:137 › Canvas Node Manipulation and Navigation
+    19634.2 -> 10140.4 KB  tests/e2e/building-blocks/node-details-configuration.spec.ts:67 › Node Details Configuration › shoul
+    18373.8 -> 8952.2 KB  tests/e2e/workflows/editor/expressions/inline.spec.ts:24 › Inline expression editor › Basic UI funct
+    22586.1 -> 13169.3 KB  tests/e2e/workflows/list/workflows.spec.ts:182 › Workflows › should filter workflows by tag
+    16006.3 -> 6597.0 KB  tests/e2e/projects/folders-advanced.spec.ts:72 › Folders - Advanced Operations › Drag and drop › sho
+    18047.6 -> 8680.7 KB  tests/e2e/ai/assistant-support-chat.spec.ts:47 › AI Assistant::enabled › Support Chat › should send 
+    18349.7 -> 8983.6 KB  tests/e2e/workflows/editor/expressions/inline.spec.ts:118 › Inline expression editor › Dynamic data 
+    18391.3 -> 9115.2 KB  tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:242 › NDV Data Display › Search Functionalit
+    17992.0 -> 8716.7 KB  tests/e2e/building-blocks/node-details-configuration.spec.ts:79 › Node Details Configuration › shoul
+    18040.5 -> 8788.8 KB  tests/e2e/workflows/editor/expressions/mapping.spec.ts:193 › Data Mapping › maps expressions from sc
+    17973.7 -> 8730.7 KB  tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:206 › Undo/Redo › should undo/redo pasting nodes
+    17894.2 -> 8664.4 KB  tests/e2e/workflows/editor/workflow-actions/publish.spec.ts:103 › Workflow Publish › Webhook conflic
+    19472.5 -> 10407.6 KB  tests/e2e/capabilities/task-runner.spec.ts:16 › Task Runner › should execute Javascript with task ru
+    23766.5 -> 14714.9 KB  tests/e2e/credentials/crud.spec.ts:294 › Credentials › should not show OAuth redirect URL section wh
+    19588.0 -> 10570.0 KB  tests/e2e/workflows/editor/canvas/canvas-nodes.spec.ts:189 › Canvas Node Manipulation and Navigation
+    27924.7 -> 18921.6 KB  tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:235 › Workflow Archive › should unpublis
+    19161.0 -> 10178.0 KB  tests/e2e/building-blocks/credentials.spec.ts:27 › Credentials › composer: createFromNdv creates cre
+    19242.2 -> 10300.8 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:164 › Canvas Actions › should select/deselect all 
+    17627.2 -> 8686.3 KB  tests/e2e/workflows/list/import.spec.ts:21 › Import workflow › From URL › should import workflow
+    18995.8 -> 10135.1 KB  tests/e2e/nodes/community-nodes.spec.ts:58 › Community and custom nodes in canvas › should render an
+    16214.8 -> 7398.8 KB  tests/e2e/data-tables/details.spec.ts:198 › Data Table details view › Should add columns of differen
+    19088.5 -> 10299.8 KB  tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:154 › Canvas Zoom Functionality › should allow
+    15177.4 -> 6467.0 KB  tests/e2e/workflows/templates/templates.spec.ts:274 › Workflow templates › For a custom template hos
+    23435.8 -> 14737.5 KB  tests/e2e/credentials/crud.spec.ts:230 › Credentials › should set a default credential when adding n
+    17447.4 -> 8755.7 KB  tests/e2e/node-creator/special-nodes.spec.ts:44 › Node Creator Special Nodes › should add a Send and
+    16087.0 -> 7398.5 KB  tests/e2e/data-tables/details.spec.ts:177 › Data Table details view › Should add columns of differen
+    18970.4 -> 10290.5 KB  tests/e2e/workflows/executions/preview-isolation.spec.ts:11 › Execution preview isolation › should p
+    19368.9 -> 10696.2 KB  tests/e2e/workflows/templates/templates.spec.ts:232 › Workflow templates › For a custom template hos
+    21788.0 -> 13122.2 KB  tests/e2e/projects/project-settings.spec.ts:15 › Project Settings - Member Management › should displ
+    21755.6 -> 13122.3 KB  tests/e2e/projects/project-settings.spec.ts:45 › Project Settings - Member Management › should allow
+    21543.4 -> 12934.1 KB  tests/e2e/workflows/templates/templates.spec.ts:297 › Workflow templates › For a custom template hos
+    25684.6 -> 17093.8 KB  tests/e2e/credentials/crud.spec.ts:15 › Credentials › should create a new credential using empty sta
+    15150.3 -> 6588.0 KB  tests/e2e/settings/environments/variables.spec.ts:48 › Variables › licensed › should create multiple
+    16727.4 -> 8176.4 KB  tests/e2e/workflows/demo-diff.spec.ts:207 › Workflow Diff Demo › ignores non-openDiff commands
+    18673.2 -> 10137.2 KB  tests/e2e/nodes/community-nodes.spec.ts:75 › Community and custom nodes in canvas › should render cu
+    21594.9 -> 13061.1 KB  tests/e2e/projects/project-settings.spec.ts:73 › Project Settings - Member Management › should displ
+    18806.9 -> 10278.5 KB  tests/e2e/ai/assistant-basic.spec.ts:272 › AI Assistant::enabled › should send message via shift + e
+    18666.9 -> 10143.8 KB  tests/e2e/node-creator/special-nodes.spec.ts:28 › Node Creator Special Nodes › should correctly appe
+    17510.6 -> 8988.2 KB  tests/e2e/workflows/editor/expressions/transformation.spec.ts:80 › Data transformation expressions ›
+    18623.1 -> 10104.8 KB  tests/e2e/ai/builder-setup-wizard.spec.ts:115 › Builder Setup Wizard @auth:owner @ai › should land o
+    18667.6 -> 10152.7 KB  tests/e2e/nodes/form-trigger-node.spec.ts:16 › Form Trigger › add node by clicking on 'On form submi
+    18615.3 -> 10110.2 KB  tests/e2e/workflows/list/import.spec.ts:65 › Import workflow › From URL › should import workflow fro
+    18699.2 -> 10199.7 KB  tests/e2e/workflows/editor/execution/execution.spec.ts:216 › Execution › execution preview › when de
+    18785.8 -> 10290.1 KB  tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:274 › Undo/Redo › should not undo/redo when NDV 
+    21623.3 -> 13128.2 KB  tests/e2e/app-config/security-notifications.spec.ts:129 › Security Notifications › Notifications ena
+    17675.8 -> 9187.3 KB  tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:172 › NDV Parameters › Expression Editor Featu
+    15083.9 -> 6596.8 KB  tests/e2e/projects/folders-basic.spec.ts:10 › Folders - Basic Operations › should create folder from
+    18578.8 -> 10117.2 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:298 › Canvas node groups loaded from API › ren
+    21853.2 -> 13396.4 KB  tests/e2e/workflows/list/workflows.spec.ts:22 › Workflows › should create a new workflow using empty
+    17276.3 -> 8824.4 KB  tests/e2e/node-creator/workflows.spec.ts:13 › Node Creator Workflow Building › should append manual 
+    17434.7 -> 8988.1 KB  tests/e2e/workflows/editor/expressions/transformation.spec.ts:61 › Data transformation expressions ›
+    17276.9 -> 8833.7 KB  tests/e2e/workflows/editor/ndv/paired-item.spec.ts:246 › NDV Paired Items › should auto-fix pairedIt
+    18533.0 -> 10117.1 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:224 › Canvas node groups › blocks Convert to s
+    18549.2 -> 10136.0 KB  tests/e2e/building-blocks/canvas-actions.spec.ts:25 › Canvas Node Actions › Node Search and Add › sh
+    17355.8 -> 8947.7 KB  tests/e2e/sharing/access-control.spec.ts:113 › Access Control Boundaries › should enforce project is
+    18815.7 -> 10409.3 KB  tests/e2e/workflows/editor/canvas/canvas-nodes.spec.ts:223 › Canvas Node Manipulation and Navigation
+    18543.1 -> 10142.5 KB  tests/e2e/workflows/editor/ndv/resource-locator.spec.ts:37 › Resource Locator › should show appropri
+    20248.5 -> 11860.4 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:201 › Canvas Actions › Node insertion positioning 
+    19282.8 -> 10904.2 KB  tests/e2e/workflows/editor/code/code-node.spec.ts:135 › Code node › Ask AI › Enabled › generate code
+    17123.1 -> 8750.1 KB  tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:65 › NDV › should show validation errors only after 
+    17031.0 -> 8677.8 KB  tests/e2e/ai/builder-setup-wizard.spec.ts:164 › Builder Setup Wizard @auth:owner @ai › should group 
+    20203.3 -> 11853.2 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:255 › Canvas Actions › Node insertion positioning 
+    18580.7 -> 10235.2 KB  tests/e2e/workflows/templates/templates.spec.ts:214 › Workflow templates › For a custom template hos
+    20148.6 -> 11821.9 KB  tests/e2e/building-blocks/canvas-actions.spec.ts:73 › Canvas Node Actions › Node Search and Add › sh
+    17039.5 -> 8715.3 KB  tests/e2e/building-blocks/canvas-actions.spec.ts:41 › Canvas Node Actions › Node Search and Add › sh
+    17026.6 -> 8706.6 KB  tests/e2e/building-blocks/canvas-actions.spec.ts:47 › Canvas Node Actions › Node Search and Add › sh
+    17010.4 -> 8715.0 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:22 › Canvas Actions › should add first step
+    17100.6 -> 8805.8 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:58 › Canvas Actions › should open a category when 
+    18743.7 -> 10449.8 KB  tests/e2e/workflows/editor/canvas/canvas-nodes.spec.ts:179 › Canvas Node Manipulation and Navigation
+    18429.0 -> 10137.8 KB  tests/e2e/ai/assistant-basic.spec.ts:172 › AI Assistant::enabled › should end chat session when `end
+    16895.6 -> 8663.2 KB  tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:36 › Canvas Zoom Functionality › should zoom i
+    18396.2 -> 10164.7 KB  tests/e2e/nodes/webhook.spec.ts:62 › Webhook Trigger node › should listen for a GET request and resp
+    16946.9 -> 8718.0 KB  tests/e2e/node-creator/actions.spec.ts:58 › Node Creator Actions › should add node with specific ope
+    16912.5 -> 8683.7 KB  tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:185 › Workflow Archive › should archive 
+    16519.5 -> 8316.2 KB  tests/e2e/workflows/demo-executable-chat-trigger.spec.ts:59 › Demo executable preview - Chat Trigger
+    27074.7 -> 18887.8 KB  tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:150 › NDV › should show node name and version in set
+    18554.2 -> 10420.0 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:230 › Canvas Actions › Node insertion positioning 
+    16308.9 -> 8214.0 KB  tests/e2e/workflows/demo-diff.spec.ts:124 › Workflow Diff Demo › renders diff view when receiving wo
+    16777.6 -> 8718.2 KB  tests/e2e/workflows/editor/ndv/resource-mapper.spec.ts:95 › Resource Mapper values persistence durin
+    16893.1 -> 8834.8 KB  tests/e2e/workflows/editor/routing.spec.ts:13 › Routing › should ask to save unsaved changes before 
+    14851.9 -> 6796.1 KB  tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:89 › Redaction enforcement › can be en
+    16823.3 -> 8768.2 KB  tests/e2e/workflows/editor/ndv/schema-preview.spec.ts:9 › Schema Preview › should show schema previe
+    25486.4 -> 17431.8 KB  tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:157 › NDV Data Display › Run Data & Selector
+    16871.2 -> 8820.3 KB  tests/e2e/regression/AI-716-correctly-set-up-agent-model-shows-error.spec.ts:9 › AI-716 Correctly se
+    16812.4 -> 8803.4 KB  tests/e2e/workflows/editor/ndv/resource-mapper.spec.ts:15 › Resource Mapper › should not retrieve li
+    16644.1 -> 8665.8 KB  tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:202 › Workflow Archive › should not show
+    25348.3 -> 17402.0 KB  tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:39 › NDV › should change input and go back to canvas
+    18069.5 -> 10152.1 KB  tests/e2e/workflows/editor/ndv/resource-locator.spec.ts:106 › Resource Locator › should show appropr
+    16631.0 -> 8731.7 KB  tests/e2e/regression/PAY-4367-node-shifting-cyclic.spec.ts:64 › PAY-4367: Node shifting in cyclic wo
+    16563.1 -> 8688.4 KB  tests/e2e/building-blocks/workflow-entry-points.spec.ts:31 › UI Test Entry Points › Entry Point: Imp
+    16532.2 -> 8663.2 KB  tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:58 › Canvas Zoom Functionality › should reset 
+    20632.0 -> 12768.5 KB  tests/e2e/workflows/editor/canvas/canvas-nodes.spec.ts:205 › Canvas Node Manipulation and Navigation
+    16577.6 -> 8764.6 KB  tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:125 › Redaction enforcement › authoriz
+    17940.1 -> 10163.0 KB  tests/e2e/ai/assistant-support-chat.spec.ts:25 › AI Assistant::enabled › Support Chat › assistant re
+    14168.2 -> 6597.4 KB  tests/e2e/projects/folders-basic.spec.ts:43 › Folders - Basic Operations › should create a folder fr
+    17229.0 -> 9730.6 KB  tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:129 › Undo/Redo › should undo/redo deleting a co
+    16125.5 -> 8716.7 KB  tests/e2e/building-blocks/node-details-configuration.spec.ts:58 › Node Details Configuration › shoul
+    16060.9 -> 8681.7 KB  tests/e2e/ai/builder-setup-wizard.spec.ts:211 › Builder Setup Wizard @auth:owner @ai › should show p
+    16056.5 -> 8715.0 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:93 › Canvas Actions › should delete node by pressi
+    13284.4 -> 5977.6 KB  tests/e2e/auth/authenticated.spec.ts:18 › Authentication › member authentication @auth:member
+    16131.3 -> 8862.5 KB  tests/e2e/workflows/editor/code/editors.spec.ts:188 › Editors › HTML Editor › should trigger dirty f
+    17366.0 -> 10107.0 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:52 › Canvas Actions › should add a node by droppin
+    15968.6 -> 8710.9 KB  tests/e2e/app-config/demo.spec.ts:31 › Demo › can import workflow with pin data
+    15931.6 -> 8693.6 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:128 › Canvas node groups › hides the toolbar f
+    17528.9 -> 10365.6 KB  tests/e2e/node-creator/navigation.spec.ts:20 › Node Creator Navigation › should navigate subcategory
+    17305.4 -> 10158.4 KB  tests/e2e/node-creator/actions.spec.ts:44 › Node Creator Actions › should show multiple actions for 
+    25985.5 -> 18847.1 KB  tests/e2e/workflows/editor/execution/inject-previous.spec.ts:42 › Inject previous execution › can pi
+    17213.2 -> 10101.2 KB  tests/e2e/ai/builder-setup-wizard.spec.ts:54 › Builder Setup Wizard @auth:owner @ai › should disable
+    17309.0 -> 10240.1 KB  tests/e2e/workflows/editor/expressions/mapping.spec.ts:53 › Data Mapping › maps expressions from jso
+    17211.4 -> 10187.4 KB  tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:63 › NDV Parameters › Remote Options & Network
+    15709.9 -> 8716.4 KB  tests/e2e/building-blocks/node-details-configuration.spec.ts:13 › Node Details Configuration › shoul
+    15614.1 -> 8680.6 KB  tests/e2e/building-blocks/workflow-entry-points.spec.ts:49 › UI Test Entry Points › Entry Point: Imp
+    17069.2 -> 10144.7 KB  tests/e2e/node-creator/special-nodes.spec.ts:14 › Node Creator Special Nodes › should correctly appe
+    13510.2 -> 6587.8 KB  tests/e2e/settings/environments/variables.spec.ts:69 › Variables › licensed › should get validation 
+    21642.3 -> 14738.9 KB  tests/e2e/credentials/crud.spec.ts:155 › Credentials › should delete credentials from NDV
+    15752.1 -> 8900.3 KB  tests/e2e/workflows/editor/code/editors.spec.ts:207 › Editors › HTML Editor › should allow switching
+    19970.6 -> 13159.0 KB  tests/e2e/app-config/security-notifications.spec.ts:205 › Security Notifications › Notifications ena
+    16948.0 -> 10138.8 KB  tests/e2e/building-blocks/canvas-actions.spec.ts:34 › Canvas Node Actions › Node Search and Add › sh
+    15599.5 -> 8792.7 KB  tests/e2e/workflows/editor/execution/execution.spec.ts:274 › Execution › should send proper payload 
+    15572.1 -> 8765.8 KB  tests/e2e/sharing/credential-visibility.spec.ts:215 › Credential Visibility Rules › should show all 
+    14698.7 -> 7929.2 KB  tests/e2e/sharing/access-control.spec.ts:13 › Access Control Boundaries › should prevent credential 
+    13355.5 -> 6597.8 KB  tests/e2e/projects/folders-operations.spec.ts:38 › Folders - Operations › Rename and delete folders 
+    15553.3 -> 8803.8 KB  tests/e2e/workflows/editor/ndv/resource-mapper.spec.ts:29 › Resource Mapper › should retrieve list o
+    15853.5 -> 9110.6 KB  tests/e2e/auth/admin-smoke.spec.ts:9 › Admin user › should see same Settings sub menu items as insta
+    13311.5 -> 6597.5 KB  tests/e2e/projects/folders-operations.spec.ts:31 › Folders - Operations › Rename and delete folders 
+    15376.8 -> 8693.8 KB  tests/e2e/workflows/editor/canvas/node-groups.spec.ts:116 › Canvas node groups › hides the Group act
+    16740.4 -> 10105.9 KB  tests/e2e/ai/builder-setup-wizard.spec.ts:232 › Builder Setup Wizard @auth:owner @ai › should not co
+    15301.9 -> 8687.1 KB  tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:185 › Redaction enforcement › authoriz
+    15329.3 -> 8714.6 KB  tests/e2e/nodes/http-request-node.spec.ts:26 › HTTP Request node › Credential-only HTTP Request Node
+    17488.1 -> 10886.3 KB  tests/e2e/workflows/editor/code/code-node.spec.ts:23 › Code node › Code editor › should show correct
+    13131.6 -> 6539.8 KB  tests/e2e/workflows/templates/templates.spec.ts:146 › Workflow templates › For api.n8n.io › Opens we
+    16956.4 -> 10405.8 KB  tests/e2e/workflows/editor/ndv/pinning.spec.ts:84 › Data pinning › Pin data operations › should dupl
+    16633.2 -> 10105.4 KB  tests/e2e/ai/builder-setup-wizard.spec.ts:136 › Builder Setup Wizard @auth:owner @ai › should only a
+    13113.5 -> 6597.3 KB  tests/e2e/projects/folders-basic.spec.ts:159 › Folders - Basic Operations › should navigate to a fol
+    12886.9 -> 6431.6 KB  tests/e2e/journeys/admin-views-executions-list.spec.ts:10 › an admin can view the execution list › r
+    15152.6 -> 8706.1 KB  tests/e2e/workflows/editor/execution/execution.spec.ts:301 › Execution › should successfully execute
+    14456.1 -> 8018.3 KB  tests/e2e/credentials/global.spec.ts:52 › Global credentials › member should see global credential i
+    13252.8 -> 6816.6 KB  tests/e2e/settings/users/users.spec.ts:22 › Users Settings › should be able to change user role to A
+    12964.9 -> 6588.0 KB  tests/e2e/settings/environments/variables.spec.ts:88 › Variables › licensed › should edit a variable
+    16447.7 -> 10076.9 KB  tests/e2e/ai/assistant-basic.spec.ts:40 › AI Assistant::enabled › renders placeholder UI
+    16463.0 -> 10142.7 KB  tests/e2e/workflows/editor/canvas/actions.spec.ts:115 › Canvas Actions › Node hover actions › should
+    12826.9 -> 6594.8 KB  tests/e2e/app-config/versions.spec.ts:66 › Versions › should show updates in help section
+    12570.5 -> 6597.3 KB  tests/e2e/projects/folders-basic.spec.ts:28 › Folders - Basic Operations › should create a folder fr
+    12497.3 -> 6617.1 KB  tests/e2e/workflows/templates/templates.spec.ts:255 › Workflow templates › For a custom template hos
+    14571.7 -> 8719.1 KB  tests/e2e/node-creator/vector-stores.spec.ts:45 › Node Creator Vector Stores › should search for spe
+    14680.8 -> 8965.9 KB  tests/e2e/workflows/editor/expressions/modal.spec.ts:21 › Expression editor modal › Keybinds › shoul
+    15851.9 -> 10144.9 KB  tests/e2e/ai/assistant-credential-help.spec.ts:115 › AI Assistant::enabled › Credential Help › shoul
+    16051.1 -> 10409.3 KB  tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:90 › Canvas Zoom Functionality › should disabl
+    14321.4 -> 8793.3 KB  tests/e2e/nodes/if-node.spec.ts:16 › If Node (filter component) › should be able to create and delet
+    18705.9 -> 13202.3 KB  tests/e2e/projects/folders-operations.spec.ts:210 › Folders - Operations › Move folders and workflow
+    15904.3 -> 10454.6 KB  tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:144 › NDV Parameters › Node Creator Integratio
+    12017.6 -> 6597.2 KB  tests/e2e/projects/folders-basic.spec.ts:19 › Folders - Basic Operations › should create folder from
+    14154.2 -> 8735.2 KB  tests/e2e/workflows/executions/list.spec.ts:136 › Workflow Executions › when workflow is saved › sho
+    15605.0 -> 10186.1 KB  tests/e2e/regression/AI-1401-sub-nodes-input-panel.spec.ts:9 › AI-1401 AI sub-nodes show node output
+    12000.2 -> 6582.3 KB  tests/e2e/settings/environments/variables.spec.ts:36 › Variables › licensed › should create a new va
+    11998.3 -> 6582.4 KB  tests/e2e/settings/environments/variables.spec.ts:102 › Variables › licensed › should delete a varia
+    15484.6 -> 10076.9 KB  tests/e2e/ai/assistant-basic.spec.ts:193 › AI Assistant::enabled › should reset session after it end
+    14069.4 -> 8664.4 KB  tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:126 › Workflow Archive › should not be a
+    11573.0 -> 6176.2 KB  tests/e2e/auth/authenticated.spec.ts:18 › Authentication › owner authentication @auth:owner
+    9815.4 -> 4552.7 KB  tests/e2e/app-config/security-notifications.spec.ts:193 › Security Notifications › Notifications ena
+    13985.7 -> 8726.6 KB  tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:29 › NDV › should show input panel when node is not 
+    14009.5 -> 8779.8 KB  tests/e2e/regression/SUG-121-fields-reset-after-closing-ndv.spec.ts:17 › SUG-121 Fields reset after 
+    13938.2 -> 8712.9 KB  tests/e2e/building-blocks/canvas-actions.spec.ts:91 › Canvas Node Actions › Node Creator Interaction
+    13383.9 -> 8214.0 KB  tests/e2e/workflows/demo-diff.spec.ts:175 › Workflow Diff Demo › applies tidy up when tidyUp option 
+    15153.8 -> 10112.9 KB  tests/e2e/ai/builder-setup-wizard.spec.ts:187 › Builder Setup Wizard @auth:owner @ai › should show c
+    15179.8 -> 10149.6 KB  tests/e2e/workflows/editor/ndv/pinning.spec.ts:78 › Data pinning › Pin data operations › should disp
+    15597.0 -> 10652.1 KB  tests/e2e/workflows/editor/execution/execution.spec.ts:344 › Execution › Paired items should be corr
+    15008.8 -> 10181.3 KB  tests/e2e/sharing/credential-sharing.spec.ts:63 › Credential Sharing › should show shared credential
+    13474.1 -> 8656.0 KB  tests/e2e/building-blocks/workflow-entry-points.spec.ts:17 › UI Test Entry Points › Entry Point: Bla
+    14868.2 -> 10087.2 KB  tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:48 › Canvas Zoom Functionality › should zoom o
+    11347.0 -> 6594.7 KB  tests/e2e/app-config/security-notifications.spec.ts:169 › Security Notifications › Notifications ena
+    17778.5 -> 13085.3 KB  tests/e2e/projects/project-settings.spec.ts:209 › Project Settings - Member Management › should allo
+    13341.4 -> 8664.5 KB  tests/e2e/workflows/list/import.spec.ts:41 › Import workflow › From URL › clicking outside modal sho
+    11023.0 -> 6490.4 KB  tests/e2e/settings/environments/variables.spec.ts:19 › Variables › unlicensed › should show the unli
+    17734.2 -> 13202.5 KB  tests/e2e/projects/folders-operations.spec.ts:132 › Folders - Operations › Move folders and workflow
+    9060.8 -> 4558.0 KB  tests/e2e/workflows/demo-diff.spec.ts:220 › Workflow Diff Demo › can override theme to dark
+    13069.8 -> 8663.4 KB  tests/e2e/sharing/access-control.spec.ts:147 › Access Control Boundaries › should prevent sharing te
+    13216.5 -> 8841.8 KB  tests/e2e/workflows/editor/subworkflows/debugging.spec.ts:21 › Subworkflow debugging › can inspect s
+    12694.7 -> 8321.0 KB  tests/e2e/app-config/demo.spec.ts:24 › Demo › can import template
+    12570.7 -> 8213.0 KB  tests/e2e/workflows/demo-diff.spec.ts:143 › Workflow Diff Demo › renders diff view with only new wor
+    12994.2 -> 8641.1 KB  tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:32 › Workflow Archive › should display a
+    14700.6 -> 10387.4 KB  tests/e2e/workflows/editor/expressions/modal.spec.ts:65 › Expression editor modal › Static data › sh
+    10638.4 -> 6405.4 KB  tests/e2e/workflows/templates/templates.spec.ts:261 › Workflow templates › For a custom template hos
+    12032.4 -> 7920.4 KB  tests/e2e/ai/assistant-credential-help.spec.ts:48 › AI Assistant::enabled › Credential Help › should
+    12746.7 -> 8724.8 KB  tests/e2e/node-creator/vector-stores.spec.ts:38 › Node Creator Vector Stores › should find vector st
+    10530.7 -> 6546.7 KB  tests/e2e/mcp/mcp-oauth.spec.ts:408 › MCP OAuth › Consent screen › should let the user approve acces
+    10561.4 -> 6597.5 KB  tests/e2e/projects/folders-basic.spec.ts:169 › Folders - Basic Operations › should navigate to a fol
+    9437.5 -> 5494.4 KB  tests/e2e/building-blocks/workflow-entry-points.spec.ts:10 › UI Test Entry Points › Entry Point: Hom
+    12641.6 -> 8753.1 KB  tests/e2e/workflows/editor/subworkflows/extraction.spec.ts:31 › Subworkflow Extraction › should extr
+    11823.6 -> 8023.1 KB  tests/e2e/credentials/global.spec.ts:110 › Global credentials › owner should be able to remove globa
+    11987.6 -> 8204.8 KB  tests/e2e/workflows/demo-diff.spec.ts:159 › Workflow Diff Demo › renders diff view with only old wor
+    14467.8 -> 10912.1 KB  tests/e2e/workflows/editor/code/code-node.spec.ts:41 › Code node › Code editor › should execute the 
+    12134.1 -> 8653.1 KB  tests/e2e/ai/assistant-basic.spec.ts:28 › AI Assistant::disabled › does not show assistant button if
+    11497.4 -> 8176.4 KB  tests/e2e/workflows/demo-diff.spec.ts:118 › Workflow Diff Demo › shows waiting state initially
+    11174.5 -> 8176.4 KB  tests/e2e/workflows/demo-diff.spec.ts:194 › Workflow Diff Demo › ignores malformed postMessage data
+    19704.6 -> 16719.0 KB  tests/e2e/settings/community-nodes/community-nodes.spec.ts:26 › Community nodes management › can ins
+    16504.1 -> 13674.7 KB  tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:69 › Canvas Zoom Functionality › should zoom t
+    7519.0 -> 4854.1 KB  tests/e2e/auth/authenticated.spec.ts:18 › Authentication › none authentication @auth:none
+    2652.5 -> 0.0 KB  tests/e2e/mcp/mcp-service.spec.ts:221 › MCP Service › search_workflows › should return workflow meta
+    12716.3 -> 10212.7 KB  tests/e2e/workflows/editor/expressions/mapping.spec.ts:353 › Data Mapping › maps expressions to a sp
+    11605.9 -> 9117.2 KB  tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:230 › NDV Data Display › Search Functionalit
+    8651.6 -> 6184.6 KB  tests/e2e/auth/authenticated.spec.ts:18 › Authentication › admin authentication @auth:admin
+    12525.6 -> 10117.5 KB  tests/e2e/workflows/editor/tags.spec.ts:115 › Workflow tags - Tag operations › should detach tag by 
+    9670.1 -> 7400.2 KB  tests/e2e/data-tables/details.spec.ts:503 › Data Table details view › Should search and filter rows 
+    12267.5 -> 10151.7 KB  tests/e2e/workflows/editor/subworkflows/workflow-selector.spec.ts:67 › Workflow Selector Parameter ›
+    6619.5 -> 4550.0 KB  tests/e2e/settings/users/users.spec.ts:17 › Users Settings › should allow instance owner to access U
+    8569.7 -> 6597.5 KB  tests/e2e/projects/folders-operations.spec.ts:62 › Folders - Operations › Rename and delete folders 
+    10664.0 -> 8722.8 KB  tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:55 › NDV › should show correct validation state for 
+    10639.8 -> 8702.2 KB  tests/e2e/workflows/editor/expressions/mapping.spec.ts:326 › Data Mapping › shows you can drop to in
+    10206.9 -> 8283.8 KB  tests/e2e/app-config/demo.spec.ts:41 › Demo › can override theme to dark
+    6441.8 -> 4557.0 KB  tests/e2e/workflows/demo-diff.spec.ts:225 › Workflow Diff Demo › can override theme to light
+    6431.8 -> 4552.1 KB  tests/e2e/credentials/global.spec.ts:138 › Global credentials › member should not see credential aft
+    1547.0 -> 61.3 KB  tests/e2e/building-blocks/user-service.spec.ts:80 › User API Service › Public API (API Key Auth) › s
+    7641.7 -> 6178.1 KB  tests/e2e/auth/authenticated.spec.ts:18 › Authentication › default authentication 
+    10446.9 -> 9106.7 KB  tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:203 › NDV Data Display › Schema & Data Views
+    10169.9 -> 8835.6 KB  tests/e2e/workflows/editor/code/editors.spec.ts:92 › Editors › SQL Editor › should not trigger dirty
+    10293.7 -> 8963.3 KB  tests/e2e/workflows/editor/expressions/modal.spec.ts:37 › Expression editor modal › Static data › sh
+    10013.1 -> 8693.4 KB  tests/e2e/workflows/editor/tags.spec.ts:193 › Workflow tags - Tag operations › should not show non-e
+    10141.5 -> 8821.9 KB  tests/e2e/workflows/editor/code/editors.spec.ts:77 › Editors › SQL Editor › should not push NDV head
+    10179.3 -> 8863.6 KB  tests/e2e/workflows/editor/subworkflows/debugging.spec.ts:78 › Subworkflow debugging › can inspect s
+    9956.9 -> 8711.0 KB  tests/e2e/workflows/editor/execution/partial.spec.ts:9 › Manual partial execution › should not execu
+    10232.4 -> 8988.1 KB  tests/e2e/workflows/editor/expressions/transformation.spec.ts:119 › Data transformation expressions 
+    10098.4 -> 8863.6 KB  tests/e2e/workflows/editor/subworkflows/debugging.spec.ts:47 › Subworkflow debugging › can inspect s
+    18705.5 -> 17485.1 KB  tests/e2e/workflows/editor/ndv/ndv-floating-nodes.spec.ts:50 › NDV Floating Nodes Navigation › shoul
+    11012.9 -> 10181.8 KB  tests/e2e/workflows/templates/templates.spec.ts:196 › Workflow templates › For a custom template hos
+    9794.9 -> 8984.1 KB  tests/e2e/workflows/editor/expressions/modal.spec.ts:88 › Expression editor modal › Dynamic data › s
+    11711.3 -> 11173.4 KB  tests/e2e/ai/rag-callout.spec.ts:10 › RAG callout experiment › NDV callout › should show callout and
+    414.0 -> 0.1 KB  tests/e2e/mcp/mcp-service.spec.ts:53 › MCP Service › Authentication › should reject requests without
+    8469.4 -> 8283.7 KB  tests/e2e/app-config/demo.spec.ts:47 › Demo › can override theme to light
+    7455.7 -> 7397.2 KB  tests/e2e/data-tables/details.spec.ts:240 › Data Table details view › Should select and delete rows
+    7439.5 -> 7400.3 KB  tests/e2e/data-tables/details.spec.ts:312 › Data Table details view › Should add columns of each typ
+    7421.7 -> 7398.5 KB  tests/e2e/data-tables/details.spec.ts:283 › Data Table details view › Should clear selection
+    13203.8 -> 13201.9 KB  tests/e2e/projects/folders-operations.spec.ts:106 › Folders - Operations › Move folders and workflow
+    13196.7 -> 13195.8 KB  tests/e2e/projects/folders-operations.spec.ts:76 › Folders - Operations › Rename and delete folders 
+    0.0 -> 0.1 KB  tests/e2e/mcp/mcp-service.spec.ts:352 › MCP Service › get_execution › should return full execution d
+    6770.2 -> 6794.0 KB  tests/e2e/settings/log-streaming/log-streaming.spec.ts:22 › Log Streaming Settings › unlicensed › sh
+    8677.4 -> 8705.9 KB  tests/e2e/workflows/list/import.spec.ts:87 › Import workflow › From File › should import workflow
+    9984.1 -> 10088.5 KB  tests/e2e/workflows/editor/workflow-actions/publish.spec.ts:91 › Workflow Publish › Webhook conflict
+    8861.4 -> 8988.1 KB  tests/e2e/workflows/editor/expressions/transformation.spec.ts:22 › Data transformation expressions ›
+    9081.8 -> 9210.7 KB  tests/e2e/workflows/editor/ndv/io-filter.spec.ts:14 › Node IO Filter › should filter pinned data
+    8771.2 -> 8900.7 KB  tests/e2e/workflows/editor/routing.spec.ts:27 › Routing › should correct route after cancelling save
+    8593.8 -> 8725.7 KB  tests/e2e/workflows/editor/subworkflows/workflow-selector.spec.ts:55 › Workflow Selector Parameter ›
+    8721.5 -> 8855.3 KB  tests/e2e/workflows/editor/code/editors.spec.ts:122 › Editors › SQL Editor › should allow switching 
+    8593.4 -> 8727.9 KB  tests/e2e/workflows/editor/subworkflows/workflow-selector.spec.ts:76 › Workflow Selector Parameter ›
+    8567.1 -> 8704.4 KB  tests/e2e/workflows/editor/routing.spec.ts:45 › Routing › should correct route when opening and clos
+    8520.8 -> 8664.4 KB  tests/e2e/workflows/editor/workflow-actions/publish.spec.ts:79 › Workflow Publish › Webhook conflict
+    8549.8 -> 8693.4 KB  tests/e2e/workflows/editor/tags.spec.ts:142 › Workflow tags - Tag operations › should detach tag by 
+    8549.5 -> 8693.3 KB  tests/e2e/workflows/editor/tags.spec.ts:168 › Workflow tags - Tag operations › should show correct t
+    13079.9 -> 13282.3 KB  tests/e2e/credentials/crud.spec.ts:118 › Credentials › should correctly render required and optional
+    24132.8 -> 24340.9 KB  tests/e2e/workflows/list/workflows.spec.ts:44 › Workflows › should search for workflows
+    8724.0 -> 10284.0 KB  tests/e2e/workflows/editor/code/editors.spec.ts:152 › Editors › HTML Editor › should preserve change
+    13203.3 -> 14770.6 KB  tests/e2e/workflows/editor/execution/debug.spec.ts:46 › Debug mode › should enter debug mode for fai
+    13083.0 -> 14697.6 KB  tests/e2e/credentials/crud.spec.ts:89 › Credentials › should show multiple credential types in the s
+    13082.6 -> 14709.9 KB  tests/e2e/credentials/crud.spec.ts:137 › Credentials › should create credentials from NDV for node w
+    17275.5 -> 18919.9 KB  tests/e2e/workflows/editor/routing.spec.ts:96 › Routing › should load existing workflow when navigat
+    0.0 -> 8728.8 KB  tests/e2e/node-creator/actions.spec.ts:28 › Node Creator Actions › should search through actions and
+    0.0 -> 10106.6 KB  tests/e2e/ai/builder-setup-wizard.spec.ts:91 › Builder Setup Wizard @auth:owner @ai › should reset t

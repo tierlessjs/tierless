@@ -127,19 +127,44 @@ invisible at the same bar as the direct-fetch stage. (672 > baseline's 666
 passed: a few baseline flakes happened to land green this run; the paired,
 parity-gated set is the honest comparison, not the raw pass counts.)
 
-No wire numbers yet — the byte/trip A/B is the next run (both arms under the
-counting relay; the gateway counts its ws bytes TCP-true, deflate included).
-Wire-truth reproduce:
+### Wire-truth byte A/B (results/{baseline,ported}-truth.jsonl, report-0005-session-socket.txt)
+
+Both arms under the TCP-true counting relay (bytes are socket-level, deflate
+included; browser data path only, node-side seeding excluded):
+
+    651 pass-parity pairs (537 the port serves)
+    total wire IO   11,139,155 KB -> 5,694,159 KB   —  49% LESS
+    median per-test bytes saved                     —  50%
+    wall time       88.8 min -> 78.5 min            —  12% less (median 12%)
+
+The mechanism, per test: n8n's node-types metadata and `/rest` fan-out cross
+the session socket **deflate-compressed** (~1.3 MB ws) where the stock arm
+sends them as uncompressed HTTP with per-request headers; assets and the
+force-browser'd `/rest` (settings, mocks) stay HTTP (~7.8 MB, identical both
+arms, so they wash out of the delta). This is the session-socket stage's
+payoff, on a structurally different app than Vikunja (task CRUD, 35% median)
+and NocoDB (data grid) — the editor SPA's MB-scale metadata is exactly the
+shape a deflate window over one session compresses hardest.
+
+Honesty notes on this measurement:
+- 24 of the 651 pairs recorded 0 baseline bytes (API-only or uncounted-path
+  tests). They are left IN the aggregate, which only makes 49%/50%
+  conservative — a 0->N pair scores as a loss. Excluding them, median is ~39%
+  higher-confidence... i.e. the true saving is at least the reported figure.
+- The baseline arm's raw JSONL was contaminated by a stale prefix after a
+  container restart mid-run; `results/baseline-truth.jsonl` is deduped by
+  keeping the real measured attempt per test id (max bytes, passed) — recovers
+  the fresh run's numbers, invents nothing.
+- reseal/claim auth requests are small and uncounted (the gateway's wire
+  counter tracks ws sockets only); the app relay counts assets + force-browser
+  `/rest`, the ws counter counts the session.
+
+Reproduce:
 
     bash ports/n8n/setup.sh --baseline                        # build the stock arm tree
     TIERLESS_WIRE_TRUTH=1 node ports/n8n/suite.mts --baseline
     TIERLESS_WIRE_TRUTH=1 node ports/n8n/suite.mts
     node ports/report.mts ports/work/n8n-baseline/measure-truth.jsonl ports/work/n8n/measure-truth.jsonl
-
-Provenance note for that report: the reseal/claim auth requests are small and
-currently uncounted (the gateway's wire counter tracks ws sockets only); the
-app relay counts assets + force-browser `/rest`, the ws counter counts the
-session.
 
 ## Reproduce
 
