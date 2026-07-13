@@ -51,9 +51,9 @@ fi
 
 # ---- 2. smoke gate: one spec on the session socket, real ws bytes, all passing ----------
 if [ ! -f ports/work/strapi/.drive-smoked ]; then
-  say "smoke: content-manager blocks.spec.ts on the session socket (wire truth)"
+  say "smoke: admin login.spec.ts on the session socket (wire truth — the sealed-auth acid test)"
   sweep_ports
-  TIERLESS_WIRE_TRUTH=1 TIERLESS_DOMAINS=content-manager TIERLESS_SPEC=blocks.spec.ts node ports/strapi/suite.mts || true
+  TIERLESS_WIRE_TRUTH=1 TIERLESS_DOMAINS=admin TIERLESS_SPEC=login.spec.ts node ports/strapi/suite.mts || true
   node -e '
     const fs = require("fs");
     const rows = fs.readFileSync("ports/work/strapi/measure-truth.jsonl", "utf8").trim().split("\n").map(JSON.parse);
