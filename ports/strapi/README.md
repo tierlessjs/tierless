@@ -161,8 +161,25 @@ reporter-attribution dropouts, see caveat).
 Why the number matches NocoDB's 92-94% rather than Vikunja's 13-35%: their Koa
 backend serves raw, uncompressed JSON (no compression middleware in their template or
 CI lane), the admin's init/permissions/settings payloads repeat heavily across a
-session, and one deflate window amortizes all of it. The apples-to-apples gzip arm
-(patch 0005, `STRAPI_TIERLESS_GZIP=1`) is the pending follow-up.
+session, and one deflate window amortizes all of it.
+
+### Apples-to-apples: against a COMPRESSED stock (results/truth-*-gzip.jsonl)
+
+Test patch 0005 enables Strapi's own shipped compression middleware
+(`strapi::compression`, koa-compress) under `STRAPI_TIERLESS_GZIP=1`. The default
+measured stack stays what their CI runs (raw); this pair answers "what if they
+deployed compression":
+
+    stock, gzip              98.3 MB -> 32.6 MB api bytes (gzip cuts stock's API 67%)
+    ported+gzip vs it        32.5 MB -> 8.1 MB   (75% less IO; median per-test 72%)
+                             — the SYMMETRIC pair; ported(raw) vs it is the same 75%
+                             (the ported arm's residual direct HTTP barely compresses)
+
+Compression captures about two thirds of the raw gap; the port's win over a
+compressed stock is structural — bodies that never repeat across a session-long
+deflate window, headers that never re-send — the same shape as NocoDB (where gzip
+captured a third) and Vikunja (half): payload-size distribution decides how much of
+the win is compressible.
 
 Pass sets: every test that runs on the CE lane passes on BOTH arms, except two
 single-occurrence, opposite-direction UI-timing flakes (blocks.spec.ts:13 failed
