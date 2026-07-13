@@ -114,11 +114,18 @@ assertion.
 
 ### Certification (results/cert-0005-session-socket.jsonl)
 
-Full suite on the session-socket build, same command as the baseline. An
-earlier ported run surfaced the two limitation classes above (network mocking,
-transport-assertion) as ~17 regressions; patches 0006/0007 resolve them, and
-each residual reruns green or is a baseline-symmetric exclusion. Final tally
-and pairing land here from the cert run.
+Full suite on the session-socket build, same command as the baseline:
+
+    736 discovered · 672 passed · 31 failed · 33 skipped · 1.5 h
+    paired 694 · 2 passed->failed, BOTH rerun green (code-node:41, debug:55)
+
+An earlier ported run surfaced the two limitation classes above (network
+mocking, transport-assertion) as ~17 regressions; patches 0005 force-browser +
+0006/0007 resolve them. The final pair against the baseline leaves just 2
+passed->failed, and both pass on rerun — the session socket is behaviorally
+invisible at the same bar as the direct-fetch stage. (672 > baseline's 666
+passed: a few baseline flakes happened to land green this run; the paired,
+parity-gated set is the honest comparison, not the raw pass counts.)
 
 No wire numbers yet — the byte/trip A/B is the next run (both arms under the
 counting relay; the gateway counts its ws bytes TCP-true, deflate included).
