@@ -32,3 +32,19 @@
  	};
  	if (baseURL.startsWith('/')) {
  		options.headers!['browser-id'] = getBrowserId();
+@@ -119,7 +137,14 @@
+ 	if (
+ 		import.meta.env.NODE_ENV !== 'production' &&
+ 		!baseURL.includes('api.n8n.io') &&
+-		!baseURL.includes('n8n.cloud')
++		!baseURL.includes('n8n.cloud') &&
++		// tierless corpus port (patch 0002, continued): only when the flag can matter.
++		// Their build leaves import.meta.env.NODE_ENV undefined, so this branch runs in
++		// production too; same-origin XMLHttpRequest sends cookies with or without
++		// withCredentials (the flag is cross-origin-only by definition), but the adapter
++		// pins any withCredentials request to the XHR fallback — the vestigial flag
++		// would silently turn the whole port into a no-op.
++		(typeof location === 'undefined' || new URL(baseURL, location.href).origin !== location.origin)
+ 	) {
+ 		options.withCredentials = options.withCredentials ?? true;
+ 	}
