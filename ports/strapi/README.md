@@ -179,6 +179,41 @@ Caveats:
   hooks): a handful of rows credit a test's bytes to its neighbor — visible as
   0-byte outliers, excluded from the covered subset; medians and the suite totals
   are the robust numbers.
-- Wall clock from the truth runs is NOT quotable: the counting proxy adds a hop per
-  HTTP request, which taxes the request-heavy stock arm — shaped timing (floors +
-  RTT 20, drive-rtt.sh) is the honest instrument and lands next.
+- Wall clock from the truth runs is NOT quotable on its own: the counting proxy adds
+  a hop per HTTP request, which taxes the request-heavy stock arm — the shaped runs
+  below are the timing instrument (their proxy-free floors reproduce the wall gap,
+  so it is real, but quote it from there).
+
+## Shaped timing (2026-07-13, results/floor-*.jsonl, rtt20-*.jsonl, rtt80-*.jsonl)
+
+`TIERLESS_RTT_MS=<n> node ports/strapi/suite.mts [--baseline]` — real RTT on both
+browser-facing hops (the app origin and the session ws; raw TCP relays, TCP_NODELAY),
+gateway→backend on undelayed localhost, as deployed. The settled metric is NETWORK
+WAIT = dur@RTT − dur@unshaped-floor per test (`node ports/report-time.mts`).
+
+At 20 ms (225 pass-parity pairs): wall clock 39.6 -> 39.4 min — parity — and the
+decomposition is fully variance-dominated (the baseline pool itself measures
+NEGATIVE: run-to-run noise exceeds the 20 ms signal). Same verdict as NocoDB at
+20 ms. At 80 ms (213 tests passing in all four runs):
+
+    unimprovable floor    2,580 s baseline / 2,123 s ported (see below)
+    network-wait pool     318.3 s -> 298.5 s   (6% of the POOL removed)
+    median per test       1,412 -> 1,338 ms network wait
+    pool share of wall    11% (baseline) — the ceiling ANY transport work has here
+    wall clock            48.7 -> 40.5 min (17% less; median per-test 7%)
+
+Two separate timing facts, named separately:
+
+1. **Network wait is parity within noise.** Per-interaction crossings pay
+   per-interaction RTTs, and this app's stock API was already same-origin keep-alive
+   HTTP (no preflights to eliminate). The 92% byte win does not become RTT wins
+   without restructuring flows (§6 chains / migrations — not shipped in this port).
+   Third app, same verdict: the timing ceiling lives in the request-per-interaction
+   structure.
+2. **The wall-clock win is real but it is not network wait — it is per-request
+   overhead.** The ported arm's UNSHAPED floor is ~18% faster (2,123 vs 2,580 s), and
+   the gap replicates across all four ported runs (floors, both RTTs, and the
+   proxy-taxed truth arms agree). Collapsing hundreds of HTTP request lifecycles per
+   test into websocket frames saves browser request scheduling and Koa
+   per-request middleware work — localhost CPU, visible at RTT 0, linear in request
+   count, and honestly attributed to neither bytes nor latency.
