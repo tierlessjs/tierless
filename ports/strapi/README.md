@@ -34,6 +34,7 @@ its API on ONE origin, and the first whose client bottom is plain `fetch`, not a
     patches/0002-tierless-fetch-adapter.patch   getFetchClient.ts: 4 call sites -> tierlessFetch
                                                 + tierlessFetch.ts (new, ~120 lines): the I/O bottom
     patches/0003-session-socket.patch           tierlessFetch.ts: the exec becomes the session socket
+    patches/0006-sealed-cookie-authority.patch  tierlessFetch.ts: auth flows cross too (see below)
 
 plus `yarn workspace @strapi/admin add tierless@link:…` (a dependency install, not a
 diff — setup.sh). Test patches (BOTH arms): 0001 measure reporter + relay-able
@@ -46,10 +47,14 @@ baseURL, 0004 transport-agnostic waits, 0005 env-gated stock gzip. What the port
    NOT crossable — stock fetch, decided per request by declared semantics:
    FormData bodies (media uploads), requests not negotiating JSON (their client omits
    `Accept: application/json` exactly when responseType is blob/text/arrayBuffer),
-   URLs leaving the backend origin, and **auth flows** (login/logout/register/reset/
-   access-token: their responses SET the httpOnly refresh cookie, and cookie-jar
-   writes exist only in the browser — caught by their own e2e suite, which asserts
-   the cookie after login).
+   and URLs leaving the backend origin. **Auth flows cross too** (patch 0006 —
+   sealed cookie authority, the session-auth layer the n8n port built): login's reply
+   sets the httpOnly refresh cookie, which no script-reconstructed reply can plant,
+   so the gateway seals every mediated Set-Cookie into an opaque blob the page
+   carries on later crossings, and a short-lived claim ticket's HTTP replay keeps
+   the REAL jar current — their raw-fetch token refresh and their suite's own
+   `httpOnly: true` assertions read the jar, not the blob. Authority still travels
+   per request; the gateway stores none of it and a restart self-heals.
    One deliberate divergence from the axios-adapter posture: **AbortSignal is handled
    browser-side** (abort races the crossing; the caller sees an immediate AbortError,
    the late reply is discarded) instead of pinning to stock — Strapi's RTK Query layer
@@ -123,11 +128,13 @@ Runtime facts, verified in this sandbox (2026-07-12):
 
 Three real boundary defects, each fixed at the right layer rather than worked around:
 
-1. **Cookie-writing responses cannot cross.** Login's reply sets the httpOnly refresh
-   cookie; a Response reconstructed from a crossing cannot write the cookie jar. Their
-   own suite asserts the cookie after login and caught it. Fix: auth flows are
-   browser-pinned by MEANING in the adapter (their client's own isAuthPath list,
-   widened to every cookie-setting route in their authentication controller).
+1. **Cookie-writing responses cannot cross — without a cookie-authority layer.**
+   Login's reply sets the httpOnly refresh cookie; a Response reconstructed from a
+   crossing cannot write the cookie jar. Their own suite asserts the cookie after
+   login and caught it. First treatment: auth flows browser-pinned by MEANING.
+   Final treatment (patch 0006): sealed cookie authority — the layer the n8n port
+   built — lets them cross while the claim replay keeps the real jar current; the
+   pin is gone and the same assertions pass.
 2. **Harness waits can assert the REQUEST, not just the reply.** Their i18n specs
    match `waitForRequest(...).postDataJSON()` on `uid/generate` — the exec log
    recorded only replies, so the accommodation had nothing to race. Fix in the
@@ -142,21 +149,28 @@ Three real boundary defects, each fixed at the right layer rather than worked ar
    slowly. Fix: `TIERLESS_IGNORE_HTTPS_ERRORS` (test patch 0001, both arms) lets the
    proxied request complete; a normal network never hits this.
 
-## The suite at the socket (2026-07-13, results/truth-*.jsonl)
+## The suite at the socket (2026-07-13, results/truth-*.jsonl; ported arm re-run
+## under sealed cookie authority — patch 0006)
 
 Both arms by one command each (`TIERLESS_WIRE_TRUTH=1 node ports/strapi/suite.mts
 [--baseline]`, orchestrated end-to-end by drive-truth.sh). 289 paired tests; 225
 pass-parity pairs (62 symmetric skips — EE- and future-flag-gated specs on the CE
-lane — plus the two flakes below); 215 of 225 touch the session socket (the rest are
+lane — plus the two flakes below); 216 of 225 touch the session socket (the rest are
 reporter-attribution dropouts, see caveat).
 
-    API+ws bytes   97.8 MB -> 8.0 MB   (92% less IO)
-    per test       median 91% fewer bytes (p10 90%, p90 93%)
-    ported split   7.05 MB session ws (deflate included) + 0.92 MB residual HTTP
-                   (auth flows + FormData/non-JSON, pinned to stock by design)
+    API+ws bytes   97.7 MB -> 7.9 MB   (92% less IO)
+    per test       median 92% fewer bytes (p10 91%, p90 94%)
+    ported split   7.65 MB session ws (deflate included) + 0.22 MB residual HTTP —
+                   with auth flows on the socket (patch 0006) the residual is only
+                   the by-design pins: FormData uploads, non-JSON responses, and
+                   their raw-fetch token refresh. (Auth-pinned, the residual was
+                   0.92 MB; that arm's suite-wide number was the same 92%.)
     best case      1,335 KB -> 194 KB (admin home: the key-statistics widget flow)
     asset traffic  ~6.4 MB per test (each test's fresh context refetches the admin
                    bundle) — identical on both arms, excluded from the comparison
+    uncounted      reseal/claim ride plain HTTP to the gateway (a claim must be an
+                   HTTP response — that is where httpOnly can be planted): ~1 KB per
+                   login, outside both counters, port-side overhead if counted
 
 Why the number matches NocoDB's 92-94% rather than Vikunja's 13-35%: their Koa
 backend serves raw, uncompressed JSON (no compression middleware in their template or
@@ -182,10 +196,12 @@ captured a third) and Vikunja (half): payload-size distribution decides how much
 the win is compressible.
 
 Pass sets: every test that runs on the CE lane passes on BOTH arms, except two
-single-occurrence, opposite-direction UI-timing flakes (blocks.spec.ts:13 failed
-once on baseline; boolean-conditional-text-field-visibility.spec.ts:16 failed once
-on ported — both passed on both arms in the previous full runs, and neither failure
-is at a transport seam). Both fall out of the pass-parity gate.
+UI-timing flakes excluded by the pass-parity gate: blocks.spec.ts:13 (the Blocks
+editor fill — has failed single runs on EACH arm across the four full pairings) and
+rbac/permissions-enforcement.spec.ts:14 (a toast wait; failed one ported full run,
+then passed three consecutive re-runs including its full domain). Neither failure is
+at a transport seam; the sealed-auth flows themselves (login/logout/re-login as a
+second user, cookie assertions incl. httpOnly) pass everywhere.
 
 Caveats:
 
@@ -218,6 +234,10 @@ NEGATIVE: run-to-run noise exceeds the 20 ms signal). Same verdict as NocoDB at
     median per test       1,412 -> 1,338 ms network wait
     pool share of wall    11% (baseline) — the ceiling ANY transport work has here
     wall clock            48.7 -> 40.5 min (17% less; median per-test 7%)
+
+(The shaped arms measured the auth-pinned build — patch 0006 landed after. Auth
+flows were under 1% of suite bytes and their crossings pay the same per-request RTT
+as their pinned HTTP did, so neither verdict below moves.)
 
 Two separate timing facts, named separately:
 
