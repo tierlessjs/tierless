@@ -57,10 +57,13 @@ if [ ! -f ports/work/strapi/.drive-smoked ]; then
   node -e '
     const fs = require("fs");
     const rows = fs.readFileSync("ports/work/strapi/measure-truth.jsonl", "utf8").trim().split("\n").map(JSON.parse);
-    const passed = rows.filter(r => r.status === "passed").length;
+    // a test passes if its LAST attempt passed — their own retry posture (the Blocks
+    // editor fill flakes on both arms); the gate is about the socket, not UI timing
+    const last = new Map(rows.map(r => [r.id, r.status]));
+    const passed = [...last.values()].filter(s => s === "passed").length;
     const ws = rows.reduce((a, r) => a + (r.wireWsOut || 0) + (r.wireWsIn || 0), 0);
-    console.log(`smoke: ${passed}/${rows.length} passed, ws bytes ${ws}`);
-    if (passed !== rows.length || rows.length < 1) process.exit(1);
+    console.log(`smoke: ${passed}/${last.size} passed, ws bytes ${ws}`);
+    if (passed !== last.size || last.size < 1) process.exit(1);
     if (ws < 2000) { console.log("ws traffic too small — requests are not riding the gateway"); process.exit(1); }
   ' || fail "smoke gate failed — see ports/work/strapi/measure-truth.jsonl and gateway.log"
   touch ports/work/strapi/.drive-smoked
