@@ -19,7 +19,8 @@
   },
   "patches": [
     "patches/0002-tierless-fetch-adapter.patch",
-    "patches/0003-session-socket.patch"
+    "patches/0003-session-socket.patch",
+    "patches/0006-sealed-cookie-authority.patch"
   ],
   "testPatches": [
     "patches/0001-measure-reporter.patch",
