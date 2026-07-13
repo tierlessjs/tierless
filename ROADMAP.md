@@ -48,13 +48,20 @@ proven (the executable proofs behind `npm test`).
   target. Move it to a first-message/subprotocol handshake (a protocol change
   across shim, browser, and server) before any deployment posture beyond the
   dev/demo flow.
-- **Session re-key on auth rotation** (from the n8n port, ports/n8n/README.md).
-  A cookie-authed SPA can bind authority to the session at ws upgrade (the
-  browser sends the httpOnly cookie to a same-host gateway), but n8n logs
-  in/out as an SPA transition — a socket opened on the signin page outlives the
-  auth change, and `browser.mts` holds one connection per page with no rotation
-  hook. Until the session can drop/re-upgrade when a pinned auth request
-  succeeds, cookie-authed SPAs port only at the direct-fetch exec.
+- **Gateway-mediated cookie authority** (from the n8n port, ports/n8n/README.md
+  — the design that unblocks cookie-authed SPAs at the session socket).
+  Bind the httpOnly cookie to the session at ws upgrade (cookies ignore ports,
+  so a same-host gateway receives it); watch `set-cookie` on EVERY mediated
+  response and re-bind in place (n8n rolls the cookie near expiry on arbitrary
+  responses, so this is a property of the exec path, not a login special
+  case); sync the browser jar via a one-time-ticket claim request whose HTTP
+  response carries the Set-Cookie (script cannot write httpOnly — a ws frame
+  cannot plant it); on a 401 from the session exec, drop the binding and
+  re-upgrade (recovery for out-of-band invalidation: another tab's logout or
+  password change bumps the token version without crossing THIS socket).
+  Posture note for SECURITY.md when it lands: this gateway holds a copy of the
+  session cookie, a heavier trust posture than the header-auth ports where it
+  held no credentials.
 - **Byte pricing at the method boundary.** `methodMigrate` migrates on structural
   evidence alone (a stable ≥2-call same-tier chain) without comparing continuation
   bytes to the profiled fetch bytes the way `decide()` does — a method carrying a

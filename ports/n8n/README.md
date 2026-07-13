@@ -64,15 +64,19 @@ and external origins (`api.n8n.io`) fall through to axios's own XHR adapter.
 
 The NocoDB shape — `sessionExec()` over a ws gateway, one exec crossing per
 request — needs authority the browser cannot attach per request here: the JWT
-lives in an **httpOnly cookie**. The upgrade request to a same-host gateway
-carries that cookie (cookies ignore ports), so a session can bind authority at
-connect time — but n8n logs in/out as an SPA transition, so a socket opened on
-the signin page outlives an auth CHANGE. The runtime's shared connection has no
-authority-rotation hook (`browser.mts` holds one lazy connection per page).
-Requirement recorded for the framework: **session re-key on auth rotation** —
-drop/re-upgrade the session socket when a pinned auth request (login, logout,
-MFA) succeeds. Until that exists, a cookie-authed SPA can only be ported at the
-direct-fetch exec (patch 0002), which is exactly what this recipe ships.
+lives in an **httpOnly cookie**, and n8n logs in/out as an SPA transition, so
+a socket opened on the signin page outlives an auth change. The design that
+unblocks it is **gateway-mediated cookie authority** (ROADMAP.md has the full
+shape): bind the cookie at ws upgrade (cookies ignore ports, so a same-host
+gateway receives it); re-bind on `set-cookie` seen on ANY mediated response —
+a property of the exec path, not a login special case, because n8n rolls the
+cookie near expiry on arbitrary responses; plant the browser-jar copy via a
+one-time-ticket claim request whose HTTP response carries the Set-Cookie
+(script cannot write httpOnly, so a ws frame cannot); and on a session-exec
+401, drop the binding and re-upgrade — recovery for invalidation that never
+crossed this socket (another tab's logout or password change). This recipe
+ships the direct-fetch exec (patch 0002); the mediated-authority gateway is
+the next stage and where the wire numbers come from.
 
 ## Reproduce
 
