@@ -110,9 +110,45 @@ Runtime facts, verified in this sandbox (2026-07-12):
   mount. boot.mts treats only a response that is neither 404 nor "starting
   up" as ready.
 
-## Status
+## Stock baseline (2026-07-13, results/baseline.jsonl)
 
-- Recipe pinned and fetched (git transport; tree hash covers symlinks). Test
-  patch 0001 and port patch 0002 authored; setup/boot/suite drivers written.
-- Build in progress in this sandbox; baseline and certification runs next.
-  Numbers land here when measured — nothing below this line is measured yet.
+Full e2e project, workers=1, measure reporter on (recording off, both arms):
+
+    740 discovered · 666 passed · 37 failed · 33 skipped · 1.6 h wall
+
+Two runs were discarded getting here, each a mechanism worth having on file:
+
+1. **301 failures, one signature.** n8n's auth cookie is `Secure` by default;
+   Playwright's node-side cookie jar honors Secure over plain http for a
+   literal IP while special-casing the name `localhost`. With
+   `N8N_BASE_URL=http://127.0.0.1:5680` every authenticated api-helper call
+   401s while browser flows sail (both origins are secure contexts to
+   Chromium). suite.mts says `localhost`, like their own scripts.
+2. **Server death at test ~500.** `settings/workers/workers.spec.ts` flips the
+   instance into queue mode without upstream's own `@mode:queue`
+   container-only tag; with no Redis locally n8n exits after 10 s of retries
+   and everything after is ECONNREFUSED collateral. Patch 0003 adds the tag
+   (test patch, both arms).
+
+The 37 remaining failures are env/flake classes (largest: 10× a null
+`services` read; OAuth popups needing external network; assorted timeouts) —
+arm-symmetric by construction, dropped by report.mts's pass-parity gate.
+
+## Adapter certification (in progress)
+
+The first ported build was **silently a no-op**: their build leaves
+`import.meta.env.NODE_ENV` undefined, so a dev-only `withCredentials` branch
+runs in production builds too, and the adapter pins any withCredentials config
+to the XHR fallback. Engagement is now PROVEN, not assumed — a page probe
+shows `/rest/settings` and `/rest/login` as initiatorType `fetch` (the
+adapter's exec) where stock shows `xhr`; patch 0002 sets the flag only when
+the target origin differs from the page origin (same-origin XHR sends cookies
+regardless of the flag, so this changes nothing upstream).
+
+Ported smoke (workflows/list + credentials): 40/41, the 1 failure is the
+baseline-failing OAuth-popup spec. Full certification arm runs next; its
+JSONL lands in results/ and the report pairs it against the baseline.
+
+Sandbox caveat for rebuilds: turbo trusts stale hashes on the no-git recipe
+tree after patch(1) edits — rebuild the ported frontend with
+`turbo run build --filter=@n8n/rest-api-client --filter=n8n-editor-ui --force`.
