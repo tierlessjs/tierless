@@ -61,9 +61,14 @@ proven (the executable proofs behind `npm test`).
   blob and the runtime swaps. The browser jar syncs via a claim request
   carrying the blob plus a 30 s nonce, whose HTTP response emits the
   Set-Cookie (script cannot write httpOnly — a ws frame cannot plant it).
-  On a session-exec 401, drop the blob and re-upgrade (recovery for
-  invalidation that never crossed this socket: another tab's logout or
-  password change). Properties to state when it lands: page script can hold
+  Tabs coordinate rotation via BroadcastChannel: the rotating tab broadcasts
+  AFTER its claim request lands the fresh cookie in the shared jar; hearers
+  refresh without dropping their socket via a `reseal` request — the claim's
+  mirror image (claim: blob in, Set-Cookie out; reseal: jar cookie in, blob
+  out; same boot key, both stateless). The channel's reach (same-origin,
+  same-profile tabs) is exactly the jar's. On a session-exec 401, drop the
+  blob and re-upgrade — the catch-all for tabs that missed the broadcast
+  (frozen/bfcached) or invalidation with no broadcast at all. Properties to state when it lands: page script can hold
   the blob but not read the JWT inside — XSS can use the session (as it can
   stock same-origin XHR) but not exfiltrate the token, which is httpOnly's
   actual guarantee; and the blob adds no lifetime — the backend still
