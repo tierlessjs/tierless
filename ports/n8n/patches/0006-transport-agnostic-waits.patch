@@ -130,14 +130,30 @@
  		await responsePromise;
 --- a/packages/testing/playwright/composables/ExecutionsComposer.ts
 +++ b/packages/testing/playwright/composables/ExecutionsComposer.ts
-@@ -1,5 +1,5 @@
+@@ -1,4 +1,5 @@
  import type { n8nPage } from '../pages/n8nPage';
--import { waitForRestResponseOrCrossing } from '../utils/transport-wait';
 +import { waitForRestRequestOrCrossing, waitForRestResponseOrCrossing } from '../utils/transport-wait';
  
  /**
   * A class for user interactions with workflow executions that go across multiple pages.
-@@ -43,12 +43,11 @@
+@@ -18,12 +19,10 @@
+ 	 */
+ 	async createExecutions(count: number): Promise<void> {
+ 		for (let i = 0; i < count; i++) {
+-			const responsePromise = this.n8n.page.waitForResponse(
+-				(response) =>
+-					response.url().includes('/rest/workflows/') &&
+-					response.url().includes('/run') &&
+-					response.request().method() === 'POST',
+-			);
++			const responsePromise = waitForRestResponseOrCrossing(this.n8n.page, {
++				url: ['/rest/workflows/', '/run'],
++				methods: ['POST'],
++			});
+ 
+ 			await this.n8n.canvas.clickExecuteWorkflowButton();
+ 			await responsePromise;
+@@ -44,12 +43,11 @@
  	 */
  	// eslint-disable-next-line @typescript-eslint/no-explicit-any
  	async executeNodeAndCapturePayload(nodeName: string): Promise<any> {

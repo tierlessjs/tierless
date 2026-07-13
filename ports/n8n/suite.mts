@@ -37,7 +37,10 @@ if (TRUTH) {
   const app: WireCounter = { toServer: 0, toClient: 0 };
   delayProxy(25680, 5680, 0, app).unref();
   delayProxy(25780, 5780, 0).unref();   // ws passthrough (page port+100 rule); the gateway counts its own TCP-true bytes
-  createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ appOut: app.toServer, appIn: app.toClient })); }).listen(14990, "127.0.0.1").unref();
+  // api* keys: report.mts sums wireApiIn/Out + wireWsIn/Out as the byte total (the
+  // "app" origin serves both api and assets here — single origin — but the field name
+  // is what the report keys on). Assets are identical in both arms and wash out.
+  createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ apiOut: app.toServer, apiIn: app.toClient })); }).listen(14990, "127.0.0.1").unref();
   editorUrl = "http://127.0.0.1:25680";
   wireUrls.push("http://127.0.0.1:14990", "http://127.0.0.1:5780/__tierless/wire");
   console.log("wire truth: browser origin via counting relay :25680, counters :14990, ws bytes at :5780/__tierless/wire");
