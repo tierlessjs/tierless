@@ -136,33 +136,47 @@ proven (the executable proofs behind `npm test`).
   connection — the standalone gateway is its own origin, paying a TCP+ws-upgrade
   handshake on top of the app origin → colocate the gateway ON the app origin
   (one connection, upgrade in place); (b) a reseal round trip before the first
-  crossing → amortize or fold into the upgrade; (c) lost request parallelism —
-  the browser spreads a concurrent /rest fan-out over parallel HTTP conns, so
-  the exec MUST pipeline concurrent crossings on the one socket, not serialize
-  them (verify the runtime does; `execBatch` burst-coalescing is the lever).
+  crossing → amortize or fold into the upgrade. (NOT lost parallelism — the
+  runtime multiplexes concurrent crossings on the one socket, verified from the
+  transport code; see the refined diagnosis below.)
   The e2e harness's per-test fresh context pays the one-time setup 736x, so the
-  amortizable part overstates the loss — but the parallelism part is real and
-  recurs per interaction. Until this is fixed the port trades latency for bytes:
-  a win only where bytes are the paid unit (metered/mobile radio), a wall-time
-  loss under RTT. Earlier Vikunja plan (still valid): preload workflow modules
-  at boot (the lazy chunk costs the first RTT before the ws send); race the
-  router guard fetch against the network; profile the render tail.
+  amortizable part overstates the loss — but the SECOND-ORIGIN handshake recurs
+  per context (not lost parallelism; the socket multiplexes — see below). Until
+  this is fixed the port trades latency for bytes: a win only where bytes are the
+  paid unit (metered/mobile radio), a wall-time loss under RTT.
 
-  DIAGNOSIS REFINED (n8n, from the runtime code + a subset A/B): the socket
-  MULTIPLEXES — `execOver → peer.request` (transport.mts:makePeer) assigns a
-  correlation id and sends immediately, many crossings outstanding at once,
-  replies matched by id — so the regression is NOT lost parallelism, the
-  scariest hypothesis, disproven. The cost is session setup LAZY on the critical
-  path: `connect().exec` awaits the ws `open` event, and both the handshake and
-  the reseal fire on the FIRST /rest (configureTierless({preconnect}) is called
-  inside the adapter, so "preconnect" never overlaps page load). LEADING FIX —
-  eager bootstrap: open the socket + kick the reseal at MODULE IMPORT, during
-  JS/asset bootstrap. A subset A/B showed ~10–15% faster on the navigation-load
-  tests measured before the box degraded (workflows/list 40.1→35.5s, 23.8→20.4s,
-  17.6→15.4s); the later tests were confounded by a container-suspend freezing
-  the run mid-measurement, so the AGGREGATE IS UNPROVEN and patch 0005 stays lazy
-  until a clean contemporaneous A/B on a stable box confirms it. Remaining levers
-  if a gap persists: gateway on the app origin; reseal folded into the ws upgrade.
+  DIAGNOSIS REFINED (n8n, from the runtime code): the socket MULTIPLEXES —
+  `execOver → peer.request` (transport.mts:makePeer) assigns a correlation id
+  and sends immediately, many crossings outstanding at once, replies matched by
+  id — so the regression is NOT lost parallelism, the scariest hypothesis,
+  disproven. What remains is session setup LAZY on the critical path:
+  `connect().exec` awaits the ws `open` event, and both the handshake and the
+  reseal fire on the FIRST /rest (configureTierless({preconnect}) is called
+  inside the adapter, so "preconnect" never overlaps page load).
+
+  EAGER BOOTSTRAP — TESTED, DISPROVEN (results/eager-boot-ab.txt). The candidate
+  fix opened the socket + kicked the reseal at MODULE IMPORT, hoping to hide the
+  ~240 ms of setup (ws handshake + reseal ≈ 3 RTT at 80 ms) behind JS/asset
+  bootstrap. A clean, drift-controlled dist-swap A/B settles it: two prebuilt
+  ported dists differing by exactly the one line (eager self-invocation;
+  confirmed the ONLY semantic delta), same 24-test subset at RTT80, two rounds
+  each, minutes apart on a calm box. Both arms are the ported build at RTT80 so
+  the RTT0 floor cancels — the durationMs delta IS the net-wait delta. Result:
+  a WASH both rounds (R1 −0.1%, R2 −0.0%; pooled mean −13 ms/test, eager if
+  anything marginally slower). The effect is an order of magnitude below the
+  per-test noise (stdev 483 ms) and below the round-to-round drift of the SAME
+  build (±0.6–0.7%, stdev 620–740 ms). The earlier "~10–15% faster" reading was
+  an artifact of a container-suspend freezing that run mid-measurement. So the
+  one-time lazy setup is NOT the load-bearing cost: page-load /rest fires nearly
+  as early as module import, leaving no window to overlap, and the e2e harness's
+  per-context repayment (the 736× the report flagged) is what made it look
+  amortizable. Patch 0005 stays lazy — no reason to add the eager code.
+
+  REMAINING LEVERS (structural, what actually recurs per interaction, in order):
+  colocate the gateway ON the app origin so there is no second TCP+ws-upgrade
+  handshake to a separate origin; then fold the reseal INTO the ws upgrade so
+  the first crossing carries no extra round trip. These remove RTTs that recur
+  every context, not the one-time setup eager targeted.
 
 ## Bigger swings
 

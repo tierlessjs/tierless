@@ -184,24 +184,34 @@ the socket's structure costs round trips the stock HTTP path didn't pay:
 - A **second connection**: the standalone gateway is its own origin, so the
   browser pays a TCP + ws-upgrade handshake to it on top of the app origin.
 - A **reseal round trip** before the first crossing (fetch the sealed blob).
-- Likely **lost request parallelism**: n8n's boot fan-out (settings, node-
-  types, credentials, projects…) fires many `/rest` concurrently; the browser
-  spreads those over parallel HTTP connections, and if they serialize over the
-  one session socket each pays the 80 ms sequentially.
+- NOT lost parallelism: n8n's boot fan-out fires many `/rest` concurrently and
+  the runtime **multiplexes** them on the one socket (`peer.request` in
+  transport.mts assigns a correlation id and sends immediately, replies matched
+  by id) — verified from the code, so the scariest hypothesis is disproven.
 
 Honesty both directions:
 - The e2e harness gives every test a **fresh browser context**, so the port
   pays its one-time session setup (ws open + reseal) 736 times where a real
   session pays it once — this measurement is *pessimistic* for the port on the
-  amortizable part. But the lost-parallelism part recurs per interaction, so
+  amortizable part. But the **second-origin handshake recurs per context**, so
   the regression is not purely an artifact.
+- **Eager bootstrap was tested and disproven** (results/eager-boot-ab.txt).
+  Moving the ws open + reseal to module import — to hide the ~240 ms of setup
+  behind JS/asset bootstrap — was the leading fix. A clean drift-controlled
+  dist-swap A/B (two dists differing by exactly that one line, same subset at
+  RTT80, two rounds) came back a **wash both rounds** (−0.1%, −0.0%; pooled mean
+  −13 ms/test). The effect is an order of magnitude below the per-test noise
+  (stdev 483 ms) and below the same-build round-to-round drift (±0.6–0.7%). The
+  one-time setup is simply not the load-bearing cost — page-load /rest fires
+  nearly as early as module import, leaving no window to overlap. Patch 0005
+  stays lazy.
 - This is the same failure the ROADMAP flagged for Vikunja ("forfeit the
   data-path lead") — there it netted to parity; n8n's more parallel boot makes
-  it a net loss. The fixes are known and unbuilt: colocate the gateway on the
-  app origin (kill the second connection), pipeline concurrent crossings, and
-  amortize/skip the reseal. Until then, **this port trades latency for bytes** —
-  a win only where bytes are the paid unit (metered/mobile), a loss on wall
-  time under RTT.
+  it a net loss. The remaining fixes are **structural** (what recurs per
+  context): colocate the gateway on the app origin to kill the second-origin
+  handshake, then fold the reseal into the ws upgrade. Until then, **this port
+  trades latency for bytes** — a win only where bytes are the paid unit
+  (metered/mobile), a loss on wall time under RTT.
 
 Reproduce (or just `node ports/drive-arms.mts n8n` for all six arms + both reports):
 

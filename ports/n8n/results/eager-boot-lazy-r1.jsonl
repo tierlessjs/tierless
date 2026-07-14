@@ -1,0 +1,24 @@
+{"id":"tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:18 › NDV › should show up when double clicked on a node and close when Back to canvas clicked","status":"passed","retry":0,"durationMs":9686}
+{"id":"tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:29 › NDV › should show input panel when node is not connected","status":"passed","retry":0,"durationMs":10026}
+{"id":"tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:39 › NDV › should change input and go back to canvas","status":"passed","retry":0,"durationMs":21750}
+{"id":"tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:55 › NDV › should show correct validation state for resource locator params","status":"passed","retry":0,"durationMs":11743}
+{"id":"tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:65 › NDV › should show validation errors only after blur or re-opening of NDV","status":"passed","retry":0,"durationMs":13759}
+{"id":"tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:86 › NDV › should show all validation errors when opening pasted node","status":"passed","retry":0,"durationMs":19945}
+{"id":"tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:95 › NDV › should render run errors correctly","status":"passed","retry":0,"durationMs":21582}
+{"id":"tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:112 › NDV › webhook should fallback to webhookId if path is empty","status":"passed","retry":0,"durationMs":13018}
+{"id":"tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:136 › NDV › should properly show node execution indicator","status":"passed","retry":0,"durationMs":14659}
+{"id":"tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:150 › NDV › should show node name and version in settings","status":"passed","retry":0,"durationMs":21644}
+{"id":"tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:172 › NDV › should not push NDV header out with a lot of code in Code node editor","status":"passed","retry":0,"durationMs":13726}
+{"id":"tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:194 › NDV › should allow editing code in fullscreen in the code editors","status":"passed","retry":0,"durationMs":14226}
+{"id":"tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:213 › NDV › Complex Edge Cases › ADO-2931 - should handle multiple branches of the same input with the first branch empty correctly","status":"passed","retry":0,"durationMs":12727}
+{"id":"tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:232 › NDV › Execution Indicators - Multi-Node › should properly show node execution indicator for multiple nodes","status":"passed","retry":0,"durationMs":14244}
+{"id":"tests/e2e/workflows/list/workflows.spec.ts:22 › Workflows › should create a new workflow using empty state button","status":"passed","retry":0,"durationMs":15648}
+{"id":"tests/e2e/workflows/list/workflows.spec.ts:30 › Workflows › should create a new workflow using add workflow button and save successfully","status":"passed","retry":0,"durationMs":20171}
+{"id":"tests/e2e/workflows/list/workflows.spec.ts:44 › Workflows › should search for workflows","status":"passed","retry":0,"durationMs":34223}
+{"id":"tests/e2e/workflows/list/workflows.spec.ts:70 › Workflows › should search workflows in command bar","status":"passed","retry":0,"durationMs":13617}
+{"id":"tests/e2e/workflows/list/workflows.spec.ts:97 › Workflows › should archive and unarchive a workflow","status":"passed","retry":0,"durationMs":34584}
+{"id":"tests/e2e/workflows/list/workflows.spec.ts:121 › Workflows › should delete an archived workflow","status":"passed","retry":0,"durationMs":35165}
+{"id":"tests/e2e/workflows/list/workflows.spec.ts:141 › Workflows › should unpublish a published workflow from workflow list","status":"passed","retry":0,"durationMs":26111}
+{"id":"tests/e2e/workflows/list/workflows.spec.ts:182 › Workflows › should filter workflows by tag","status":"passed","retry":0,"durationMs":12261}
+{"id":"tests/e2e/workflows/list/workflows.spec.ts:198 › Workflows › should preserve search and filters in URL","status":"passed","retry":0,"durationMs":18244}
+{"id":"tests/e2e/workflows/list/workflows.spec.ts:221 › Workflows › should share a workflow","status":"passed","retry":0,"durationMs":19398}
