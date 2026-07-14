@@ -166,6 +166,50 @@ Reproduce:
     TIERLESS_WIRE_TRUTH=1 node ports/n8n/suite.mts
     node ports/report.mts ports/work/n8n-baseline/measure-truth.jsonl ports/work/n8n/measure-truth.jsonl
 
+### Network wait — the port LOSES here (results/report-time-rtt80.txt)
+
+The other half of the headline, and it goes the other way. Four arms — floor
+(RTT0) and shaped (RTT 80 ms) × baseline/ported — decomposed by
+`report-time.mts` as `net = dur(80) − dur(0)`, the only component transport
+can move. Over 616 tests passing in all four runs:
+
+    floor (compute/render, unimprovable)   baseline 4428 s ≈ ported 4381 s   (isolation clean)
+    network-wait pool                      baseline 1903 s -> ported 2286 s   (+20% MORE wait)
+    median per-test net wait               2946 ms -> 3686 ms                 (+740 ms ≈ 9 RTT)
+
+**The session socket cut bytes 49% but added ~20% network wait.** Fewer bytes,
+more waiting — deflate shrinks the payload but does nothing for latency, and
+the socket's structure costs round trips the stock HTTP path didn't pay:
+
+- A **second connection**: the standalone gateway is its own origin, so the
+  browser pays a TCP + ws-upgrade handshake to it on top of the app origin.
+- A **reseal round trip** before the first crossing (fetch the sealed blob).
+- Likely **lost request parallelism**: n8n's boot fan-out (settings, node-
+  types, credentials, projects…) fires many `/rest` concurrently; the browser
+  spreads those over parallel HTTP connections, and if they serialize over the
+  one session socket each pays the 80 ms sequentially.
+
+Honesty both directions:
+- The e2e harness gives every test a **fresh browser context**, so the port
+  pays its one-time session setup (ws open + reseal) 736 times where a real
+  session pays it once — this measurement is *pessimistic* for the port on the
+  amortizable part. But the lost-parallelism part recurs per interaction, so
+  the regression is not purely an artifact.
+- This is the same failure the ROADMAP flagged for Vikunja ("forfeit the
+  data-path lead") — there it netted to parity; n8n's more parallel boot makes
+  it a net loss. The fixes are known and unbuilt: colocate the gateway on the
+  app origin (kill the second connection), pipeline concurrent crossings, and
+  amortize/skip the reseal. Until then, **this port trades latency for bytes** —
+  a win only where bytes are the paid unit (metered/mobile), a loss on wall
+  time under RTT.
+
+Reproduce (or just `node ports/drive-arms.mts n8n` for all six arms + both reports):
+
+    TIERLESS_RTT_MS=80 node ports/n8n/suite.mts --baseline
+    TIERLESS_RTT_MS=80 node ports/n8n/suite.mts
+    node ports/report-time.mts results/floor-baseline.jsonl results/floor-ported.jsonl \
+                               results/rtt80-baseline.jsonl results/rtt80-ported.jsonl
+
 ## Reproduce
 
     bash ports/n8n/setup.sh                 # fetch + verify + patch + install + build + browsers

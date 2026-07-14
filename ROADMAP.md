@@ -127,13 +127,26 @@ proven (the executable proofs behind `npm test`).
   fewer bytes, 22% fewer trips). Open: the 10–20-app study reporting medians
   and full distributions, losers included.
 
-- **Cash the measured 486 ms data-path lead** (ports/vikunja README, timing
-  section). Under real 80 ms RTT the port delivers all route data at t=260 vs
-  stock's t=746, yet click-to-render is at parity (859 vs 870 ms) because the
-  code path forfeits the lead. In order: preload workflow modules at boot (the
-  lazy chunk costs the first RTT before the ws send); let the router's guard
-  fetch race the network instead of waiting on the workflow hold (first answer
-  wins); then profile the remaining ~380 ms render tail on the ported arm.
+- **The session socket LOSES on network wait — fix before the corpus study.**
+  Measured on n8n (ports/n8n/README.md, results/report-time-rtt80.txt): at 80 ms
+  RTT the port cut wire bytes 49% but ADDED ~20% network wait (median 2946 ->
+  3686 ms/test, ~9 extra round trips). Vikunja forfeited its 486 ms data-path
+  lead to parity; n8n's more parallel boot fan-out makes it a net regression.
+  The socket's structure costs round trips stock HTTP didn't: (a) a SECOND
+  connection — the standalone gateway is its own origin, paying a TCP+ws-upgrade
+  handshake on top of the app origin → colocate the gateway ON the app origin
+  (one connection, upgrade in place); (b) a reseal round trip before the first
+  crossing → amortize or fold into the upgrade; (c) lost request parallelism —
+  the browser spreads a concurrent /rest fan-out over parallel HTTP conns, so
+  the exec MUST pipeline concurrent crossings on the one socket, not serialize
+  them (verify the runtime does; `execBatch` burst-coalescing is the lever).
+  The e2e harness's per-test fresh context pays the one-time setup 736x, so the
+  amortizable part overstates the loss — but the parallelism part is real and
+  recurs per interaction. Until this is fixed the port trades latency for bytes:
+  a win only where bytes are the paid unit (metered/mobile radio), a wall-time
+  loss under RTT. Earlier Vikunja plan (still valid): preload workflow modules
+  at boot (the lazy chunk costs the first RTT before the ws send); race the
+  router guard fetch against the network; profile the render tail.
 
 ## Bigger swings
 
