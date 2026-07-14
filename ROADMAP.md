@@ -148,6 +148,22 @@ proven (the executable proofs behind `npm test`).
   at boot (the lazy chunk costs the first RTT before the ws send); race the
   router guard fetch against the network; profile the render tail.
 
+  DIAGNOSIS REFINED (n8n, from the runtime code + a subset A/B): the socket
+  MULTIPLEXES — `execOver → peer.request` (transport.mts:makePeer) assigns a
+  correlation id and sends immediately, many crossings outstanding at once,
+  replies matched by id — so the regression is NOT lost parallelism, the
+  scariest hypothesis, disproven. The cost is session setup LAZY on the critical
+  path: `connect().exec` awaits the ws `open` event, and both the handshake and
+  the reseal fire on the FIRST /rest (configureTierless({preconnect}) is called
+  inside the adapter, so "preconnect" never overlaps page load). LEADING FIX —
+  eager bootstrap: open the socket + kick the reseal at MODULE IMPORT, during
+  JS/asset bootstrap. A subset A/B showed ~10–15% faster on the navigation-load
+  tests measured before the box degraded (workflows/list 40.1→35.5s, 23.8→20.4s,
+  17.6→15.4s); the later tests were confounded by a container-suspend freezing
+  the run mid-measurement, so the AGGREGATE IS UNPROVEN and patch 0005 stays lazy
+  until a clean contemporaneous A/B on a stable box confirms it. Remaining levers
+  if a gap persists: gateway on the app origin; reseal folded into the ws upgrade.
+
 ## Bigger swings
 
 - **Durable continuations.** Persist a parked continuation and resume it after
