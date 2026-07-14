@@ -87,7 +87,7 @@ try {
   const reqs: { t: number; url: string }[] = [];
   const allUrls: string[] = [];
   const t0 = Date.now();
-  page.on("request", (r) => {
+  page.on("request", (r: { url(): string }) => {
     const u = r.url();
     allUrls.push(u);
     if (u.includes("/rest")) reqs.push({ t: Date.now() - t0, url: u.replace(APP, "").split("?")[0] });

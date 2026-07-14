@@ -14,7 +14,7 @@
 // correlation ids keep their bounces apart.
 import { makePump, initialStack } from "./runtime.mjs";
 import { encodeWireBinary, decodeWireBinary, encodeArgs, decodeArgs } from "./wire-binary.mjs";
-import { makeRecorder, type RecorderOpts, type Recorder } from "./trace.mjs";
+import { makeRecorder, decide, siteKey, argFeatures, type RecorderOpts, type Recorder, type Profile } from "./trace.mjs";
 import { DEREF_TIER, usesHeap, type Coherence } from "./coherence.mjs";
 import type { EncodeOptions } from "./graph.mjs";
 import type { Bundle, Frame, Exec, ResourceRequest, PumpRequest, Peer, Host, HostReply, Pump } from "./types.mjs";
@@ -49,6 +49,13 @@ export interface MakeHostOpts {
    *  class-stamped handles resolve to LOCAL instances here. Opt-in per class; key on
    *  `handle` (owner + heap id) when instances are stateful — see PumpOpts.twins. */
   twins?: (cls: string, handle?: { id: string; owner: string }) => object | undefined;
+  /** §6 placement for the full-tierless drive path (docs/migrate-arm.md "§6 decide"):
+   *  at each park the driver prices fetch-vs-migrate from the LOCKED profile — migrate
+   *  ships the whole continuation (type:"resume"), fetch pulls just the value
+   *  (type:"exec", the fetch arm) and pumps on at home. Absent, or a cold/unpriced site,
+   *  keeps the pre-§6 floor: always migrate. Loaded per the run protocol (docs/corpus.md);
+   *  comparison runs pass a locked profile, profiling runs pass none (they trace migrates). */
+  placement?: { profile: Profile | null; mode?: "greedy" | "trajectory"; stability?: number };
 }
 
 // OWNERSHIP scan — the generic half of request pinning (a resource family adds its
@@ -95,7 +102,10 @@ function ownedUnit(v: unknown): boolean {
 
 let nextSid = 1;
 
-export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn, twins }: MakeHostOpts): Host {
+export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn, twins, placement }: MakeHostOpts): Host {
+  const placeProfile = placement?.profile ?? null;
+  const placeMode = placement?.mode ?? "trajectory";
+  const placeStability = placement?.stability ?? 0.9;
   const pump = makePump(bundle, { twins });
   const coherence = coherenceIn && usesHeap(bundle) ? coherenceIn : undefined;   // per-bundle gate (see MakeHostOpts.coherence)
   const ownsBase: (tier: string) => boolean = owns || ((t) => t === tier);
@@ -124,9 +134,15 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
   };
   // A traced stack's flag is captured BEFORE pumping: a finished pump has popped every
   // frame, so the end marker needs the flag held aside. Untraced stacks pump exactly as before.
-  const runPump = async (peer: Peer | undefined, stack: Frame[], incoming: ResourceRequest | null = null, sink?: { twinDelta(d: import("./types.mjs").TwinDelta): void }): Promise<PumpResult> => {
+  // `carry`, when given, is a fetched value (or error) to inject AT the resume park: the
+  // pump's first exec call returns it instead of servicing — the drive-path fetch arm's
+  // re-pump, the mirror of runLocal's onceExec (host.mts fetch arm below).
+  const runPump = async (peer: Peer | undefined, stack: Frame[], incoming: ResourceRequest | null = null, sink?: { twinDelta(d: import("./types.mjs").TwinDelta): void }, carry?: { value: unknown } | { error: unknown }): Promise<PumpResult> => {
     const flag = rec ? rec.flagOf(stack) : null;
-    const res = await pump(stack, ownsHere, execFor(peer, stack), incoming, sink);
+    const base = execFor(peer, stack);
+    let c = carry;
+    const ex: Exec = c ? (r) => { if (c) { const cc = c; c = undefined; if ("error" in cc) throw cc.error; return cc.value; } return base(r); } : base;
+    const res = await pump(stack, ownsHere, ex, incoming, sink);
     if (res.done) rec?.end(flag, "done");
     return res;
   };
@@ -154,7 +170,31 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
   // of accumulating every session's excisions until disconnect.
   async function drive(peer: Peer, sid: string, res: PumpResult): Promise<unknown> {
     while (!res.done) {
-      res = await settle(peer, await peer.request({ type: "resume", sid, ...meta }, ship(sid, res)));
+      const cur = res;                    // narrowed & const — survives the awaits below
+      const req = cur.request;
+      // §6 decide (docs/migrate-arm.md): a data-resource park may FETCH just the value
+      // instead of shipping the whole continuation, when the profile prices it cheaper. A
+      // §5 home park and a cold/unpriced site both keep the floor — migrate. Price on the
+      // REAL shipped bytes (encode once; the migrate branch reuses them).
+      let wire: Uint8Array | null = null;
+      let fetchIt = false;
+      if (placeProfile && req.op === "resource") {
+        const top = cur.stack[cur.stack.length - 1];
+        wire = encodeWireBinary(cur.stack, req, encOpts(sid));
+        fetchIt = decide(wire.length, siteKey(top.fn, top.pc, req.name), placeProfile, { mode: placeMode, stability: placeStability, argFeatures: argFeatures(req.args) }).choice === "fetch";
+      }
+      if (fetchIt) {
+        // the fetch arm: pull only (name, args) over the peer, resume the stack HERE with
+        // the value — errors re-enter the machine's service() path exactly as a migrate would.
+        let carry: { value: unknown } | { error: unknown };
+        try { carry = { value: await execOver(peer, req as ResourceRequest, meta) }; }
+        catch (e) { carry = { error: e }; }
+        res = await runPump(peer, cur.stack, req as ResourceRequest, undefined, carry);
+      } else {
+        const shipped = rec ? rec.ship(cur.stack, req, () => wire ?? encodeWireBinary(cur.stack, req, encOpts(sid)), "migrate")
+                            : (wire ?? encodeWireBinary(cur.stack, req, encOpts(sid)));
+        res = await settle(peer, await peer.request({ type: "resume", sid, ...meta }, shipped));
+      }
     }
     return res.value;
   }

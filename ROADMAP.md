@@ -37,6 +37,14 @@ proven (the executable proofs behind `npm test`).
   stability in real applications, the load-bearing empirical unknown the recorder now
   instruments. Beyond that, Stip.js-style global search over the suspension graph
   (pre-placing or replicating pure helpers) remains the bigger swing.
+  UPDATE: the §6 decide loop is now LANDED in the shipped host (host.mts `drive`,
+  `placement: { profile, mode }`) — fetch is a first-class protocol message
+  (`type:"exec"`) the driver picks over migrate (`type:"resume"`) per park, priced on
+  real shipped bytes; cold/unpriced keeps the migrate floor. Proven in the real host
+  over the wire (test/e2e/trio-live.mts §3a: greedy 3 exec, trajectory 1 resume, 57%
+  fewer bytes, byte-identical to the old hand-rolled driver). Remaining: symmetric
+  step-side fetch (the answering side still always suspends); a suffix horizon for
+  long-running sessions; per-site suffix stability in real apps.
 - **Profile fidelity: record FAILED touches.** A resource call that rejects is
   invisible to the recorder (rec.res runs after a successful exec), so a run
   whose compiled code catches the failure reads as a complete trajectory with a

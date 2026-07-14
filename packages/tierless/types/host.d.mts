@@ -1,4 +1,4 @@
-import { type RecorderOpts, type Recorder } from "./trace.mjs";
+import { type RecorderOpts, type Recorder, type Profile } from "./trace.mjs";
 import { type Coherence } from "./coherence.mjs";
 import type { Bundle, Exec, ResourceRequest, Peer, Host } from "./types.mjs";
 export type { Bundle, Frame, MachineResult, ResourceRequest, HomePark, PumpRequest, Exec, Peer, Host } from "./types.mjs";
@@ -27,8 +27,19 @@ export interface MakeHostOpts {
         id: string;
         owner: string;
     }) => object | undefined;
+    /** §6 placement for the full-tierless drive path (docs/migrate-arm.md "§6 decide"):
+     *  at each park the driver prices fetch-vs-migrate from the LOCKED profile — migrate
+     *  ships the whole continuation (type:"resume"), fetch pulls just the value
+     *  (type:"exec", the fetch arm) and pumps on at home. Absent, or a cold/unpriced site,
+     *  keeps the pre-§6 floor: always migrate. Loaded per the run protocol (docs/corpus.md);
+     *  comparison runs pass a locked profile, profiling runs pass none (they trace migrates). */
+    placement?: {
+        profile: Profile | null;
+        mode?: "greedy" | "trajectory";
+        stability?: number;
+    };
 }
-export declare function makeHost({ bundle, tier, exec, owns, meta, trace, coherence: coherenceIn, twins }: MakeHostOpts): Host;
+export declare function makeHost({ bundle, tier, exec, owns, meta, trace, coherence: coherenceIn, twins, placement }: MakeHostOpts): Host;
 export declare function execOver(peer: Peer, req: ResourceRequest, meta?: Record<string, unknown>): Promise<unknown>;
 export declare function answerWith(peer: Peer, hostFor: (id: string) => Host | Promise<Host>, field?: string): void;
 export declare function batchExec(peer: Peer): Peer;

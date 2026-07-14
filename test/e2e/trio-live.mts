@@ -119,6 +119,33 @@ check("fetchA's recorded suffix is [fetchB, fetchC], fully stable",
   sA.modal !== null && sA.modal.includes("api.fetchB") && sA.modal.includes("api.fetchC") && sA.stability === 1, sA.modal);
 check("the suffix carries its summed fetch cost", sA.suffixes[sA.modal!].fetchSum > 2 * 4096, sA.suffixes[sA.modal!]);
 
+// ---- 3a. THE LANDED §6 DECIDE LOOP: the real host's drive() prices fetch-vs-migrate from
+// the profile (host.mts placement) — no hand-rolled driver. We steer it by constructing the
+// browser host with a locked profile + mode and counting the REAL protocol messages it
+// emits: type:"exec" is a fetch (value only), type:"resume" is a migrate (whole stack). ----
+async function countingRun(mode: "greedy" | "trajectory"): Promise<{ value: TrioValue; exec: number; resume: number; bytes: number }> {
+  const c = { exec: 0, resume: 0, bytes: 0 };
+  const orig = peer.request.bind(peer);
+  (peer as { request: typeof peer.request }).request = (payload: any, bin?: Uint8Array) => {
+    if (payload?.type === "exec") c.exec++;
+    else if (payload?.type === "resume") c.resume++;
+    if (bin) c.bytes += bin.length;
+    return orig(payload, bin).then((r: any) => { if (r?.bin) c.bytes += r.bin.length; if (r?.obj) c.bytes += JSON.stringify(r.obj).length; return r; });   // fetch returns data in obj.value, migrate returns the stack in bin — count both
+  };
+  try {
+    const host = makeHost({ bundle, tier: "browser", exec: (() => { throw new Error("browser owns nothing"); }) as any, placement: { profile, mode } });
+    const value = await host.run(peer, "Trio", [W, K]) as TrioValue;
+    return { value, ...c };
+  } finally { (peer as { request: typeof peer.request }).request = orig; }
+}
+const gReal = await countingRun("greedy");
+const tReal = await countingRun("trajectory");
+console.log(`LANDED drive: greedy -> ${gReal.exec} exec + ${gReal.resume} resume (${fmt(gReal.bytes)}); trajectory -> ${tReal.exec} exec + ${tReal.resume} resume (${fmt(tReal.bytes)})\n`);
+check("landed drive computes the right answer both modes", gReal.value.work === W && gReal.value.a === K && JSON.stringify(gReal.value) === JSON.stringify(tReal.value), [gReal.value, tReal.value]);
+check("landed drive GREEDY fetches every hop through the real host (3 exec, 0 resume)", gReal.exec === 3 && gReal.resume === 0, gReal);
+check("landed drive TRAJECTORY migrates once through the real host (0 exec, 1 resume)", tReal.exec === 0 && tReal.resume === 1, tReal);
+check("landed drive TRAJECTORY crosses fewer bytes than greedy", tReal.bytes < gReal.bytes, `${fmt(tReal.bytes)} vs ${fmt(gReal.bytes)}`);
+
 // ---- 3. the §6 driver, greedy vs trajectory, every byte counted both directions ---------
 interface Hop { site: string; contBytes: number; fetchSide: number; choice: string }
 async function runTrio(mode: "greedy" | "trajectory"): Promise<{ value: TrioValue; crossed: number; hops: Hop[] }> {
