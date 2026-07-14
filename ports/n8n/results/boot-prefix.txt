@@ -1,0 +1,38 @@
+===== n8n authenticated boot — browser-capability touch classification =====
+landed on: http://127.0.0.1:5680/home/workflows
+
+-- timeline (ms from nav) --
+  domcontentloaded 2190   load 2193   networkidle 16863
+  all requests: 268   /rest requests: 0   first@-  last@-
+  first localStorage HIT @- ms   (first /rest @- ms)
+
+== ESSENTIAL — needs the real client's value (the server-DOM ceiling) ==
+  localStorage/sessionStorage reads returning a VALUE: 0 calls, distinct keys:
+  client-environment reads (viewport / locale / timezone / hardware): 75 calls, distinct:
+      40x  navigator.userAgent
+      14x  window.devicePixelRatio
+      12x  navigator.platform
+       4x  matchMedia (any-pointer: coarse)
+       2x  navigator.maxTouchPoints
+       2x  navigator.vendor
+       1x  matchMedia (prefers-color-scheme: dark)
+
+== INCIDENTAL — a server-side DOM shim satisfies these (no client value) ==
+  document.createElement calls: 745
+  page-load-event listeners (load/DOMContentLoaded/readystatechange): 2
+       2x  window/DOMContentLoaded
+  localStorage/sessionStorage reads returning NULL (server default matches): 0
+  localStorage/sessionStorage writes: 0   document.cookie reads: 2
+
+== VERDICT — is any boot decision gated on a real client value? ==
+  Fresh boot starts with EMPTY localStorage (DB reset) yet loads its full dataset and
+  reaches /home/workflows — so the fan-out is NOT gated on any stored value.
+  localStorage reads that returned a VALUE (could gate a decision): 0   [note: total read count is flaky — n8n installs its own Storage wrapper that
+   sometimes clobbers the probe; the post-boot dump below is direct ground truth.]
+  Repeat-visit state a server boot would need to mirror = 13 keys / ~419 B, all UI prefs:
+      N8N_AI_TEMPLATES_STARTER_COLLECTION_CALL_OUT_DISMISSED, N8N_NDV_INPUT_PANEL_DISPLAY_MODE, n8n-browserId, n8n-recent-workflows, sidebar.collapsed, n8n-recent-nodes, N8N_WORKFLOWS_LIST_PREFERENCES, N8N_READY_TO_RUN_WORKFLOWS_DISMISSED, N8N_NDV_OUTPUT_PANEL_DISPLAY_MODE, N8N_READY_TO_RUN_OPENAI_CREDENTIAL_ID, N8N_LOGS_PANEL_OPEN, N8N_SIDEBAR_WIDTH, N8N_AGENT_REQUESTS
+  device-env facts read (gate RENDERING, not which requests fire): navigator.userAgent, navigator.maxTouchPoints, navigator.platform, navigator.vendor, matchMedia, window.devicePixelRatio
+
+  NETWORK-gating client values (change what is fetched): NONE observed
+  RENDER-gating client values (change final paint only): device-env + 13 UI-pref keys (~419 B)
+  INCIDENTAL touches a server DOM satisfies for free: createElement 745, page-load listeners 2, cookie 2 (server holds the cookie)
