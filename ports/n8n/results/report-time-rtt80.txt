@@ -1,0 +1,43 @@
+
+time decomposition over 616 tests passing in all four runs (120 dropped)
+
+== the unimprovable floor (localhost: render + Playwright + fixtures; no meaningful network) ==
+  baseline 4428.2s   ported 4381.3s   — transport cannot move this
+
+== the improvable pool (network waits: dur@RTT - dur@RTT0, per test) ==
+  baseline total 1903.4s -> ported 2286.1s   (-20% of the POOL removed)
+  median per test 2946 ms -> 3686 ms
+  pool share of total wall time (baseline): 30% — the ceiling any flow rewrite has to work with
+  noise: 78 test(s) with a negative net component (run variance; kept as-is, medians are robust)
+
+== per-test detail, ranked by network-wait delta (netB -> netP · localhost floor) ==
+    7283 ->   3428 ms · floor   5382 ms  tests/e2e/settings/environments/variables.spec.ts:36 › Variables › licensed › should create a n
+    6486 ->   3904 ms · floor  34686 ms  tests/e2e/ai/ai-2505-pdf-embed.spec.ts:18 › AI-2505 — PDF embed regression › embeds a PDF throu
+    5726 ->   3914 ms · floor  15111 ms  tests/e2e/workflows/editor/execution/executions-list-infinite-scroll.spec.ts:52 › Executions li
+    4508 ->   3093 ms · floor   9498 ms  tests/e2e/workflows/editor/ndv/paired-item.spec.ts:257 › NDV Paired Items › can resolve express
+    2420 ->   1088 ms · floor  11128 ms  tests/e2e/capabilities/task-runner.spec.ts:27 › Task Runner › should execute Python with task r
+    6619 ->   5332 ms · floor  20001 ms  tests/e2e/workflows/editor/execution/debug.spec.ts:74 › Debug mode › should handle pinned data 
+    4134 ->   2865 ms · floor   7227 ms  tests/e2e/workflows/editor/subworkflows/debugging.spec.ts:36 › Subworkflow debugging › can insp
+   10094 ->   8902 ms · floor  10080 ms  tests/e2e/projects/folders-operations.spec.ts:266 › Folders - Operations › Move folders and wor
+     525 ->   -517 ms · floor   1735 ms  tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:291 › Redaction enforcement › whe
+    3482 ->   2582 ms · floor   7196 ms  tests/e2e/regression/PAY-4367-node-shifting-cyclic.spec.ts:94 › PAY-4367: Node shifting in cycl
+     -69 ->   -853 ms · floor   2719 ms  tests/e2e/workflows/editor/subworkflows/wait.spec.ts:219 › CAT-1929: Parent should not resume u
+    6791 ->   6056 ms · floor   9615 ms  tests/e2e/projects/folders-operations.spec.ts:241 › Folders - Operations › Move folders and wor
+   18457 ->  17744 ms · floor  32530 ms  tests/e2e/sharing/credential-visibility.spec.ts:13 › Credential Visibility Rules › should only 
+      36 ->   -661 ms · floor   1239 ms  tests/e2e/workflows/editor/subworkflows/wait.spec.ts:31 › Parent that does not wait for sub-wor
+     -41 ->   -658 ms · floor   1740 ms  tests/e2e/workflows/editor/subworkflows/wait.spec.ts:174 › CAT-3263: Parent receives error from
+    2653 ->   2091 ms · floor   4321 ms  tests/e2e/ai/assistant-credential-help.spec.ts:48 › AI Assistant::enabled › Credential Help › s
+      93 ->   -435 ms · floor   1283 ms  tests/e2e/workflows/editor/subworkflows/subworkflow-version-resolution.spec.ts:128 › Sub-workfl
+     -84 ->   -592 ms · floor   1972 ms  tests/e2e/workflows/editor/subworkflows/wait.spec.ts:111 › CAT-1801: Parent receives correct da
+    7039 ->   6551 ms · floor  22631 ms  tests/e2e/credentials/oauth.spec.ts:42 › OAuth Credentials › should connect when the callback n
+    3783 ->   3342 ms · floor   5630 ms  tests/e2e/ai/assistant-support-chat.spec.ts:47 › AI Assistant::enabled › Support Chat › should 
+
+== worst regressions (same ranking, bottom) ==
+    1799 ->   5559 ms · floor   7355 ms  tests/e2e/workflows/list/import.spec.ts:41 › Import workflow › From URL › clicking outside moda
+    8293 ->  11802 ms · floor  23888 ms  tests/e2e/workflows/editor/canvas/canvas-nodes.spec.ts:64 › Canvas Node Manipulation and Naviga
+    -204 ->   3268 ms · floor   5684 ms  tests/e2e/workflows/demo-diff.spec.ts:207 › Workflow Diff Demo › ignores non-openDiff commands
+    1629 ->   5061 ms · floor   7981 ms  tests/e2e/workflows/editor/workflow-actions/publish.spec.ts:91 › Workflow Publish › Webhook con
+     707 ->   3935 ms · floor  14036 ms  tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:69 › Canvas Zoom Functionality › should z
+    1306 ->   4518 ms · floor  11665 ms  tests/e2e/workflows/executions/preview-isolation.spec.ts:11 › Execution preview isolation › sho
+    5093 ->   8262 ms · floor  16606 ms  tests/e2e/workflows/editor/ndv/ndv-floating-nodes.spec.ts:13 › NDV Floating Nodes Navigation › 
+    4138 ->   7195 ms · floor  14632 ms  tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:150 › NDV › should show node name and version i
