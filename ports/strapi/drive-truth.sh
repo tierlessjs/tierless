@@ -71,15 +71,15 @@ if [ ! -f ports/work/strapi/.drive-smoked ]; then
 fi
 
 # ---- 3. ported truth arm (full CE suite, chromium) --------------------------------------
-if [ ! -f "$R/truth-ported.jsonl" ]; then
+if [ ! -f "$R/ported-truth.jsonl" ]; then
   say "ported wire-truth arm (full suite)"
   sweep_ports
   TIERLESS_WIRE_TRUTH=1 node ports/strapi/suite.mts || true
   n=$(wc -l < ports/work/strapi/measure-truth.jsonl || echo 0)
   [ "$n" -ge 200 ] || fail "ported truth arm produced only $n rows"
-  cp ports/work/strapi/measure-truth.jsonl "$R/truth-ported.jsonl"
+  cp ports/work/strapi/measure-truth.jsonl "$R/ported-truth.jsonl"
 fi
-commit_push "ports/strapi: ported wire-truth arm ($(wc -l < "$R/truth-ported.jsonl") rows)" "$R/truth-ported.jsonl" || fail "push failed for ported arm"
+commit_push "ports/strapi: ported wire-truth arm ($(wc -l < "$R/ported-truth.jsonl") rows)" "$R/ported-truth.jsonl" || fail "push failed for ported arm"
 say "ported arm committed"
 
 # ---- 4. baseline tree built --------------------------------------------------------------
@@ -89,18 +89,18 @@ if [ ! -d ports/work/strapi-baseline/src/node_modules ] || [ ! -f ports/work/str
 fi
 
 # ---- 5. baseline truth arm ---------------------------------------------------------------
-if [ ! -f "$R/truth-baseline.jsonl" ]; then
+if [ ! -f "$R/baseline-truth.jsonl" ]; then
   say "baseline wire-truth arm (full suite)"
   sweep_ports
   TIERLESS_WIRE_TRUTH=1 node ports/strapi/suite.mts --baseline || true
   n=$(wc -l < ports/work/strapi-baseline/measure-truth.jsonl || echo 0)
   [ "$n" -ge 200 ] || fail "baseline truth arm produced only $n rows"
-  cp ports/work/strapi-baseline/measure-truth.jsonl "$R/truth-baseline.jsonl"
+  cp ports/work/strapi-baseline/measure-truth.jsonl "$R/baseline-truth.jsonl"
 fi
-commit_push "ports/strapi: baseline wire-truth arm ($(wc -l < "$R/truth-baseline.jsonl") rows)" "$R/truth-baseline.jsonl" || fail "push failed for baseline arm"
+commit_push "ports/strapi: baseline wire-truth arm ($(wc -l < "$R/baseline-truth.jsonl") rows)" "$R/baseline-truth.jsonl" || fail "push failed for baseline arm"
 say "baseline arm committed"
 
 # ---- 6. the comparison -------------------------------------------------------------------
 say "pairing the arms"
-node ports/report.mts "$R/truth-baseline.jsonl" "$R/truth-ported.jsonl"
+node ports/report.mts "$R/baseline-truth.jsonl" "$R/ported-truth.jsonl"
 say "DRIVE COMPLETE"

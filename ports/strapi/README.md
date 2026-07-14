@@ -149,7 +149,7 @@ Three real boundary defects, each fixed at the right layer rather than worked ar
    slowly. Fix: `TIERLESS_IGNORE_HTTPS_ERRORS` (test patch 0001, both arms) lets the
    proxied request complete; a normal network never hits this.
 
-## The suite at the socket (2026-07-13, results/truth-*.jsonl; ported arm re-run
+## The suite at the socket (2026-07-13, results/*-truth.jsonl; ported arm re-run
 ## under sealed cookie authority — patch 0006)
 
 Both arms by one command each (`TIERLESS_WIRE_TRUTH=1 node ports/strapi/suite.mts

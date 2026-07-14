@@ -48,9 +48,9 @@ run_arm() { # run_arm <results-name> <measure-name> <baselineFlag>
   say "$out committed"
 }
 
-run_arm truth-baseline-gzip.jsonl ports/work/strapi-baseline/measure-truth-gzip.jsonl --baseline
-run_arm truth-ported-gzip.jsonl   ports/work/strapi/measure-truth-gzip.jsonl          ""
+run_arm baseline-truth-gzip.jsonl ports/work/strapi-baseline/measure-truth-gzip.jsonl --baseline
+run_arm ported-truth-gzip.jsonl   ports/work/strapi/measure-truth-gzip.jsonl          ""
 
 say "gzip-stock vs ported (the SYMMETRIC pair)"
-node ports/report.mts "$R/truth-baseline-gzip.jsonl" "$R/truth-ported-gzip.jsonl" | head -20
+node ports/report.mts "$R/baseline-truth-gzip.jsonl" "$R/ported-truth-gzip.jsonl" | head -20
 say "GZIP DRIVE COMPLETE"
