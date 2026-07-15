@@ -46,11 +46,19 @@ export interface CookieSessionAuthOpts {
    *  preboot map seeds the join buffer. Absent = the pre-hello behavior: HTTP reseal at
    *  startup. Rotation/401 recovery still uses the HTTP reseal endpoint either way. */
   hello?: Promise<SessionHello>;
+  /** Await each rotation's claim before the crossing resolves. Stock fetch applies a
+   *  response's Set-Cookie to the jar SYNCHRONOUSLY with the response; the default
+   *  fire-and-forget claim replants it a beat later, so code (or a test) that reads or
+   *  clears the jar the instant an auth flow settles can observe a late resurrection —
+   *  the Strapi suite's clearCookies-then-reload step caught exactly that. Opting in
+   *  restores the stock invariant at the cost of one gateway round trip on ROTATING
+   *  crossings only (auth flows; data-plane crossings never rotate). */
+  awaitClaims?: boolean;
 }
 
 interface Rotation { blob: string; claim: string }
 
-export function cookieSessionAuth({ gateway, channelName = "tierless-session-auth", fetchImpl, hello }: CookieSessionAuthOpts): { wrap(inner: Exec): Exec } {
+export function cookieSessionAuth({ gateway, channelName = "tierless-session-auth", fetchImpl, hello, awaitClaims = false }: CookieSessionAuthOpts): { wrap(inner: Exec): Exec } {
   const f: typeof fetch = fetchImpl ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   const base = gateway.replace(/\/$/, "");
   let blob: string | null = null;
@@ -91,12 +99,14 @@ export function cookieSessionAuth({ gateway, channelName = "tierless-session-aut
     return { ...req, args: [path, data, { ...(opts ?? {}), headers: { ...(opts?.headers ?? {}), [SESSION_AUTH_HEADER]: blob } }] };
   };
 
-  const rotateFrom = (env: unknown): void => {
+  const rotateFrom = (env: unknown): void | Promise<void> => {
     const auth = (env as Record<string, unknown> | null)?.[AUTH_FIELD] as Rotation | undefined;
     if (!auth) return;
     blob = auth.blob;
     delete (env as Record<string, unknown>)[AUTH_FIELD];
-    void claimThenBroadcast(auth.claim);
+    const done = claimThenBroadcast(auth.claim);
+    if (awaitClaims) return done;
+    void done;
   };
 
   return {
@@ -110,12 +120,12 @@ export function cookieSessionAuth({ gateway, channelName = "tierless-session-aut
         if (preboot.has(path)) { const env = preboot.get(path); preboot.delete(path); return env; }
       }
       let env = await inner(attach(req as ResourceRequest));
-      rotateFrom(env);
+      await rotateFrom(env);
       if ((env as { status?: number } | null)?.status === 401) {
         await reseal();
         if (blob) {
           env = await inner(attach(req as ResourceRequest));
-          rotateFrom(env);
+          await rotateFrom(env);
         }
       }
       return env;

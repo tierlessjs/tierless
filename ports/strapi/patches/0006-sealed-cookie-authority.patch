@@ -1,5 +1,5 @@
 --- a/packages/core/admin/admin/src/utils/tierlessFetch.ts	2026-07-13 21:38:27.098929958 +0000
-+++ b/packages/core/admin/admin/src/utils/tierlessFetch.ts	2026-07-13 21:39:51.381344567 +0000
++++ b/packages/core/admin/admin/src/utils/tierlessFetch.ts	2026-07-15 20:29:11.732372881 +0000
 @@ -13,11 +13,16 @@
   *   - requests not negotiating JSON (getFetchClient omits `Accept: application/json`
   *     exactly when responseType is blob/text/arrayBuffer — binary can't cross a JSON
@@ -30,7 +30,7 @@
  
  interface Envelope {
    status: number;
-@@ -40,24 +46,26 @@
+@@ -40,24 +46,30 @@
  // everything the session already said. Configured once, on the first crossable call;
  // preconnected so the upgrade handshake never lands on an interaction's critical path.
  // `tierlessWsUrl` (localStorage, set by the suite's global setup) lets measured runs
@@ -65,14 +65,18 @@
 +      `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:8180/__tierless`;
 +    configureTierless({ url: () => wsUrl, preconnect: true });
 +    const gateway = new URL(wsUrl.replace(/^ws/, 'http')).origin;
-+    wrapped = cookieSessionAuth({ gateway }).wrap(sessionExec());
++    // awaitClaims: stock fetch puts a response's Set-Cookie in the jar synchronously
++    // with the response — their suite reads/clears the jar the instant auth flows
++    // settle, so the claim must land before the crossing resolves (rotations only;
++    // the data plane never rotates and pays nothing).
++    wrapped = cookieSessionAuth({ gateway, awaitClaims: true }).wrap(sessionExec());
    }
 -  return sessionExec();
 +  return wrapped;
  };
  
  const abortError = () =>
-@@ -67,11 +75,6 @@
+@@ -67,11 +79,6 @@
  
  const NO_BODY_STATUS = new Set([204, 205, 304]);
  
@@ -84,7 +88,7 @@
  export const tierlessFetch = async (url: string, init: RequestInit): Promise<Response> => {
    const method = String(init.method || 'GET').toLowerCase();
    const headers = new Headers(init.headers);
-@@ -84,7 +87,6 @@
+@@ -84,7 +91,6 @@
    const crossable =
      typeof window !== 'undefined' &&
      target.origin === apiOrigin &&

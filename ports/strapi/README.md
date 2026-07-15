@@ -204,7 +204,12 @@ editor fill — has failed single runs on EACH arm across the four full pairings
 rbac/permissions-enforcement.spec.ts:14 (a toast wait; failed one ported full run,
 then passed three consecutive re-runs including its full domain). Neither failure is
 at a transport seam; the sealed-auth flows themselves (login/logout/re-login as a
-second user, cookie assertions incl. httpOnly) pass everywhere.
+second user, cookie assertions incl. httpOnly) pass everywhere. One real race the
+suite DID catch after the rebase onto main's runtime: the fire-and-forget claim can
+replant the refresh cookie a beat after a clearCookies that raced it (stock fetch
+applies Set-Cookie synchronously with the response). Fixed at the runtime layer:
+`awaitClaims` (opt-in, set by patch 0006) holds a ROTATING crossing until its claim
+lands — auth flows only, the data plane never rotates.
 
 Caveats:
 
@@ -309,7 +314,12 @@ editor fill — has failed single runs on EACH arm across the four full pairings
 rbac/permissions-enforcement.spec.ts:14 (a toast wait; failed one ported full run,
 then passed three consecutive re-runs including its full domain). Neither failure is
 at a transport seam; the sealed-auth flows themselves (login/logout/re-login as a
-second user, cookie assertions incl. httpOnly) pass everywhere.
+second user, cookie assertions incl. httpOnly) pass everywhere. One real race the
+suite DID catch after the rebase onto main's runtime: the fire-and-forget claim can
+replant the refresh cookie a beat after a clearCookies that raced it (stock fetch
+applies Set-Cookie synchronously with the response). Fixed at the runtime layer:
+`awaitClaims` (opt-in, set by patch 0006) holds a ROTATING crossing until its claim
+lands — auth flows only, the data plane never rotates.
 
 Caveats:
 
