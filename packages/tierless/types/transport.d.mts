@@ -13,4 +13,22 @@ export interface Port {
     close(): void;
 }
 export declare function wsPort(ws: any): Port;
+interface ByteReader {
+    read(): Promise<{
+        value?: Uint8Array;
+        done: boolean;
+    }>;
+}
+interface ByteWriter {
+    write(chunk: Uint8Array): Promise<void>;
+    close(): Promise<void>;
+}
+export declare function wtPort(stream: {
+    readable: {
+        getReader(): ByteReader;
+    };
+    writable: {
+        getWriter(): ByteWriter;
+    };
+}): Port;
 export declare function makePeer(port: Port): Peer;

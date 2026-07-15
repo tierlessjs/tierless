@@ -75,6 +75,52 @@ export function wsPort(ws: any): Port {
   };
 }
 
+// A WebTransport (HTTP/3 / QUIC) bidirectional stream is a WHATWG byte duplex, not a message
+// transport — but tierless's own frame ([u32 jsonLen][u32 binLen][json][bin], encodeMessage)
+// is self-delimiting, so we length-frame straight over the stream: no RFC 6455, no ws upgrade.
+// Browser-safe (ReadableStream/WritableStream only), symmetric on both tiers: the browser
+// passes a `WebTransport.createBidirectionalStream()` result; the server passes an incoming
+// bidi stream from its H3 library (pluggable — stable Node has no H3). Why WebTransport at all:
+// like ws-over-H2 it shares one connection (the QUIC connection), so no separate handshake,
+// PLUS 0-RTT session resumption and no head-of-line blocking. The forward-looking transport.
+// Structural stream types (not the DOM/web-stream globals) so this stays lib-agnostic: any
+// object matching the WHATWG duplex shape works — a browser WebTransport stream, a Node
+// web stream, an H3 library's stream.
+interface ByteReader { read(): Promise<{ value?: Uint8Array; done: boolean }> }
+interface ByteWriter { write(chunk: Uint8Array): Promise<void>; close(): Promise<void> }
+export function wtPort(stream: { readable: { getReader(): ByteReader }; writable: { getWriter(): ByteWriter } }): Port {
+  const writer = stream.writable.getWriter();
+  // held on an object so the async read loop below sees reassignments (a plain `let` gets
+  // narrowed to its initial null inside the closure and reads as `never`).
+  const cbs: { msg: ((obj: any, bin: Uint8Array | null) => void) | null; close: (() => void) | null } = { msg: null, close: null };
+  (async () => {
+    const reader = stream.readable.getReader();
+    let buf = new Uint8Array(0);
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value && value.length) { const next = new Uint8Array(buf.length + value.length); next.set(buf); next.set(value, buf.length); buf = next; }
+        for (;;) {                                                  // drain every whole frame the buffer now holds
+          if (buf.length < 8) break;
+          const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+          const total = 8 + dv.getUint32(0) + dv.getUint32(4);
+          if (buf.length < total) break;
+          const frame = buf.subarray(0, total); buf = buf.subarray(total);
+          if (cbs.msg) { let m; try { m = decodeMessage(frame); } catch { continue; } cbs.msg(m.obj, m.bin); }
+        }
+      }
+    } catch { /* stream aborted — fall through to close */ }
+    cbs.close?.();
+  })();
+  return {
+    send(obj: object, bin?: Uint8Array): void { writer.write(encodeMessage(obj, bin)).catch(() => { /* closed */ }); },
+    onMessage(cb: (obj: any, bin: Uint8Array | null) => void): void { cbs.msg = cb; },
+    onClose(cb: () => void): void { cbs.close = cb; },
+    close(): void { writer.close().catch(() => { /* already closed */ }); },
+  };
+}
+
 // RPC correlation over a port: request() awaits a matching reply; inbound requests are
 // dispatched to type handlers. A handler returns { obj, bin? }. When the port closes,
 // every in-flight request REJECTS — a dropped socket settles the awaiting session (its

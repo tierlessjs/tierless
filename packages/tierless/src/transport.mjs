@@ -70,6 +70,57 @@ export function wsPort(ws) {
         close() { ws.close(); },
     };
 }
+export function wtPort(stream) {
+    const writer = stream.writable.getWriter();
+    // held on an object so the async read loop below sees reassignments (a plain `let` gets
+    // narrowed to its initial null inside the closure and reads as `never`).
+    const cbs = { msg: null, close: null };
+    (async () => {
+        const reader = stream.readable.getReader();
+        let buf = new Uint8Array(0);
+        try {
+            for (;;) {
+                const { value, done } = await reader.read();
+                if (done)
+                    break;
+                if (value && value.length) {
+                    const next = new Uint8Array(buf.length + value.length);
+                    next.set(buf);
+                    next.set(value, buf.length);
+                    buf = next;
+                }
+                for (;;) { // drain every whole frame the buffer now holds
+                    if (buf.length < 8)
+                        break;
+                    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+                    const total = 8 + dv.getUint32(0) + dv.getUint32(4);
+                    if (buf.length < total)
+                        break;
+                    const frame = buf.subarray(0, total);
+                    buf = buf.subarray(total);
+                    if (cbs.msg) {
+                        let m;
+                        try {
+                            m = decodeMessage(frame);
+                        }
+                        catch {
+                            continue;
+                        }
+                        cbs.msg(m.obj, m.bin);
+                    }
+                }
+            }
+        }
+        catch { /* stream aborted — fall through to close */ }
+        cbs.close?.();
+    })();
+    return {
+        send(obj, bin) { writer.write(encodeMessage(obj, bin)).catch(() => { }); },
+        onMessage(cb) { cbs.msg = cb; },
+        onClose(cb) { cbs.close = cb; },
+        close() { writer.close().catch(() => { }); },
+    };
+}
 // RPC correlation over a port: request() awaits a matching reply; inbound requests are
 // dispatched to type handlers. A handler returns { obj, bin? }. When the port closes,
 // every in-flight request REJECTS — a dropped socket settles the awaiting session (its
