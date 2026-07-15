@@ -209,6 +209,19 @@ proven (the executable proofs behind `npm test`).
   learning the SPA route — deferred; the win is small and partly irreducible (first-open of
   an arbitrary record can't be predicted at the upgrade).
 
+  THE HANDSHAKE ITSELF — three transports now supported (docs/transports.md). The residual is
+  the ws handshake; the real fix is a transport that SHARES the page's connection so there is
+  no separate handshake. Landed: (1) plain ws (fallback); (2) ws-over-H2 (RFC 8441 Extended
+  CONNECT — native, attachTierlessH2 on node:http2 with a self-contained RFC 6455 codec; the
+  browser negotiates it transparently via `new WebSocket`, so it is a pure server/deployment
+  addition, gated on same-origin + TLS + H2); (3) WebTransport (H3/QUIC — native wtPort adapter
+  length-framing over the QUIC byte stream, pluggable H3 server since stable Node has none). All
+  proven in the suite (test/e2e/{h2-connect,webtransport}-live.mts). "Support" = verify it rode
+  H2, not a silent fallback (client nextHopProtocol / server stream type). Follow-ons:
+  permessage-deflate over the H2 codec (keep the byte win on that path); browser connect()
+  WebTransport wiring; running the corpus over TLS+H2 so the numbers reflect the shared-
+  connection common case, where the handshake residual largely disappears.
+
 ## Bigger swings
 
 - **Durable continuations.** Persist a parked continuation and resume it after
