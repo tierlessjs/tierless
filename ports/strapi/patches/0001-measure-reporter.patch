@@ -1,0 +1,150 @@
+--- a/playwright.base.config.js	2026-07-12 20:17:59.165605647 +0000
++++ b/playwright.base.config.js	2026-07-12 23:37:12.589185644 +0000
+@@ -77,26 +77,44 @@
+     /* Opt out of parallel tests on CI. */
+     workers: 1,
+     /* Reporter to use. See https://playwright.dev/docs/test-reporters */
+-    reporter: [
+-      ['html', { outputFolder: htmlReportFolder }],
+-      // Junit reporter for Trunk flaky test CI upload
+-      [
+-        'junit',
+-        {
+-          outputFile: path.join(
+-            getEnvString(
+-              process.env.PLAYWRIGHT_OUTPUT_DIR,
+-              path.join(__dirname, 'test-apps', 'junit-reports')
+-            ),
+-            reportFileName
+-          ),
+-        },
+-      ],
+-    ],
++    // tierless corpus harness (test patch, both arms): per-test JSONL when measuring.
++    // Absolute path — this object is JSON.stringify'd into each generated test-app
++    // config, so the reporter must resolve from the test app's directory.
++    reporter: process.env.TIERLESS_MEASURE_OUT
++      ? [['line'], [path.join(__dirname, 'tests', 'e2e', 'tierlessMeasureReporter.ts')]]
++      : [
++          ['html', { outputFolder: htmlReportFolder }],
++          // Junit reporter for Trunk flaky test CI upload
++          [
++            'junit',
++            {
++              outputFile: path.join(
++                getEnvString(
++                  process.env.PLAYWRIGHT_OUTPUT_DIR,
++                  path.join(__dirname, 'test-apps', 'junit-reports')
++                ),
++                reportFileName
++              ),
++            },
++          ],
++        ],
+     /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
+     use: {
+       /* Base URL to use in actions like `await page.goto('/')`. */
+-      baseURL: `http://127.0.0.1:${port}`,
++      // tierless corpus harness (test patch, both arms): measured runs route the
++      // BROWSER through a counting/shaping relay; the webServer url below stays the
++      // direct port (node-side seeding is never counted). Strapi serves admin assets
++      // and API on one origin, so the relay sees both; the counting proxy classifies.
++      baseURL: getEnvString(process.env.TIERLESS_BASE_URL, `http://127.0.0.1:${port}`),
++
++      // Sandboxes that MITM outbound TLS break the admin's github release check in a
++      // way Playwright never sees finish (ERR_CERT_AUTHORITY_INVALID without a
++      // loadingFailed) — the phantom in-flight request wedges every later networkidle
++      // wait. Accepting the proxy's certificate lets the request complete (fast 403)
++      // on BOTH arms; on a normal network this flag changes nothing.
++      ...(getEnvBool(process.env.TIERLESS_IGNORE_HTTPS_ERRORS, false)
++        ? { ignoreHTTPSErrors: true }
++        : {}),
+ 
+       /** Set timezone for consistency across any machine*/
+       timezoneId: 'Europe/Paris',
+--- a/tests/utils/global-setup.ts	2026-07-12 20:17:59.171649172 +0000
++++ b/tests/utils/global-setup.ts	2026-07-12 20:18:55.301457763 +0000
+@@ -50,12 +50,20 @@
+   }
+   const browser = await chromium.launch();
+   const context = await browser.newContext({
+-    baseURL: `http://127.0.0.1:${port}`,
++    // tierless corpus harness (test patch, both arms): the storage-state origin must be
++    // the origin the BROWSER uses — measured runs put a counting/shaping relay in front
++    baseURL: process.env.TIERLESS_BASE_URL || `http://127.0.0.1:${port}`,
+   });
+   const page = await context.newPage();
+ 
+   await setGuidedTourLocalStorage(page, STRAPI_GUIDED_TOUR_CONFIG);
+ 
++  // Shaped runs route the ported build's session socket through a relay; the ws URL
++  // rides localStorage into the admin bundle (a no-op key on the stock build).
++  if (process.env.TIERLESS_WS_URL) {
++    await page.evaluate((url) => localStorage.setItem('tierlessWsUrl', url), process.env.TIERLESS_WS_URL);
++  }
++
+   // Save the storage state to be used by all tests - save it in the e2e directory
+   const storageStatePath = path.join(__dirname, '..', 'e2e', 'playwright-storage-state.json');
+   await context.storageState({ path: storageStatePath });
+--- a/tests/e2e/tierlessMeasureReporter.ts	2026-07-07 01:11:07.867613984 +0000
++++ b/tests/e2e/tierlessMeasureReporter.ts	2026-07-12 20:19:11.037457403 +0000
+@@ -0,0 +1,59 @@
++// Per-test measurement reporter (tierless corpus harness, docs/corpus.md): appends one
++// JSONL row per test ATTEMPT to TIERLESS_MEASURE_OUT — id, status, retry, durationMs.
++// With TIERLESS_WIRE_URLS set (comma-separated endpoints returning flat JSON number
++// counters), reads them around each attempt and records the deltas as wire* fields.
++// The suite runs workers=1 (their base config), so no two tests generate traffic at
++// once; but Playwright does NOT await async reporter hooks, so a snapshot can lag its
++// boundary and mis-attribute between ADJACENT tests — per-test deltas are best-effort
++// (fine for medians), while the byte instrument of record is the suite-total pair.
++// A counter read that fails INVALIDATES the row (wireError: true, no wire fields)
++// instead of shipping wrong deltas — a missed BEGIN read would silently attribute all
++// prior suite traffic to this test; report.mts excludes flagged rows and says so.
++import type { Reporter, TestCase, TestResult } from '@playwright/test/reporter';
++import { appendFileSync } from 'fs';
++
++const OUT = process.env.TIERLESS_MEASURE_OUT;
++const WIRE = (process.env.TIERLESS_WIRE_URLS || '').split(',').filter(Boolean);
++
++// null = a configured endpoint was unreachable or non-2xx: this attempt has no valid deltas
++async function counters(): Promise<Record<string, number> | null> {
++  const out: Record<string, number> = {};
++  for (const url of WIRE) {
++    try {
++      const r = await fetch(url);
++      if (!r.ok) return null;
++      const j = (await r.json()) as Record<string, unknown>;
++      for (const [k, v] of Object.entries(j)) if (typeof v === 'number') out[k] = (out[k] || 0) + v;
++    } catch {
++      return null;
++    }
++  }
++  return out;
++}
++
++class TierlessMeasure implements Reporter {
++  private before: Record<string, number> | null = {};
++  async onTestBegin(_test: TestCase) {
++    if (WIRE.length) this.before = await counters();
++  }
++  async onTestEnd(test: TestCase, result: TestResult) {
++    if (!OUT) return;
++    const after = WIRE.length ? await counters() : {};
++    const wire: Record<string, number | boolean> = {};
++    if (WIRE.length && (!this.before || !after)) {
++      wire.wireError = true;
++    } else if (after) {
++      for (const k of Object.keys(after)) wire['wire' + k[0].toUpperCase() + k.slice(1)] = after[k] - (this.before![k] || 0);
++    }
++    const file = test.location.file.replace(/^.*tests\/e2e\//, '');
++    const titles = test.titlePath().filter((t) => t && !t.endsWith('.spec.ts') && t !== 'chromium');
++    appendFileSync(
++      OUT,
++      JSON.stringify({ id: `${file}:${test.location.line} › ${titles.join(' › ')}`, status: result.status, retry: result.retry, durationMs: result.duration, ...wire }) + '\n',
++    );
++  }
++  printsToStdio() {
++    return false;
++  }
++}
++export default TierlessMeasure;

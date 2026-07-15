@@ -3,7 +3,7 @@
 export const SESSION_AUTH_HEADER = "x-tierless-session-auth";
 /** The rotation annotation key on an exec envelope. Stripped here before the app sees it. */
 export const AUTH_FIELD = "__tierlessAuth";
-export function cookieSessionAuth({ gateway, channelName = "tierless-session-auth", fetchImpl, hello }) {
+export function cookieSessionAuth({ gateway, channelName = "tierless-session-auth", fetchImpl, hello, awaitClaims = false }) {
     const f = fetchImpl ?? ((...a) => fetch(...a));
     const base = gateway.replace(/\/$/, "");
     let blob = null;
@@ -56,7 +56,10 @@ export function cookieSessionAuth({ gateway, channelName = "tierless-session-aut
             return;
         blob = auth.blob;
         delete env[AUTH_FIELD];
-        void claimThenBroadcast(auth.claim);
+        const done = claimThenBroadcast(auth.claim);
+        if (awaitClaims)
+            return done;
+        void done;
     };
     return {
         wrap: (inner) => async (req) => {
@@ -73,12 +76,12 @@ export function cookieSessionAuth({ gateway, channelName = "tierless-session-aut
                 }
             }
             let env = await inner(attach(req));
-            rotateFrom(env);
+            await rotateFrom(env);
             if (env?.status === 401) {
                 await reseal();
                 if (blob) {
                     env = await inner(attach(req));
-                    rotateFrom(env);
+                    await rotateFrom(env);
                 }
             }
             return env;

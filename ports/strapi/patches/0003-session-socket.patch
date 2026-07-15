@@ -1,0 +1,47 @@
+--- a/packages/core/admin/admin/src/utils/tierlessFetch.ts	2026-07-12 20:45:23.515769469 +0000
++++ b/packages/core/admin/admin/src/utils/tierlessFetch.ts	2026-07-12 20:43:20.569152006 +0000
+@@ -26,7 +26,7 @@
+  * reply is discarded. Divergence from stock: the wire is not torn down mid-flight —
+  * for this API's small JSON bodies the server completes the handler either way.
+  */
+-import { restResources } from 'tierless/adapt';
++import { configureTierless, sessionExec } from 'tierless/browser';
+ 
+ interface Envelope {
+   status: number;
+@@ -34,10 +34,31 @@
+   body: unknown;
+ }
+ 
+-// The exec servicing crossings: a direct fetch against the client's own backend origin
+-// (stock behavior, byte for byte — the certification arm). The session-socket exec
+-// replaces this in the next patch.
+-const makeExec = (apiOrigin: string) => restResources(apiOrigin, { envelopeErrors: true });
++// The session socket (corpus port): requests cross ONE websocket to the gateway
++// (ports/strapi/gateway.mts), which executes them against the backend over localhost.
++// One session-long permessage-deflate window compresses every crossing against
++// everything the session already said. Configured once, on the first crossable call;
++// preconnected so the upgrade handshake never lands on an interaction's critical path.
++// `tierlessWsUrl` (localStorage, set by the suite's global setup) lets measured runs
++// route the socket through a shaping relay.
++let configured = false;
++const makeExec = (_apiOrigin: string) => {
++  if (!configured) {
++    configured = true;
++    // bounded per-crossing log ({t, url, status, body}) — the suite's transport-
++    // agnostic waits read it (tests/utils/shared.ts, test patch)
++    (window as unknown as { __TIERLESS_EXEC_LOG__?: boolean }).__TIERLESS_EXEC_LOG__ = true;
++    const wsUrl = localStorage.getItem('tierlessWsUrl');
++    // scheme follows the page (an https page blocks ws:// as mixed content)
++    configureTierless({
++      url: () =>
++        wsUrl ||
++        `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:8180/__tierless`,
++      preconnect: true,
++    });
++  }
++  return sessionExec();
++};
+ 
+ const abortError = () =>
+   typeof DOMException !== 'undefined'

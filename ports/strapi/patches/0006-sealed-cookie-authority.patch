@@ -1,0 +1,98 @@
+--- a/packages/core/admin/admin/src/utils/tierlessFetch.ts	2026-07-13 21:38:27.098929958 +0000
++++ b/packages/core/admin/admin/src/utils/tierlessFetch.ts	2026-07-15 20:29:11.732372881 +0000
+@@ -13,11 +13,16 @@
+  *   - requests not negotiating JSON (getFetchClient omits `Accept: application/json`
+  *     exactly when responseType is blob/text/arrayBuffer — binary can't cross a JSON
+  *     envelope),
+- *   - URLs leaving the client's own backend origin (external I/O, never a crossing),
+- *   - auth flows (login/logout/register/reset/access-token): their responses SET the
+- *     httpOnly refresh cookie — cookie-jar writes exist only in the browser, and a
+- *     reply reconstructed from a crossing cannot perform them. Pinned by meaning,
+- *     matching their own client's isAuthPath special-casing.
++ *   - URLs leaving the client's own backend origin (external I/O, never a crossing).
++ *
++ * Auth flows (login/logout/register/reset/access-token) CROSS TOO (patch 0006 —
++ * sealed cookie authority, tierless/adapt-session-auth): their responses set the
++ * httpOnly refresh cookie, which no reply reconstructed by script can plant, so the
++ * gateway seals every mediated Set-Cookie into an opaque blob the page carries on
++ * later crossings, and a short-lived claim ticket's HTTP replay keeps the REAL jar
++ * current (their raw-fetch token refresh and their e2e suite's httpOnly assertions
++ * read the jar, not the blob). Authority still travels per request; the gateway
++ * stores none of it.
+  *
+  * AbortSignal is handled HERE, browser-side, instead of pinning the request to stock
+  * (the axios-adapter posture): Strapi's RTK Query layer attaches a signal to EVERY
+@@ -27,6 +32,7 @@
+  * for this API's small JSON bodies the server completes the handler either way.
+  */
+ import { configureTierless, sessionExec } from 'tierless/browser';
++import { cookieSessionAuth } from 'tierless/adapt-session-auth';
+ 
+ interface Envelope {
+   status: number;
+@@ -40,24 +46,30 @@
+ // everything the session already said. Configured once, on the first crossable call;
+ // preconnected so the upgrade handshake never lands on an interaction's critical path.
+ // `tierlessWsUrl` (localStorage, set by the suite's global setup) lets measured runs
+-// route the socket through a shaping relay.
+-let configured = false;
++// route the socket through a shaping relay; reseal/claim ride the same host:port over
++// http (the relay shapes them identically).
++// Sealed cookie authority (patch 0006): every crossing carries the sealed jar blob;
++// rotation is in-band on any mediated Set-Cookie (login included) and the claim keeps
++// the real jar current for their raw-fetch token refresh and page reloads.
++let wrapped: ReturnType<ReturnType<typeof cookieSessionAuth>['wrap']> | undefined;
+ const makeExec = (_apiOrigin: string) => {
+-  if (!configured) {
+-    configured = true;
+-    // bounded per-crossing log ({t, url, status, body}) — the suite's transport-
+-    // agnostic waits read it (tests/utils/shared.ts, test patch)
++  if (!wrapped) {
++    // bounded per-crossing log ({t, url, status, reqBody, body}) — the suite's
++    // transport-agnostic waits read it (tests/utils/shared.ts, test patch)
+     (window as unknown as { __TIERLESS_EXEC_LOG__?: boolean }).__TIERLESS_EXEC_LOG__ = true;
+-    const wsUrl = localStorage.getItem('tierlessWsUrl');
+-    // scheme follows the page (an https page blocks ws:// as mixed content)
+-    configureTierless({
+-      url: () =>
+-        wsUrl ||
+-        `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:8180/__tierless`,
+-      preconnect: true,
+-    });
++    const wsUrl =
++      localStorage.getItem('tierlessWsUrl') ||
++      // scheme follows the page (an https page blocks ws:// as mixed content)
++      `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:8180/__tierless`;
++    configureTierless({ url: () => wsUrl, preconnect: true });
++    const gateway = new URL(wsUrl.replace(/^ws/, 'http')).origin;
++    // awaitClaims: stock fetch puts a response's Set-Cookie in the jar synchronously
++    // with the response — their suite reads/clears the jar the instant auth flows
++    // settle, so the claim must land before the crossing resolves (rotations only;
++    // the data plane never rotates and pays nothing).
++    wrapped = cookieSessionAuth({ gateway, awaitClaims: true }).wrap(sessionExec());
+   }
+-  return sessionExec();
++  return wrapped;
+ };
+ 
+ const abortError = () =>
+@@ -67,11 +79,6 @@
+ 
+ const NO_BODY_STATUS = new Set([204, 205, 304]);
+ 
+-// Auth endpoints whose responses set/clear the httpOnly refresh cookie (their server's
+-// authentication controller), plus the rest of the login-page flows for symmetry.
+-const AUTH_PATH =
+-  /\/admin\/(login|logout|register|register-admin|registration-info|forgot-password|reset-password|access-token|renew-token)\b/;
+-
+ export const tierlessFetch = async (url: string, init: RequestInit): Promise<Response> => {
+   const method = String(init.method || 'GET').toLowerCase();
+   const headers = new Headers(init.headers);
+@@ -84,7 +91,6 @@
+   const crossable =
+     typeof window !== 'undefined' &&
+     target.origin === apiOrigin &&
+-    !AUTH_PATH.test(target.pathname) &&
+     (init.body === undefined || init.body === null || typeof init.body === 'string') &&
+     (headers.get('accept') || '').includes('application/json');
+ 
