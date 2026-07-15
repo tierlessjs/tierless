@@ -1,0 +1,42 @@
+===== n8n STOCK boot tail — decomposition (median of 3 reps) =====
+arm     DCL   FCP   appReady    data{n,span,ttfbMax,busy}      asset{n,span,ttfbMax,busy}
+RTT0    2043  2764        -1    {11, 256, 82, 514}      {239, 2259, 370, 162477}
+RTT80   4588  6232        -1    {12, 776, 223, 2217}      {238, 5459, 333, 432474}
+
+== decomposition of appReady @ RTT80 ==
+  compute/render FLOOR (appReady @ RTT0, network ~free): -1 ms   <- IRREDUCIBLE
+  total network wait added by 80ms RTT (appReady80 - appReady0): 0 ms
+  data fan-out shape @RTT80: 12 reqs, wall span 776 ms, worst single TTFB 223 ms  -> SERIAL (dependency depth)
+  asset download @RTT80: 238 reqs, wall span 5459 ms, worst TTFB 333 ms
+
+  [note: the project-name app-ready selector did not match the empty-DB /home/workflows
+   view, so the appReady/FLOOR lines read -1 and are void. The decomposition below uses
+   Resource Timing (which worked) + FCP; those are the load-bearing numbers.]
+
+===== INTERPRETATION =====
+Of the ~3.7 s of network wait that 80 ms RTT injects into stock n8n boot:
+
+  data-fetch wait (/rest + /types)     520 ms   14%   SERVER-PRE-COMPLETABLE
+  asset (JS bundle) download wait     3200 ms   86%   NOT hideable (client needs the bundle)
+  FCP                          2764 -> 6232 ms         (+3.5 s, ~all asset download)
+
+n8n boot is BUNDLE-DOWNLOAD-bound, not data-wait-bound. 238 JS chunks over HTTP/1.1's
+~6 connections, each paying an RTT, is the villain.
+
+Ceiling for the "server boots the app / ships the continuation, client adopts" idea on
+n8n = ~520 ms (14%). The dominant 3.2 s is asset download that survives any data-preboot,
+because the client still runs the app locally after adoption. This is also the ceiling
+for Remix loaders / Qwik / RSC — anything that pre-fetches DATA. No preloader wins much
+on n8n's boot.
+
+Levers that WOULD move n8n boot (orthogonal to tierless): HTTP/2 multiplexing (collapse
+the 238-request-over-6-conns penalty), fewer/larger chunks, modulepreload, per-tier
+dead-code shake (ROADMAP). Caveats: 238 reqs/HTTP-1.1 is partly a preview-server
+artifact (prod HTTP/2 + CDN cuts asset wait, still > 520 ms); the data path shows ~2-3
+layers of depth (520 ms / 12 reqs, not flat fan-out), so migration could collapse
+~300-500 ms — small, but the only genuinely tierless-shaped boot win here.
+
+CONCLUSION: n8n's boot is the wrong battle for a network-wait win — for tierless OR any
+preloading framework. Confirms the corpus claim must be distributional: preloading/
+migration pay where DATA wait or dependency DEPTH dominate, not where asset download and
+compute do (n8n).

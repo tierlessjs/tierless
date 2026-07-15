@@ -66,6 +66,17 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
         onEvent(ws, "open", () => res());
         onEvent(ws, "error", (e) => rej(new Error("tierless: websocket error" + (e && e.message ? ": " + e.message : ""))));
     });
+    // the gateway's unsolicited "hello" (server sends it the instant the socket is up):
+    // sealed auth blob + pre-fetched boot GETs. Registered synchronously here so the frame
+    // is never missed; resolves { blob:null } if the socket settles with no hello (a gateway
+    // that doesn't send one, e.g. the actions-only demo).
+    let helloResolve;
+    const hello = new Promise((r) => { helloResolve = r; });
+    raw.on("hello", (payload) => {
+        helloResolve({ blob: payload?.blob ?? null, preboot: payload?.preboot ?? null });
+        return { obj: { type: "ok" } };
+    });
+    onEvent(ws, "open", () => setTimeout(() => helloResolve({ blob: null }), 5000)); // safety net: a gateway that never sends hello must not hang crossings — fall back to reseal. Long enough never to preempt a real hello (which arrives ~one latency after open).
     if (traceUrl) { // PROFILING run: batch records to the gateway
         // a lost batch must not go silent: an incomplete run that still delivers its `end`
         // record would teach buildProfile a FALSE trajectory. Failed batches requeue at the
@@ -134,6 +145,7 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
     });
     return {
         ready,
+        hello,
         register,
         call: async (entry, args = [], module = "") => {
             await ready;
@@ -163,7 +175,9 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
                 if (!g.__TIERLESS_EXEC_LOG__)
                     return;
                 const log = (g.__tierlessExecLog ||= []);
-                log.push({ t: Date.now(), name: req.name, url: String(req.args?.[0] ?? ""), status, ...(hasBody ? { body } : {}) });
+                // reqBody too: harness waits shaped as `resp.request().postDataJSON()` need the
+                // request side of the crossing (opt-in log; entry count is bounded above)
+                log.push({ t: Date.now(), name: req.name, url: String(req.args?.[0] ?? ""), status, ...(req.args?.[1] !== undefined ? { reqBody: req.args[1] } : {}), ...(hasBody ? { body } : {}) });
                 if (log.length > 500)
                     log.splice(0, log.length - 500);
             };
@@ -191,6 +205,13 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
  *  (or at configureTierless({ preconnect }) time), each call awaits readiness. */
 export function sessionExec() {
     return (req) => sharedConn().exec(req);
+}
+/** The shared connection's ws "hello" (sealed blob + preboot GETs). The I/O-bottom auth
+ *  wrapper (cookieSessionAuth) takes this so the startup blob rides the upgrade instead of
+ *  a reseal round trip, and the preboot map seeds its join buffer. Materializes the shared
+ *  connection (opens the socket), same as sessionExec — pair them behind one preconnect. */
+export function sessionHello() {
+    return sharedConn().hello;
 }
 // ---- the actions surface (what the Vite plugin emits calls into) ----------------------
 let sharedOpts = {};

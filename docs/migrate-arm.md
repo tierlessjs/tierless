@@ -1,6 +1,6 @@
 # The §6 migrate arm for compiled methods
 
-Status: slices 1-2 shipped and proven (probe + live e2e + vite emit); slice-3 MECHANICS shipped (dynamic call parks, class-stamped handles, session twins, frame-aware fetch arm). Remaining: setup-closure extraction (__caps), the cross-module merged program registry the dyn dispatch needs, app wiring + profiled comparison runs. The fetch arm (host.mts runLocal) stays the
+Status: slices 1-2 shipped and proven (probe + live e2e + vite emit); slice-3 MECHANICS shipped (dynamic call parks, class-stamped handles, session twins, frame-aware fetch arm). The §6 decide loop is now LANDED in the shipped host's full-tierless drive path (host.mts `drive` + `placement`; see "LANDED" below) — fetch a first-class protocol message the driver prices against migrate per park. Remaining: setup-closure extraction (__caps), the cross-module merged program registry the dyn dispatch needs, app wiring + profiled comparison runs, symmetric step-side fetch. The fetch arm (host.mts runLocal) stays the
 default and the cold fallback; this document is the delta that lets a compiled method's
 continuation MIGRATE to the server and run its request chain there — N crossings become 1.
 
@@ -71,6 +71,22 @@ artifact, decide()) prices the choice per call path: a path whose profile shows 
 server-priced resource touches before any home-parking segment migrates; everything
 else keeps exec-carrying. Comparison runs use a locked profile; profiling runs, not
 comparison runs, do the exploration (run protocol, docs/corpus.md).
+
+### LANDED in the shipped host (full-tierless drive path)
+
+The §6 decide loop now lives in `makeHost`'s `drive` (host.mts), not in a test driver.
+Pass `placement: { profile, mode }` to `makeHost`; at every park `drive` prices the REAL
+shipped bytes against the profile and either MIGRATES (ships the continuation as
+`type:"resume"`) or FETCHES (pulls just the value as `type:"exec"`, the fetch arm, and
+resumes the stack at home via a carry). A §5 home park and a cold/unpriced site keep the
+floor — migrate — so a host with no `placement` behaves exactly as before (proven: the
+whole suite is unchanged). Proof it reproduces the hand-rolled driver byte-for-byte:
+test/e2e/trio-live.mts §3a runs Trio through `host.run` with a locked profile and counts
+the real protocol — greedy emits 3 `exec` + 0 `resume` (19.7 KB), trajectory 0 `exec` +
+1 `resume` (8.5 KB, 57% less), identical to the driver's own numbers below. Scope: the
+decision is made by the DRIVING side (`drive`); the answering `step` still always suspends
+— symmetric step-side fetch (a migrated continuation that parks back at a driver resource)
+is the next increment, rarer than the primary browser-drives-server case.
 
 ## Slice plan
 

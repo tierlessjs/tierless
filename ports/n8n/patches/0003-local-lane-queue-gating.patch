@@ -1,0 +1,16 @@
+--- a/packages/testing/playwright/tests/e2e/settings/workers/workers.spec.ts
++++ b/packages/testing/playwright/tests/e2e/settings/workers/workers.spec.ts
+@@ -1,7 +1,12 @@
+ import { test, expect } from '../../../../fixtures/base';
+ 
++// tierless corpus harness (test patch, both arms): this suite flips the instance into
++// queue mode, which needs the Redis a container stack provides — on the local lane
++// n8n exits after 10 s of Redis retries, killing every test after it. The @mode:queue
++// tag is upstream's own container-only convention (fixtures/capabilities.ts); it was
++// missing here.
+ test.describe
+-	.serial('Worker View', () => {
++	.serial('Worker View @mode:queue', () => {
+ 		test.describe(
+ 			'unlicensed',
+ 			{

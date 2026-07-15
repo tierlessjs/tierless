@@ -62,6 +62,19 @@ console.log(`  pool share of total wall time (baseline): ${(100 * totB / (totB +
 const noisy = rows.filter((r) => r.netB < 0 || r.netP < 0).length;
 console.log(`  noise: ${noisy} test(s) with a negative net component (run variance; kept as-is, medians are robust)`);
 
+// The network-bound decile: rank by BASELINE net wait — the workload's own measure of
+// how network-heavy a test is, independent of the port — and cut the top 10%. Most of
+// the suite is local-UI/compute with negligible network, which dilutes the aggregate
+// pool; this slice shows the delta where transport can actually matter, on the app's
+// OWN tests, selected by the baseline arm so it favors neither. Reported for every port.
+const decileN = Math.max(1, Math.round(rows.length / 10));
+const decile = [...rows].sort((a, b) => b.netB - a.netB).slice(0, decileN);
+const p90 = decile[decile.length - 1].netB;
+const decB = sum(decile.map((r) => r.netB)), decP = sum(decile.map((r) => r.netP));
+console.log(`\n== the network-bound decile (top ${decileN} tests by baseline net wait, netB >= ${p90} ms) ==`);
+console.log(`  baseline ${ms(decB)} -> ported ${ms(decP)}   (${(100 * (decB - decP) / decB).toFixed(0)}% of the decile pool removed)`);
+console.log(`  median per test ${median(decile.map((r) => r.netB)).toFixed(0)} ms -> ${median(decile.map((r) => r.netP)).toFixed(0)} ms`);
+
 console.log(`\n== per-test detail, ranked by network-wait delta (netB -> netP · localhost floor) ==`);
 for (const r of [...rows].sort((a, b) => (b.netB - b.netP) - (a.netB - a.netP)).slice(0, 20)) {
   console.log(`  ${String(r.netB).padStart(6)} -> ${String(r.netP).padStart(6)} ms · floor ${String(r.base0).padStart(6)} ms  ${r.id.slice(0, 95)}`);

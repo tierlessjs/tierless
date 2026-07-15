@@ -1,0 +1,620 @@
+--- a/packages/testing/playwright/composables/ExecutionsComposer.ts
++++ b/packages/testing/playwright/composables/ExecutionsComposer.ts
+@@ -1,4 +1,5 @@
+ import type { n8nPage } from '../pages/n8nPage';
++import { waitForRestRequestOrCrossing, waitForRestResponseOrCrossing } from '../utils/transport-wait';
+ 
+ /**
+  * A class for user interactions with workflow executions that go across multiple pages.
+@@ -18,12 +19,10 @@
+ 	 */
+ 	async createExecutions(count: number): Promise<void> {
+ 		for (let i = 0; i < count; i++) {
+-			const responsePromise = this.n8n.page.waitForResponse(
+-				(response) =>
+-					response.url().includes('/rest/workflows/') &&
+-					response.url().includes('/run') &&
+-					response.request().method() === 'POST',
+-			);
++			const responsePromise = waitForRestResponseOrCrossing(this.n8n.page, {
++				url: ['/rest/workflows/', '/run'],
++				methods: ['POST'],
++			});
+ 
+ 			await this.n8n.canvas.clickExecuteWorkflowButton();
+ 			await responsePromise;
+@@ -44,12 +43,11 @@
+ 	 */
+ 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 	async executeNodeAndCapturePayload(nodeName: string): Promise<any> {
+-		const workflowRunPromise = this.n8n.page.waitForRequest(
+-			(request) =>
+-				request.url().includes('/rest/workflows/') &&
+-				request.url().includes('/run') &&
+-				request.method() === 'POST',
+-		);
++		// tierless corpus harness (test patch, both arms): payload capture over HTTP or the socket
++		const workflowRunPromise = waitForRestRequestOrCrossing(this.n8n.page, {
++			url: ['/rest/workflows/', '/run'],
++			methods: ['POST'],
++		});
+ 
+ 		await this.n8n.canvas.executeNode(nodeName);
+ 
+--- a/packages/testing/playwright/composables/WorkflowComposer.ts
++++ b/packages/testing/playwright/composables/WorkflowComposer.ts
+@@ -1,4 +1,5 @@
+ import { expect } from '@playwright/test';
++import { waitForRestResponseOrCrossing } from '../utils/transport-wait';
+ 
+ import type { n8nPage } from '../pages/n8nPage';
+ 
+@@ -17,12 +18,11 @@
+ 		options: { timeout?: number } = {},
+ 	) {
+ 		const { timeout = 3000 } = options;
+-		const responsePromise = this.n8n.page.waitForResponse(
+-			(response) =>
+-				response.url().includes('/rest/workflows/') &&
+-				response.url().includes('/run') &&
+-				response.request().method() === 'POST',
+-		);
++		// tierless corpus harness (test patch, both arms): over HTTP or the session socket
++		const responsePromise = waitForRestResponseOrCrossing(this.n8n.page, {
++			url: ['/rest/workflows/', '/run'],
++			methods: ['POST'],
++		});
+ 
+ 		await this.n8n.canvas.clickExecuteWorkflowButton();
+ 		await responsePromise;
+--- a/packages/testing/playwright/composables/journeys/admin-views-executions-list.ts
++++ b/packages/testing/playwright/composables/journeys/admin-views-executions-list.ts
+@@ -1,4 +1,5 @@
+ import { expect } from '@playwright/test';
++import { waitForRestResponseOrCrossing } from '../../utils/transport-wait';
+ import type { IWorkflowBase } from 'n8n-workflow';
+ import { nanoid } from 'nanoid';
+ 
+@@ -84,10 +85,12 @@
+ 	n8n: n8nPage,
+ 	ctx: AdminViewsExecutionsListContext,
+ ): Promise<void> {
+-	const executionsResponse = n8n.page.waitForResponse(
+-		(r) => r.url().includes('/rest/executions') && r.status() === 200,
+-		{ timeout: 120_000 },
+-	);
++	// tierless corpus harness (test patch, both arms): over HTTP or the session socket
++	const executionsResponse = waitForRestResponseOrCrossing(n8n.page, {
++		url: ['/rest/executions'],
++		status: 200,
++		timeout: 120_000,
++	});
+ 	await n8n.page.goto(`/projects/${ctx.project.id}/executions`, {
+ 		waitUntil: 'commit',
+ 		timeout: 120_000,
+--- a/packages/testing/playwright/pages/BasePage.ts
++++ b/packages/testing/playwright/pages/BasePage.ts
+@@ -1,4 +1,5 @@
+ import type { Locator, Page } from '@playwright/test';
++import { waitForRestResponseOrCrossing } from '../utils/transport-wait';
+ 
+ import { BaseModal } from './components/BaseModal';
+ import { FloatingUiHelper } from './components/FloatingUiHelper';
+@@ -39,16 +40,11 @@
+ 		url: string | RegExp,
+ 		method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
+ 	) {
+-		if (typeof url === 'string') {
+-			return await this.page.waitForResponse((res) => {
+-				const matches = res.url().includes(url);
+-				return matches && (method ? res.request().method() === method : true);
+-			});
+-		}
+-
+-		return await this.page.waitForResponse((res) => {
+-			const matches = url.test(res.url());
+-			return matches && (method ? res.request().method() === method : true);
++		// tierless corpus harness (test patch, both arms): the ported build serves
++	// same-origin /rest over a session socket — race the HTTP wait against the exec log
++		return await waitForRestResponseOrCrossing(this.page, {
++			url: typeof url === 'string' ? [url] : url,
++			methods: method ? [method] : [],
+ 		});
+ 	}
+ 
+--- a/packages/testing/playwright/pages/CanvasPage.ts
++++ b/packages/testing/playwright/pages/CanvasPage.ts
+@@ -1,4 +1,5 @@
+ import { expect, type Locator } from '@playwright/test';
++import { waitForRestResponseOrCrossing } from '../utils/transport-wait';
+ 
+ import { BasePage } from './BasePage';
+ import { ROUTES } from '../config/constants';
+@@ -171,12 +172,13 @@
+ 	 * @param options.timeout - Timeout in milliseconds. Defaults to 2000ms to account for the 1500ms autosave debounce.
+ 	 */
+ 	async waitForSaveWorkflowCompleted({ timeout = 2000 }: { timeout?: number } = {}) {
+-		return await this.page.waitForResponse(
+-			(response) =>
+-				response.url().includes('/rest/workflows') &&
+-				(response.request().method() === 'POST' || response.request().method() === 'PATCH'),
+-			{ timeout },
+-		);
++		// tierless corpus harness (test patch, both arms): the ported build serves
++	// same-origin /rest over a session socket — race the HTTP wait against the exec log
++		return await waitForRestResponseOrCrossing(this.page, {
++			url: ['/rest/workflows'],
++			methods: ['POST', 'PATCH'],
++			timeout,
++		});
+ 	}
+ 
+ 	getExecuteWorkflowButton(triggerNodeName?: string): Locator {
+@@ -302,12 +304,10 @@
+ 	}
+ 
+ 	async publishWorkflow(): Promise<void> {
+-		const responsePromise = this.page.waitForResponse(
+-			(response) =>
+-				response.url().includes('/rest/workflows/') &&
+-				response.url().includes('/activate') &&
+-				response.request().method() === 'POST',
+-		);
++		const responsePromise = waitForRestResponseOrCrossing(this.page, {
++			url: ['/rest/workflows/', '/activate'],
++			methods: ['POST'],
++		});
+ 
+ 		await this.getOpenPublishModalButton().click();
+ 		await this.getPublishButton().click();
+--- a/packages/testing/playwright/pages/components/CredentialModal.ts
++++ b/packages/testing/playwright/pages/components/CredentialModal.ts
+@@ -1,4 +1,5 @@
+ import type { Locator, Page } from '@playwright/test';
++import { waitForRestResponseOrCrossing } from '../../utils/transport-wait';
+ import { expect } from '@playwright/test';
+ 
+ import { BaseModal } from './BaseModal';
+@@ -276,15 +277,11 @@
+ 		const saveBtn = this.getSaveButton();
+ 		await saveBtn.click();
+ 
+-		// Wait for share API call to complete
+-		await this.root
+-			.page()
+-			.waitForResponse(
+-				(response) =>
+-					response.url().includes('/rest/credentials/') &&
+-					response.url().includes('/share') &&
+-					response.request().method() === 'PUT',
+-			);
++		// Wait for share API call to complete (tierless test patch: over HTTP or the session socket)
++		await waitForRestResponseOrCrossing(this.root.page(), {
++			url: ['/rest/credentials/', '/share'],
++			methods: ['PUT'],
++		});
+ 
+ 		await this.waitForSaveComplete();
+ 	}
+--- a/packages/testing/playwright/tests/e2e/workflows/editor/execution/execution.spec.ts
++++ b/packages/testing/playwright/tests/e2e/workflows/editor/execution/execution.spec.ts
+@@ -1,4 +1,5 @@
+ import { test, expect } from '../../../../../fixtures/base';
++import { waitForRestRequestOrCrossing } from '../../../../../utils/transport-wait';
+ import type { n8nPage } from '../../../../../pages/n8nPage';
+ 
+ const NODE_NAMES = {
+@@ -303,12 +304,10 @@
+ 			await n8n.start.fromImportedWorkflow('Test_Workflow_pairedItem_incomplete_manual_bug.json');
+ 			await n8n.canvas.clickZoomToFitButton();
+ 
+-			const workflowRunPromise = n8n.page.waitForRequest(
+-				(request) =>
+-					request.url().includes('/rest/workflows/') &&
+-					request.url().includes('/run') &&
+-					request.method() === 'POST',
+-			);
++			const workflowRunPromise = waitForRestRequestOrCrossing(n8n.page, {
++				url: ['/rest/workflows/', '/run'],
++				methods: ['POST'],
++			});
+ 
+ 			await n8n.canvas.clickExecuteWorkflowButton();
+ 			await n8n.canvas.executeNode(NODE_NAMES.TEST_EXPRESSION);
+@@ -322,12 +321,10 @@
+ 				'Test_workflow_partial_execution_with_missing_credentials.json',
+ 			);
+ 
+-			const workflowRunPromise = n8n.page.waitForRequest(
+-				(request) =>
+-					request.url().includes('/rest/workflows/') &&
+-					request.url().includes('/run') &&
+-					request.method() === 'POST',
+-			);
++			const workflowRunPromise = waitForRestRequestOrCrossing(n8n.page, {
++				url: ['/rest/workflows/', '/run'],
++				methods: ['POST'],
++			});
+ 
+ 			await n8n.canvas.clickZoomToFitButton();
+ 			await n8n.canvas.clickExecuteWorkflowButton();
+--- a/packages/testing/playwright/tests/e2e/workflows/editor/ndv/resource-locator.spec.ts
++++ b/packages/testing/playwright/tests/e2e/workflows/editor/ndv/resource-locator.spec.ts
+@@ -1,4 +1,5 @@
+ import { E2E_TEST_NODE_NAME } from '../../../../../config/constants';
++import { waitForRestResponseOrCrossing } from '../../../../../utils/transport-wait';
+ import { test, expect } from '../../../../../fixtures/base';
+ import { MessageBox } from '../../../../../pages/components/messageBoxLocators';
+ 
+@@ -80,9 +81,10 @@
+ 			});
+ 
+ 			// OAuth: Save button is hidden. Click Connect to trigger implicit save.
+-			const credentialSaved = n8n.page.waitForResponse(
+-				(resp) => resp.url().includes('/rest/credentials') && resp.request().method() === 'POST',
+-			);
++			const credentialSaved = waitForRestResponseOrCrossing(n8n.page, {
++				url: ['/rest/credentials'],
++				methods: ['POST'],
++			});
+ 			const popupPromise = n8n.page.context().waitForEvent('page');
+ 			await n8n.canvas.credentialModal.oauthConnectButton.click();
+ 			await credentialSaved;
+--- a/packages/testing/playwright/tests/e2e/workflows/executions/filter.spec.ts
++++ b/packages/testing/playwright/tests/e2e/workflows/executions/filter.spec.ts
+@@ -1,4 +1,5 @@
+ import { test, expect } from '../../../../fixtures/base';
++import { waitForRestResponseOrCrossing } from '../../../../utils/transport-wait';
+ 
+ test.describe(
+ 	'Executions Filter',
+@@ -15,9 +16,9 @@
+ 			await expect(n8n.canvas.disabledNodes()).toHaveCount(0);
+ 			await n8n.executionsComposer.createExecutions(2);
+ 
+-			const executionsResponsePromise = n8n.page.waitForResponse((response) =>
+-				response.url().includes('/rest/executions?filter='),
+-			);
++			const executionsResponsePromise = waitForRestResponseOrCrossing(n8n.page, {
++				url: ['/rest/executions?filter='],
++			});
+ 			await n8n.canvas.clickExecutionsTab();
+ 			await executionsResponsePromise;
+ 
+@@ -31,10 +32,7 @@
+ 			// No badge before filtering
+ 			await expect(n8n.executions.getFilterBadge()).toBeHidden();
+ 
+-			const filterRequestPromise = n8n.page.waitForResponse(
+-				(response) =>
+-					response.url().includes('/rest/executions?filter=') && response.url().includes('error'),
+-			);
++			const filterRequestPromise = waitForRestResponseOrCrossing(n8n.page, { url: ['/rest/executions?filter=', 'error'] });
+ 
+ 			await n8n.executions.selectFilterStatus('Error');
+ 			await filterRequestPromise;
+@@ -51,10 +49,7 @@
+ 			await n8n.executions.openFilter();
+ 			await expect(n8n.executions.getFilterForm()).toBeVisible();
+ 
+-			const filterRequestPromise = n8n.page.waitForResponse(
+-				(response) =>
+-					response.url().includes('/rest/executions?filter=') && response.url().includes('success'),
+-			);
++			const filterRequestPromise = waitForRestResponseOrCrossing(n8n.page, { url: ['/rest/executions?filter=', 'success'] });
+ 
+ 			await n8n.executions.selectFilterStatus('Success');
+ 			await filterRequestPromise;
+@@ -62,9 +57,7 @@
+ 			await expect(n8n.executions.getFilterBadge()).toBeVisible();
+ 			await expect(n8n.executions.getFilterResetButton()).toBeVisible();
+ 
+-			const resetRequestPromise = n8n.page.waitForResponse((response) =>
+-				response.url().includes('/rest/executions?filter='),
+-			);
++			const resetRequestPromise = waitForRestResponseOrCrossing(n8n.page, { url: ['/rest/executions?filter='] });
+ 
+ 			await n8n.executions.resetFilter();
+ 			await resetRequestPromise;
+--- a/packages/testing/playwright/tests/e2e/workflows/executions/list.spec.ts
++++ b/packages/testing/playwright/tests/e2e/workflows/executions/list.spec.ts
+@@ -1,4 +1,5 @@
+ import flatted from 'flatted';
++import { waitForRestRequestOrCrossing, waitForRestResponseOrCrossing } from '../../../../utils/transport-wait';
+ 
+ import { test, expect } from '../../../../fixtures/base';
+ import executionOutOfMemoryResponse from '../../../../fixtures/execution-out-of-memory-server-response.json';
+@@ -41,10 +42,9 @@
+ 				await expect(filterForm).toBeVisible();
+ 
+ 				// Set up listener for the filtered executions request
+-				const filterRequestPromise = n8n.page.waitForRequest(
+-					(request) =>
+-						request.url().includes('/rest/executions?filter=') && request.url().includes('success'),
+-				);
++				const filterRequestPromise = waitForRestRequestOrCrossing(n8n.page, {
++					url: ['/rest/executions?filter=', 'success'],
++				});
+ 
+ 				await n8n.page.waitForTimeout(500);
+ 				// Select an option from the dropdown
+@@ -87,18 +87,14 @@
+ 			await expect(n8n.canvas.disabledNodes()).toHaveCount(1);
+ 			await n8n.executionsComposer.createExecutions(15);
+ 
+-			const executionsResponsePromise = n8n.page.waitForResponse((response) =>
+-				response.url().includes('/rest/executions?filter='),
+-			);
++			const executionsResponsePromise = waitForRestResponseOrCrossing(n8n.page, { url: ['/rest/executions?filter='] });
+ 
+ 			await n8n.canvas.clickExecutionsTab();
+ 			await executionsResponsePromise;
+ 
+ 			await expect(n8n.executions.getExecutionItems().first()).toBeVisible();
+ 
+-			const loadMoreResponsePromise = n8n.page.waitForResponse((response) =>
+-				response.url().includes('/rest/executions?filter='),
+-			);
++			const loadMoreResponsePromise = waitForRestResponseOrCrossing(n8n.page, { url: ['/rest/executions?filter='] });
+ 			await n8n.executions.scrollExecutionsListToBottom();
+ 			await loadMoreResponsePromise;
+ 
+@@ -163,12 +159,7 @@
+ 		test('should error toast when server error message returned without stack trace', async ({
+ 			n8n,
+ 		}) => {
+-			const responsePromise = n8n.page.waitForResponse(
+-				(response) =>
+-					response.url().includes('/rest/workflows/') &&
+-					response.url().includes('/run') &&
+-					response.request().method() === 'POST',
+-			);
++			const responsePromise = waitForRestResponseOrCrossing(n8n.page, { url: ['/rest/workflows/', '/run'], methods: ['POST'] });
+ 			await n8n.canvas.clickExecuteWorkflowButton();
+ 			await responsePromise;
+ 
+@@ -185,10 +176,7 @@
+ 				});
+ 			});
+ 
+-			const executionDetailPromise = n8n.page.waitForResponse(
+-				(response) =>
+-					response.url().includes('/rest/executions/') && !response.url().includes('?filter='),
+-			);
++			const executionDetailPromise = waitForRestResponseOrCrossing(n8n.page, { url: /\/rest\/executions\/(?!.*\?filter=)/ });
+ 			await n8n.canvas.clickExecutionsTab();
+ 			await executionDetailPromise;
+ 
+@@ -225,9 +213,7 @@
+ 			await expect(n8n.canvas.disabledNodes()).toHaveCount(1);
+ 			await n8n.executionsComposer.createExecutions(15);
+ 
+-			const executionsResponsePromise = n8n.page.waitForResponse((response) =>
+-				response.url().includes('/rest/executions?filter='),
+-			);
++			const executionsResponsePromise = waitForRestResponseOrCrossing(n8n.page, { url: ['/rest/executions?filter='] });
+ 
+ 			await n8n.canvas.clickExecutionsTab();
+ 			await executionsResponsePromise;
+--- a/packages/testing/playwright/tests/e2e/workflows/templates/templates.spec.ts
++++ b/packages/testing/playwright/tests/e2e/workflows/templates/templates.spec.ts
+@@ -1,4 +1,5 @@
+ import { test, expect } from '../../../../fixtures/base';
++import { waitForRestResponseOrCrossing } from '../../../../utils/transport-wait';
+ import type { n8nPage } from '../../../../pages/n8nPage';
+ import type { TestRequirements } from '../../../../Types';
+ import allTemplatesSearchResponse from '../../../../workflows/all_templates_search_response.json';
+@@ -197,7 +198,7 @@
+ 
+ 				await Promise.all([
+ 					n8n.page.waitForResponse(`https://${hostname}/api/workflows/templates/${TEMPLATE_ID}`),
+-					n8n.page.waitForResponse('**/rest/workflows'),
++					waitForRestResponseOrCrossing(n8n.page, { url: ['/rest/workflows'] }),
+ 					n8n.navigate.toOnboardingTemplate(TEMPLATE_ID),
+ 				]);
+ 
+@@ -215,7 +216,7 @@
+ 
+ 				await Promise.all([
+ 					n8n.page.waitForResponse(`https://${hostname}/api/workflows/templates/${TEMPLATE_ID}`),
+-					n8n.page.waitForResponse('**/rest/workflows/**'),
++					waitForRestResponseOrCrossing(n8n.page, { url: /\/rest\/workflows\/.+/ }),
+ 					n8n.navigate.toTemplateImport(TEMPLATE_ID),
+ 				]);
+ 
+@@ -231,6 +232,16 @@
+ 			test('should save template id with the workflow', async ({ n8n }) => {
+ 				await n8n.templatesComposer.importFirstTemplate();
+ 
++				// tierless corpus harness (test patch, both arms; docs/corpus.md test
++				// accommodations): the execute below saves first, and that save is valid only
++				// once the imported workflow's name has been applied — upstream sequences the
++				// name after a /rest/workflows/new fetch, and the composer's URL-redirect wait
++				// does not cover it. Stock transport timing happened to apply it by click
++				// time; the ported transport interleaves the two fetches differently and the
++				// save 400s on an empty name. Wait for the page state the test already
++				// assumes; the assertions below are unchanged.
++				await expect(n8n.canvas.getWorkflowName()).toHaveAttribute('title', /\S/);
++
+ 				// Execute workflow to trigger autosave (imported templates don't auto-save immediately)
+ 				await n8n.canvas.hitExecuteWorkflow();
+ 
+--- a/packages/testing/playwright/utils/transport-wait.ts
++++ b/packages/testing/playwright/utils/transport-wait.ts
+@@ -0,0 +1,176 @@
++// Transport-agnostic REST wait (tierless corpus harness, test patch — applied to
++// BOTH arms; docs/corpus.md test accommodations). The ported build serves same-origin
++// /rest requests over a session websocket, so `page.waitForResponse` can never fire
++// for them. This helper races the HTTP wait against the page's tierless exec log
++// (same url/method/status predicate) and returns a Response-LIKE object either way,
++// so call sites keep their `.json()` / `.request().postDataJSON()` shape unchanged.
++// On the stock build the log never exists and the race reduces to the original wait.
++import type { Page, Response } from '@playwright/test';
++
++export interface RestWaitOptions {
++	/** Substrings that must ALL appear in the url, or a RegExp. */
++	url: string[] | RegExp;
++	/** Uppercase methods to accept; empty/omitted accepts any. */
++	methods?: string[];
++	/** Require this response status; omitted accepts any. */
++	status?: number;
++	timeout?: number;
++}
++
++export interface RestResponseLike {
++	url(): string;
++	status(): number;
++	json(): Promise<unknown>;
++	request(): { method(): string; postData(): string | null; postDataJSON(): unknown };
++}
++
++interface ExecLogEntry {
++	t: number;
++	name: string;
++	url: string;
++	status?: number;
++	reqBody?: unknown;
++	body?: unknown;
++}
++
++const fromResponse = (res: Response): RestResponseLike => res;
++
++const fromEntry = (e: ExecLogEntry): RestResponseLike => ({
++	url: () => e.url,
++	status: () => e.status ?? 200,
++	json: async () => e.body,
++	request: () => ({
++		method: () => (e.name || '').split('.')[1]?.toUpperCase() ?? '',
++		postData: () => (e.reqBody === undefined ? null : JSON.stringify(e.reqBody)),
++		postDataJSON: () => (typeof e.reqBody === 'string' ? JSON.parse(e.reqBody) : e.reqBody),
++	}),
++});
++
++export interface RestRequestLike {
++	url(): string;
++	method(): string;
++	postData(): string | null;
++	postDataJSON(): unknown;
++}
++
++/** Request-side companion: waits for a matching HTTP request OR a matching crossing in
++ *  the exec log, returning a Request-like with the same postDataJSON() shape. Serves the
++ *  payload-capture tests (`waitForRequest(...).postDataJSON()`) whose request rides the
++ *  socket and so never appears as browser HTTP. */
++export async function waitForRestRequestOrCrossing(
++	page: Page,
++	{ url, methods = [], timeout }: RestWaitOptions,
++): Promise<RestRequestLike> {
++	const urlOk = (u: string): boolean =>
++		url instanceof RegExp ? url.test(u) : url.every((s) => u.includes(s));
++	const logFrom = await page.evaluate(() => Date.now()).catch(() => Date.now());
++	const httpWait = page.waitForRequest(
++		(req) => urlOk(req.url()) && (methods.length === 0 || methods.includes(req.method())),
++		timeout !== undefined ? { timeout } : undefined,
++	);
++	const crossingWait = page
++		.waitForFunction(
++			({ from, reSrc, reFlags, subs, ms }) => {
++				const log = ((window as unknown as { __tierlessExecLog?: ExecLogEntry[] })
++					.__tierlessExecLog ?? []) as ExecLogEntry[];
++				for (const e of log) {
++					// a crossing is logged only AFTER it settles; for a request-side wait that
++					// still means the request was sent, which is what waitForRequest observes
++					if (!e || e.t < from) continue;
++					const method = (e.name || '').split('.')[1]?.toUpperCase() ?? '';
++					const ok =
++						reSrc !== null
++							? new RegExp(reSrc, reFlags ?? '').test(e.url)
++							: (subs as string[]).every((s) => e.url.includes(s));
++					if (ok && ((ms as string[]).length === 0 || (ms as string[]).includes(method)))
++						return JSON.stringify(e);
++				}
++				return '';
++			},
++			{
++				from: logFrom,
++				reSrc: url instanceof RegExp ? url.source : null,
++				reFlags: url instanceof RegExp ? url.flags : null,
++				subs: url instanceof RegExp ? [] : url,
++				ms: methods,
++			},
++			timeout !== undefined ? { timeout } : undefined,
++		)
++		.then(async (h) => {
++			const e = JSON.parse((await h.jsonValue()) as string) as ExecLogEntry;
++			return {
++				url: () => e.url,
++				method: () => (e.name || '').split('.')[1]?.toUpperCase() ?? '',
++				postData: () => (e.reqBody === undefined ? null : JSON.stringify(e.reqBody)),
++				postDataJSON: () => (typeof e.reqBody === 'string' ? JSON.parse(e.reqBody) : e.reqBody),
++			};
++		});
++	void httpWait.catch(() => {});
++	void crossingWait.catch(() => {});
++	return await Promise.race([
++		httpWait.then((req) => ({
++			url: () => req.url(),
++			method: () => req.method(),
++			postData: () => req.postData(),
++			postDataJSON: () => req.postDataJSON(),
++		})),
++		crossingWait,
++	]);
++}
++
++export async function waitForRestResponseOrCrossing(
++	page: Page,
++	{ url, methods = [], status, timeout }: RestWaitOptions,
++): Promise<RestResponseLike> {
++	const urlOk = (u: string): boolean =>
++		url instanceof RegExp ? url.test(u) : url.every((s) => u.includes(s));
++	// a TIMESTAMP, not an index cursor: the awaited action may navigate, which resets
++	// the page world and restarts the log — wall clock stays comparable across documents
++	const logFrom = await page.evaluate(() => Date.now()).catch(() => Date.now());
++	const httpWait = page.waitForResponse(
++		(res) =>
++			urlOk(res.url()) &&
++			(methods.length === 0 || methods.includes(res.request().method())) &&
++			(status === undefined || res.status() === status),
++		timeout !== undefined ? { timeout } : undefined,
++	);
++	const crossingWait = page
++		.waitForFunction(
++			({ from, reSrc, reFlags, subs, ms, st }) => {
++				const log = ((window as unknown as { __tierlessExecLog?: ExecLogEntry[] })
++					.__tierlessExecLog ?? []) as ExecLogEntry[];
++				for (const e of log) {
++					if (!e || e.t < from || e.status === undefined) continue;
++					if (st !== null && e.status !== st) continue;
++					const method = (e.name || '').split('.')[1]?.toUpperCase() ?? '';
++					const ok =
++						reSrc !== null
++							? new RegExp(reSrc, reFlags ?? '').test(e.url)
++							: (subs as string[]).every((s) => e.url.includes(s));
++					if (ok && ((ms as string[]).length === 0 || (ms as string[]).includes(method)))
++						return JSON.stringify(e);
++				}
++				return '';
++			},
++			{
++				from: logFrom,
++				reSrc: url instanceof RegExp ? url.source : null,
++				reFlags: url instanceof RegExp ? url.flags : null,
++				subs: url instanceof RegExp ? [] : url,
++				ms: methods,
++				st: status ?? null,
++			},
++			timeout !== undefined ? { timeout } : undefined,
++		)
++		.then(async (h) => {
++			const s = (await h.jsonValue()) as string;
++			return fromEntry(JSON.parse(s) as ExecLogEntry);
++		});
++	// the losing wait's eventual timeout must not surface as an unhandled rejection
++	void httpWait.catch(() => {});
++	void crossingWait.catch(() => {});
++	return await Promise.race([
++		httpWait.then(fromResponse),
++		crossingWait,
++	]);
++}

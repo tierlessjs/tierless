@@ -56,6 +56,21 @@ Measurement and certification never share a stack: each run gets a freshly boote
 app (`boot.mts` kills whole process groups) and nothing else may touch its database
 mid-run — a stray seed invalidates every test that was live.
 
+**Every port reports BOTH halves of the headline — bytes AND network wait.** Bytes
+alone (`report.mts` over the two TCP-true `truth` arms) is only half the claim; network
+wait is the part a flow rewrite actually targets, and it needs shaped arms. So the
+measured result of a port is SIX arms, not two, driven by one command
+(`node ports/drive-arms.mts <name>` — idempotent, checkpoint-commits each arm, prints
+both reports):
+
+- **floor** (RTT0, no relay) — plain `suite.mts`, both variants → the timing baseline.
+- **truth** (`TIERLESS_WIRE_TRUTH=1`, counting relay) — TCP-true bytes, both variants.
+- **rtt** (`TIERLESS_RTT_MS=<n>`, latency proxy) — shaped timing, both variants.
+
+`report-time.mts` then decomposes `net = dur(rtt) − dur(floor)` per test per arm — the
+only component transport can move — and compares it across arms. A port whose numbers
+are quoted without the network-wait decomposition is quoted incomplete.
+
 **Test accommodations.** Some upstream tests assert the transport, not the UI —
 `waitForResponse(...)` for a request the port eliminates can never fire. Rather than
 maintaining an allow-list of expected failures, each such test gets a patch in the

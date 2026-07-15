@@ -1,0 +1,47 @@
+
+time decomposition over 618 tests passing in all four runs (118 dropped)
+
+== the unimprovable floor (localhost: render + Playwright + fixtures; no meaningful network) ==
+  baseline 4441.3s   ported 4401.7s   — transport cannot move this
+
+== the improvable pool (network waits: dur@RTT - dur@RTT0, per test) ==
+  baseline total 1913.8s -> ported 2029.2s   (-6% of the POOL removed)
+  median per test 2946 ms -> 3211 ms
+  pool share of total wall time (baseline): 30% — the ceiling any flow rewrite has to work with
+  noise: 87 test(s) with a negative net component (run variance; kept as-is, medians are robust)
+
+== the network-bound decile (top 62 tests by baseline net wait, netB >= 6020 ms) ==
+  baseline 510.2s -> ported 485.0s   (5% of the decile pool removed)
+  median per test 7094 ms -> 7026 ms
+
+== per-test detail, ranked by network-wait delta (netB -> netP · localhost floor) ==
+    7283 ->   2996 ms · floor   5382 ms  tests/e2e/settings/environments/variables.spec.ts:36 › Variables › licensed › should create a n
+    6486 ->   2558 ms · floor  34686 ms  tests/e2e/ai/ai-2505-pdf-embed.spec.ts:18 › AI-2505 — PDF embed regression › embeds a PDF throu
+    4349 ->    673 ms · floor   9240 ms  tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:172 › NDV Parameters › Expression Editor 
+    4395 ->    803 ms · floor   6950 ms  tests/e2e/nodes/pdf-node.spec.ts:9 › PDF Test › Can read and write PDF files and extract text
+   14468 ->  10999 ms · floor   8376 ms  tests/e2e/building-blocks/user-service.spec.ts:107 › User API Service › Public API (API Key Aut
+    9084 ->   6301 ms · floor  15215 ms  tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:153 › Workflow Archive › should arc
+    5726 ->   3023 ms · floor  15111 ms  tests/e2e/workflows/editor/execution/executions-list-infinite-scroll.spec.ts:52 › Executions li
+    4508 ->   2193 ms · floor   9498 ms  tests/e2e/workflows/editor/ndv/paired-item.spec.ts:257 › NDV Paired Items › can resolve express
+    4134 ->   1980 ms · floor   7227 ms  tests/e2e/workflows/editor/subworkflows/debugging.spec.ts:36 › Subworkflow debugging › can insp
+   10726 ->   8883 ms · floor  13378 ms  tests/e2e/building-blocks/credential-mismatch.spec.ts:105 › HTTP Request credential picker with
+    8955 ->   7276 ms · floor  15106 ms  tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:235 › Workflow Archive › should unp
+    7534 ->   5875 ms · floor  14738 ms  tests/e2e/workflows/editor/routing.spec.ts:59 › Routing › should open ndv via URL
+    6513 ->   5067 ms · floor  15286 ms  tests/e2e/workflows/editor/routing.spec.ts:75 › Routing › should open show warning and drop nod
+    7124 ->   5707 ms · floor  13039 ms  tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:109 › NDV Data Display › Search and Ren
+   10501 ->   9242 ms · floor  13564 ms  tests/e2e/data-tables/tables.spec.ts:118 › Data Table list view › Should delete data table from
+    3717 ->   2539 ms · floor  10360 ms  tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:242 › Redaction enforcement › whe
+    4322 ->   3220 ms · floor   6048 ms  tests/e2e/ai/builder-setup-wizard.spec.ts:54 › Builder Setup Wizard @auth:owner @ai › should di
+    6020 ->   4956 ms · floor   7803 ms  tests/e2e/credentials/crud.spec.ts:230 › Credentials › should set a default credential when add
+    7039 ->   5987 ms · floor  22631 ms  tests/e2e/credentials/oauth.spec.ts:42 › OAuth Credentials › should connect when the callback n
+    -222 ->  -1234 ms · floor   2752 ms  tests/e2e/workflows/editor/subworkflows/subworkflow-version-resolution.spec.ts:55 › Sub-workflo
+
+== worst regressions (same ranking, bottom) ==
+    5907 ->  10663 ms · floor   7913 ms  tests/e2e/credentials/crud.spec.ts:89 › Credentials › should show multiple credential types in 
+    -204 ->   2890 ms · floor   5684 ms  tests/e2e/workflows/demo-diff.spec.ts:207 › Workflow Diff Demo › ignores non-openDiff commands
+    5529 ->   8540 ms · floor  13642 ms  tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:53 › NDV Data Display › Schema View › s
+    4782 ->   7496 ms · floor  14621 ms  tests/e2e/workflows/editor/ndv/ndv-floating-nodes.spec.ts:99 › NDV Floating Nodes Navigation › 
+    1870 ->   4300 ms · floor  13744 ms  tests/e2e/workflows/editor/canvas/canvas-nodes.spec.ts:137 › Canvas Node Manipulation and Navig
+    1306 ->   3697 ms · floor  11665 ms  tests/e2e/workflows/executions/preview-isolation.spec.ts:11 › Execution preview isolation › sho
+    1918 ->   4211 ms · floor  10179 ms  tests/e2e/workflows/editor/code/code-node.spec.ts:208 › Code node › Ask AI › Enabled › should s
+   18457 ->  20694 ms · floor  32530 ms  tests/e2e/sharing/credential-visibility.spec.ts:13 › Credential Visibility Rules › should only 

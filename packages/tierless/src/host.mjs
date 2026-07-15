@@ -14,7 +14,7 @@
 // correlation ids keep their bounces apart.
 import { makePump, initialStack } from "./runtime.mjs";
 import { encodeWireBinary, decodeWireBinary, encodeArgs, decodeArgs } from "./wire-binary.mjs";
-import { makeRecorder } from "./trace.mjs";
+import { makeRecorder, decide, siteKey, argFeatures } from "./trace.mjs";
 import { DEREF_TIER, usesHeap } from "./coherence.mjs";
 const isRecorder = (t) => typeof t.ship === "function";
 // OWNERSHIP scan — the generic half of request pinning (a resource family adds its
@@ -73,7 +73,10 @@ function ownedUnit(v) {
     return ownsValues(v);
 }
 let nextSid = 1;
-export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn, twins }) {
+export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn, twins, placement }) {
+    const placeProfile = placement?.profile ?? null;
+    const placeMode = placement?.mode ?? "trajectory";
+    const placeStability = placement?.stability ?? 0.9;
     const pump = makePump(bundle, { twins });
     const coherence = coherenceIn && usesHeap(bundle) ? coherenceIn : undefined; // per-bundle gate (see MakeHostOpts.coherence)
     const ownsBase = owns || ((t) => t === tier);
@@ -100,9 +103,21 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
     };
     // A traced stack's flag is captured BEFORE pumping: a finished pump has popped every
     // frame, so the end marker needs the flag held aside. Untraced stacks pump exactly as before.
-    const runPump = async (peer, stack, incoming = null, sink) => {
+    // `carry`, when given, is a fetched value (or error) to inject AT the resume park: the
+    // pump's first exec call returns it instead of servicing — the drive-path fetch arm's
+    // re-pump, the mirror of runLocal's onceExec (host.mts fetch arm below).
+    const runPump = async (peer, stack, incoming = null, sink, carry) => {
         const flag = rec ? rec.flagOf(stack) : null;
-        const res = await pump(stack, ownsHere, execFor(peer, stack), incoming, sink);
+        const base = execFor(peer, stack);
+        let c = carry;
+        const ex = c ? (r) => { if (c) {
+            const cc = c;
+            c = undefined;
+            if ("error" in cc)
+                throw cc.error;
+            return cc.value;
+        } return base(r); } : base;
+        const res = await pump(stack, ownsHere, ex, incoming, sink);
         if (res.done)
             rec?.end(flag, "done");
         return res;
@@ -130,7 +145,36 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
     // of accumulating every session's excisions until disconnect.
     async function drive(peer, sid, res) {
         while (!res.done) {
-            res = await settle(peer, await peer.request({ type: "resume", sid, ...meta }, ship(sid, res)));
+            const cur = res; // narrowed & const — survives the awaits below
+            const req = cur.request;
+            // §6 decide (docs/migrate-arm.md): a data-resource park may FETCH just the value
+            // instead of shipping the whole continuation, when the profile prices it cheaper. A
+            // §5 home park and a cold/unpriced site both keep the floor — migrate. Price on the
+            // REAL shipped bytes (encode once; the migrate branch reuses them).
+            let wire = null;
+            let fetchIt = false;
+            if (placeProfile && req.op === "resource") {
+                const top = cur.stack[cur.stack.length - 1];
+                wire = encodeWireBinary(cur.stack, req, encOpts(sid));
+                fetchIt = decide(wire.length, siteKey(top.fn, top.pc, req.name), placeProfile, { mode: placeMode, stability: placeStability, argFeatures: argFeatures(req.args) }).choice === "fetch";
+            }
+            if (fetchIt) {
+                // the fetch arm: pull only (name, args) over the peer, resume the stack HERE with
+                // the value — errors re-enter the machine's service() path exactly as a migrate would.
+                let carry;
+                try {
+                    carry = { value: await execOver(peer, req, meta) };
+                }
+                catch (e) {
+                    carry = { error: e };
+                }
+                res = await runPump(peer, cur.stack, req, undefined, carry);
+            }
+            else {
+                const shipped = rec ? rec.ship(cur.stack, req, () => wire ?? encodeWireBinary(cur.stack, req, encOpts(sid)), "migrate")
+                    : (wire ?? encodeWireBinary(cur.stack, req, encOpts(sid)));
+                res = await settle(peer, await peer.request({ type: "resume", sid, ...meta }, shipped));
+            }
         }
         return res.value;
     }

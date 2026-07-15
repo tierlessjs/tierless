@@ -45,6 +45,10 @@ export interface Connection {
      *  frame: the fetch-arm crossing as a first-class op (host.mts execOver). The
      *  I/O-bottom adapter path: an app's axios adapter crosses here per request. */
     exec(req: import("./types.mjs").ResourceRequest): Promise<unknown>;
+    /** The gateway's unsolicited "hello", the instant the socket is up: a sealed auth blob
+     *  (reseal folded into the upgrade) and any GET envelopes it pre-fetched (boot preboot).
+     *  Resolves with { blob:null } if the gateway sends no hello before the socket settles. */
+    hello: Promise<import("./adapt-session-auth.mjs").SessionHello>;
     close(): void;
 }
 export declare const mergedAppHash: () => string;
@@ -54,6 +58,11 @@ export declare function connect({ url, protocols, exec, bundle, tier, heap, trac
  *  `axiosAdapter({ exec: sessionExec(), ... })`. Lazy: the socket opens on first use
  *  (or at configureTierless({ preconnect }) time), each call awaits readiness. */
 export declare function sessionExec(): Exec;
+/** The shared connection's ws "hello" (sealed blob + preboot GETs). The I/O-bottom auth
+ *  wrapper (cookieSessionAuth) takes this so the startup blob rides the upgrade instead of
+ *  a reseal round trip, and the preboot map seeds its join buffer. Materializes the shared
+ *  connection (opens the socket), same as sessionExec — pair them behind one preconnect. */
+export declare function sessionHello(): Promise<import("./adapt-session-auth.mjs").SessionHello>;
 export declare function configureTierless(opts: ConnectOpts & {
     preconnect?: boolean;
 }): void;

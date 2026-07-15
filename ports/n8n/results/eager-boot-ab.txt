@@ -1,0 +1,34 @@
+=== per-round A/B (A=lazy baseline, B=eager) ===
+R1 lazy->eager: n=24  A_total=442157 B_total=442708  Δ=-551 (-0.1%)  medA=15154 medB=15580  B_faster=13/24
+R2 lazy->eager: n=24  A_total=439340 B_total=439434  Δ=-94 (-0.0%)  medA=14472 medB=15082  B_faster=9/24
+
+=== drift check (same arm across rounds) ===
+eager R1->R2 : n=24  A_total=442708 B_total=439434  Δ=+3274 (+0.7%)  medA=15580 medB=15082  B_faster=13/24
+lazy  R1->R2 : n=24  A_total=442157 B_total=439340  Δ=+2817 (+0.6%)  medA=15154 medB=14472  B_faster=12/24
+
+=== pooled (mean of both rounds per test) ===
+pooled lazy->eager: n=24  A_total=440748 B_total=441071  Δ=-322 (-0.1%)  medA=14709 medB=15331  B_faster=12/24
+per-test eager-minus-lazy speedup: mean=-13ms  median=+7ms  stdev=483ms
+same-arm drift stdev: eager=739ms lazy=621ms (mean|drift|: e=582 l=521)
+
+METHOD: dist-swap A/B, no rebuild between arms. Two prebuilt editor-ui dists
+differing by exactly one line (the eager-vs-lazy diff: a module-scope
+`if(typeof window) tierlessSessionExec()` — confirmed as the ONLY semantic
+delta: +1 `typeof window` guard in the session-exec chunk, all other hash
+churn is cosmetic Vite nondeterminism). Both arms: ported build, RTT80,
+same 24-test subset (workflows/list + ndv-core), same box, minutes apart.
+Since both arms are the ported build at RTT80, the RTT0 floor cancels, so
+the durationMs delta IS the net-wait delta.
+
+VERDICT: eager bootstrap produces NO measurable network-wait improvement.
+The eager-vs-lazy effect (mean -13 ms/test, i.e. eager marginally SLOWER;
+median +7 ms faster) is an order of magnitude below the per-test noise
+(stdev 483 ms) and below the round-to-round drift of the SAME build
+(eager R1->R2 +0.7%, lazy R1->R2 +0.6%; drift stdev 620-740 ms). Two
+independent rounds agree: both are a wash (R1 -0.1%, R2 -0.0%).
+
+WHY: eager hides the one-time lazy setup (ws handshake + reseal, ~=3 RTT =
+240 ms) by moving it to module import. That cost is real but small vs the
+recurring structural costs (second-origin handshake per context, no overlap
+with page-load fetches that fire nearly as early). The regression is
+dominated by what recurs, which eager does not touch.

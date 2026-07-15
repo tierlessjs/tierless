@@ -22,7 +22,7 @@
 // running its journeys are per-recipe steps documented in ports/<name>/README.md.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -49,15 +49,18 @@ const work = path.join(ROOT, "work", baseline ? name + "-baseline" : name);
 const src = path.join(work, "src");
 
 // sha256 over the extracted tree: every file, sorted by relative path, as
-// "<relpath>\0<contents>\0" — transport-independent content identity.
+// "<relpath>\0<contents>\0" — transport-independent content identity. A symlink is an
+// entry too (n8n ships directory symlinks): hashed by its TARGET STRING, never followed —
+// following would double-count the pointee and loop on cycles.
 function treeHash(dir: string): string {
   const h = createHash("sha256");
   const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap((e) => {
     const p = path.join(d, e.name);
-    return e.isDirectory() ? walk(p) : [p];
+    return e.isDirectory() ? walk(p) : [p];   // dirent reflects lstat: a dir symlink is NOT isDirectory()
   });
   for (const f of walk(dir).sort((a, b) => a.localeCompare(b, "en"))) {
-    h.update(path.relative(dir, f)); h.update("\0"); h.update(readFileSync(f)); h.update("\0");
+    h.update(path.relative(dir, f)); h.update("\0");
+    h.update(lstatSync(f).isSymbolicLink() ? "symlink\0" + readlinkSync(f) : readFileSync(f)); h.update("\0");
   }
   return h.digest("hex");
 }
