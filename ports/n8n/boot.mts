@@ -66,6 +66,12 @@ export async function bootN8n(): Promise<{ close(): void }> {
     N8N_RESTRICT_FILE_ACCESS_TO: "",
     N8N_DYNAMIC_BANNERS_ENABLED: "false",
     N8N_DIAGNOSTICS_ENABLED: "false",
+    // boot-latency fixes ON by default for the ported gateway (proven: reseal folded into
+    // the ws upgrade + 18 boot GETs pre-fetched at upgrade — ports/n8n/results/boot-setup.txt,
+    // 38/38 correctness). Explicit env still overrides, so the measurement arms (P0/P1) work.
+    TIERLESS_HELLO_AUTH: process.env.TIERLESS_HELLO_AUTH ?? "1",
+    TIERLESS_PREBOOT: process.env.TIERLESS_PREBOOT ?? "1",
+    TIERLESS_PREBOOT_FILE: process.env.TIERLESS_PREBOOT_FILE ?? fileURLToPath(new URL("./results/preboot-manifest.txt", import.meta.url)),
   };
   // detached process GROUPS (n8n spawns task runners); kill(-pid) takes the whole tree
   const procs: ChildProcess[] = [

@@ -4,12 +4,12 @@
  import type { GenericValue, IDataObject } from 'n8n-workflow';
  import { axiosAdapter } from 'tierless/adapt-axios';
  import { restResources } from 'tierless/adapt';
-+import { configureTierless, sessionExec } from 'tierless/browser';
++import { configureTierless, sessionExec, sessionHello } from 'tierless/browser';
 +import { cookieSessionAuth } from 'tierless/adapt-session-auth';
  
  import type { IRestApiContext } from './types';
  
-@@ -18,6 +20,68 @@
+@@ -18,6 +20,72 @@
  	return browserId;
  };
  
@@ -32,8 +32,12 @@
 +				`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:${port}/__tierless`,
 +			preconnect: true,
 +		});
++		// hello: the gateway seals THIS socket's cookie at the upgrade and pre-fetches the
++		// boot GETs, delivered before any crossing — so the startup blob rides the handshake
++		// (no reseal round trip) and the first boot GETs join the preboot buffer.
 +		tierlessSession = cookieSessionAuth({
 +			gateway: `${location.protocol}//${location.hostname}:${port}`,
++			hello: sessionHello(),
 +		}).wrap(sessionExec());
 +	}
 +	return tierlessSession;
@@ -78,7 +82,7 @@
  export const NO_NETWORK_ERROR_CODE = 999;
  export const STREAM_SEPARATOR = '⧉⇋⇋➽⌑⧉§§\n';
  
-@@ -123,11 +187,17 @@
+@@ -123,11 +191,17 @@
  		// builds, so production requests never pin on it). Browser-pinned configs
  		// (blobs, FormData, binary bodies) fall through to axios's own XHR adapter.
  		adapter: axiosAdapter({
