@@ -46,6 +46,13 @@ connection **automatically**, with no client code change, when four conditions h
 4. **No downgrading middlebox** in between (one that terminates as H1.1 or doesn't grok
    Extended CONNECT silently drops you to a plain ws).
 
+**Measured** (`ports/transport-bench.mts`, real Chromium over TLS+H2 at 80 ms RTT, same page,
+the only difference the `enableConnectProtocol` toggle): median ws-open **167 ms plain ws →
+84 ms ws-over-H2 — 50% faster, one saved RTT (the TCP handshake of a separate connection)**.
+Server-side stream counts confirm the transport per arm (h1=6 vs h2=6), so it is the transport
+that moved, not noise. The residual 84 ms is the Extended CONNECT round trip on the shared
+connection; WebTransport (pooled QUIC stream, ~0-RTT creation) is what removes that last RTT.
+
 Because it **falls back silently**, "support" means *verify it actually rode H2*: check the
 client's `performance.getEntriesByType('resource')` `nextHopProtocol === 'h2'` (or DevTools'
 Protocol column), and/or log the stream type server-side — and gate it in telemetry so a
