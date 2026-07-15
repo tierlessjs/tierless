@@ -48,7 +48,7 @@ export function mergeCookies(header, setCookies) {
     }
     return [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
 }
-export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_000, fetchImpl, now = Date.now }) {
+export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_000, fetchImpl, prebootPaths = [], now = Date.now }) {
     const key = randomBytes(32); // per boot, shared with no one
     const allowed = new Set(allowedOrigins);
     const baseFetch = fetchImpl ?? ((...a) => fetch(...a));
@@ -148,5 +148,22 @@ export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_00
         }
         return false;
     };
-    return { exec, handleHttp };
+    // The ws-upgrade "hello": seal the upgrade's cookie into a startup blob (reseal folded
+    // into the handshake — no round trip) and pre-fetch the boot GETs with that cookie. Both
+    // are per-call toggleable so a measured run can isolate each lever without a rebuild.
+    const hello = async (cookie, { auth = true, preboot = true } = {}) => {
+        const blob = auth && cookie ? seal({ p: "session", c: cookie, iat: now() }) : null;
+        if (!preboot || !cookie || !prebootPaths.length)
+            return { blob };
+        const inner = restResources(backendUrl, { envelopeErrors: true, fetchImpl: baseFetch });
+        const pb = {};
+        await Promise.all(prebootPaths.map(async (path) => {
+            try {
+                pb[path] = await inner({ op: "resource", tier: "server", name: "api.get", args: [path, undefined, { headers: { cookie } }] });
+            }
+            catch { /* a preboot GET that fails just isn't offered — the app fetches it normally */ }
+        }));
+        return { blob, preboot: pb };
+    };
+    return { exec, handleHttp, hello };
 }

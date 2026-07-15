@@ -28,20 +28,39 @@ export const SESSION_AUTH_HEADER = "x-tierless-session-auth";
 /** The rotation annotation key on an exec envelope. Stripped here before the app sees it. */
 export const AUTH_FIELD = "__tierlessAuth";
 
+/** What the gateway delivers in the ws "hello" the instant the socket is up (server side:
+ *  session-auth.mts cookieAuthority.hello, wired through attachTierless). `blob` folds the
+ *  reseal round trip INTO the upgrade — the gateway seals the upgrade's own cookie and hands
+ *  it back, so no startup HTTP reseal is needed. `preboot` is a map of GET path -> envelope
+ *  the gateway pre-fetched at upgrade (docs boot preboot): the first crossings JOIN it. */
+export interface SessionHello { blob: string | null; preboot?: Record<string, unknown> | null }
+
 export interface CookieSessionAuthOpts {
   /** The gateway's http(s) origin, e.g. `http://localhost:5780`. */
   gateway: string;
   /** BroadcastChannel name for cross-tab rotation. Tabs sharing a jar must share it. */
   channelName?: string;
   fetchImpl?: typeof fetch;
+  /** The session socket's "hello" (adapt-session-auth SessionHello). When present, the
+   *  startup blob comes from it — no HTTP reseal round trip on the critical path — and its
+   *  preboot map seeds the join buffer. Absent = the pre-hello behavior: HTTP reseal at
+   *  startup. Rotation/401 recovery still uses the HTTP reseal endpoint either way. */
+  hello?: Promise<SessionHello>;
 }
 
 interface Rotation { blob: string; claim: string }
 
-export function cookieSessionAuth({ gateway, channelName = "tierless-session-auth", fetchImpl }: CookieSessionAuthOpts): { wrap(inner: Exec): Exec } {
+export function cookieSessionAuth({ gateway, channelName = "tierless-session-auth", fetchImpl, hello }: CookieSessionAuthOpts): { wrap(inner: Exec): Exec } {
   const f: typeof fetch = fetchImpl ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   const base = gateway.replace(/\/$/, "");
   let blob: string | null = null;
+  // preboot join buffer: GET path -> the envelope the gateway pre-fetched at upgrade. A
+  // crossing whose path is here returns it instead of round-tripping. Consumed once (a
+  // re-fetch then goes to the network, fresh) — boot GETs are read-once.
+  const preboot = new Map<string, unknown>();
+  const seedPreboot = (pb: Record<string, unknown> | null | undefined): void => {
+    if (pb) for (const [k, v] of Object.entries(pb)) preboot.set(k, v);
+  };
 
   const reseal = async (): Promise<void> => {
     try {
@@ -49,7 +68,12 @@ export function cookieSessionAuth({ gateway, channelName = "tierless-session-aut
       if (r.ok) blob = ((await r.json()) as { blob: string | null }).blob;
     } catch { /* gateway unreachable: crossings go without auth and surface the app's own errors */ }
   };
-  let ready = reseal();
+  // startup: prefer the hello (reseal folded into the ws upgrade). A hello with no blob
+  // (auth disabled, or a gateway that doesn't seal) falls back to the HTTP reseal, so the
+  // startup path degrades to the pre-hello behavior. No hello configured = HTTP reseal.
+  let ready = hello
+    ? hello.then((h) => { seedPreboot(h?.preboot); if (h?.blob) blob = h.blob; else return reseal(); }, () => reseal())
+    : reseal();
 
   const channel = typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel(channelName);
   if (channel) channel.onmessage = () => { ready = reseal(); };
@@ -78,6 +102,13 @@ export function cookieSessionAuth({ gateway, channelName = "tierless-session-aut
   return {
     wrap: (inner) => async (req) => {
       await ready;
+      // preboot JOIN: a GET whose value the gateway pre-fetched at upgrade returns from the
+      // buffer — no crossing, the data fetch already happened during bundle download.
+      const rr = req as ResourceRequest;
+      if (rr.name === "api.get") {
+        const path = (rr.args ?? [])[0] as string;
+        if (preboot.has(path)) { const env = preboot.get(path); preboot.delete(path); return env; }
+      }
       let env = await inner(attach(req as ResourceRequest));
       rotateFrom(env);
       if ((env as { status?: number } | null)?.status === 401) {

@@ -63,6 +63,10 @@ export interface Connection {
    *  frame: the fetch-arm crossing as a first-class op (host.mts execOver). The
    *  I/O-bottom adapter path: an app's axios adapter crosses here per request. */
   exec(req: import("./types.mjs").ResourceRequest): Promise<unknown>;
+  /** The gateway's unsolicited "hello", the instant the socket is up: a sealed auth blob
+   *  (reseal folded into the upgrade) and any GET envelopes it pre-fetched (boot preboot).
+   *  Resolves with { blob:null } if the gateway sends no hello before the socket settles. */
+  hello: Promise<import("./adapt-session-auth.mjs").SessionHello>;
   close(): void;
 }
 
@@ -108,6 +112,17 @@ export function connect({ url, protocols, exec, bundle, tier = "browser", heap =
     onEvent(ws, "open", () => res());
     onEvent(ws, "error", (e: any) => rej(new Error("tierless: websocket error" + (e && e.message ? ": " + e.message : ""))));
   });
+  // the gateway's unsolicited "hello" (server sends it the instant the socket is up):
+  // sealed auth blob + pre-fetched boot GETs. Registered synchronously here so the frame
+  // is never missed; resolves { blob:null } if the socket settles with no hello (a gateway
+  // that doesn't send one, e.g. the actions-only demo).
+  let helloResolve: (h: import("./adapt-session-auth.mjs").SessionHello) => void;
+  const hello: Promise<import("./adapt-session-auth.mjs").SessionHello> = new Promise((r) => { helloResolve = r; });
+  raw.on("hello", (payload: { blob?: string | null; preboot?: Record<string, unknown> | null }) => {
+    helloResolve({ blob: payload?.blob ?? null, preboot: payload?.preboot ?? null });
+    return { obj: { type: "ok" } };
+  });
+  onEvent(ws, "open", () => setTimeout(() => helloResolve({ blob: null }), 5000));   // safety net: a gateway that never sends hello must not hang crossings — fall back to reseal. Long enough never to preempt a real hello (which arrives ~one latency after open).
 
   if (traceUrl) {                                            // PROFILING run: batch records to the gateway
     // a lost batch must not go silent: an incomplete run that still delivers its `end`
@@ -162,6 +177,7 @@ export function connect({ url, protocols, exec, bundle, tier = "browser", heap =
 
   return {
     ready,
+    hello,
     register,
     call: async (entry: string, args: unknown[] = [], module: string = ""): Promise<unknown> => {
       await ready;
@@ -217,6 +233,14 @@ export function connect({ url, protocols, exec, bundle, tier = "browser", heap =
  *  (or at configureTierless({ preconnect }) time), each call awaits readiness. */
 export function sessionExec(): Exec {
   return (req) => sharedConn().exec(req);
+}
+
+/** The shared connection's ws "hello" (sealed blob + preboot GETs). The I/O-bottom auth
+ *  wrapper (cookieSessionAuth) takes this so the startup blob rides the upgrade instead of
+ *  a reseal round trip, and the preboot map seeds its join buffer. Materializes the shared
+ *  connection (opens the socket), same as sessionExec — pair them behind one preconnect. */
+export function sessionHello(): Promise<import("./adapt-session-auth.mjs").SessionHello> {
+  return sharedConn().hello;
 }
 
 // ---- the actions surface (what the Vite plugin emits calls into) ----------------------

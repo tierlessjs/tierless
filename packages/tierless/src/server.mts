@@ -42,6 +42,11 @@ export interface SessionSetup {
    *  `handle` is the receiver's identity (owner tier + heap id) — key on it for
    *  stateful per-instance classes; class-only keying is right only for singletons. */
   twins?: (cls: string, handle?: { id: string; owner: string }) => object | undefined;
+  /** Sent to the browser as an unsolicited "hello" the instant the socket is up — the
+   *  place to fold a startup round trip INTO the ws upgrade: a sealed auth blob (no reseal
+   *  fetch) and/or GET envelopes pre-fetched from the upgrade's own credentials (boot
+   *  preboot). Computed in `session(req)`, which holds the upgrade request's cookie. */
+  hello?: { blob?: string | null; preboot?: Record<string, unknown> };
 }
 export interface AttachOptions {
   /** The compiled bundle, or an async resolver by module id (multi-module endpoints). */
@@ -155,8 +160,11 @@ export function attachTierless(httpServer: HttpServer, { bundle, tier = "server"
     if (ws._socket?.setNoDelay) ws._socket.setNoDelay(true);
     if (wire && ws._socket) wire.track(ws._socket);
     try {
-      const { exec, entry, args = [], onDone, twins } = await session(req);
+      const { exec, entry, args = [], onDone, twins, hello } = await session(req);
       const peer = makePeer(wsPort(ws));
+      // fold a startup round trip into the upgrade: fire the hello the instant the socket is
+      // up, before any crossing. Fire-and-forget — the browser handler acks and we ignore it.
+      if (hello) peer.request({ type: "hello", ...hello }).catch(() => {});
       // §5 heap coherence is per-connection: one heap for excised locals, one bounded
       // reader cache, shared across this socket's module-hosts (each host applies it only
       // if its own bundle is heap-compiled). serve() answers the other tier's fetch,

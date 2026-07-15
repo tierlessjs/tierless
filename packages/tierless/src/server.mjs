@@ -121,8 +121,12 @@ export function attachTierless(httpServer, { bundle, tier = "server", session, p
         if (wire && ws._socket)
             wire.track(ws._socket);
         try {
-            const { exec, entry, args = [], onDone, twins } = await session(req);
+            const { exec, entry, args = [], onDone, twins, hello } = await session(req);
             const peer = makePeer(wsPort(ws));
+            // fold a startup round trip into the upgrade: fire the hello the instant the socket is
+            // up, before any crossing. Fire-and-forget — the browser handler acks and we ignore it.
+            if (hello)
+                peer.request({ type: "hello", ...hello }).catch(() => { });
             // §5 heap coherence is per-connection: one heap for excised locals, one bounded
             // reader cache, shared across this socket's module-hosts (each host applies it only
             // if its own bundle is heap-compiled). serve() answers the other tier's fetch,
