@@ -1,4 +1,5 @@
 import { WS_PATH } from "./ws-path.mjs";
+import type { Http2SecureServer } from "node:http2";
 import type { Bundle, Exec, ResourceRequest } from "./types.mjs";
 import type { Server as HttpServer, IncomingMessage } from "node:http";
 export { WS_PATH };
@@ -68,6 +69,10 @@ export declare function bearerFromUpgrade(req: IncomingMessage): string | undefi
 export declare function attachTierless(httpServer: HttpServer, { bundle, tier, session, path: wsPath, wire, heap, maxConnections }: AttachOptions): {
     close(): void;
 };
+export declare function attachTierlessH2(h2server: Http2SecureServer, { bundle, tier, session, path: wsPath, heap, maxConnections }: AttachOptions): {
+    close(): void;
+};
+export { h2Port, isWebSocketConnect } from "./transport-h2.mjs";
 export interface ServeAppOpts extends AttachOptions {
     port?: number;
     page?: string;

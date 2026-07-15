@@ -20,8 +20,10 @@ import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { makeHost, answerWith } from "./host.mjs";
 import { makeCoherence } from "./coherence.mjs";
-import { makePeer, wsPort } from "./transport.mjs";
+import { makePeer, wsPort, type Peer } from "./transport.mjs";
+import { h2Port, isWebSocketConnect } from "./transport-h2.mjs";
 import { WS_PATH } from "./ws-path.mjs";
+import type { Http2SecureServer, ServerHttp2Stream } from "node:http2";
 import type { Bundle, Exec, ResourceRequest } from "./types.mjs";
 import type { Server as HttpServer, IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -110,6 +112,25 @@ export function bearerFromUpgrade(req: IncomingMessage): string | undefined {
   try { return Buffer.from(b.slice(7).replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8") || undefined; } catch { return undefined; }
 }
 
+// The per-connection session setup, shared by every transport (plain ws, ws-over-H2, and a
+// WebTransport adapter): given a Peer over whatever byte pipe and the handshake request,
+// fire the hello, wire §5 coherence, build the module-host map, and answer. The transport
+// differs only in how the Peer's Port is made — the session logic is identical.
+async function serveSessionOn(peer: Peer, req: IncomingMessage, cfg: { resolveBundle: (id: string) => Bundle | Promise<Bundle>; session: (req: IncomingMessage) => SessionSetup | Promise<SessionSetup>; heap: boolean; tier: string }): Promise<void> {
+  const { exec, entry, args = [], onDone, twins, hello } = await cfg.session(req);
+  // fold a startup round trip into the handshake: fire the hello the instant the pipe is up.
+  if (hello) peer.request({ type: "hello", ...hello }).catch(() => {});
+  const coherence = cfg.heap ? makeCoherence(cfg.tier) : undefined;
+  if (coherence) coherence.serve(peer);
+  const hosts = new Map<string, import("./types.mjs").Host>();     // moduleId -> host (stateless; cached per connection)
+  const hostFor = async (id: string) => {
+    if (!hosts.has(id)) hosts.set(id, makeHost({ bundle: await cfg.resolveBundle(id), tier: cfg.tier, exec, meta: id ? { module: id } : {}, coherence, twins }));
+    return hosts.get(id)!;
+  };
+  answerWith(peer, hostFor);                                        // browser-started sessions (actions) + bounces
+  if (entry) { const value = await (await hostFor("")).run(peer, entry, args); if (onDone) onDone(value); }   // full-tierless mode: the server starts the session
+}
+
 export function attachTierless(httpServer: HttpServer, { bundle, tier = "server", session, path: wsPath = WS_PATH, wire, heap = true, maxConnections = DEFAULT_MAX_CONNECTIONS }: AttachOptions): { close(): void } {
   // STREAMING compression, not per-message: with context takeover the deflate window
   // persists across messages, so every exec's headers, URL prefixes, and JSON field
@@ -160,27 +181,7 @@ export function attachTierless(httpServer: HttpServer, { bundle, tier = "server"
     if (ws._socket?.setNoDelay) ws._socket.setNoDelay(true);
     if (wire && ws._socket) wire.track(ws._socket);
     try {
-      const { exec, entry, args = [], onDone, twins, hello } = await session(req);
-      const peer = makePeer(wsPort(ws));
-      // fold a startup round trip into the upgrade: fire the hello the instant the socket is
-      // up, before any crossing. Fire-and-forget — the browser handler acks and we ignore it.
-      if (hello) peer.request({ type: "hello", ...hello }).catch(() => {});
-      // §5 heap coherence is per-connection: one heap for excised locals, one bounded
-      // reader cache, shared across this socket's module-hosts (each host applies it only
-      // if its own bundle is heap-compiled). serve() answers the other tier's fetch,
-      // write-back, and release requests against that heap.
-      const coherence = heap ? makeCoherence(tier) : undefined;
-      if (coherence) coherence.serve(peer);
-      const hosts = new Map<string, import("./types.mjs").Host>();  // moduleId -> host (stateless; cached per socket)
-      const hostFor = async (id: string) => {
-        if (!hosts.has(id)) hosts.set(id, makeHost({ bundle: await resolveBundle(id), tier, exec, meta: id ? { module: id } : {}, coherence, twins }));
-        return hosts.get(id)!;
-      };
-      answerWith(peer, hostFor);                                   // browser-started sessions (actions) + bounces
-      if (entry) {                                                 // full-tierless mode: the server starts the session
-        const value = await (await hostFor("")).run(peer, entry, args);
-        if (onDone) onDone(value);
-      }
+      await serveSessionOn(makePeer(wsPort(ws)), req, { resolveBundle, session, heap, tier });
     } catch (e: any) {
       try { ws.close(1011, String((e && e.message) || e).slice(0, 100)); } catch { /* already gone */ }
     }
@@ -188,6 +189,46 @@ export function attachTierless(httpServer: HttpServer, { bundle, tier = "server"
 
   return { close: () => { httpServer.off("upgrade", onUpgrade); wss.close(); } };
 }
+
+// ---------------------------------------------------------------- ws-over-H2 -----------
+// Mount the session endpoint on an HTTP/2 server as WebSocket-over-H2 (RFC 8441 Extended
+// CONNECT). The whole point: a plain websocket is a SEPARATE connection whose TCP+upgrade
+// handshake (~2 RTT) lands on the boot critical path; ws-over-H2 rides the page's EXISTING
+// H2 connection as a new stream — no new handshake. The browser negotiates it transparently,
+// so this is a pure server/deployment addition; the client code is unchanged.
+//
+// The H2 server MUST be created with `settings: { enableConnectProtocol: true }` (advertise
+// RFC 8441 so browsers coalesce the ws onto the H2 connection) and, to also serve the plain-ws
+// fallback and the app's own H2 requests, `allowHTTP1: true`. Co-mount `attachTierless` on the
+// same server for the H1.1 'upgrade' path; this handles the H2 'stream' path. Requires TLS
+// (browsers do H2 only over ALPN `h2`) and the SAME origin as the page (so the browser reuses
+// its connection). Verify it actually rode H2, not a silent fallback: check the client's
+// `performance…nextHopProtocol === 'h2'` and/or log the stream type here.
+export function attachTierlessH2(h2server: Http2SecureServer, { bundle, tier = "server", session, path: wsPath = WS_PATH, heap = true, maxConnections = DEFAULT_MAX_CONNECTIONS }: AttachOptions): { close(): void } {
+  const resolveBundle = typeof bundle === "function" ? bundle : () => bundle;
+  const onStream = (stream: ServerHttp2Stream, headers: Record<string, unknown>): void => {
+    if (!isWebSocketConnect(headers)) return;                      // an ordinary H2 request — not our ws endpoint
+    const path = String(headers[":path"] ?? "");
+    if (path.split("?")[0] !== wsPath) { try { stream.respond({ ":status": 404 }); stream.end(); } catch { /* gone */ } return; }
+    if (liveConnections >= maxConnections) { try { stream.respond({ ":status": 503 }); stream.end(); } catch { /* gone */ } return; }
+    liveConnections++;
+    stream.on("close", () => { liveConnections--; });
+    try {
+      stream.respond({ ":status": 200 });                          // Extended CONNECT: a 200 (no 101), then RFC 6455 frames flow in the stream's DATA
+      // (No setNoDelay here: Http2Session.socket is a guarded proxy that throws on socket
+      // manipulation. NODELAY for H2 is a server-socket-level concern — set it when creating
+      // the http2 server if the deployment needs it — not per stream.)
+      // session() reads req.headers.origin / .cookie and req.url — the H2 pseudo/normal
+      // headers carry both (origin, cookie are normal lowercase headers; :path is the url).
+      const req = { headers, url: path } as unknown as IncomingMessage;
+      serveSessionOn(makePeer(h2Port(stream)), req, { resolveBundle, session, heap, tier }).catch((e) => { if (process.env.TIERLESS_DEBUG) console.error("[attachTierlessH2] session error:", e); try { stream.close(); } catch { /* gone */ } });
+    } catch { try { stream.close(); } catch { /* gone */ } }
+  };
+  h2server.on("stream", onStream);
+  return { close: () => { h2server.off("stream", onStream); } };
+}
+
+export { h2Port, isWebSocketConnect } from "./transport-h2.mjs";
 
 // ---------------------------------------------------------------- serveApp ------------
 const MIME: Record<string, string> = {

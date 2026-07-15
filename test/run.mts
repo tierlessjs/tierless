@@ -52,6 +52,7 @@ const cases: Case[] = [
   { file: "test/e2e/connection-cap.mts", needs: ["the per-process connection cap refuses over-cap upgrades with 503, spares live sessions, and recycles freed slots"] },
   { file: "test/e2e/ws-auth-live.mts",   needs: ["the session token rides a bearer subprotocol — read by the gateway, absent from URLs, never echoed — and protocol-less clients connect unchanged"] },
   { file: "test/e2e/preboot-live.mts",   needs: ["the ws-upgrade hello folded the reseal round trip into the handshake and pre-delivered a boot GET the first crossing joined"] },
+  { file: "test/e2e/h2-connect-live.mts", needs: ["a websocket rode an HTTP/2 Extended CONNECT stream (RFC 8441) and carried a full tierless exec"] },
   { file: "test/e2e/policy-live.mts",    needs: ["informed FETCH", "priced migrate vs fetch from real bytes and steered the socket"] },
   { file: "test/probes/trace.mts",       needs: ["run-level sampling, a wire-borne trace flag with one cross-tier order, truncation-safe profiles with per-feature size models, and a stability-gated trajectory rule over a greedy floor"] },
   { file: "test/e2e/trio-live.mts",      needs: ["traces recorded through the real host priced fetchA's whole suffix and flipped a locally-losing hop", "the hash gate refuses stale history"] },
