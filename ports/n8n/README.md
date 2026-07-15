@@ -166,59 +166,58 @@ Reproduce:
     TIERLESS_WIRE_TRUTH=1 node ports/n8n/suite.mts
     node ports/report.mts ports/work/n8n-baseline/measure-truth.jsonl ports/work/n8n/measure-truth.jsonl
 
-### Network wait — the port LOSES here (results/report-time-rtt80.txt)
+### Network wait — was a loss, now fixed to the websocket floor (results/report-time-rtt80-p2.txt)
 
-The other half of the headline, and it goes the other way. Four arms — floor
-(RTT0) and shaped (RTT 80 ms) × baseline/ported — decomposed by
-`report-time.mts` as `net = dur(80) − dur(0)`, the only component transport
-can move. Over 616 tests passing in all four runs:
+Four arms — floor (RTT0) and shaped (RTT 80 ms) × baseline/ported — decomposed by
+`report-time.mts` as `net = dur(80) − dur(0)`, the only component transport can move.
+The port originally **added ~20% network wait** (median +740 ms) even as it cut bytes
+49%. Two fixes — the reseal folded into the ws upgrade and the boot GETs pre-fetched at
+the upgrade (below) — cut that to **+6%**. Over 618 tests passing in all four runs:
 
-    floor (compute/render, unimprovable)   baseline 4428 s ≈ ported 4381 s   (isolation clean)
-    network-wait pool                      baseline 1903 s -> ported 2286 s   (+20% MORE wait)
-    median per-test net wait               2946 ms -> 3686 ms                 (+740 ms ≈ 9 RTT)
+                                           PRE-FIX                    FIXED (P2)
+    floor (compute/render, unimprovable)   4428 ≈ 4381 s              4441 ≈ 4402 s   (isolation clean)
+    network-wait pool     baseline->ported 1903 -> 2286 s (+20%)      1914 -> 2029 s (+6%)
+    median per-test net wait               2946 -> 3686 ms (+740)     2946 -> 3211 ms (+265)
 
-**The session socket cut bytes 49% but added ~20% network wait.** Fewer bytes,
-more waiting — deflate shrinks the payload but does nothing for latency, and
-the socket's structure costs round trips the stock HTTP path didn't pay:
+**The residual +6% is 86% the websocket handshake, paid once per real session.** The
+excess pool is 115 s / 618 tests = 187 ms/test. A websocket needs its own TCP + upgrade
+(2 RTT = 160 ms at 80 ms) regardless of origin — that is 99 s (86%) of the 115 s, paid
+**per fresh browser context**. The e2e harness gives every test a fresh context, so it
+pays the handshake 618×; a real long-lived session pays it **once**. So the harness
+number overstates the loss: on the persistent socket a real session runs at ~parity on
+wait with the 49% byte win. This is why "colocate the gateway on the app origin" (the old
+ROADMAP lever) buys ~0 — the ws needs its own handshake to any origin. The remaining 17 s
+(14%) is a handful of workflow-ID/project-specific editor GETs (`/rest/workflows/:id`,
+`.../exists`, `credentials/for-workflow?projectId=`) that a static preboot manifest can't
+cover — the IDs are generated per test, unknown at the upgrade — and they multiplex (~1
+RTT). The boot fan-out itself is fully covered: 13/16 editor boot GETs join the preboot
+buffer (`capture-editor.mts`), all 18 home boot GETs join.
 
-- A **second connection**: the standalone gateway is its own origin, so the
-  browser pays a TCP + ws-upgrade handshake to it on top of the app origin.
-- A **reseal round trip** before the first crossing (fetch the sealed blob).
-- NOT lost parallelism: n8n's boot fan-out fires many `/rest` concurrently and
-  the runtime **multiplexes** them on the one socket (`peer.request` in
-  transport.mts assigns a correlation id and sends immediately, replies matched
-  by id) — verified from the code, so the scariest hypothesis is disproven.
+The two fixes, proven (results/boot-setup.txt, per-context boot timing @ RTT80):
 
-Honesty both directions:
-- The e2e harness gives every test a **fresh browser context**, so the port
-  pays its one-time session setup (ws open + reseal) 736 times where a real
-  session pays it once — this measurement is *pessimistic* for the port on the
-  amortizable part. But the **second-origin handshake recurs per context**, so
-  the regression is not purely an artifact.
-- **Eager bootstrap was tested and disproven** (results/eager-boot-ab.txt).
-  Moving the ws open + reseal to module import — to hide the ~240 ms of setup
-  behind JS/asset bootstrap — was the leading fix. A clean drift-controlled
-  dist-swap A/B (two dists differing by exactly that one line, same subset at
-  RTT80, two rounds) came back a **wash both rounds** (−0.1%, −0.0%; pooled mean
-  −13 ms/test). The effect is an order of magnitude below the per-test noise
-  (stdev 483 ms) and below the same-build round-to-round drift (±0.6–0.7%). The
-  one-time setup is simply not the load-bearing cost — page-load /rest fires
-  nearly as early as module import, leaving no window to overlap. Patch 0005
-  stays lazy.
-- This is the same failure the ROADMAP flagged for Vikunja ("forfeit the
-  data-path lead") — there it netted to parity; n8n's more parallel boot makes
-  it a net loss. The remaining fixes are **structural** (what recurs per
-  context): colocate the gateway on the app origin to kill the second-origin
-  handshake, then fold the reseal into the ws upgrade. Until then, **this port
-  trades latency for bytes** — a win only where bytes are the paid unit
-  (metered/mobile), a loss on wall time under RTT.
+- **Reseal folded into the ws upgrade** — the gateway seals THIS socket's cookie at the
+  upgrade and hands the blob back in an unsolicited `hello`, so the startup blob rides the
+  handshake instead of a separate HTTP reseal round trip. First crossing −200 ms, FCP −152 ms.
+- **Preboot** — the gateway pre-fetches the boot GETs (the frozen manifest) at the upgrade
+  with the socket's own cookie and pushes the envelopes in the `hello`; the app's first
+  crossings JOIN the buffer instead of crossing. Boot crossings **19 → 1**, boot data path
+  −1.4 s. The join is consume-once and refreshes per page load, so it stays correct through
+  mutations (full-suite gate: 670 floor / 667 rtt80 passed, pass-parity with baseline).
+- NOT lost parallelism: the runtime **multiplexes** concurrent crossings (`peer.request` in
+  transport.mts assigns a correlation id and sends immediately, replies matched by id).
+- Eager bootstrap (moving setup to module import) was tested and **disproven** first
+  (results/eager-boot-ab.txt): re-TIMING the setup was a wash because there is no overlap
+  window; REDUCING it (these two fixes) is what moved the number.
 
-Reproduce (or just `node ports/drive-arms.mts n8n` for all six arms + both reports):
+Both fixes are ON by default (boot.mts); each is env-toggleable
+(`TIERLESS_HELLO_AUTH`, `TIERLESS_PREBOOT`) so a run can isolate its contribution.
+
+Reproduce:
 
     TIERLESS_RTT_MS=80 node ports/n8n/suite.mts --baseline
-    TIERLESS_RTT_MS=80 node ports/n8n/suite.mts
-    node ports/report-time.mts results/floor-baseline.jsonl results/floor-ported.jsonl \
-                               results/rtt80-baseline.jsonl results/rtt80-ported.jsonl
+    TIERLESS_RTT_MS=80 node ports/n8n/suite.mts                 # P2 default (both fixes on)
+    node ports/report-time.mts results/floor-baseline.jsonl results/floor-ported-p2.jsonl \
+                               results/rtt80-baseline.jsonl results/rtt80-ported-p2.jsonl
 
 ## Reproduce
 

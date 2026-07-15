@@ -135,8 +135,23 @@ proven (the executable proofs behind `npm test`).
   fewer bytes, 22% fewer trips). Open: the 10–20-app study reporting medians
   and full distributions, losers included.
 
-- **The session socket LOSES on network wait — fix before the corpus study.**
-  Measured on n8n (ports/n8n/README.md, results/report-time-rtt80.txt): at 80 ms
+- **The session socket's network-wait loss — FIXED to the websocket floor.**
+  RESOLUTION (n8n, results/report-time-rtt80-p2.txt): two fixes — the reseal folded
+  into the ws upgrade, and the boot GETs pre-fetched at the upgrade and JOINED by the
+  first crossings — cut the regression from **+20% to +6%** (median wait +740 → +265 ms)
+  with the 49% byte win and full correctness intact (670 floor / 667 rtt80 passed,
+  pass-parity). The residual +6% is **86% the websocket handshake** (TCP + upgrade =
+  2 RTT = 160 ms), paid **per fresh browser context** — 99 s of the 115 s pool excess
+  over 618 tests. A real long-lived session pays that ONCE; the e2e harness pays it 618×,
+  so the harness number overstates the loss and a real session runs at ~parity on wait.
+  The other 17 s (14%) is workflow-ID/project-specific editor GETs a static preboot
+  manifest can't cover (IDs unknown at the upgrade), multiplexed at ~1 RTT. "Colocate the
+  gateway on the app origin" (below) is now known to buy ~0 — a ws needs its own handshake
+  to ANY origin. Mechanism/proof: boot crossings 19 → 1, boot data path −1.4 s
+  (results/boot-setup.txt); packages/tierless hello capability (test/e2e/preboot-live.mts);
+  n8n patch 0005 + gateway.mts + boot.mts (both fixes ON by default, env-toggleable).
+  The ORIGINAL loss, for the record:
+  Measured on n8n (results/report-time-rtt80.txt): at 80 ms
   RTT the port cut wire bytes 49% but ADDED ~20% network wait (median 2946 ->
   3686 ms/test, ~9 extra round trips). Vikunja forfeited its 486 ms data-path
   lead to parity; n8n's more parallel boot fan-out makes it a net regression.
@@ -180,11 +195,19 @@ proven (the executable proofs behind `npm test`).
   per-context repayment (the 736× the report flagged) is what made it look
   amortizable. Patch 0005 stays lazy — no reason to add the eager code.
 
-  REMAINING LEVERS (structural, what actually recurs per interaction, in order):
-  colocate the gateway ON the app origin so there is no second TCP+ws-upgrade
-  handshake to a separate origin; then fold the reseal INTO the ws upgrade so
-  the first crossing carries no extra round trip. These remove RTTs that recur
-  every context, not the one-time setup eager targeted.
+  WHAT LANDED (supersedes the eager attempt): eager RE-TIMED the setup (a wash — no
+  overlap window); the fixes REDUCE it. (1) Reseal folded into the ws upgrade — the
+  gateway seals the socket's cookie at the handshake and returns the blob in an unsolicited
+  `hello`, killing the reseal round trip (first crossing −200 ms). (2) Preboot — the gateway
+  pre-fetches the boot GETs at the upgrade and pushes them in the `hello`; the first
+  crossings JOIN the buffer (19 → 1 crossings, boot data −1.4 s). Both delivered on ONE
+  frame at the upgrade. What did NOT help and why: colocating the gateway on the app origin —
+  a websocket needs its own TCP + upgrade to any origin, so there is no handshake to save;
+  the residual IS that handshake, irreducible for a ws transport and amortized once per real
+  session. Fully general open item: route-aware preboot (the upgrade carrying the route so
+  ID-specific GETs can be pre-fetched) would close the last 14%, at the cost of the upgrade
+  learning the SPA route — deferred; the win is small and partly irreducible (first-open of
+  an arbitrary record can't be predicted at the upgrade).
 
 ## Bigger swings
 
