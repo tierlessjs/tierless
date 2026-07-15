@@ -183,6 +183,16 @@ the upgrade (below) — cut that to **+6%**. Over 618 tests passing in all four 
     network-wait pool     baseline->ported 1903 -> 2286 s (+20%)      1914 -> 2029 s (+6%)
     median per-test net wait               2946 -> 3686 ms (+740)     2946 -> 3211 ms (+265)
 
+**The aggregate loss inverts on the tests that are actually network-bound.** Ranking the
+618 tests by *baseline* net wait (the workload's own measure, independent of the port) and
+cutting the top decile — 62 tests, netB ≥ 6020 ms — the port is **faster**: 510 → 485 s, a
+**+5%** win where the −6% is a loss (median 7094 → 7026 ms). The reason is the crossover: the
+socket handshake is a fixed per-context cost, so it's a large *fraction* of a test that barely
+touches the network (dragging the compute-heavy 90% of the suite negative) but a small one on a
+network-bound test, where the 49% byte cut and the eliminated CORS preflights win outright. A
+port that pays a fixed transport tax and returns a per-byte/per-round-trip saving *should* look
+exactly like this. `report-time.mts` prints this decile for every port.
+
 **The residual +6% is 86% the websocket handshake, paid once per real session.** The
 excess pool is 115 s / 618 tests = 187 ms/test. A websocket needs its own TCP + upgrade
 (2 RTT = 160 ms at 80 ms) regardless of origin — that is 99 s (86%) of the 115 s, paid
