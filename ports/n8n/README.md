@@ -185,8 +185,14 @@ excess pool is 115 s / 618 tests = 187 ms/test. A websocket needs its own TCP + 
 **per fresh browser context**. The e2e harness gives every test a fresh context, so it
 pays the handshake 618×; a real long-lived session pays it **once**. So the harness
 number overstates the loss: on the persistent socket a real session runs at ~parity on
-wait with the 49% byte win. This is why "colocate the gateway on the app origin" (the old
-ROADMAP lever) buys ~0 — the ws needs its own handshake to any origin. The remaining 17 s
+wait with the 49% byte win. Over **ws-over-H2** (`docs/transports.md`) the handshake halves
+again — a ws colocated on the app's H2 origin **coalesces onto the page's warm connection**
+and pays 1 RTT (the Extended CONNECT stream), not 2 (measured: transport-bench 167→84 ms).
+So over H2-on-both-with-colocation the 99 s handshake term is ~49 s and the pool excess is
+~66 s (**~+3%**); plain ws over separate origins is the fallback floor these numbers assume.
+(This is the one case where colocation matters: for *plain* ws it buys ~0 — a plain ws needs
+its own TCP+upgrade to any origin — but for ws-over-H2 colocation is exactly what makes the
+socket coalescible, worth that 1 saved RTT.) The remaining 17 s
 (14%) is a handful of workflow-ID/project-specific editor GETs (`/rest/workflows/:id`,
 `.../exists`, `credentials/for-workflow?projectId=`) that a static preboot manifest can't
 cover — the IDs are generated per test, unknown at the upgrade — and they multiplex (~1
