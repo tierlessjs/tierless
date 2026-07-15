@@ -1,0 +1,10 @@
+===== ported boot setup timing @ RTT80 (median of 4) =====
+arm              appReady   FCP   firstCross  lastCross  crossings
+P0 reseal-http        -1   5600        4273       5881        19
+P1 reseal-upgrd       -1   5448        4073       5704        19
+P2 +preboot           -1   5320        4307       4307         1
+
+== deltas (lower = better) ==
+  reseal-in-upgrade (P0->P1): appReady 0 ms, firstCross 200 ms
+  + preboot        (P1->P2): appReady 0 ms, lastCross 1397 ms, crossings 18
+  full fix         (P0->P2): appReady 0 ms
