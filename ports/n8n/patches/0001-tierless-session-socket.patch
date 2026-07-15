@@ -1,19 +1,21 @@
 --- a/packages/frontend/@n8n/rest-api-client/src/utils.ts
 +++ b/packages/frontend/@n8n/rest-api-client/src/utils.ts
-@@ -6,6 +6,8 @@
+@@ -4,6 +4,10 @@
+ import axios from 'axios';
+ import { jsonParse } from 'n8n-workflow';
  import type { GenericValue, IDataObject } from 'n8n-workflow';
- import { axiosAdapter } from 'tierless/adapt-axios';
- import { restResources } from 'tierless/adapt';
++import { axiosAdapter } from 'tierless/adapt-axios';
++import { restResources } from 'tierless/adapt';
 +import { configureTierless, sessionExec, sessionHello } from 'tierless/browser';
 +import { cookieSessionAuth } from 'tierless/adapt-session-auth';
  
  import type { IRestApiContext } from './types';
  
-@@ -18,6 +20,72 @@
+@@ -16,6 +20,72 @@
  	return browserId;
  };
  
-+// The session socket (corpus port, patch 0005): same-origin requests cross a ws
++// The session socket (corpus port): same-origin requests cross a ws
 +// session to the gateway at page-port+100 (ports/n8n/gateway.mts) as one exec crossing
 +// each — preflights gone, envelope headers trimmed, one session-long deflate window.
 +// n8n's authority is an httpOnly cookie, so each crossing carries a sealed blob
@@ -25,7 +27,7 @@
 +	if (!tierlessSession) {
 +		const port = Number(location.port || (location.protocol === 'https:' ? 443 : 80)) + 100;
 +		// bounded per-crossing log ({t, url, status, reqBody, body}) — the suite's
-+		// transport-agnostic waits read it (test patch 0006); zero cost outside tests
++		// transport-agnostic waits read it (test patch); zero cost outside tests
 +		(window as { __TIERLESS_EXEC_LOG__?: boolean }).__TIERLESS_EXEC_LOG__ = true;
 +		configureTierless({
 +			url: () =>
@@ -43,13 +45,13 @@
 +	return tierlessSession;
 +}
 +
-+// FORCE-BROWSER (corpus port, patch 0005): a request whose URL matches a glob the page
++// FORCE-BROWSER (corpus port): a request whose URL matches a glob the page
 +// registered in `window.__tierlessForceBrowser` stays on the browser's own fetch
 +// instead of the socket. Moving I/O off the browser makes it invisible to anything
 +// that intercepts browser network traffic — service workers, extensions, and (the
 +// reason it surfaced) a test harness's response mocking. The embedder lists the
 +// resources that MUST stay browser-visible; empty/absent in production, so this is a
-+// no-op there. Populated by test patch 0007 from the suite's own route() registrations.
++// no-op there. Populated by a test patch from the suite's own route() registrations.
 +type ForceGlob = { glob: string } | { re: [string, string] };
 +function forceBrowser(path: string): boolean {
 +	const list = (window as { __tierlessForceBrowser?: ForceGlob[] }).__tierlessForceBrowser;
@@ -82,16 +84,20 @@
  export const NO_NETWORK_ERROR_CODE = 999;
  export const STREAM_SEPARATOR = '⧉⇋⇋➽⌑⧉§§\n';
  
-@@ -123,11 +191,17 @@
- 		// builds, so production requests never pin on it). Browser-pinned configs
- 		// (blobs, FormData, binary bodies) fall through to axios's own XHR adapter.
- 		adapter: axiosAdapter({
--			exec: restResources(
--				new URL(baseURL, typeof location === 'undefined' ? 'http://localhost' : location.href)
--					.origin,
--				{ envelopeErrors: true },
--			),
-+			// patch 0005: the app's OWN api (same-origin) crosses the session socket;
+@@ -112,6 +182,28 @@
+ 		url: endpoint,
+ 		baseURL,
+ 		headers: headers ?? {},
++		// The tierless I/O bottom (corpus port): axios above this slot is
++		// untouched — every caller (makeRestApiRequest, getFullApiResponse, ~50 api/
++		// modules) funnels through this one request(). Each request is fulfilled as a
++		// tierless resource request; in the browser the exec is a direct fetch bound to
++		// THIS call's own baseURL origin — stock behavior, same-origin cookies ride the
++		// fetch exactly as they rode the XHR (n8n sets withCredentials only in dev
++		// builds, so production requests never pin on it). Browser-pinned configs
++		// (blobs, FormData, binary bodies) fall through to axios's own XHR adapter.
++		adapter: axiosAdapter({
++			// the session socket: the app's OWN api (same-origin) crosses the session socket;
 +			// an external origin (api.n8n.io) keeps the direct-fetch exec — stock behavior
 +			exec: (() => {
 +				const origin = new URL(
@@ -102,6 +108,24 @@
 +					? tierlessSameOriginExec(origin)
 +					: restResources(origin, { envelopeErrors: true });
 +			})(),
- 			fallback: typeof XMLHttpRequest === 'undefined' ? undefined : axios.getAdapter('xhr'),
- 		}) as AxiosRequestConfig['adapter'],
++			fallback: typeof XMLHttpRequest === 'undefined' ? undefined : axios.getAdapter('xhr'),
++		}) as AxiosRequestConfig['adapter'],
  	};
+ 	if (baseURL.startsWith('/')) {
+ 		options.headers!['browser-id'] = getBrowserId();
+@@ -119,7 +211,14 @@
+ 	if (
+ 		import.meta.env.NODE_ENV !== 'production' &&
+ 		!baseURL.includes('api.n8n.io') &&
+-		!baseURL.includes('n8n.cloud')
++		!baseURL.includes('n8n.cloud') &&
++		// tierless corpus port (continued): only when the flag can matter.
++		// Their build leaves import.meta.env.NODE_ENV undefined, so this branch runs in
++		// production too; same-origin XMLHttpRequest sends cookies with or without
++		// withCredentials (the flag is cross-origin-only by definition), but the adapter
++		// pins any withCredentials request to the XHR fallback — the vestigial flag
++		// would silently turn the whole port into a no-op.
++		(typeof location === 'undefined' || new URL(baseURL, location.href).origin !== location.origin)
+ 	) {
+ 		options.withCredentials = options.withCredentials ?? true;
+ 	}

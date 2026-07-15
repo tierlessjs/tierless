@@ -1,13 +1,13 @@
 --- a/packages/testing/playwright/utils/force-browser-routes.ts
 +++ b/packages/testing/playwright/utils/force-browser-routes.ts
 @@ -0,0 +1,85 @@
-+// Force-browser route recorder (tierless corpus harness, test patch 0007 — applied to
++// Force-browser route recorder (tierless corpus harness, test patch — applied to
 +// BOTH arms; docs/corpus.md test accommodations). The ported build serves same-origin
 +// /rest over a session websocket, which is INVISIBLE to browser network interception:
 +// Playwright's context.route/page.route hook the browser's own fetch/XHR, so a request
 +// that leaves as a ws frame is never seen and its mock never fires.
 +//
-+// The port exposes a seam for exactly this (patch 0005 `forceBrowser`): a page global
++// The port exposes a seam for exactly this (the port’s `forceBrowser` seam): a page global
 +// listing URL globs that must stay on the browser's fetch. This recorder wraps route()
 +// so every pattern a test intercepts is registered there automatically — the mocked
 +// request stays browser-side, the intercept fires, and the assertion is unchanged. On
@@ -98,7 +98,7 @@
  }
  
  export async function setupDefaultInterceptors(target: BrowserContext) {
-+	// tierless corpus harness (test patch 0007, both arms): record every intercepted
++	// tierless corpus harness (test patch, both arms): record every intercepted
 +	// glob into the port's force-browser seam so mocked requests stay browser-visible
 +	recordForceBrowserRoutes(target);
  	// Global /rest/settings intercept - always active like Cypress

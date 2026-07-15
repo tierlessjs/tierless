@@ -41,17 +41,20 @@ verified from source at the pinned sha:
 
 ## The diff to their app
 
-    patches/0002-tierless-axios-adapter.patch   utils.ts: the adapter in the one request() (+20 lines)
+    patches/0001-tierless-session-socket.patch   utils.ts: the adapter + the session
+                                                 socket in the one request() (one file)
 
 plus `pnpm add tierless` in `@n8n/rest-api-client` (a dependency install, not a
-diff — setup.sh does it on the ported tree only). Test patches (BOTH arms):
+diff — setup.sh does it on the ported tree only). The whole port is this one file:
+the direct-fetch adapter and the session-socket stage below are two halves of it.
+Test patches (BOTH arms):
 
-    patches/0001-measure-reporter.patch   playwright.config.ts: measure reporter +
+    patches/0002-measure-reporter.patch   playwright.config.ts: measure reporter +
                                           recording off on measured runs + webServer
                                           skip covers the frontend entry; one new
                                           reporter file
 
-What patch 0002 does: n8n's `request()` builds a per-call `AxiosRequestConfig`;
+What the adapter half does: n8n's `request()` builds a per-call `AxiosRequestConfig`;
 the patch adds a per-call `adapter` — tierless's axios adapter with a
 direct-fetch exec bound to THAT call's own `baseURL` origin. Everything above —
 their error taxonomy (ResponseError/MFA), param serializer, browser-id header,
@@ -60,7 +63,7 @@ fetch exactly as they rode the XHR (n8n sets `withCredentials` only in dev
 builds, so production requests never pin on it). Blob/FormData/binary configs
 and external origins (`api.n8n.io`) fall through to axios's own XHR adapter.
 
-## The session-socket stage (patch 0005 — BUILT and certified)
+## The session-socket stage (the port patch's second half — BUILT and certified)
 
 Same-origin `/rest` now crosses a **session websocket** to a standalone gateway
 (`ports/n8n/gateway.mts`, :5780 = page-port+100) as one exec crossing each:
@@ -97,10 +100,11 @@ a test harness's response mocking. Playwright's `route()` hooks the browser's
 own fetch, so a request that leaves as a ws frame is never seen: on the first
 full ported run, 33 tests that inject feature flags by mocking `/rest/settings`
 and friends silently went unmocked. The answer is a **force-browser seam**
-(patch 0005 `forceBrowser`): a page global lists URL globs that must stay on the
-browser's own fetch; matching same-origin requests take the direct-fetch exec
-instead of the socket. Empty in production — a real embedder control (keep a
-resource SW/extension-visible), not a test device. Test patch 0007 populates it
+(the port patch's `forceBrowser` seam): a page global lists URL globs that must
+stay on the browser's own fetch; matching same-origin requests take the
+direct-fetch exec instead of the socket. Empty in production — a real embedder
+control (keep a resource SW/extension-visible), not a test device. The
+force-browser test patch populates it
 by wrapping `route()`, so every intercepted glob auto-registers; both arms,
 inert on stock.
 
@@ -285,7 +289,7 @@ The 37 remaining failures are env/flake classes (largest: 10× a null
 `services` read; OAuth popups needing external network; assorted timeouts) —
 arm-symmetric by construction, dropped by report.mts's pass-parity gate.
 
-## Patch 0002 certified behaviorally invisible (2026-07-13, results/cert-0002-adapter.jsonl)
+## The adapter certified behaviorally invisible (2026-07-13, results/cert-0002-adapter.jsonl)
 
 Full suite on the ported tree, same command as the baseline:
 

@@ -18,14 +18,12 @@
     "codeload": null
   },
   "patches": [
-    "patches/0002-tierless-axios-adapter.patch",
-    "patches/0005-session-socket.patch"
+    "patches/0001-tierless-session-socket.patch"
   ],
   "testPatches": [
-    "patches/0001-measure-reporter.patch",
+    "patches/0002-measure-reporter.patch",
     "patches/0003-local-lane-queue-gating.patch",
     "patches/0004-transport-agnostic-waits.patch",
-    "patches/0006-transport-agnostic-waits.patch",
-    "patches/0007-force-browser-mocked-routes.patch"
+    "patches/0005-force-browser-mocked-routes.patch"
   ]
 }
