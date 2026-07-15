@@ -24,7 +24,7 @@ const ARMS = [
   { name: "P2 +preboot    ", env: { TIERLESS_HELLO_AUTH: "1", TIERLESS_PREBOOT: "1", TIERLESS_PREBOOT_FILE: "/home/user/tierless/ports/n8n/results/preboot-manifest.txt" } },
 ];
 
-const READY = ["project-name", "resources-list-wrapper", "add-resource-workflow", "new-workflow-card", "main-sidebar"];
+const READY = "project-name";   // best-effort DOM ready; short timeout, -1 if absent (FCP + crossings are the primary signals)
 const med = (xs: number[]): number => { const s = xs.filter((x) => x >= 0).sort((a, b) => a - b); return s.length ? Math.round(s[Math.floor(s.length / 2)]) : -1; };
 
 const browser = await chromium.launch({ headless: true, executablePath: SHELL });
@@ -53,11 +53,12 @@ try {
         const page = await ctx.newPage();
         const t0 = Date.now();
         await page.goto(SHAPED + "/home/workflows", { waitUntil: "commit" });
-        let ready = -1, matched = "";
-        for (const sel of READY) {
-          try { await page.getByTestId(sel).first().waitFor({ state: "visible", timeout: rep === 0 ? 45000 : 30000 }); ready = Date.now() - t0; matched = sel; break; } catch { /* try next */ }
-        }
-        await page.waitForTimeout(500);
+        // wait for the boot to settle on the transport metric — the LAST boot crossing —
+        // then read timings. A short DOM ready check is best-effort (project-name), -1 if absent.
+        let ready = -1;
+        try { await page.getByTestId(READY).first().waitFor({ state: "visible", timeout: 8000 }); ready = Date.now() - t0; } catch { /* -1 */ }
+        // let the boot crossings finish arriving (they settle within a few RTTs of the socket)
+        await page.waitForTimeout(6000);
         // crossings log wall-clock t (Date.now); relate to nav start t0 (same host clock). A
         // preboot JOIN never reaches the exec, so it is absent — crossings count drops on P2.
         const m = (await page.evaluate((t0v: number) => {
@@ -66,23 +67,25 @@ try {
           const ts = log.map((e) => e.t).filter((t) => typeof t === "number");
           return { fcp: Math.round(fcp), crossings: log.length, first: ts.length ? Math.min(...ts) - t0v : -1, last: ts.length ? Math.max(...ts) - t0v : -1 };
         }, t0)) as any;
-        results[arm.name].push({ ready, matched, ...m });
+        results[arm.name].push({ ready, ...m });
         await ctx.close();
       }
       await rc.dispose();
+      const rs = results[arm.name];
+      process.stderr.write(`[arm ${arm.name.trim()}] done: ${rs.length} reps, fcp~${med(rs.map((r) => r.fcp))} first~${med(rs.map((r) => r.first))} last~${med(rs.map((r) => r.last))} crossings~${med(rs.map((r) => r.crossings))}\n`);
     } finally { boot.close(); await new Promise((r) => setTimeout(r, 1500)); }
   }
   await browser.close();
 
   const P = (s: string) => process.stdout.write(s + "\n");
   P("\n===== ported boot setup timing @ RTT80 (median of " + REPS + ") =====");
-  P("arm              appReady   FCP   firstCross  lastCross  crossings  (readySel)");
+  P("arm              appReady   FCP   firstCross  lastCross  crossings");
   const M: Record<string, any> = {};
   for (const arm of ARMS) {
     const rs = results[arm.name]; const g = (f: (r: any) => number) => med(rs.map(f));
     M[arm.name] = { ready: g((r) => r.ready), fcp: g((r) => r.fcp), first: g((r) => r.first), last: g((r) => r.last), crossings: g((r) => r.crossings) };
     const q = M[arm.name];
-    P(arm.name + "  " + String(q.ready).padStart(7) + " " + String(q.fcp).padStart(6) + " " + String(q.first).padStart(11) + " " + String(q.last).padStart(10) + " " + String(q.crossings).padStart(9) + "   " + (rs[0]?.matched || "-"));
+    P(arm.name + "  " + String(q.ready).padStart(7) + " " + String(q.fcp).padStart(6) + " " + String(q.first).padStart(11) + " " + String(q.last).padStart(10) + " " + String(q.crossings).padStart(9));
   }
   const d = (a: string, b: string, f: string) => M[a][f] - M[b][f];
   P("\n== deltas (lower = better) ==");
