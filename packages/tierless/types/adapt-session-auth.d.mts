@@ -11,6 +11,7 @@ export declare const AUTH_FIELD = "__tierlessAuth";
  *  the gateway pre-fetched at upgrade (docs boot preboot): the first crossings JOIN it. */
 export interface SessionHello {
     blob: string | null;
+    sealed?: boolean;
     preboot?: Record<string, unknown> | null;
 }
 export interface CookieSessionAuthOpts {

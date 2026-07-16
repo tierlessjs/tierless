@@ -33,7 +33,7 @@ export const AUTH_FIELD = "__tierlessAuth";
  *  reseal round trip INTO the upgrade — the gateway seals the upgrade's own cookie and hands
  *  it back, so no startup HTTP reseal is needed. `preboot` is a map of GET path -> envelope
  *  the gateway pre-fetched at upgrade (docs boot preboot): the first crossings JOIN it. */
-export interface SessionHello { blob: string | null; preboot?: Record<string, unknown> | null }
+export interface SessionHello { blob: string | null; sealed?: boolean; preboot?: Record<string, unknown> | null }
 
 export interface CookieSessionAuthOpts {
   /** The gateway's http(s) origin, e.g. `http://localhost:5780`. */
@@ -76,11 +76,16 @@ export function cookieSessionAuth({ gateway, channelName = "tierless-session-aut
       if (r.ok) blob = ((await r.json()) as { blob: string | null }).blob;
     } catch { /* gateway unreachable: crossings go without auth and surface the app's own errors */ }
   };
-  // startup: prefer the hello (reseal folded into the ws upgrade). A hello with no blob
-  // (auth disabled, or a gateway that doesn't seal) falls back to the HTTP reseal, so the
-  // startup path degrades to the pre-hello behavior. No hello configured = HTTP reseal.
+  // startup: prefer the hello (reseal folded into the ws upgrade). The gateway's own
+  // declaration decides the blob-less case: sealed:false = no cookie authority there, so
+  // skip the useless reseal and every attach no-ops (this is what makes wrapping
+  // unconditionally — adapt-auto's auth:"auto" — free for header-auth apps); sealed:true
+  // = authority but no cookie at the upgrade (pre-login) — the first rotation delivers
+  // the blob in-band, nothing to reseal. An UNDECLARED blob-less hello (a pre-`sealed`
+  // gateway, or the connection's no-hello safety net) falls back to the HTTP reseal —
+  // the pre-hello behavior, unchanged. No hello configured = HTTP reseal.
   let ready = hello
-    ? hello.then((h) => { seedPreboot(h?.preboot); if (h?.blob) blob = h.blob; else return reseal(); }, () => reseal())
+    ? hello.then((h) => { seedPreboot(h?.preboot); if (h?.blob) blob = h.blob; else if (h?.sealed === undefined) return reseal(); }, () => reseal())
     : reseal();
 
   const channel = typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel(channelName);

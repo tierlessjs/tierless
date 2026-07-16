@@ -15,7 +15,14 @@ population of other people's apps can. Four rungs, each independently useful:
    namespace with an exec, so an adapter can declare an app's existing REST endpoints as
    `api.*` — no backend rewrite. The server host deploys as a thin gateway colocated
    with the backend: client↔server RTTs collapse into one migration; gateway↔backend
-   hops are localhost.
+   hops are localhost. Both halves ship packaged (hardened on the first four ports,
+   which carried them as per-app patches): the gateway is `tierless gateway --backend
+   <url> [--cookie-authority]`; the browser side is `autoSession()`
+   (tierless/adapt-auto — ws-URL convention, shaped-run override, same-origin/external
+   split, force-browser seam, cookie authority auto-engaged by the gateway's hello
+   declaration) feeding `axiosAdapter` (tierless/adapt-axios) or `fetchAdapter`
+   (tierless/adapt-fetch, the crossability policy Strapi's port hand-wrote). Proven
+   live by `test/e2e/auto-session-live.mts`.
 
 3. **Porting recipe.** Per workflow, the client-side fetch/thunk orchestration becomes
    one plain sequential function entering through the Vite seam. Mechanical enough for
@@ -79,9 +86,12 @@ race the HTTP wait against the session's exec log, running the test's own predic
 (or glob/RegExp) unchanged against a truthful facade of each crossing — one fixture
 line per suite, zero edits to spec files. A wait it can't satisfy honestly (a predicate
 reading what a crossing doesn't carry) warns and falls back to HTTP-only rather than
-fabricate a match. What remains hand-patched in the recipe's `testPatches` is the
-SEMANTIC case: a test asserting behavior the port deliberately changes (mocked routes
-that need the force-browser seam, waits whose removal reorders the app). Rules
+fabricate a match. Its companions are generic too: `recordForceBrowserRoutes(context)`
+(same module) auto-registers every `page.route()` pattern on the force-browser seam so
+upstream mocks keep firing, and the measure reporter ships as
+`tierless/playwright-reporter`. What remains hand-patched in the recipe's `testPatches`
+is the SEMANTIC case: a test asserting behavior the port deliberately changes (waits
+whose removal reorders the app, transport-shape assertions). Rules
 unchanged: applied to BOTH arms (on stock the log never exists, so every wait reduces
 to the original exactly); may relocate a wait but never weaken what the test asserts
 about the page; each hand hunk carries a comment saying why. Failures that remain

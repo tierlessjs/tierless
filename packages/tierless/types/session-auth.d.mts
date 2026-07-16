@@ -29,6 +29,7 @@ export declare function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs
         preboot?: boolean;
     }): Promise<{
         blob: string | null;
+        sealed: boolean;
         preboot?: Record<string, unknown>;
     }>;
 };

@@ -18,7 +18,7 @@ export interface ContextLike extends Bindable {
     pages(): PageLike[];
     on(event: "page", cb: (page: PageLike) => void): unknown;
 }
-export declare function globToRegexPattern(glob: string): string;
+export { globToRegexPattern } from "./url-glob.mjs";
 /** Patch `waitForResponse`/`waitForRequest` on a Page — or on a BrowserContext and every
  *  page it ever creates (popups included) — to also accept tierless session crossings.
  *  Idempotent. Call it once from the suite's fixture/setup; upstream spec files need no
@@ -27,4 +27,19 @@ export declare function globToRegexPattern(glob: string): string;
 export declare function installTransportWaits(target: PageLike | ContextLike, { warn }?: {
     warn?: (msg: string) => void;
 }): Promise<void>;
-export {};
+type RouteMatcher = string | RegExp | ((url: unknown) => boolean);
+interface RoutablePage {
+    route(url: RouteMatcher, handler: unknown, options?: unknown): Promise<void>;
+    evaluate(fn: unknown, arg?: unknown): Promise<unknown>;
+    addInitScript(script: unknown, arg?: unknown): Promise<void>;
+}
+interface RoutableContext {
+    route(url: RouteMatcher, handler: unknown, options?: unknown): Promise<void>;
+    pages(): RoutablePage[];
+    on(event: "page", cb: (page: RoutablePage) => void): unknown;
+}
+/** Wrap a BrowserContext's route() — and every page's, current and future — so each
+ *  intercepted URL pattern registers as force-browser on the ported build's seam
+ *  (`window.__tierlessForceBrowser`, read by adapt-auto). Mocked requests then stay on
+ *  the browser's fetch where the intercept can fire. Idempotent per target. */
+export declare function recordForceBrowserRoutes(context: RoutableContext): void;

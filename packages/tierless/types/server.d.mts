@@ -21,9 +21,14 @@ export interface SessionSetup {
     /** Sent to the browser as an unsolicited "hello" the instant the socket is up — the
      *  place to fold a startup round trip INTO the ws upgrade: a sealed auth blob (no reseal
      *  fetch) and/or GET envelopes pre-fetched from the upgrade's own credentials (boot
-     *  preboot). Computed in `session(req)`, which holds the upgrade request's cookie. */
+     *  preboot). Computed in `session(req)`, which holds the upgrade request's cookie.
+     *  `sealed` declares whether this gateway mediates cookie authority (cookieAuthority's
+     *  hello says true even blob-less — pre-login); a session that returns NO hello gets a
+     *  default `{ blob: null, sealed: false }` sent for it, so adapt-auto's auth:"auto"
+     *  resolves at socket-open instead of a safety-net timeout. */
     hello?: {
         blob?: string | null;
+        sealed?: boolean;
         preboot?: Record<string, unknown>;
     };
 }

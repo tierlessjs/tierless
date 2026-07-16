@@ -120,9 +120,21 @@
       "types": "./types/adapt-session-auth.d.mts",
       "default": "./src/adapt-session-auth.mjs"
     },
+    "./adapt-fetch": {
+      "types": "./types/adapt-fetch.d.mts",
+      "default": "./src/adapt-fetch.mjs"
+    },
+    "./adapt-auto": {
+      "types": "./types/adapt-auto.d.mts",
+      "default": "./src/adapt-auto.mjs"
+    },
     "./playwright": {
       "types": "./types/playwright.d.mts",
       "default": "./src/playwright.mjs"
+    },
+    "./playwright-reporter": {
+      "types": "./types/playwright-reporter.d.mts",
+      "default": "./src/playwright-reporter.mjs"
     }
   },
   "bin": {

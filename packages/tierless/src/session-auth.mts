@@ -68,7 +68,7 @@ export function mergeCookies(header: string, setCookies: string[]): string {
   return [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
 }
 
-export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_000, fetchImpl, prebootPaths = [], now = Date.now }: CookieAuthorityOpts): { exec: Exec; handleHttp(req: IncomingMessage, res: ServerResponse): boolean; hello(cookie: string, opts?: { auth?: boolean; preboot?: boolean }): Promise<{ blob: string | null; preboot?: Record<string, unknown> }> } {
+export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_000, fetchImpl, prebootPaths = [], now = Date.now }: CookieAuthorityOpts): { exec: Exec; handleHttp(req: IncomingMessage, res: ServerResponse): boolean; hello(cookie: string, opts?: { auth?: boolean; preboot?: boolean }): Promise<{ blob: string | null; sealed: boolean; preboot?: Record<string, unknown> }> } {
   const key = randomBytes(32);   // per boot, shared with no one
   const allowed = new Set(allowedOrigins);
   const baseFetch: typeof fetch = fetchImpl ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
@@ -160,16 +160,21 @@ export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_00
   // The ws-upgrade "hello": seal the upgrade's cookie into a startup blob (reseal folded
   // into the handshake — no round trip) and pre-fetch the boot GETs with that cookie. Both
   // are per-call toggleable so a measured run can isolate each lever without a rebuild.
-  const hello = async (cookie: string, { auth = true, preboot = true }: { auth?: boolean; preboot?: boolean } = {}): Promise<{ blob: string | null; preboot?: Record<string, unknown> }> => {
+  // `sealed: true` declares that THIS gateway mediates cookie authority even when the
+  // blob is null (no cookie at the upgrade — pre-login): the browser wrapper then skips
+  // the useless HTTP reseal and lets the in-band rotation deliver the first blob. A
+  // gateway with no authority sends sealed:false (attachTierless's default hello), which
+  // is what lets adapt-auto's auth:"auto" cost header-auth apps nothing.
+  const hello = async (cookie: string, { auth = true, preboot = true }: { auth?: boolean; preboot?: boolean } = {}): Promise<{ blob: string | null; sealed: boolean; preboot?: Record<string, unknown> }> => {
     const blob = auth && cookie ? seal({ p: "session", c: cookie, iat: now() }) : null;
-    if (!preboot || !cookie || !prebootPaths.length) return { blob };
+    if (!preboot || !cookie || !prebootPaths.length) return { blob, sealed: auth };
     const inner = restResources(backendUrl, { envelopeErrors: true, fetchImpl: baseFetch });
     const pb: Record<string, unknown> = {};
     await Promise.all(prebootPaths.map(async (path) => {
       try { pb[path] = await inner({ op: "resource", tier: "server", name: "api.get", args: [path, undefined, { headers: { cookie } }] } as ResourceRequest); }
       catch { /* a preboot GET that fails just isn't offered — the app fetches it normally */ }
     }));
-    return { blob, preboot: pb };
+    return { blob, sealed: auth, preboot: pb };
   };
 
   return { exec, handleHttp, hello };

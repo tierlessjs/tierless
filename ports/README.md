@@ -6,3 +6,11 @@ patch series, and journey files for bench/harness. `node ports/run.mts <name>` f
 into the gitignored ports/work/, verifies the tree, applies the patches; the recipe's
 README covers boot + measurement. `ports/selftest` proves the runner end to end against
 this repo's own sha zip (pin mode, verification, patch apply, mismatch refusal).
+
+New ports: what the first four carried as hand patches is now packaged — `autoSession`
+(tierless/adapt-auto) + `axiosAdapter`/`fetchAdapter` for the app seam, `tierless
+gateway` for the gateway, and `installTransportWaits` + `recordForceBrowserRoutes`
+(tierless/playwright) + `tierless/playwright-reporter` for the suite. The app diff
+should be the I/O-bottom seam plus app-specific pins; test patches only for SEMANTIC
+accommodations (docs/corpus.md). The four existing recipes predate this surface and
+stay as measured — re-cutting one means re-running its arms.

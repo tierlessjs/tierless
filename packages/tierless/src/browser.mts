@@ -118,8 +118,8 @@ export function connect({ url, protocols, exec, bundle, tier = "browser", heap =
   // that doesn't send one, e.g. the actions-only demo).
   let helloResolve: (h: import("./adapt-session-auth.mjs").SessionHello) => void;
   const hello: Promise<import("./adapt-session-auth.mjs").SessionHello> = new Promise((r) => { helloResolve = r; });
-  raw.on("hello", (payload: { blob?: string | null; preboot?: Record<string, unknown> | null }) => {
-    helloResolve({ blob: payload?.blob ?? null, preboot: payload?.preboot ?? null });
+  raw.on("hello", (payload: { blob?: string | null; sealed?: boolean; preboot?: Record<string, unknown> | null }) => {
+    helloResolve({ blob: payload?.blob ?? null, sealed: payload?.sealed, preboot: payload?.preboot ?? null });
     return { obj: { type: "ok" } };
   });
   onEvent(ws, "open", () => setTimeout(() => helloResolve({ blob: null }), 5000));   // safety net: a gateway that never sends hello must not hang crossings — fall back to reseal. Long enough never to preempt a real hello (which arrives ~one latency after open).

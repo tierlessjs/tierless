@@ -15,6 +15,15 @@
 //       it and list the surface — endpoint names and authorization KINDS. An endpoint
 //       missing authorize fails HERE, at load time, not in production.
 //
+//   tierless gateway --backend <url> [--port 8180] [--host 127.0.0.1] [--allow-origin o1,o2]
+//                    [--cookie-authority] [--preboot /path ...] [--wire-truth]
+//       The corpus-port session gateway in a box (docs/corpus.md rung 2/3) — what each
+//       port used to carry as its own gateway.mts: a thin exec gateway colocated with
+//       the backend. Same-origin crossings execute against --backend over localhost;
+//       --cookie-authority turns on sealed cookie mediation (reseal/claim endpoints,
+//       hello blob in the upgrade); --wire-truth serves TCP-true byte counters at
+//       /__tierless/wire for the measurement reporter.
+//
 //   tierless types <service.mjs> [out.d.ts]
 //       Emit a `declare const api` declaration from the service's registered endpoints,
 //       so `api.getQuote(...)` in a mix module is checked against the real surface. Each
@@ -40,6 +49,7 @@ const usage = `usage:
   tierless build   <in.js> <out.mjs> [--bare] [--head=<file>] [--auto-deref] [--auto-writeback] [--track-writes] [--source-map] [--resource=ns:tier]
   tierless explain <file.js> [--json] [--resource=ns:tier ...]
   tierless api     <service.mjs>
+  tierless gateway --backend <url> [--port 8180] [--host 127.0.0.1] [--allow-origin o1,o2] [--cookie-authority] [--preboot /path ...] [--wire-truth]
   tierless types   <service.mjs> [out.d.ts]`;
 const parseResources = (flags) => {
     const resources = {};
@@ -252,6 +262,60 @@ else if (cmd === "explain") {
             console.log(`       line ${s.line}: ${s.name} → ${s.tier} tier`);
     }
     console.log(`\n${rep.functions.filter((f) => f.suspendable).length} compiled, ${rep.functions.filter((f) => !f.suspendable).length} pure.`);
+}
+else if (cmd === "gateway") {
+    // The port gateway in a box — replaces the per-port gateway.mts files (they were four
+    // flags' worth of differences). Deployment posture unchanged: browser↔gateway is the
+    // one real-latency hop, gateway↔backend is localhost.
+    const flag = (name) => { const i = rest.indexOf(name); return i >= 0 ? rest[i + 1] : undefined; };
+    const multi = (name) => rest.flatMap((a, i) => (a === name && rest[i + 1] ? [rest[i + 1]] : []));
+    const backend = flag("--backend") || process.env.TIERLESS_API_URL || die(usage);
+    const port = Number(flag("--port") || process.env.TIERLESS_GATEWAY_PORT || 8180);
+    const host = flag("--host") || "127.0.0.1"; // loopback by default: an unauthenticated exec bridge to the backend must not bind wide
+    const origins = (flag("--allow-origin") || process.env.TIERLESS_ALLOWED_ORIGINS || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const prebootPaths = multi("--preboot");
+    const { createServer } = await import("node:http");
+    // package self-reference: the bin's tsconfig compiles only bin/, so src modules are
+    // reached the way any consumer reaches them — through the exports map
+    const { attachTierless, makeWireStats } = await import("tierless/server");
+    const { restResources } = await import("tierless/adapt");
+    const wire = rest.includes("--wire-truth") || process.env.TIERLESS_WIRE_TRUTH ? makeWireStats() : undefined;
+    // sealed cookie authority (session-auth.mts): crossings carry a sealed jar blob, the
+    // gateway rotates in-band on mediated Set-Cookie and stores no credentials. Its
+    // reseal/claim endpoints trade credentials, so --cookie-authority REQUIRES the origin
+    // gate. Without it, hello declares sealed:false (attachTierless's default) and
+    // adapt-auto's auth:"auto" no-ops.
+    const authority = rest.includes("--cookie-authority")
+        ? (await import("tierless/session-auth")).cookieAuthority({ backendUrl: backend, allowedOrigins: origins.length ? origins : die("tierless gateway: --cookie-authority requires --allow-origin (reseal/claim trade credentials)"), prebootPaths })
+        : undefined;
+    const server = createServer((req, res) => {
+        if (wire && req.url === "/__tierless/wire") {
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify(wire.read()));
+            return;
+        }
+        if (authority?.handleHttp(req, res))
+            return;
+        res.statusCode = 200;
+        res.end("tierless gateway"); // the suite's boot readiness wait
+    });
+    const exec = authority ? authority.exec : restResources(backend, { envelopeErrors: true });
+    attachTierless(server, {
+        // exec-only: no compiled machines (the adapter path crosses per request); compiled
+        // surfaces resolve from a manifest when a port lands them
+        bundle: { PROGRAMS: {}, __unwind: () => false },
+        wire,
+        session: async (req) => {
+            // websockets don't do CORS: loopback binding alone doesn't stop a hostile page the
+            // developer happens to visit from reaching the backend through this exec bridge
+            const origin = String(req.headers.origin || "");
+            if (origins.length && !origins.includes(origin))
+                throw new Error("tierless gateway: origin not allowed: " + JSON.stringify(origin));
+            return authority ? { exec, hello: await authority.hello(String(req.headers.cookie || "")) } : { exec };
+        },
+    });
+    // print the BOUND port (--port 0 lets a harness pick a free one and parse it back)
+    server.listen(port, host, () => console.log(`tierless gateway ${host}:${server.address().port} -> ${backend}${authority ? " (cookie authority)" : ""}${wire ? " (wire truth)" : ""}`));
 }
 else if (cmd === "api") {
     const [file] = rest;

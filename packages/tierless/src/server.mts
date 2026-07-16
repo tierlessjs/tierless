@@ -47,8 +47,12 @@ export interface SessionSetup {
   /** Sent to the browser as an unsolicited "hello" the instant the socket is up — the
    *  place to fold a startup round trip INTO the ws upgrade: a sealed auth blob (no reseal
    *  fetch) and/or GET envelopes pre-fetched from the upgrade's own credentials (boot
-   *  preboot). Computed in `session(req)`, which holds the upgrade request's cookie. */
-  hello?: { blob?: string | null; preboot?: Record<string, unknown> };
+   *  preboot). Computed in `session(req)`, which holds the upgrade request's cookie.
+   *  `sealed` declares whether this gateway mediates cookie authority (cookieAuthority's
+   *  hello says true even blob-less — pre-login); a session that returns NO hello gets a
+   *  default `{ blob: null, sealed: false }` sent for it, so adapt-auto's auth:"auto"
+   *  resolves at socket-open instead of a safety-net timeout. */
+  hello?: { blob?: string | null; sealed?: boolean; preboot?: Record<string, unknown> };
 }
 export interface AttachOptions {
   /** The compiled bundle, or an async resolver by module id (multi-module endpoints). */
@@ -118,8 +122,10 @@ export function bearerFromUpgrade(req: IncomingMessage): string | undefined {
 // differs only in how the Peer's Port is made — the session logic is identical.
 async function serveSessionOn(peer: Peer, req: IncomingMessage, cfg: { resolveBundle: (id: string) => Bundle | Promise<Bundle>; session: (req: IncomingMessage) => SessionSetup | Promise<SessionSetup>; heap: boolean; tier: string }): Promise<void> {
   const { exec, entry, args = [], onDone, twins, hello } = await cfg.session(req);
-  // fold a startup round trip into the handshake: fire the hello the instant the pipe is up.
-  if (hello) peer.request({ type: "hello", ...hello }).catch(() => {});
+  // fold a startup round trip into the handshake: fire the hello the instant the pipe is
+  // up — ALWAYS, defaulting to "no cookie authority here" so the browser's auth wrapper
+  // (auth:"auto") settles at socket-open instead of its 5s no-hello safety net.
+  peer.request({ type: "hello", blob: null, sealed: false, ...hello }).catch(() => {});
   const coherence = cfg.heap ? makeCoherence(cfg.tier) : undefined;
   if (coherence) coherence.serve(peer);
   const hosts = new Map<string, import("./types.mjs").Host>();     // moduleId -> host (stateless; cached per connection)

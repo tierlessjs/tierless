@@ -151,10 +151,15 @@ export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_00
     // The ws-upgrade "hello": seal the upgrade's cookie into a startup blob (reseal folded
     // into the handshake — no round trip) and pre-fetch the boot GETs with that cookie. Both
     // are per-call toggleable so a measured run can isolate each lever without a rebuild.
+    // `sealed: true` declares that THIS gateway mediates cookie authority even when the
+    // blob is null (no cookie at the upgrade — pre-login): the browser wrapper then skips
+    // the useless HTTP reseal and lets the in-band rotation deliver the first blob. A
+    // gateway with no authority sends sealed:false (attachTierless's default hello), which
+    // is what lets adapt-auto's auth:"auto" cost header-auth apps nothing.
     const hello = async (cookie, { auth = true, preboot = true } = {}) => {
         const blob = auth && cookie ? seal({ p: "session", c: cookie, iat: now() }) : null;
         if (!preboot || !cookie || !prebootPaths.length)
-            return { blob };
+            return { blob, sealed: auth };
         const inner = restResources(backendUrl, { envelopeErrors: true, fetchImpl: baseFetch });
         const pb = {};
         await Promise.all(prebootPaths.map(async (path) => {
@@ -163,7 +168,7 @@ export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_00
             }
             catch { /* a preboot GET that fails just isn't offered — the app fetches it normally */ }
         }));
-        return { blob, preboot: pb };
+        return { blob, sealed: auth, preboot: pb };
     };
     return { exec, handleHttp, hello };
 }

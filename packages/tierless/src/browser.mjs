@@ -73,7 +73,7 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
     let helloResolve;
     const hello = new Promise((r) => { helloResolve = r; });
     raw.on("hello", (payload) => {
-        helloResolve({ blob: payload?.blob ?? null, preboot: payload?.preboot ?? null });
+        helloResolve({ blob: payload?.blob ?? null, sealed: payload?.sealed, preboot: payload?.preboot ?? null });
         return { obj: { type: "ok" } };
     });
     onEvent(ws, "open", () => setTimeout(() => helloResolve({ blob: null }), 5000)); // safety net: a gateway that never sends hello must not hang crossings — fall back to reseal. Long enough never to preempt a real hello (which arrives ~one latency after open).

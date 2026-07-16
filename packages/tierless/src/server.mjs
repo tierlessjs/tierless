@@ -72,9 +72,10 @@ export function bearerFromUpgrade(req) {
 // differs only in how the Peer's Port is made — the session logic is identical.
 async function serveSessionOn(peer, req, cfg) {
     const { exec, entry, args = [], onDone, twins, hello } = await cfg.session(req);
-    // fold a startup round trip into the handshake: fire the hello the instant the pipe is up.
-    if (hello)
-        peer.request({ type: "hello", ...hello }).catch(() => { });
+    // fold a startup round trip into the handshake: fire the hello the instant the pipe is
+    // up — ALWAYS, defaulting to "no cookie authority here" so the browser's auth wrapper
+    // (auth:"auto") settles at socket-open instead of its 5s no-hello safety net.
+    peer.request({ type: "hello", blob: null, sealed: false, ...hello }).catch(() => { });
     const coherence = cfg.heap ? makeCoherence(cfg.tier) : undefined;
     if (coherence)
         coherence.serve(peer);

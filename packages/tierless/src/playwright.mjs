@@ -147,50 +147,10 @@ function responseFacade(c) {
     };
 }
 // ------------------------------------------------------------------ url matching ----
-// Playwright-faithful glob → regex — a token-for-token port of playwright-core's
-// urlMatch.globToRegexPattern (verified against the installed copy by the live proof's
-// differential check): `*` → any run without `/`, `**` → any run at all, `{a,b}` →
-// alternation, `\` escapes. NOTE current Playwright treats `?` and `[`/`]` as LITERALS
-// in URL globs (URLs carry query strings), so a no-wildcard string compiles to an
-// anchored literal — Playwright's exact-equality case falls out.
-const GLOB_ESCAPE = new Set(["$", "^", "+", ".", "*", "(", ")", "|", "\\", "?", "{", "}", "[", "]"]);
-export function globToRegexPattern(glob) {
-    const tokens = ["^"];
-    let inGroup = false;
-    for (let i = 0; i < glob.length; ++i) {
-        const c = glob[i];
-        if (c === "\\" && i + 1 < glob.length) {
-            const nxt = glob[++i];
-            tokens.push(GLOB_ESCAPE.has(nxt) ? "\\" + nxt : nxt);
-            continue;
-        }
-        if (c === "*") {
-            let stars = 1;
-            while (glob[i + 1] === "*") {
-                stars++;
-                i++;
-            }
-            tokens.push(stars > 1 ? "(.*)" : "([^/]*)");
-            continue;
-        }
-        switch (c) {
-            case "{":
-                inGroup = true;
-                tokens.push("(");
-                break;
-            case "}":
-                inGroup = false;
-                tokens.push(")");
-                break;
-            case ",":
-                tokens.push(inGroup ? "|" : "\\,");
-                break;
-            default: tokens.push(GLOB_ESCAPE.has(c) ? "\\" + c : c);
-        }
-    }
-    tokens.push("$");
-    return tokens.join("");
-}
+// Playwright-faithful glob → regex, shared with the force-browser seam (url-glob.mts;
+// the live proof differentially verifies it against the installed playwright-core).
+import { globToRegexPattern } from "./url-glob.mjs";
+export { globToRegexPattern } from "./url-glob.mjs";
 // Playwright resolves a non-`*`-leading string pattern against the context baseURL,
 // which a Page doesn't expose; the crossing's own absolute URL is the closest truthful
 // base (these suites' baseURL IS the page origin). Patterns starting with `*` — every
@@ -334,4 +294,57 @@ export async function installTransportWaits(target, { warn = (msg) => console.wa
         // current document (the init script only reaches documents created from now on)
         await page.evaluate(PAGE_WIRE).catch(() => { });
     }
+}
+// a function matcher can't be serialized into the page (and is the rare case). Skipped:
+// worst case that one request rides the socket and its mock misses — the run surfaces it.
+const describeMatcher = (url) => typeof url === "string" ? { glob: url } : url instanceof RegExp ? { re: [url.source, url.flags] } : null;
+const PUSH_FORCE = (g) => {
+    const w = window;
+    (w.__tierlessForceBrowser ??= []).push(g);
+};
+const seedForce = (page, d) => {
+    // current document (route() may be called after the page loaded)…
+    void page.evaluate(PUSH_FORCE, d).catch(() => { });
+    // …and every future document (navigations reset window; init scripts re-run per doc)
+    void page.addInitScript(PUSH_FORCE, d).catch(() => { });
+};
+const ROUTE_WRAPPED = new WeakSet();
+/** Wrap a BrowserContext's route() — and every page's, current and future — so each
+ *  intercepted URL pattern registers as force-browser on the ported build's seam
+ *  (`window.__tierlessForceBrowser`, read by adapt-auto). Mocked requests then stay on
+ *  the browser's fetch where the intercept can fire. Idempotent per target. */
+export function recordForceBrowserRoutes(context) {
+    if (ROUTE_WRAPPED.has(context))
+        return;
+    ROUTE_WRAPPED.add(context);
+    // context.route() applies to every page including future ones: remember its patterns
+    // and seed them onto each page as it appears
+    const contextDescriptors = [];
+    const ctxRoute = context.route.bind(context);
+    context.route = async (url, handler, options) => {
+        const d = describeMatcher(url);
+        if (d) {
+            contextDescriptors.push(d);
+            for (const p of context.pages())
+                seedForce(p, d);
+        }
+        return ctxRoute(url, handler, options);
+    };
+    const wrapPage = (page) => {
+        if (ROUTE_WRAPPED.has(page))
+            return;
+        ROUTE_WRAPPED.add(page);
+        for (const d of contextDescriptors)
+            seedForce(page, d);
+        const pageRoute = page.route.bind(page);
+        page.route = async (url, handler, options) => {
+            const d = describeMatcher(url);
+            if (d)
+                seedForce(page, d);
+            return pageRoute(url, handler, options);
+        };
+    };
+    for (const p of context.pages())
+        wrapPage(p);
+    context.on("page", wrapPage);
 }

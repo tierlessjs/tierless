@@ -177,35 +177,10 @@ function responseFacade(c: Crossing): Record<string, unknown> {
 }
 
 // ------------------------------------------------------------------ url matching ----
-// Playwright-faithful glob → regex — a token-for-token port of playwright-core's
-// urlMatch.globToRegexPattern (verified against the installed copy by the live proof's
-// differential check): `*` → any run without `/`, `**` → any run at all, `{a,b}` →
-// alternation, `\` escapes. NOTE current Playwright treats `?` and `[`/`]` as LITERALS
-// in URL globs (URLs carry query strings), so a no-wildcard string compiles to an
-// anchored literal — Playwright's exact-equality case falls out.
-const GLOB_ESCAPE = new Set(["$", "^", "+", ".", "*", "(", ")", "|", "\\", "?", "{", "}", "[", "]"]);
-export function globToRegexPattern(glob: string): string {
-  const tokens = ["^"];
-  let inGroup = false;
-  for (let i = 0; i < glob.length; ++i) {
-    const c = glob[i];
-    if (c === "\\" && i + 1 < glob.length) { const nxt = glob[++i]; tokens.push(GLOB_ESCAPE.has(nxt) ? "\\" + nxt : nxt); continue; }
-    if (c === "*") {
-      let stars = 1;
-      while (glob[i + 1] === "*") { stars++; i++; }
-      tokens.push(stars > 1 ? "(.*)" : "([^/]*)");
-      continue;
-    }
-    switch (c) {
-      case "{": inGroup = true; tokens.push("("); break;
-      case "}": inGroup = false; tokens.push(")"); break;
-      case ",": tokens.push(inGroup ? "|" : "\\,"); break;
-      default: tokens.push(GLOB_ESCAPE.has(c) ? "\\" + c : c);
-    }
-  }
-  tokens.push("$");
-  return tokens.join("");
-}
+// Playwright-faithful glob → regex, shared with the force-browser seam (url-glob.mts;
+// the live proof differentially verifies it against the installed playwright-core).
+import { globToRegexPattern } from "./url-glob.mjs";
+export { globToRegexPattern } from "./url-glob.mjs";
 
 // Playwright resolves a non-`*`-leading string pattern against the context baseURL,
 // which a Page doesn't expose; the crossing's own absolute URL is the closest truthful
@@ -328,4 +303,79 @@ export async function installTransportWaits(target: PageLike | ContextLike, { wa
     // current document (the init script only reaches documents created from now on)
     await page.evaluate(PAGE_WIRE).catch(() => {});
   }
+}
+
+// -------------------------------------------------------- force-browser recorder ----
+// The companion accommodation to the waits: a `page.route()` mock hooks the browser's
+// own fetch/XHR, so a request that leaves as a ws frame is invisible to it and the mock
+// never fires. The ported build's I/O bottom exposes a seam for exactly this — a page
+// global listing URL patterns that must stay on the browser's fetch (adapt-auto reads
+// `window.__tierlessForceBrowser`; empty in production, so a no-op there). This
+// recorder wraps route() so every pattern a test intercepts registers there
+// automatically: the mocked request stays browser-side, the intercept fires, the
+// assertion is unchanged. Only the TRANSPORT of intercepted requests is affected. On
+// the stock arm the global is inert (those requests are already HTTP).
+type RouteMatcher = string | RegExp | ((url: unknown) => boolean);
+type ForceDescriptor = { glob: string } | { re: [string, string] };
+interface RoutablePage {
+  route(url: RouteMatcher, handler: unknown, options?: unknown): Promise<void>;
+  evaluate(fn: unknown, arg?: unknown): Promise<unknown>;
+  addInitScript(script: unknown, arg?: unknown): Promise<void>;
+}
+interface RoutableContext {
+  route(url: RouteMatcher, handler: unknown, options?: unknown): Promise<void>;
+  pages(): RoutablePage[];
+  on(event: "page", cb: (page: RoutablePage) => void): unknown;
+}
+
+// a function matcher can't be serialized into the page (and is the rare case). Skipped:
+// worst case that one request rides the socket and its mock misses — the run surfaces it.
+const describeMatcher = (url: RouteMatcher): ForceDescriptor | null =>
+  typeof url === "string" ? { glob: url } : url instanceof RegExp ? { re: [url.source, url.flags] } : null;
+
+const PUSH_FORCE = (g: unknown): void => {
+  const w = window as unknown as { __tierlessForceBrowser?: unknown[] };
+  (w.__tierlessForceBrowser ??= []).push(g);
+};
+
+const seedForce = (page: RoutablePage, d: ForceDescriptor): void => {
+  // current document (route() may be called after the page loaded)…
+  void page.evaluate(PUSH_FORCE, d).catch(() => {});
+  // …and every future document (navigations reset window; init scripts re-run per doc)
+  void page.addInitScript(PUSH_FORCE, d).catch(() => {});
+};
+
+const ROUTE_WRAPPED = new WeakSet<object>();
+
+/** Wrap a BrowserContext's route() — and every page's, current and future — so each
+ *  intercepted URL pattern registers as force-browser on the ported build's seam
+ *  (`window.__tierlessForceBrowser`, read by adapt-auto). Mocked requests then stay on
+ *  the browser's fetch where the intercept can fire. Idempotent per target. */
+export function recordForceBrowserRoutes(context: RoutableContext): void {
+  if (ROUTE_WRAPPED.has(context)) return;
+  ROUTE_WRAPPED.add(context);
+
+  // context.route() applies to every page including future ones: remember its patterns
+  // and seed them onto each page as it appears
+  const contextDescriptors: ForceDescriptor[] = [];
+  const ctxRoute = context.route.bind(context);
+  context.route = async (url, handler, options?) => {
+    const d = describeMatcher(url);
+    if (d) { contextDescriptors.push(d); for (const p of context.pages()) seedForce(p, d); }
+    return ctxRoute(url, handler, options);
+  };
+
+  const wrapPage = (page: RoutablePage): void => {
+    if (ROUTE_WRAPPED.has(page)) return;
+    ROUTE_WRAPPED.add(page);
+    for (const d of contextDescriptors) seedForce(page, d);
+    const pageRoute = page.route.bind(page);
+    page.route = async (url, handler, options?) => {
+      const d = describeMatcher(url);
+      if (d) seedForce(page, d);
+      return pageRoute(url, handler, options);
+    };
+  };
+  for (const p of context.pages()) wrapPage(p);
+  context.on("page", wrapPage);
 }
