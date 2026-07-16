@@ -38,7 +38,13 @@ const anchored = T.anchorPlaywrightConfig(base, ${JSON.stringify(suiteDir)});
 export default {
   ...anchored,
   ...(process.env.TIERLESS_MEASURE_OUT ? { reporter: [["line"], [${JSON.stringify(path.join(TIERLESS_SRC, "playwright-reporter.mjs"))}]] } : {}),
-  use: { ...anchored.use, ...(process.env.BASE_URL ? { baseURL: process.env.BASE_URL } : {}) },
+  use: {
+    ...anchored.use,
+    ...(process.env.BASE_URL ? { baseURL: process.env.BASE_URL } : {}),
+    // recording costs sit inside every measured duration — off on measured runs,
+    // identically in both arms (some suites record unconditionally, e.g. n8n trace:'on')
+    ...(process.env.TIERLESS_MEASURE_OUT ? { trace: "off", video: "off", screenshot: "off" } : {}),
+  },
 };
 `;
   mkdirSync(path.dirname(outFile), { recursive: true });

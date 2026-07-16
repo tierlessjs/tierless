@@ -23,6 +23,7 @@
   "testPatches": [
     "patches/0002-transport-waits-fixture.patch",
     "patches/0003-local-lane-queue-gating.patch",
-    "patches/0004-template-name-race.patch"
+    "patches/0004-template-name-race.patch",
+    "patches/0005-frontend-webserver-skip.patch"
   ]
 }

@@ -1,0 +1,15 @@
+--- a/packages/testing/playwright/playwright.config.ts	2026-07-16 20:02:40.145250525 +0000
++++ b/packages/testing/playwright/playwright.config.ts	2026-07-16 20:02:40.162715603 +0000
+@@ -71,7 +71,11 @@
+ 	});
+ }
+ 
+-if (FRONTEND_URL) {
++// tierless corpus harness (test patch, both arms — SEMANTIC): upstream guards only the
++// BACKEND entry with SKIP_WEB_SERVER; a measured run boots n8n itself and points the
++// browser at a relay origin, which this unguarded entry would probe
++// (reuseExistingServer=false in dev mode) and refuse.
++if (FRONTEND_URL && !SKIP_WEB_SERVER) {
+ 	webServer.push({
+ 		command: 'cd .. && pnpm dev:fe:editor',
+ 		url: `${FRONTEND_URL}/favicon.ico`,
