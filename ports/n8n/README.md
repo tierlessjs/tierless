@@ -368,6 +368,14 @@ attaches the packaged reporter. gateway.mts is retired for `tierless gateway
 --cookie-authority` on :5780 (page+100); the boot levers (preboot manifest,
 hello-auth ablation, GET logging) are CLI flags/envs now.
 
-Both the ported tree and the (now near-pristine) baseline fetch and apply. The measured
-numbers above were driven on the original cut; re-drive before quoting. Runtime
-verification queued behind the nocodb truth arms and strapi.
+VERIFIED in this sandbox (2026-07-16): both variants built; floor arms over the
+wait-heavy subset (executions filter, editor execution incl. request-payload captures,
+templates) — **25 tests per arm, identical ids, EXACT status parity: 19 passed /
+5 skipped / 1 failed on both**, the failure arm-symmetric (a templates-page visibility
+flake, identical on stock). Wire-truth smoke: 2/2 passed with 29.6 KB of real
+session-ws bytes. Two findings from the verification: this suite's playwright (1.60)
+SEALS the client classes, so the waits ride the suite's own fixture seam (test patch
+0002, ~10 lines — the wrapper degrades gracefully and says so); and upstream's
+frontend webServer entry misses the SKIP guard its backend entry has (test patch 0005,
+15 lines, semantic). Total: 986 → 134 patch lines, one 56-line port patch. The
+measured numbers above were driven on the original cut; re-drive before quoting.
