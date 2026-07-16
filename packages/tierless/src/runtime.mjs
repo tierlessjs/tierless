@@ -21,25 +21,46 @@ export function makePump(bundle, { twins } = {}) {
     // segment entered there references; if any currently holds a handle, park the stack to
     // the handle's owner BEFORE stepping. "args" means the unpack block reads F.args — its
     // elements are checked too (a nested call can pass a handle as an argument).
-    // the wire codec descends into arrays/Maps/Sets/plain objects, so a slot can arrive as
-    // ANY container shape holding a handle ([svc], {service: h}, a Map of services) — scan
-    // every own data property the codec would have serialized, cycle-guarded (the codec
-    // itself bounds what can arrive, so traversal terminates on real frames)
-    const findHandle = (v, seen) => {
-        if (isHandle(v))
-            return v;
-        if (v === null || typeof v !== "object" || seen.has(v))
-            return null;
-        seen.add(v);
-        const items = Array.isArray(v) ? v
-            : v instanceof Map ? [...v.keys(), ...v.values()]
-                : v instanceof Set ? [...v]
-                    : v instanceof Date || v instanceof Uint8Array ? []
-                        : Object.values(v);
-        for (const x of items) {
-            const h = findHandle(x, seen);
-            if (h)
-                return h;
+    // Every handle is minted by decodeGraph, and every container the decoder builds is a
+    // plain object, Array, Map, or Set — so a wire handle is only ever reachable through
+    // that chain of shapes ([svc], {service: h}, a Map of services). Descend EXACTLY those,
+    // reading own data properties the way the codec does (non-enumerable and symbol keys
+    // included); stop at anything live (a class instance, a DOM node, a reactive graph) —
+    // the codec excises those as a unit, so a handle can't hide inside one. A LOCAL frame's
+    // slot can hold an app object graph of unbounded depth (a captured store reaches the
+    // whole component tree), so the walk is iterative — no graph shape can blow the stack.
+    const dataProps = (v, out) => {
+        for (const k of [...Object.getOwnPropertyNames(v), ...Object.getOwnPropertySymbols(v)]) {
+            const d = Object.getOwnPropertyDescriptor(v, k);
+            if ("value" in d)
+                out.push(d.value);
+        }
+    };
+    const findHandle = (root) => {
+        const seen = new Set(), work = [root];
+        while (work.length) {
+            const v = work.pop();
+            if (isHandle(v))
+                return v;
+            if (v === null || typeof v !== "object" || seen.has(v))
+                continue;
+            seen.add(v);
+            if (Array.isArray(v))
+                for (const x of v)
+                    work.push(x);
+            else if (v instanceof Map)
+                for (const [k, x] of v) {
+                    work.push(k);
+                    work.push(x);
+                }
+            else if (v instanceof Set)
+                for (const x of v)
+                    work.push(x);
+            else {
+                const p = Object.getPrototypeOf(v);
+                if (p === Object.prototype || p === null)
+                    dataProps(v, work);
+            }
         }
         return null;
     };
@@ -51,7 +72,7 @@ export function makePump(bundle, { twins } = {}) {
             const v = k === "args" ? top.args
                 : k.startsWith("args[") ? (Array.isArray(top.args) ? top.args[Number(k.slice(5, -1))] : top.args)
                     : top[k];
-            const h = findHandle(v, new Set());
+            const h = findHandle(v);
             if (h)
                 return { op: "home", tier: h.owner, name: k, args: [] };
         }

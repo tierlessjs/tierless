@@ -374,5 +374,44 @@ const svc7 = new mod.Svc({});
 const v15 = await bhost.runLocal(makePeer(bp6), "Store$flowDrop", [new mod.Store(svc7), 7], migrate);
 check("dyn home park: the uncompiled method ran on the LIVE home instance, value correct", v15 === "ok" && (svc7 as any).dropped === true && !("tempThing" in svc7), JSON.stringify({ v15, dropped: (svc7 as any).dropped, has: "tempThing" in svc7 }));
 
+// ---- 16. the park scan is codec-bounded: handles are minted by decodeGraph, whose
+// containers are all plain object/Array/Map/Set — so the scan descends exactly those
+// and STOPS at live class instances. A LOCAL frame's slot can hold an app-sized live
+// graph (a captured Pinia store reaches the whole component tree and Vue's dep linked
+// list, ~10^4+ nodes deep) — the old recursive every-own-property walk blew the JS
+// stack there (vikunja quick-add with 100 tasks). Iterative + plain-only must survive
+// it, still find handles through decoder shapes, and skip handle-shaped bait inside
+// class instances.
+{
+  const { makePump } = await import("tierless/runtime");
+  const pump = (makePump as any)({
+    PROGRAMS: { P: () => ({ op: "return", value: "ok" }) },
+    __unwind: () => false,
+    __slots: { P: { 0: ["args[0]"] } },
+  });
+  const owns = (t: string): boolean => t === "here";
+  class Link { next: Link | null = null; }
+  const deep = new Link();                                    // 500k-node class-instance chain: depth that killed the recursive walk
+  let tailL = deep;
+  for (let i = 0; i < 500_000; i++) { const n = new Link(); tailL.next = n; tailL = n; }
+  const cyc: Record<string, unknown> = { a: 1 }; cyc.self = cyc;   // plain cycle: must terminate, no park
+  const r16a = await pump([{ fn: "P", pc: 0, args: [{ store: deep, cycle: cyc }] }], owns, async () => undefined);
+  check("park scan survives a 500k-deep live class graph (no stack overflow, no park)", r16a.done === true && r16a.value === "ok", JSON.stringify(r16a));
+
+  const handle = { __tierless_handle__: true, owner: "srv", id: "h1", kind: "object" };
+  const viaDecoderShapes = { a: [new Map([["k", new Set([{ inner: handle }])]])] };
+  const r16b = await pump([{ fn: "P", pc: 0, args: [viaDecoderShapes] }], owns, async () => undefined);
+  check("a handle nested through plain/Array/Map/Set still parks to its owner", r16b.done === false && r16b.request?.op === "home" && r16b.request?.tier === "srv", JSON.stringify(r16b));
+
+  const hidden: Record<string, unknown> = {};                 // non-enumerable decoded field (decodeGraph restores those): the scan must read it
+  Object.defineProperty(hidden, "svc", { value: handle, enumerable: false, configurable: true });
+  const r16c = await pump([{ fn: "P", pc: 0, args: [hidden] }], owns, async () => undefined);
+  check("a handle on a NON-ENUMERABLE decoded field parks (Object.values missed these)", r16c.done === false && r16c.request?.tier === "srv", JSON.stringify(r16c));
+
+  const live = new (class Wrapper { h = handle; })();         // handle-shaped value inside a class instance: excised as a unit at encode, so not a wire handle here
+  const r16d = await pump([{ fn: "P", pc: 0, args: [{ live }] }], owns, async () => undefined);
+  check("a handle inside a live class instance does NOT park (codec excises the instance whole)", r16d.done === true && r16d.value === "ok", JSON.stringify(r16d));
+}
+
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
 console.log("\na chain migrates in one crossing; the stop rule, identity, and unwind hold; the profile decides");
