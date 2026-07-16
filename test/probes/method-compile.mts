@@ -88,6 +88,35 @@ const got = routed as { prog: string; self: unknown; args: unknown[] } | null;  
 check("bound stub routes (program, this, args)", got !== null && got.prog === "Svc$getAll" && got.self === inst3 && JSON.stringify(got.args) === '[{"page":5}]');
 check("bound path result matches original semantics", out3.length === 2 && out3[1].tagged && inst3.totalPages === 3);
 
+// ---- a NESTED closure's local stays its own const — never a frame slot ------------------
+// vikunja's getBlobUrl shape: after the tier call, the return value is built inside a
+// Promise executor with its own `const reader`. The old declaration rewrite hoisted that
+// declaration to `F.reader = …` while the scope-checked identifier pass (correctly) left
+// its READS bare — every SVG blob crashed with "reader is not defined". The nested local
+// must survive intact, and must NOT clobber a same-named frame local.
+{
+  const { code: codeN, meta: metaN } = compile(`"use tierless";
+export class N {
+  async m(u) {
+    const label = "L";
+    const response = await this.http.get(u);
+    return new Promise((res) => { const label = response.body + ":" + "inner"; res(label); }).then((x) => x + ":" + label);
+  }
+}`, { resources: { "this.http": "server" }, filename: "n.js" });
+  check("nested-local method compiles", metaN.methods[0]?.program === "N$m", JSON.stringify(metaN.methods));
+  const dirN = mkdtempSync(join(tmpdir(), "tln-"));
+  writeFileSync(join(dirN, "n.mjs"), codeN);
+  const modN = await import(pathToFileURL(join(dirN, "n.mjs")).href);
+  const stackN: Array<Record<string, unknown>> = [{ fn: "N$m", pc: 0, args: [{}, "/u"] }];
+  let outN: unknown;
+  for (let i = 0; i < 100; i++) {
+    const r = modN.PROGRAMS[(stackN[stackN.length - 1] as { fn: string }).fn](stackN[stackN.length - 1]);
+    if (r.op === "return") { outN = r.value; break; }
+    (stackN[stackN.length - 1] as { ret?: unknown }).ret = { status: 200, headers: {}, body: "B" };
+  }
+  check("nested executor local resolves (no bare read of a hoisted name, no frame clobber)", await outN === "B:inner:L", String(await outN));
+}
+
 // ---- awaited member calls compile into dynamic parks; only bare awaits reject ------------
 const { meta: meta2 } = compile(`"use tierless";
 export class W { async m() { await Promise.resolve(1); const r = this.http.get("/x"); return r; } }`,
