@@ -395,6 +395,14 @@ the runner and every worker), the reporter rides their runner's own flag passthr
 the retired 0005 enabled their own koa middleware; the relay is the nginx posture),
 and the gateway is `tierless gateway --cookie-authority` on :8100 (page+100).
 
-Both variants fetch and apply. The measured numbers above were driven on the original
-six-patch cut; re-drive before quoting. Runtime verification of this cut (build + the
-login/content-manager subset on both arms) is queued behind the nocodb truth arms.
+VERIFIED in this sandbox (2026-07-16): both variants built; floor arms over the
+wait-heavy subset (admin home/tokens + content-manager blocks) — **18 tests per arm,
+identical ids, EXACT status parity: 16 passed / 1 skipped / 1 failed on both**, the one
+failure arm-symmetric (blocks.spec.ts code-block, fails identically on stock — falls
+out of the parity gate). Wire-truth smoke on the admin domain: 6/6 passed with 169 KB
+of real session-ws bytes — the crossings ride the socket through the register-delivered
+waits and the CLI gateway's cookie authority. The verification also caught and fixed a
+harness gap: on shaped/counted arms the page's origin is the relay, so the page+100
+convention now holds THROUGH relays (passthroughs at 28100/18100). The measured numbers
+above were driven on the original six-patch cut; re-drive the full arms before quoting
+them for this cut.
