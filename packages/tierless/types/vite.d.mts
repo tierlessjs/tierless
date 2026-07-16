@@ -33,8 +33,18 @@ export interface TierlessPluginOptions {
      *  top-level class methods with tier calls compile into PROGRAMS. The kept classes run
      *  untouched; compiled methods route through the session's fetch arm (frame and
      *  instance stay in the browser; `this.http.*` requests are served by the preview
-     *  gateway's twin against apiUrl). No shadow modules, no route table. */
-    compile?: string[];
+     *  gateway's twin against apiUrl). No shadow modules, no route table.
+     *
+     *  `"auto"`: eligibility is the COMPILER'S, not a hand list — every app module that
+     *  contains one of the two forms the compiler carries (top-level named classes,
+     *  Pinia setup stores) is run through the same pipeline, and included exactly when
+     *  at least one method compiled. Sound by construction: an uncompiled method stubs
+     *  to its original, an unbound bundle behaves stock, a park with no twin bounces
+     *  home, and §6 placement prices whether a compiled chain ever migrates. A build
+     *  artifact (`<serverOutDir>/tierless.compile-coverage.json`) records what compiled
+     *  and what didn't, with the compiler's own per-method reasons — commit evidence,
+     *  not a curated list. */
+    compile?: string[] | "auto";
     /** App module exporting `makeTwins({token, apiUrl})` and stamping its TWIN_CLASSES
      *  (docs/migrate-arm.md "twins and correctness"). Imported by the browser build for
      *  the prototype stamps; esbuild-bundled for the gateway, which constructs the twins

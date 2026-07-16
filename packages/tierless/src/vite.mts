@@ -120,8 +120,18 @@ export interface TierlessPluginOptions {
    *  top-level class methods with tier calls compile into PROGRAMS. The kept classes run
    *  untouched; compiled methods route through the session's fetch arm (frame and
    *  instance stay in the browser; `this.http.*` requests are served by the preview
-   *  gateway's twin against apiUrl). No shadow modules, no route table. */
-  compile?: string[];
+   *  gateway's twin against apiUrl). No shadow modules, no route table.
+   *
+   *  `"auto"`: eligibility is the COMPILER'S, not a hand list — every app module that
+   *  contains one of the two forms the compiler carries (top-level named classes,
+   *  Pinia setup stores) is run through the same pipeline, and included exactly when
+   *  at least one method compiled. Sound by construction: an uncompiled method stubs
+   *  to its original, an unbound bundle behaves stock, a park with no twin bounces
+   *  home, and §6 placement prices whether a compiled chain ever migrates. A build
+   *  artifact (`<serverOutDir>/tierless.compile-coverage.json`) records what compiled
+   *  and what didn't, with the compiler's own per-method reasons — commit evidence,
+   *  not a curated list. */
+  compile?: string[] | "auto";
   /** App module exporting `makeTwins({token, apiUrl})` and stamping its TWIN_CLASSES
    *  (docs/migrate-arm.md "twins and correctness"). Imported by the browser build for
    *  the prototype stamps; esbuild-bundled for the gateway, which constructs the twins
@@ -174,8 +184,11 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
   } = opts;
 
   const isTierlessModule = (code: string): boolean => DIRECTIVE.test(code);
-  const hasCompile = !!(compileList && compileList.length);
+  const autoCompile = compileList === "auto";
+  const hasCompile = autoCompile || !!(compileList && compileList.length);
   let compileTargets = new Set<string>();       // absolute paths, resolved once root is known
+  // per-module compile outcomes (auto AND explicit): the coverage artifact's content
+  const coverage = new Map<string, { compiled: boolean; methods: Array<{ class: string; method: string; program: string | null; error?: string }>; error?: string }>();
   let sidecar: SidecarClient | null = null;
   const machines = new Map<string, { code: string; imports: string[] }>();  // moduleId -> compiled server machine + its relative imports
   // wire id -> the machine-only server module for a compiled APP file (meta.serverCode) +
@@ -225,23 +238,44 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
       // server emit: the fetch arm never runs the machine server-side (handleExec only
       // needs the exec), which also sidesteps app-alias imports (@/…) in Node.
       const cleanId = id.split("?")[0];
-      if (hasCompile && compileTargets.has(path.resolve(cleanId))) {
-        // strip types with the APP's own esbuild (resolved from the Vite root, not from
-        // this package — under pnpm's strict linking we can't see the app's deps)
-        const appRequire = createRequire(path.join(root, "package.json"));
-        const esbuild = appRequire("esbuild") as { transformSync: (code: string, opts: object) => { code: string } };
-        const stripped = esbuild.transformSync(code, { loader: "ts", format: "esm", target: "es2022", sourcefile: cleanId });
-        const { compile } = require("./transform.cjs");
-        const { code: compiled, meta } = compile(stripped.code, { ...compilerOptions, resources: { "this.http": "server", ...(resources || {}) }, filename: id, preamble: "" });
-        for (const m of meta.methods) if (m.error) this?.warn?.(`tierless: ${m.class}.${m.method} kept original — ${m.error}`);
-        if (!meta.methods.some((m: { program: string | null }) => m.program)) { this?.warn?.(`tierless: ${id} is in compile[] but no method compiled`); return null; }
-        if (meta.serverCode) appMachines.set("m:" + shortHash(cleanId), { code: meta.serverCode, resolveDir: path.dirname(cleanId) });
-        const binder = [
-          `import { bindMethods as __tlBindMethods } from ${JSON.stringify(runtime)};`,
-          `export const __bundle = { PROGRAMS, __unwind, __bindTierlessMethods, BUNDLE_HASH, ...(typeof __slots === "undefined" ? {} : { __slots }) };`,
-          `__tlBindMethods(__bundle, { module: ${JSON.stringify("m:" + shortHash(cleanId))} });`   // wire id: a hash, not the ~85 B source path — it rides EVERY exec message (app modules resolve to the exec-only host, so any stable id works),
-        ].join("\n");
-        return { code: compiled + "\n" + binder + "\n", map: null };
+      const explicit = !autoCompile && hasCompile && compileTargets.has(path.resolve(cleanId));
+      // AUTO: candidacy is a cheap truthful prefilter — the two forms the compiler
+      // carries (top-level classes, Pinia setup stores) — and INCLUSION is the
+      // compiler's own verdict below (at least one method compiled). Fail-safe: any
+      // error under auto records in the coverage report and the module runs stock.
+      const auto = autoCompile && !explicit &&
+        !id.startsWith("\0") && !cleanId.includes("node_modules") &&
+        /\.(m?[tj]s|[tj]sx)$/.test(cleanId) && !isTierlessModule(code) &&
+        (/\bclass\s+[A-Za-z_$]/.test(code) || /\bdefineStore\s*\(/.test(code));
+      if (explicit || auto) {
+        const rel = path.relative(root, cleanId);
+        try {
+          // strip types with the APP's own esbuild (resolved from the Vite root, not from
+          // this package — under pnpm's strict linking we can't see the app's deps)
+          const appRequire = createRequire(path.join(root, "package.json"));
+          const esbuild = appRequire("esbuild") as { transformSync: (code: string, opts: object) => { code: string } };
+          const loader = /\.[tj]sx$/.test(cleanId) ? "tsx" : "ts";
+          const stripped = esbuild.transformSync(code, { loader, format: "esm", target: "es2022", sourcefile: cleanId });
+          const { compile } = require("./transform.cjs");
+          const { code: compiled, meta } = compile(stripped.code, { ...compilerOptions, resources: { "this.http": "server", ...(resources || {}) }, filename: id, preamble: "" });
+          const some = meta.methods.some((m: { program: string | null }) => m.program);
+          coverage.set(rel, { compiled: some, methods: meta.methods });
+          if (explicit) for (const m of meta.methods) if (m.error) this?.warn?.(`tierless: ${m.class}.${m.method} kept original — ${m.error}`);
+          if (!some) { if (explicit) this?.warn?.(`tierless: ${id} is in compile[] but no method compiled`); return null; }
+          if (meta.serverCode) appMachines.set("m:" + shortHash(cleanId), { code: meta.serverCode, resolveDir: path.dirname(cleanId) });
+          const binder = [
+            `import { bindMethods as __tlBindMethods } from ${JSON.stringify(runtime)};`,
+            `export const __bundle = { PROGRAMS, __unwind, __bindTierlessMethods, BUNDLE_HASH, ...(typeof __slots === "undefined" ? {} : { __slots }) };`,
+            `__tlBindMethods(__bundle, { module: ${JSON.stringify("m:" + shortHash(cleanId))} });`   // wire id: a hash, not the ~85 B source path — it rides EVERY exec message (app modules resolve to the exec-only host, so any stable id works),
+          ].join("\n");
+          return { code: compiled + "\n" + binder + "\n", map: null };
+        } catch (err) {
+          // explicit list: a broken configured file should fail the build (unchanged);
+          // auto: never break a build that worked without it — record and run stock
+          if (explicit) throw err;
+          coverage.set(rel, { compiled: false, methods: [], error: String((err as Error).message || err).split("\n")[0] });
+          return null;
+        }
       }
       if (id.includes("node_modules") || !isTierlessModule(code)) return null;
       const { compile } = require("./transform.cjs");
@@ -263,13 +297,13 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
 
     configResolved(config: { root?: string; resolve?: { alias?: Array<{ find: string | RegExp; replacement: string }> } }): void {
       if (config?.root) root = config.root;
-      compileTargets = new Set((compileList || []).map((p) => path.resolve(root, p)));
+      compileTargets = new Set(Array.isArray(compileList) ? compileList.map((p) => path.resolve(root, p)) : []);
       // string alias finds ('@' -> src) carry over to the server-machine esbuild bundle;
       // regex finds don't map onto esbuild's alias option and are skipped (loudly at build
       // time if a machine import then fails to resolve — never silently misresolved).
       aliases = Object.fromEntries((config?.resolve?.alias || []).filter((a) => typeof a.find === "string").map((a) => [a.find as string, a.replacement]));
     },
-    buildStart(): void { machines.clear(); appMachines.clear(); },   // fresh build: transform repopulates the maps
+    buildStart(): void { machines.clear(); appMachines.clear(); coverage.clear(); },   // fresh build: transform repopulates the maps
 
     // Build: emit the server side of what the client build just produced. For every "use tierless"
     // module the transform compiled, write its machine (byte-identical to `tierless build --bare` —
@@ -278,6 +312,17 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
     // `bundleResolverFromManifest` — no hand-written module resolver, no re-compile. Runs on build
     // only (Vite never calls writeBundle in dev serve).
     writeBundle(): void {
+      // the coverage artifact — what compiled and what didn't, with the compiler's own
+      // per-method reasons. Written whenever compilation was configured (auto or list),
+      // even when nothing compiled: "nothing eligible" is evidence too.
+      if (hasCompile) {
+        const outDir = path.resolve(root, serverOutDir);
+        mkdirSync(outDir, { recursive: true });
+        const modules = Object.fromEntries([...coverage.entries()].sort(([a], [b]) => a.localeCompare(b)));
+        const programs = [...coverage.values()].reduce((n, c) => n + c.methods.filter((m) => m.program).length, 0);
+        writeFileSync(path.join(outDir, "tierless.compile-coverage.json"), JSON.stringify({ mode: autoCompile ? "auto" : "list", modules: Object.keys(modules).length, compiledModules: [...coverage.values()].filter((c) => c.compiled).length, compiledPrograms: programs, perModule: modules }, null, 2) + "\n");
+        console.log(`tierless: compile coverage — ${[...coverage.values()].filter((c) => c.compiled).length}/${coverage.size} candidate modules compiled (${programs} programs) -> ${path.join(serverOutDir, "tierless.compile-coverage.json")}`);
+      }
       if (!machines.size && !appMachines.size) {
         // dist-tierless/ lives OUTSIDE Vite's cleaned outDir: a build with no tierless
         // modules must not leave the PREVIOUS build's manifest for a server to mount

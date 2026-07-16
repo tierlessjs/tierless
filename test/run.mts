@@ -40,6 +40,7 @@ const cases: Case[] = [
   { file: "test/probes/vite-plugin.mts", needs: ["the Vite plugin turns a \"use tierless\" module into monitor-backed actions: transform + dev-server endpoint + ssr-loaded machine + sidecar authorization, end to end"] },
   { file: "test/probes/vite-build.mts", needs: ["`vite build` emits the server machine + manifest and a prod server mounts it end to end, no second compile and no hand-written resolver"] },
   { file: "test/probes/vite-build-compile.mts", needs: ["vite build emits a machine-only server bundle for compiled app modules; the gateway resumes a migrated chain from it"] },
+  { file: "test/probes/vite-auto-compile.mts", needs: ["compile:\"auto\" makes eligibility a build feature"] },
   { file: "test/probes/create-app.mts", needs: ["create-tierless scaffolds a WORKING two-tier app: build, boot (api sidecar forked), seeded render, authorized write, monitor denial caught across the tier, clean end"] },
   { file: "test/e2e/heap-probe.mts",     needs: ["big locals stay home, fetched on deref, single-writer coherent"] },
   { file: "test/e2e/heap-live.mts",      needs: ["the dataset stayed on the server, crossing only when the browser derefed it"] },

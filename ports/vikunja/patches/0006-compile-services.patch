@@ -1,5 +1,5 @@
---- a/frontend/vite.config.ts
-+++ b/frontend/vite.config.ts
+--- a/frontend/vite.config.ts	2026-07-16 21:39:34.218265548 +0000
++++ b/frontend/vite.config.ts	2026-07-16 21:39:34.261627308 +0000
 @@ -2,6 +2,7 @@
  import {defineConfig, type PluginOption, loadEnv} from 'vite'
  import {configDefaults} from 'vitest/config'
@@ -8,11 +8,19 @@
  import {URL, fileURLToPath} from 'node:url'
  import {dirname, resolve} from 'node:path'
  
-@@ -118,6 +119,7 @@
+@@ -118,6 +119,15 @@
  		},
  		plugins: [
  			vue(),
-+			tierless({apiUrl: process.env.TIERLESS_API_URL || 'http://127.0.0.1:3456', compile: ['src/services/abstractService.ts', 'src/stores/tasks.ts', 'src/stores/projects.ts', 'src/stores/kanban.ts'], twins: 'src/tierlessTwins.ts', twinsStubs: ['@/message', '@/router', '@/stores/base', '@/stores/projects']}),
++			// The tierless compile surface (docs/corpus.md rung 3): AUTO — eligibility is
++			// the COMPILER'S verdict over every candidate module (top-level classes, Pinia
++			// setup stores), not a hand list; what compiled and why is committed as the
++			// build's coverage artifact (dist-tierless/tierless.compile-coverage.json).
++			// Sound by construction: uncompiled methods stub to their originals, unbound
++			// bundles behave stock, twin-less parks bounce home, and §6 placement prices
++			// what actually migrates. The twins list stays an audit: which classes are
++			// SAFE to instantiate server-side is a statement about state ownership.
++			tierless({apiUrl: process.env.TIERLESS_API_URL || 'http://127.0.0.1:3456', compile: 'auto', twins: 'src/tierlessTwins.ts', twinsStubs: ['@/message', '@/router', '@/stores/base', '@/stores/projects']}),
  			svgLoader({
  				// Since the svgs are already manually optimized via https://jakearchibald.github.io/svgomg/
  				// we don't need to optimize them again.
