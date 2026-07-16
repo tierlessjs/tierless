@@ -228,3 +228,33 @@ does not become large wall-clock wins without restructuring flows (§6 chains /
 migrations), and it costs nothing either. The timing ceiling lives in the
 request-per-interaction structure — the compile-surface story, not the
 transport story — same verdict as Vikunja, now decomposed on a second app.
+
+## Re-cut on the packaged surface (2026-07-16, results/recut-floor-*.jsonl)
+
+The recipe now rides the packaged port surface instead of hand patches — 321 → 173
+patch lines, and what remains is mostly comments:
+
+    patches/0001-measure-reporter.patch (24)      config only: tierless/playwright-reporter + relay baseURL
+    patches/0002-tierless-auto-session.patch (62) THE PORT: autoSession + axiosAdapter at the same seam
+                                                  (replaces the 0002 adapter + 0003 socket pair, 93 lines)
+    patches/0004-transport-agnostic-waits.patch (27)  one hook: installTransportWaits(page.context()) in
+                                                  setup() — pages/Base.ts and every spec stay PRISTINE
+    patches/0005-optional-gzip.patch (60)         unchanged (the apples-to-apples lever)
+
+gateway.mts is retired — boot.mts spawns `tierless gateway` (same origins, ports, and
+wire-truth env). setup.sh links tierless into tests/playwright on both arms (a harness
+dependency, same posture as the reporter copy it replaces). Cookie authority is
+auto-declared OFF by the gateway's hello (nocodb's authority is the xc-auth header);
+autoSession's `cross: () => true` covers the rig's UI(:3000)/API(:8080) origin split.
+
+Verified in this sandbox (floor arms, one command each): an 8-spec subset spanning the
+wait-helper-heavy page objects (columnUserSelect, columnMenuOperations,
+columnMultiSelect, verticalFillHandle, multiFieldEditor, toolbarOperations,
+tableOperations, pagination) — **42 tests per arm, identical ids, EXACT status parity:
+32 passed / 10 skipped on both, zero diffs**; the session ws to :8180 confirmed live
+mid-run (/proc/net/tcp). The suite's own waits (Base.ts `waitForResponse`, unpatched)
+resolved from session crossings via the installTransportWaits facade.
+
+The measured numbers above (truth/rtt sections) were driven on the PREVIOUS cut —
+transport-equivalent (same socket, same gateway posture; the ws-upgrade hello frame is
+new, a few bytes per session) but re-drive the arms before quoting them for this cut.

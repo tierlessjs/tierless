@@ -1,0 +1,42 @@
+{"id":"db/columns/columnMenuOperations.spec.ts:57 › Column menu operations › Duplicate fields","status":"passed","retry":0,"durationMs":32679}
+{"id":"db/columns/columnMenuOperations.spec.ts:78 › Column menu operations › Insert after","status":"passed","retry":0,"durationMs":28562}
+{"id":"db/columns/columnMenuOperations.spec.ts:94 › Column menu operations › Insert before","status":"passed","retry":0,"durationMs":25869}
+{"id":"db/columns/columnMenuOperations.spec.ts:112 › Column menu operations › Hide column","status":"passed","retry":0,"durationMs":22866}
+{"id":"db/columns/columnMenuOperations.spec.ts:126 › Column menu operations › Sort column","status":"passed","retry":0,"durationMs":24388}
+{"id":"db/columns/columnMultiSelect.spec.ts:46 › Multi select › Select and clear options and rename options","status":"passed","retry":0,"durationMs":45857}
+{"id":"db/columns/columnMultiSelect.spec.ts:129 › Multi select › Remove a option, reorder option and delete the column","status":"passed","retry":0,"durationMs":42920}
+{"id":"db/columns/columnMultiSelect.spec.ts:168 › Multi select › Add new option directly from cell","status":"passed","retry":0,"durationMs":37568}
+{"id":"db/columns/columnMultiSelect.spec.ts:304 › Multi select - filters › Select and clear options and rename options","status":"passed","retry":0,"durationMs":62267}
+{"id":"db/columns/columnUserSelect.spec.ts:90 › User single select › Verify the default option count, select default value and verify","status":"passed","retry":0,"durationMs":41379}
+{"id":"db/columns/columnUserSelect.spec.ts:124 › User single select › Rename column title and delete the column","status":"passed","retry":0,"durationMs":50475}
+{"id":"db/columns/columnUserSelect.spec.ts:142 › User single select › Field operations - duplicate column, convert to SingleLineText","status":"passed","retry":0,"durationMs":42332}
+{"id":"db/columns/columnUserSelect.spec.ts:177 › User single select › Cell Operation - edit, copy-paste and delete","status":"passed","retry":0,"durationMs":56832}
+{"id":"db/columns/columnUserSelect.spec.ts:369 › User single select - filter, sort & GroupBy › User sort & validate, filter & validate","status":"passed","retry":0,"durationMs":78116}
+{"id":"db/columns/columnUserSelect.spec.ts:473 › User multiple select › Verify the default option count, select default value and verify","status":"passed","retry":0,"durationMs":30530}
+{"id":"db/columns/columnUserSelect.spec.ts:511 › User multiple select › Field operations - duplicate column, convert to SingleLineText","status":"passed","retry":0,"durationMs":32176}
+{"id":"db/columns/columnUserSelect.spec.ts:563 › User multiple select › Cell Operation - edit, copy-paste and delete","status":"passed","retry":0,"durationMs":40483}
+{"id":"db/columns/columnUserSelect.spec.ts:768 › User multiple select - filter, sort & GroupBy › User sort & validate, filter & validate","status":"passed","retry":0,"durationMs":70869}
+{"id":"db/features/multiFieldEditor.spec.ts:180 › Multi Field Editor › Verify system fields listed, Add New field, update & Restore, reset","status":"passed","retry":0,"durationMs":37549}
+{"id":"db/features/multiFieldEditor.spec.ts:222 › Multi Field Editor › Add all fields and check status on clicking each field","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/multiFieldEditor.spec.ts:242 › Multi Field Editor › Field operations: CopyId, Duplicate, InsertAbove, InsertBelow, Delete, Hide","status":"skipped","retry":0,"durationMs":18015}
+{"id":"db/features/multiFieldEditor.spec.ts:282 › Multi Field Editor › Search field and verify","status":"passed","retry":0,"durationMs":29059}
+{"id":"db/features/multiFieldEditor.spec.ts:310 › Multi Field Editor › Field Reorder and verify","status":"passed","retry":0,"durationMs":34050}
+{"id":"db/features/multiFieldEditor.spec.ts:358 › Multi Field Editor › Keyboard shortcuts: add new field, save and delete","status":"passed","retry":0,"durationMs":23644}
+{"id":"db/features/pagination.spec.ts:18 › Grid pagination › Access next page, prev page & offset page","status":"passed","retry":0,"durationMs":20181}
+{"id":"db/features/verticalFillHandle.spec.ts:65 › Fill Handle › Text based","status":"passed","retry":0,"durationMs":31970}
+{"id":"db/features/verticalFillHandle.spec.ts:105 › Fill Handle › Number based","status":"passed","retry":0,"durationMs":36844}
+{"id":"db/features/verticalFillHandle.spec.ts:176 › Fill Handle › Select based","status":"passed","retry":0,"durationMs":35930}
+{"id":"db/features/verticalFillHandle.spec.ts:228 › Fill Handle › Miscellaneous (Checkbox, attachment)","status":"passed","retry":0,"durationMs":33148}
+{"id":"db/features/verticalFillHandle.spec.ts:285 › Fill Handle › Date Time Based","status":"passed","retry":0,"durationMs":31279}
+{"id":"db/general/tableOperations.spec.ts:23 › Table Operations › Create, and delete table, verify in audit tab, rename City table, update icon and reorder tables","status":"passed","retry":0,"durationMs":30070}
+{"id":"db/general/tableOperations.spec.ts:74 › Table Operations › duplicate_table","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/tableOperations.spec.ts:103 › Table Operations › duplicate_table_with_no_data_views","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/toolbarOperations.spec.ts:30 › Toolbar operations (GRID) › Create a GroupBy and Verify With Sort, Filter, Hide","status":"skipped","retry":0,"durationMs":17855}
+{"id":"db/general/toolbarOperations.spec.ts:159 › Toolbar operations (GRID) › Create Two GroupBy and Verify With Sort, Filter, Hide","status":"skipped","retry":0,"durationMs":17496}
+{"id":"db/general/toolbarOperations.spec.ts:294 › Toolbar operations (GRID) › Create Three GroupBy and Verify With Sort, Filter, Hide","status":"skipped","retry":0,"durationMs":17605}
+{"id":"db/general/toolbarOperations.spec.ts:449 › Toolbar operations (GRID) › Update GroupBy and Verify","status":"skipped","retry":0,"durationMs":17240}
+{"id":"db/general/toolbarOperations.spec.ts:495 › Toolbar operations (GRID) › Change View and Verify GroupBy","status":"skipped","retry":0,"durationMs":17471}
+{"id":"db/general/toolbarOperations.spec.ts:518 › Toolbar operations (GRID) › Duplicate View and Verify GroupBy","status":"passed","retry":0,"durationMs":29833}
+{"id":"db/general/toolbarOperations.spec.ts:539 › Toolbar operations (GRID) › Delete GroupBy and Verify","status":"skipped","retry":0,"durationMs":17494}
+{"id":"db/general/toolbarOperations.spec.ts:575 › Toolbar operations (GRID) › Hide, Sort, Filter","status":"passed","retry":0,"durationMs":28605}
+{"id":"db/general/toolbarOperations.spec.ts:623 › Toolbar operations (GRID) › row height","status":"passed","retry":0,"durationMs":22492}
