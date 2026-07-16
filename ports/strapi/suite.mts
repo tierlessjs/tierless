@@ -109,6 +109,10 @@ if (TRUTH) {
   countingProxy(28000, APP_ORIGIN, counters).unref();
   http.createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(counters)); }).listen(14991, "127.0.0.1").unref();
   env.TIERLESS_BASE_URL = "http://127.0.0.1:28000";
+  // the page derives its session socket as page-port+100, and on this arm the page's
+  // origin IS the counting proxy — keep the convention true through the relay with a
+  // transparent passthrough at 28100 (ws bytes stay counted once, inside the gateway)
+  delayProxy(28100, GATEWAY, 0).unref();
   wireUrls.push("http://127.0.0.1:14991", `http://127.0.0.1:${GATEWAY}/__tierless/wire`);
   console.log("wire truth: browser via counting proxy :28000 -> :" + APP_ORIGIN + ", counters :14991, ws bytes at :" + GATEWAY + "/__tierless/wire");
 }
@@ -118,10 +122,11 @@ if (RTT) {
   // throttling can't shape ws): the app origin (assets + API, one origin on this app)
   // and the session gateway. The gateway->backend hop stays undelayed localhost.
   delayProxy(18000, APP_ORIGIN, RTT / 2).unref();
-  delayProxy(18180, GATEWAY, RTT / 2).unref();
+  // page-port+100 through the relay origin: pages ride :18000, so the shaped session
+  // socket listens at :18100 — the convention holds with no override channel
+  delayProxy(18100, GATEWAY, RTT / 2).unref();
   env.TIERLESS_BASE_URL = "http://127.0.0.1:18000";
-  env.TIERLESS_WS_URL = "ws://127.0.0.1:18180/__tierless";
-  console.log(`RTT injection: ${RTT} ms via 18000->${APP_ORIGIN}, 18180->${GATEWAY}`);
+  console.log(`RTT injection: ${RTT} ms via 18000->${APP_ORIGIN}, 18100->${GATEWAY}`);
 }
 if (wireUrls.length) env.TIERLESS_WIRE_URLS = wireUrls.join(",");
 

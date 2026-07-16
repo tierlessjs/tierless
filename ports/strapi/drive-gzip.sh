@@ -29,7 +29,7 @@ sweep_ports() {
   pkill -9 -f "ports/work/strapi" 2>/dev/null
   pkill -9 -f "tierless.mjs gateway" 2>/dev/null   # the CLI gateway (page+100 convention)
   sleep 2
-  ss -tlnp 2>/dev/null | grep -E ":8000|:8100|:28000|:14991|:18000|:18180" \
+  ss -tlnp 2>/dev/null | grep -E ":8000|:8100|:28000|:28100|:14991|:18000|:18100" \
     | grep -oE "pid=[0-9]+" | cut -d= -f2 | sort -u | xargs -r kill -9
   sleep 2
 }
