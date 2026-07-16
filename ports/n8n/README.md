@@ -344,3 +344,30 @@ stage, which is blocked on the auth-rotation requirement above.
 Sandbox caveat for rebuilds: turbo trusts stale hashes on the no-git recipe
 tree after patch(1) edits — rebuild the ported frontend with
 `turbo run build --filter=@n8n/rest-api-client --filter=n8n-editor-ui --force`.
+
+## Re-cut on the packaged surface (2026-07-16 — patches apply; runtime verification pending)
+
+986 → 91 patch lines. The port is ONE patch again, now on the packaged surface:
+
+    patches/0001-tierless-auto-session.patch (56)  utils.ts: autoSession + axiosAdapter in the one
+                                                   request() options builder (same-origin crosses,
+                                                   api.n8n.io stays direct — the execFor default),
+                                                   plus the vestigial-withCredentials quirk hunk.
+                                                   Cookie authority, the force-browser seam, and
+                                                   the ws-URL convention all come from autoSession.
+    patches/0003-local-lane-queue-gating.patch (16)  SEMANTIC: upstream's own container-only tag,
+                                                   missing on one suite (unchanged)
+    patches/0004-template-name-race.patch (19)     SEMANTIC: the one interleaving accommodation
+                                                   from the old 620-line waits patch — everything
+                                                   else was mechanical and now rides the wrapper
+
+The 620-line waits patch, the reporter copy, and the 106-line route-recorder patch are
+gone: the suite runs through the generated `--config` wrapper (ports/pw-wrapper.mts),
+which patches their playwright-core Page class — waits AND route() recording — and
+attaches the packaged reporter. gateway.mts is retired for `tierless gateway
+--cookie-authority` on :5780 (page+100); the boot levers (preboot manifest,
+hello-auth ablation, GET logging) are CLI flags/envs now.
+
+Both the ported tree and the (now near-pristine) baseline fetch and apply. The measured
+numbers above were driven on the original cut; re-drive before quoting. Runtime
+verification queued behind the nocodb truth arms and strapi.

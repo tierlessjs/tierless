@@ -1,0 +1,56 @@
+--- a/packages/frontend/@n8n/rest-api-client/src/utils.ts	2026-07-16 11:38:56.087099134 +0000
++++ b/packages/frontend/@n8n/rest-api-client/src/utils.ts	2026-07-16 11:39:48.371172334 +0000
+@@ -5,8 +5,24 @@
+ import { jsonParse } from 'n8n-workflow';
+ import type { GenericValue, IDataObject } from 'n8n-workflow';
+ 
++import { autoSession } from 'tierless/adapt-auto';
++import { axiosAdapter } from 'tierless/adapt-axios';
++
+ import type { IRestApiContext } from './types';
+ 
++// The tierless port — the whole thing (docs/corpus.md rung 3). Every REST call funnels
++// through the one request() below; the adapter slot gets the tierless I/O bottom:
++// same-origin requests cross one ws session to the gateway on <page-port>+100
++// (`tierless gateway --cookie-authority`, ports/n8n/boot.mts) as one exec crossing
++// each; an external baseURL (api.n8n.io) keeps a direct browser fetch — stock. Cookie
++// authority auto-engages from the gateway's hello (n8n's authority is an httpOnly JWT
++// cookie): the sealed jar blob rides each crossing, rotation is in-band (login
++// included), the claim keeps the real jar current for reloads. Force-browser routes
++// (window.__tierlessForceBrowser, populated by the test harness's route recorder) stay
++// on the browser's own fetch. Browser-pinned configs (blobs, FormData, binary bodies)
++// fall through to axios's own XHR adapter; under Node/SSR the stock adapter stays.
++let tierless: ReturnType<typeof autoSession> | undefined;
++
+ const getBrowserId = () => {
+ 	let browserId = localStorage.getItem(BROWSER_ID_STORAGE_KEY);
+ 	if (!browserId) {
+@@ -112,6 +128,12 @@
+ 		url: endpoint,
+ 		baseURL,
+ 		headers: headers ?? {},
++		adapter: (typeof window === 'undefined'
++			? undefined
++			: axiosAdapter({
++					exec: (tierless ??= autoSession()).execFor(baseURL),
++					fallback: typeof XMLHttpRequest === 'undefined' ? undefined : axios.getAdapter('xhr'),
++				})) as AxiosRequestConfig['adapter'],
+ 	};
+ 	if (baseURL.startsWith('/')) {
+ 		options.headers!['browser-id'] = getBrowserId();
+@@ -119,7 +141,14 @@
+ 	if (
+ 		import.meta.env.NODE_ENV !== 'production' &&
+ 		!baseURL.includes('api.n8n.io') &&
+-		!baseURL.includes('n8n.cloud')
++		!baseURL.includes('n8n.cloud') &&
++		// tierless port (continued): only when the flag can matter. Their build leaves
++		// import.meta.env.NODE_ENV undefined, so this branch runs in production too;
++		// same-origin XHR sends cookies with or without withCredentials (the flag is
++		// cross-origin-only by definition), but the adapter pins any withCredentials
++		// request to the XHR fallback — the vestigial flag would silently turn the
++		// whole port into a no-op.
++		(typeof location === 'undefined' || new URL(baseURL, location.href).origin !== location.origin)
+ 	) {
+ 		options.withCredentials = options.withCredentials ?? true;
+ 	}

@@ -57,13 +57,18 @@ export interface SuitePlaywright {
  *  SAME class the suite's fixtures hand to tests. */
 export declare function resolveSuitePlaywright(fromDir: string): SuitePlaywright;
 /** Patch the suite's Page class so EVERY page's waits are transport-agnostic — the
- *  zero-touch form of installTransportWaits, applied from a generated config wrapper.
- *  `initScript` (optional) is added to every context before its first page — the
- *  harness's channel for page-visible run parameters (e.g. seeding the tierlessWsUrl
- *  localStorage override on shaped runs) without touching the app or the suite. */
-export declare function patchPlaywrightPages({ Page, BrowserContext }: SuitePlaywright, { warn, initScript }?: {
+ *  zero-touch form of installTransportWaits, applied from a generated config wrapper
+ *  or the NODE_OPTIONS register. `initScript` (optional) is added to every context
+ *  before its first page — the harness's channel for page-visible run parameters
+ *  (e.g. seeding the tierlessWsUrl localStorage override on shaped runs) without
+ *  touching the app or the suite. `recordRoutes` (default true) is the zero-touch form
+ *  of recordForceBrowserRoutes: every route()'d pattern registers on the force-browser
+ *  seam so upstream mocks keep firing on the ported build; on stock the global is
+ *  inert. */
+export declare function patchPlaywrightPages({ Page, BrowserContext }: SuitePlaywright, { warn, initScript, recordRoutes }?: {
     warn?: (msg: string) => void;
     initScript?: string;
+    recordRoutes?: boolean;
 }): void;
 /** Re-anchor a config object's relative paths to the directory of the config file it
  *  came from — what a `--config` wrapper OUTSIDE the suite tree needs, since Playwright

@@ -76,8 +76,19 @@ export async function bootN8n(): Promise<{ close(): void }> {
   // detached process GROUPS (n8n spawns task runners); kill(-pid) takes the whole tree
   const procs: ChildProcess[] = [
     spawn(process.execPath, ["bin/n8n"], { cwd: path.join(SRC, "packages/cli"), env, stdio: log("n8n"), detached: true }),
-    // the session gateway (both variants — env symmetry; the baseline build never connects)
-    spawn(process.execPath, [fileURLToPath(new URL("./gateway.mts", import.meta.url))], { env, stdio: log("gateway"), detached: true }),
+    // the session gateway (both variants — env symmetry; the baseline build never
+    // connects): `tierless gateway` from the package CLI — the per-port gateway.mts,
+    // retired. Cookie authority mediates n8n's httpOnly JWT; the boot levers
+    // (TIERLESS_PREBOOT_FILE / TIERLESS_HELLO_AUTH / TIERLESS_LOG_GETS) ride the env
+    // into the CLI's own flags.
+    spawn(process.execPath, [
+      fileURLToPath(new URL("../../packages/tierless/bin/tierless.mjs", import.meta.url)), "gateway",
+      "--backend", process.env.TIERLESS_API_URL || APP,
+      "--port", "5780",                                // page port (:5680) + 100: the patch needs no gateway config
+      "--cookie-authority",
+      "--allow-origin", process.env.TIERLESS_ALLOWED_ORIGINS ||
+        ["5680", "15680", "25680"].flatMap((p) => [`http://localhost:${p}`, `http://127.0.0.1:${p}`]).join(","),
+    ], { env, stdio: log("gateway"), detached: true }),
   ];
   const close = (): void => procs.forEach((p) => { try { process.kill(-p.pid!, "SIGTERM"); } catch { p.kill(); } });
   process.on("exit", close);

@@ -443,11 +443,15 @@ export function resolveSuitePlaywright(fromDir: string): SuitePlaywright {
 const PROTO_PATCHED = new WeakSet<object>();
 
 /** Patch the suite's Page class so EVERY page's waits are transport-agnostic — the
- *  zero-touch form of installTransportWaits, applied from a generated config wrapper.
- *  `initScript` (optional) is added to every context before its first page — the
- *  harness's channel for page-visible run parameters (e.g. seeding the tierlessWsUrl
- *  localStorage override on shaped runs) without touching the app or the suite. */
-export function patchPlaywrightPages({ Page, BrowserContext }: SuitePlaywright, { warn = (msg: string) => console.warn(msg), initScript }: { warn?: (msg: string) => void; initScript?: string } = {}): void {
+ *  zero-touch form of installTransportWaits, applied from a generated config wrapper
+ *  or the NODE_OPTIONS register. `initScript` (optional) is added to every context
+ *  before its first page — the harness's channel for page-visible run parameters
+ *  (e.g. seeding the tierlessWsUrl localStorage override on shaped runs) without
+ *  touching the app or the suite. `recordRoutes` (default true) is the zero-touch form
+ *  of recordForceBrowserRoutes: every route()'d pattern registers on the force-browser
+ *  seam so upstream mocks keep firing on the ported build; on stock the global is
+ *  inert. */
+export function patchPlaywrightPages({ Page, BrowserContext }: SuitePlaywright, { warn = (msg: string) => console.warn(msg), initScript, recordRoutes = true }: { warn?: (msg: string) => void; initScript?: string; recordRoutes?: boolean } = {}): void {
   if (!PROTO_PATCHED.has(Page)) {
     PROTO_PATCHED.add(Page);
     for (const [method, kind] of [["waitForResponse", "response"], ["waitForRequest", "request"]] as [string, Kind][]) {
@@ -458,18 +462,41 @@ export function patchPlaywrightPages({ Page, BrowserContext }: SuitePlaywright, 
         return raced(orig.call(this, urlOrPredicate, options), firstCrossing(st, matcherFor(urlOrPredicate, kind, st), Date.now()));
       };
     }
+    if (recordRoutes) {
+      const origRoute = Page.prototype.route as (this: RoutablePage, u: RouteMatcher, h: unknown, o?: unknown) => Promise<void>;
+      Page.prototype.route = function (this: RoutablePage, url: RouteMatcher, handler: unknown, options?: unknown) {
+        const d = describeMatcher(url);
+        if (d) seedForce(this, d);
+        return origRoute.call(this, url, handler, options);
+      };
+    }
   }
-  if (initScript && !PROTO_PATCHED.has(BrowserContext)) {
+  if (!PROTO_PATCHED.has(BrowserContext)) {
     PROTO_PATCHED.add(BrowserContext);
-    const seeded = new WeakSet<object>();
-    const origNewPage = BrowserContext.prototype.newPage as (this: object) => Promise<unknown>;
-    BrowserContext.prototype.newPage = async function (this: object) {
-      if (!seeded.has(this)) {
-        seeded.add(this);
-        try { await (this as { addInitScript(s: string): Promise<void> }).addInitScript(initScript); } catch { /* context already closing */ }
-      }
-      return origNewPage.call(this);
-    };
+    if (initScript) {
+      const seeded = new WeakSet<object>();
+      const origNewPage = BrowserContext.prototype.newPage as (this: object) => Promise<unknown>;
+      BrowserContext.prototype.newPage = async function (this: object) {
+        if (!seeded.has(this)) {
+          seeded.add(this);
+          try { await (this as { addInitScript(s: string): Promise<void> }).addInitScript(initScript); } catch { /* context already closing */ }
+        }
+        return origNewPage.call(this);
+      };
+    }
+    if (recordRoutes) {
+      const origCtxRoute = BrowserContext.prototype.route as (this: RoutableContext & { addInitScript(s: unknown, a?: unknown): Promise<void> }, u: RouteMatcher, h: unknown, o?: unknown) => Promise<void>;
+      BrowserContext.prototype.route = function (this: RoutableContext & { addInitScript(s: unknown, a?: unknown): Promise<void> }, url: RouteMatcher, handler: unknown, options?: unknown) {
+        const d = describeMatcher(url);
+        if (d) {
+          // context routes cover every page including future ones: current documents by
+          // evaluate, future documents by a context-level init script
+          for (const p of this.pages()) void p.evaluate(PUSH_FORCE, d).catch(() => {});
+          void this.addInitScript(PUSH_FORCE, d).catch(() => {});
+        }
+        return origCtxRoute.call(this, url, handler, options);
+      };
+    }
   }
 }
 

@@ -18,12 +18,10 @@
     "codeload": null
   },
   "patches": [
-    "patches/0001-tierless-session-socket.patch"
+    "patches/0001-tierless-auto-session.patch"
   ],
   "testPatches": [
-    "patches/0002-measure-reporter.patch",
     "patches/0003-local-lane-queue-gating.patch",
-    "patches/0004-transport-agnostic-waits.patch",
-    "patches/0005-force-browser-mocked-routes.patch"
+    "patches/0004-template-name-race.patch"
   ]
 }

@@ -16,13 +16,18 @@
 //       missing authorize fails HERE, at load time, not in production.
 //
 //   tierless gateway --backend <url> [--port 8180] [--host 127.0.0.1] [--allow-origin o1,o2]
-//                    [--cookie-authority] [--preboot /path ...] [--wire-truth]
+//                    [--cookie-authority] [--preboot /path ...] [--preboot-file <f>]
+//                    [--log-gets <f>] [--no-upgrade-seal] [--wire-truth]
 //       The corpus-port session gateway in a box (docs/corpus.md rung 2/3) — what each
 //       port used to carry as its own gateway.mts: a thin exec gateway colocated with
 //       the backend. Same-origin crossings execute against --backend over localhost;
 //       --cookie-authority turns on sealed cookie mediation (reseal/claim endpoints,
 //       hello blob in the upgrade); --wire-truth serves TCP-true byte counters at
-//       /__tierless/wire for the measurement reporter.
+//       /__tierless/wire for the measurement reporter. Boot levers (measured-run
+//       ablations, docs/migrate-arm boot): --preboot-file loads a frozen manifest of
+//       GET paths to pre-fetch at the upgrade; --log-gets captures one (append each
+//       distinct 2xx GET path); --no-upgrade-seal suppresses the hello blob so the
+//       browser pays the HTTP reseal round trip (the pre-fix arm).
 //
 //   tierless types <service.mjs> [out.d.ts]
 //       Emit a `declare const api` declaration from the service's registered endpoints,
@@ -53,7 +58,7 @@ const usage = `usage:
   tierless build   <in.js> <out.mjs> [--bare] [--head=<file>] [--auto-deref] [--auto-writeback] [--track-writes] [--source-map] [--resource=ns:tier]
   tierless explain <file.js> [--json] [--resource=ns:tier ...]
   tierless api     <service.mjs>
-  tierless gateway --backend <url> [--port 8180] [--host 127.0.0.1] [--allow-origin o1,o2] [--cookie-authority] [--preboot /path ...] [--wire-truth]
+  tierless gateway --backend <url> [--port 8180] [--host 127.0.0.1] [--allow-origin o1,o2] [--cookie-authority] [--preboot /path ...] [--preboot-file <f>] [--log-gets <f>] [--no-upgrade-seal] [--wire-truth]
   tierless types   <service.mjs> [out.d.ts]`;
 
 const parseResources = (flags: string[]): Record<string, string> => {
@@ -222,7 +227,14 @@ if (cmd === "build") {
   const port = Number(flag("--port") || process.env.TIERLESS_GATEWAY_PORT || 8180);
   const host = flag("--host") || "127.0.0.1";                       // loopback by default: an unauthenticated exec bridge to the backend must not bind wide
   const origins = (flag("--allow-origin") || process.env.TIERLESS_ALLOWED_ORIGINS || "").split(",").map((s) => s.trim()).filter(Boolean);
-  const prebootPaths = multi("--preboot");
+  const { readFileSync: readF, appendFileSync: appendF, existsSync: existsF } = await import("node:fs");
+  const prebootFile = flag("--preboot-file") || process.env.TIERLESS_PREBOOT_FILE;
+  const prebootPaths = [
+    ...multi("--preboot"),
+    ...(prebootFile && existsF(prebootFile) ? readF(prebootFile, "utf8").split("\n").map((s) => s.trim()).filter(Boolean) : []),
+  ];
+  const logGets = flag("--log-gets") || process.env.TIERLESS_LOG_GETS;
+  const upgradeSeal = !rest.includes("--no-upgrade-seal") && process.env.TIERLESS_HELLO_AUTH !== "0";
   const { createServer } = await import("node:http");
   // package self-reference: the bin's tsconfig compiles only bin/, so src modules are
   // reached the way any consumer reaches them — through the exports map
@@ -242,7 +254,19 @@ if (cmd === "build") {
     if (authority?.handleHttp(req, res)) return;
     res.statusCode = 200; res.end("tierless gateway");              // the suite's boot readiness wait
   });
-  const exec = authority ? authority.exec : restResources(backend, { envelopeErrors: true });
+  const baseExec = authority ? authority.exec : restResources(backend, { envelopeErrors: true });
+  // --log-gets: profiling for the preboot manifest — append each distinct 2xx GET path,
+  // so one boot capture becomes the --preboot-file of the frozen arm. Zero cost unset.
+  const seenGets = new Set<string>();
+  const exec: typeof baseExec = !logGets ? baseExec : async (req) => {
+    const v = await baseExec(req);
+    const status = (v as { status?: number } | null)?.status ?? 0;
+    if (req.name === "api.get" && status >= 200 && status < 400) {
+      const p = String((req.args ?? [])[0] ?? "");
+      if (p && !seenGets.has(p)) { seenGets.add(p); try { appendF(logGets, p + "\n"); } catch { /* best effort */ } }
+    }
+    return v;
+  };
   attachTierless(server, {
     // exec-only: no compiled machines (the adapter path crosses per request); compiled
     // surfaces resolve from a manifest when a port lands them
@@ -253,7 +277,10 @@ if (cmd === "build") {
       // developer happens to visit from reaching the backend through this exec bridge
       const origin = String(req.headers.origin || "");
       if (origins.length && !origins.includes(origin)) throw new Error("tierless gateway: origin not allowed: " + JSON.stringify(origin));
-      return authority ? { exec, hello: await authority.hello(String(req.headers.cookie || "")) } : { exec };
+      return authority
+        // TIERLESS_PREBOOT=0: the ablation arm — manifest configured, pre-fetch off
+        ? { exec, hello: await authority.hello(String(req.headers.cookie || ""), { auth: upgradeSeal, preboot: prebootPaths.length > 0 && process.env.TIERLESS_PREBOOT !== "0" }) }
+        : { exec };
     },
   });
   // print the BOUND port (--port 0 lets a harness pick a free one and parse it back)

@@ -223,6 +223,12 @@ check("the page's requests cross the session socket (no HTTP fired for them)", (
   const res = await wait;
   check("zero-touch: an untouched page's unmodified wait resolves from the post-arm crossing", !!res.__tierlessCrossing && res.url().endsWith("/api/items?post=1"), res.url());
   check("zero-touch: initScript seeded the context before its first page", (await page2.evaluate("localStorage.getItem('tierlessSeeded')")) === "yes");
+  // route recording at the class level: page- and context-level route() patterns land
+  // on the force-browser seam (adapt-auto's page global) with no recorder call anywhere
+  await page2.route("**/api/proto-mocked*", (route: { fulfill(o: unknown): Promise<void> }) => route.fulfill({ status: 200, body: "{}" }));
+  await ctx.route(/\/api\/ctx-mocked/, (route: { fulfill(o: unknown): Promise<void> }) => route.fulfill({ status: 200, body: "{}" }));
+  const seam = await page2.evaluate("JSON.stringify(window.__tierlessForceBrowser || [])") as string;
+  check("zero-touch: route() patterns auto-register on the force-browser seam", seam.includes("proto-mocked") && seam.includes("ctx-mocked"), seam);
   await ctx.close();
 }
 

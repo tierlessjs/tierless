@@ -22,6 +22,7 @@ import { rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
+import { writeSuiteConfig } from "../pw-wrapper.mts";
 import { delayProxy, type WireCounter } from "../latency-proxy.mts";
 
 const VARIANT = process.argv.includes("--baseline") ? "n8n-baseline" : "n8n";
@@ -63,7 +64,11 @@ for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => { app.cl
 // --workers=1: per-test wire attribution needs one test generating traffic at a time
 // (their local default is cpu/2); applied identically to both arms.
 // Heavier shaping needs headroom over their 60 s per-test timeout — both arms get it.
-const suite = spawn("corepack", ["pnpm", "exec", "playwright", "test", "--project=e2e", "--workers=1", ...(RTT >= 50 ? ["--timeout=120000"] : []), ...(process.env.TIERLESS_SPEC || "").split(/\s+/).filter(Boolean)], {
+// their suite through the generated --config wrapper (ports/pw-wrapper.mts): waits +
+// route-recording patched into their playwright-core, the measure reporter attached —
+// their tree carries NO harness patches
+const CONFIG = writeSuiteConfig({ suiteDir: path.join(SRC, "packages/testing/playwright"), outFile: fileURLToPath(new URL(`../work/${VARIANT}/pw/tierless.config.ts`, import.meta.url)) });
+const suite = spawn("corepack", ["pnpm", "exec", "playwright", "test", "--config", CONFIG, "--project=e2e", "--workers=1", ...(RTT >= 50 ? ["--timeout=120000"] : []), ...(process.env.TIERLESS_SPEC || "").split(/\s+/).filter(Boolean)], {
   cwd: path.join(SRC, "packages/testing/playwright"),
   stdio: "inherit",
   env: {

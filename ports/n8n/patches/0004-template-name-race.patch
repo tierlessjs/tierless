@@ -1,0 +1,19 @@
+--- a/packages/testing/playwright/tests/e2e/workflows/templates/templates.spec.ts	2026-07-16 11:38:56.098794937 +0000
++++ b/packages/testing/playwright/tests/e2e/workflows/templates/templates.spec.ts	2026-07-16 11:39:48.371539905 +0000
+@@ -231,6 +231,16 @@
+ 			test('should save template id with the workflow', async ({ n8n }) => {
+ 				await n8n.templatesComposer.importFirstTemplate();
+ 
++				// tierless corpus harness (test patch, both arms; docs/corpus.md test
++				// accommodations — SEMANTIC): the execute below saves first, and that save is
++				// valid only once the imported workflow's name has been applied — upstream
++				// sequences the name after a /rest/workflows/new fetch, and the composer's
++				// URL-redirect wait does not cover it. Stock transport timing happened to
++				// apply it by click time; the ported transport interleaves the two fetches
++				// differently and the save 400s on an empty name. Wait for the page state the
++				// test already assumes; the assertions below are unchanged.
++				await expect(n8n.canvas.getWorkflowName()).toHaveAttribute('title', /\S/);
++
+ 				// Execute workflow to trigger autosave (imported templates don't auto-save immediately)
+ 				await n8n.canvas.hitExecuteWorkflow();
+ 
