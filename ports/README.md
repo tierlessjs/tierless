@@ -12,5 +12,6 @@ New ports: what the first four carried as hand patches is now packaged — `auto
 gateway` for the gateway, and `installTransportWaits` + `recordForceBrowserRoutes`
 (tierless/playwright) + `tierless/playwright-reporter` for the suite. The app diff
 should be the I/O-bottom seam plus app-specific pins; test patches only for SEMANTIC
-accommodations (docs/corpus.md). The four existing recipes predate this surface and
-stay as measured — re-cutting one means re-running its arms.
+accommodations (docs/corpus.md). The nocodb recipe is re-cut on this surface (321 → 173
+patch lines — see its README); vikunja/strapi/n8n predate it and stay as measured —
+re-cutting one means re-running its arms.
