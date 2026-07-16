@@ -171,13 +171,16 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
             // and restart the log, but time stays comparable — a harness wait armed before
             // a goto() still recognizes the new document's crossings.
             const g = globalThis;
-            const record = (status, body, hasBody) => {
+            const record = (status, body, hasBody, headers) => {
                 if (!g.__TIERLESS_EXEC_LOG__)
                     return;
                 const log = (g.__tierlessExecLog ||= []);
                 // reqBody too: harness waits shaped as `resp.request().postDataJSON()` need the
-                // request side of the crossing (opt-in log; entry count is bounded above)
-                log.push({ t: Date.now(), name: req.name, url: String(req.args?.[0] ?? ""), status, ...(req.args?.[1] !== undefined ? { reqBody: req.args[1] } : {}), ...(hasBody ? { body } : {}) });
+                // request side of the crossing (opt-in log; entry count is bounded above) — and
+                // both sides' headers, so a facade over an entry (tierless/playwright) answers
+                // header reads truthfully instead of not at all
+                const reqHeaders = req.args?.[2]?.headers;
+                log.push({ t: Date.now(), name: req.name, url: String(req.args?.[0] ?? ""), status, ...(headers ? { headers } : {}), ...(req.args?.[1] !== undefined ? { reqBody: req.args[1] } : {}), ...(reqHeaders ? { reqHeaders } : {}), ...(hasBody ? { body } : {}) });
                 if (log.length > 500)
                     log.splice(0, log.length - 500);
             };
@@ -189,11 +192,11 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
                 // a REJECTED crossing is still a crossing a harness wait may be matching on
                 // (shaped 4xx/5xx errors carry .response) — log it before rethrowing
                 const r = err?.response;
-                record(r && typeof r.status === "number" ? r.status : undefined, r?.data, !!r && "data" in r);
+                record(r && typeof r.status === "number" ? r.status : undefined, r?.data, !!r && "data" in r, r?.headers);
                 throw err;
             }
             const env = value;
-            record(env && typeof env.status === "number" ? env.status : undefined, env?.body, !!env && "body" in env);
+            record(env && typeof env.status === "number" ? env.status : undefined, env?.body, !!env && "body" in env, env?.headers);
             return value;
         },
         close: () => ws.close(),

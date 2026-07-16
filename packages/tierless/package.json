@@ -119,6 +119,10 @@
     "./adapt-session-auth": {
       "types": "./types/adapt-session-auth.d.mts",
       "default": "./src/adapt-session-auth.mjs"
+    },
+    "./playwright": {
+      "types": "./types/playwright.d.mts",
+      "default": "./src/playwright.mjs"
     }
   },
   "bin": {

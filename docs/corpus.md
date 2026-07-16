@@ -72,14 +72,21 @@ only component transport can move — and compares it across arms. A port whose 
 are quoted without the network-wait decomposition is quoted incomplete.
 
 **Test accommodations.** Some upstream tests assert the transport, not the UI —
-`waitForResponse(...)` for a request the port eliminates can never fire. Rather than
-maintaining an allow-list of expected failures, each such test gets a patch in the
-recipe's `testPatches` that replaces the network wait with the equivalent UI wait
-(e.g. "the task row is rendered"). Rules: applied to BOTH arms; may relocate a wait
-but never weaken what the test asserts about the page; each hunk carries a comment
-saying why. Failures that remain (e.g. a login provider whose container we don't
-run) fail identically in both arms and fall out of the report's pass-parity gate,
-listed with both statuses.
+`waitForResponse(...)` for a request the port eliminates can never fire. The MECHANICAL
+case is now generic: `installTransportWaits(page)` (`tierless/playwright`, proven by
+`test/e2e/pw-waits-live.mts`) patches `waitForResponse`/`waitForRequest` in place to
+race the HTTP wait against the session's exec log, running the test's own predicate
+(or glob/RegExp) unchanged against a truthful facade of each crossing — one fixture
+line per suite, zero edits to spec files. A wait it can't satisfy honestly (a predicate
+reading what a crossing doesn't carry) warns and falls back to HTTP-only rather than
+fabricate a match. What remains hand-patched in the recipe's `testPatches` is the
+SEMANTIC case: a test asserting behavior the port deliberately changes (mocked routes
+that need the force-browser seam, waits whose removal reorders the app). Rules
+unchanged: applied to BOTH arms (on stock the log never exists, so every wait reduces
+to the original exactly); may relocate a wait but never weaken what the test asserts
+about the page; each hand hunk carries a comment saying why. Failures that remain
+(e.g. a login provider whose container we don't run) fail identically in both arms and
+fall out of the report's pass-parity gate, listed with both statuses.
 
 ## Honesty constraints (bind all rungs)
 
