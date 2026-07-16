@@ -12,3 +12,7 @@ examples/*/package-lock.json
 # tsc fixture written by test/probes/types.mjs
 test/.types-fixture/
 ports/work/
+
+# lefthook's install hook inside ports/work/n8n escapes to this repo root (it walks up
+# to the nearest .git) and drops its example config on every install — not our file
+/lefthook.yml
