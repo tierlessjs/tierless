@@ -231,30 +231,35 @@ transport story — same verdict as Vikunja, now decomposed on a second app.
 
 ## Re-cut on the packaged surface (2026-07-16, results/recut-floor-*.jsonl)
 
-The recipe now rides the packaged port surface instead of hand patches — 321 → 173
-patch lines, and what remains is mostly comments:
+The port is now ONE patch — the seam and nothing else (23 lines, 3 of them code):
 
-    patches/0001-measure-reporter.patch (24)      config only: tierless/playwright-reporter + relay baseURL
-    patches/0002-tierless-auto-session.patch (62) THE PORT: autoSession + axiosAdapter at the same seam
-                                                  (replaces the 0002 adapter + 0003 socket pair, 93 lines)
-    patches/0004-transport-agnostic-waits.patch (27)  one hook: installTransportWaits(page.context()) in
-                                                  setup() — pages/Base.ts and every spec stay PRISTINE
-    patches/0005-optional-gzip.patch (60)         unchanged (the apples-to-apples lever)
+    patches/0002-tierless-auto-session.patch    interceptors.ts: import axios, import
+                                                tierlessAxios, tierlessAxios(axios, api.instance)
 
-gateway.mts is retired — boot.mts spawns `tierless gateway` (same origins, ports, and
-wire-truth env). setup.sh links tierless into tests/playwright on both arms (a harness
-dependency, same posture as the reporter copy it replaces). Cookie authority is
-auto-declared OFF by the gateway's hello (nocodb's authority is the xc-auth header);
-autoSession's `cross: () => true` covers the rig's UI(:3000)/API(:8080) origin split.
+`testPatches` is EMPTY — the baseline tree is byte-identical to upstream, and the two
+arms differ in exactly that one file. Everything the recipe used to patch in is
+delivered from outside the tree:
 
-Verified in this sandbox (floor arms, one command each): an 8-spec subset spanning the
-wait-helper-heavy page objects (columnUserSelect, columnMenuOperations,
-columnMultiSelect, verticalFillHandle, multiFieldEditor, toolbarOperations,
-tableOperations, pagination) — **42 tests per arm, identical ids, EXACT status parity:
-32 passed / 10 skipped on both, zero diffs**; the session ws to :8180 confirmed live
-mid-run (/proc/net/tcp). The suite's own waits (Base.ts `waitForResponse`, unpatched)
-resolved from session crossings via the installTransportWaits facade.
+- **waits + reporter**: the suite runs through a generated `--config` wrapper
+  (ports/pw-wrapper.mts) that imports their own config, re-anchors its paths, patches
+  their playwright-core Page class (tierless/playwright `patchPlaywrightPages` — lazy
+  per-page wiring, pre-arm history excluded by arm time) and attaches
+  tierless/playwright-reporter by absolute path. No dependency link in their tree.
+- **gateway**: `tierless gateway` on the page+100 convention (:3100), spawned by
+  boot.mts — so the patch names no port, no URL. Shaped runs reroute the socket via
+  TIERLESS_WS_URL, which the wrapper seeds into each context as the adapt-auto
+  localStorage override; the app never learns about shaped runs.
+- **stock-arm gzip**: a compressing reverse proxy (ports/gzip-proxy.mts, the nginx
+  posture) replaces the old in-app compression patch. Verified equivalent on the
+  pagination truth smoke: 37,451 B via the relay vs 37,787 B in-app (82,096 B
+  uncompressed).
 
-The measured numbers above (truth/rtt sections) were driven on the PREVIOUS cut —
-transport-equivalent (same socket, same gateway posture; the ws-upgrade hello frame is
-new, a few bytes per session) but re-drive the arms before quoting them for this cut.
+Verified in this sandbox (floor arms, one command each): the same 8-spec subset as the
+earlier cut — **42 tests per arm, identical ids, EXACT status parity: 32 passed / 10
+skipped on both, zero diffs**. The suite's own waits (pages/Base.ts, PRISTINE)
+resolved from session crossings through the class-level facade.
+
+The measured numbers above (truth/rtt sections) were driven on the original hand-cut
+patches — transport-equivalent (same socket, same gateway posture; the ws-upgrade
+hello frame is new, a few bytes per session) but re-drive the arms before quoting them
+for this cut.
