@@ -27,7 +27,7 @@ import { cookieSessionAuth } from "./adapt-session-auth.mjs";
 import { restResources } from "./adapt.mjs";
 import { WS_PATH } from "./ws-path.mjs";
 import { matchesForceBrowser } from "./url-glob.mjs";
-export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "tierlessWsUrl", forceBrowser = [], auth = "auto", awaitClaims, preconnect = true } = {}) {
+export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "tierlessWsUrl", forceBrowser = [], auth = "auto", cross, awaitClaims, preconnect = true } = {}) {
     if (typeof location === "undefined")
         throw new Error("autoSession: browser-only (SSR/twin bundles keep their host fetch — gate the call on typeof location)");
     const pagePort = Number(location.port || (location.protocol === "https:" ? 443 : 80));
@@ -60,13 +60,14 @@ export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "ti
     const session = auth === "none"
         ? sessionExec()
         : cookieSessionAuth({ gateway: new URL(wsUrl.replace(/^ws/, "http")).origin, hello: sessionHello(), ...(awaitClaims !== undefined ? { awaitClaims } : {}) }).wrap(sessionExec());
+    const crosses = cross ?? ((origin) => origin === location.origin);
     const byOrigin = new Map();
     const execFor = (baseUrl = "/") => {
         const origin = new URL(baseUrl, location.href).origin;
         let e = byOrigin.get(origin);
         if (!e) {
             const direct = restResources(origin, { envelopeErrors: true });
-            e = origin === location.origin ? (req) => (forced(req, origin) ? direct(req) : session(req)) : direct;
+            e = crosses(origin) ? (req) => (forced(req, origin) ? direct(req) : session(req)) : direct;
             byOrigin.set(origin, e);
         }
         return e;

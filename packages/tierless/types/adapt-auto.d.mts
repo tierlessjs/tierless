@@ -14,6 +14,11 @@ export interface AutoSessionOpts {
     /** "auto" (default): cookie-auth wrap engaged by the gateway's own hello declaration.
      *  "none": bare session exec (authority rides in each request's own headers). */
     auth?: "auto" | "none";
+    /** Which origins CROSS the session socket. Default: the page origin only. An app
+     *  whose own API is served from another origin (NocoDB's test rig: UI on :3000, API
+     *  on :8080) widens it — e.g. `cross: () => true` when the adapted client only ever
+     *  talks to the app's own backend. Non-crossing origins get a direct browser fetch. */
+    cross?: (origin: string) => boolean;
     /** cookieSessionAuth's awaitClaims (rotation jar-write ordering — see its doc). */
     awaitClaims?: boolean;
     /** Open the socket now so the upgrade handshake never lands on an interaction's
@@ -29,4 +34,4 @@ export interface AutoSession {
     /** The ws URL in effect (after overrides) — the gateway origin derives from it. */
     wsUrl: string;
 }
-export declare function autoSession({ url, gatewayPort, path, storageKey, forceBrowser, auth, awaitClaims, preconnect }?: AutoSessionOpts): AutoSession;
+export declare function autoSession({ url, gatewayPort, path, storageKey, forceBrowser, auth, cross, awaitClaims, preconnect }?: AutoSessionOpts): AutoSession;

@@ -44,6 +44,11 @@ export interface AutoSessionOpts {
   /** "auto" (default): cookie-auth wrap engaged by the gateway's own hello declaration.
    *  "none": bare session exec (authority rides in each request's own headers). */
   auth?: "auto" | "none";
+  /** Which origins CROSS the session socket. Default: the page origin only. An app
+   *  whose own API is served from another origin (NocoDB's test rig: UI on :3000, API
+   *  on :8080) widens it — e.g. `cross: () => true` when the adapted client only ever
+   *  talks to the app's own backend. Non-crossing origins get a direct browser fetch. */
+  cross?: (origin: string) => boolean;
   /** cookieSessionAuth's awaitClaims (rotation jar-write ordering — see its doc). */
   awaitClaims?: boolean;
   /** Open the socket now so the upgrade handshake never lands on an interaction's
@@ -61,7 +66,7 @@ export interface AutoSession {
   wsUrl: string;
 }
 
-export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "tierlessWsUrl", forceBrowser = [], auth = "auto", awaitClaims, preconnect = true }: AutoSessionOpts = {}): AutoSession {
+export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "tierlessWsUrl", forceBrowser = [], auth = "auto", cross, awaitClaims, preconnect = true }: AutoSessionOpts = {}): AutoSession {
   if (typeof location === "undefined") throw new Error("autoSession: browser-only (SSR/twin bundles keep their host fetch — gate the call on typeof location)");
   const pagePort = Number(location.port || (location.protocol === "https:" ? 443 : 80));
   const scheme = location.protocol === "https:" ? "wss" : "ws";
@@ -85,13 +90,14 @@ export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "ti
     ? sessionExec()
     : cookieSessionAuth({ gateway: new URL(wsUrl.replace(/^ws/, "http")).origin, hello: sessionHello(), ...(awaitClaims !== undefined ? { awaitClaims } : {}) }).wrap(sessionExec());
 
+  const crosses = cross ?? ((origin: string) => origin === location.origin);
   const byOrigin = new Map<string, Exec>();
   const execFor = (baseUrl = "/"): Exec => {
     const origin = new URL(baseUrl, location.href).origin;
     let e = byOrigin.get(origin);
     if (!e) {
       const direct = restResources(origin, { envelopeErrors: true });
-      e = origin === location.origin ? (req) => (forced(req, origin) ? direct(req) : session(req)) : direct;
+      e = crosses(origin) ? (req) => (forced(req, origin) ? direct(req) : session(req)) : direct;
       byOrigin.set(origin, e);
     }
     return e;

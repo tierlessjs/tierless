@@ -54,8 +54,16 @@ export async function bootNocodb(): Promise<{ close(): void }> {
     spawn("corepack", ["pnpm", "run", "dev"], { cwd: path.join(SRC, "packages/nc-sql-executor"), env, stdio: log("executor"), detached: true }),
     spawn("corepack", ["pnpm", "run", "watch:run:playwright"], { cwd: path.join(SRC, "packages/nocodb"), env, stdio: log("backend"), detached: true }),
     spawn("corepack", ["pnpm", "run", "start"], { cwd: path.join(SRC, "packages/nc-gui"), env: frontEnv, stdio: log("frontend"), detached: true }),
-    // the session gateway (both variants — env symmetry; the baseline build never connects)
-    spawn(process.execPath, [fileURLToPath(new URL("./gateway.mts", import.meta.url))], { env, stdio: log("gateway"), detached: true }),
+    // the session gateway (both variants — env symmetry; the baseline build never
+    // connects): `tierless gateway` from the package CLI — the per-port gateway.mts,
+    // retired. Origin-gated to OUR page origins (plain + shaped-relay ports); wire
+    // truth and port ride the same env the old file read.
+    spawn(process.execPath, [
+      fileURLToPath(new URL("../../packages/tierless/bin/tierless.mjs", import.meta.url)), "gateway",
+      "--backend", process.env.TIERLESS_API_URL || API,
+      "--allow-origin", process.env.TIERLESS_ALLOWED_ORIGINS ||
+        ["3000", "13000"].flatMap((p) => [`http://localhost:${p}`, `http://127.0.0.1:${p}`]).join(","),
+    ], { env, stdio: log("gateway"), detached: true }),
   ];
   // cleanup exists BEFORE any await: a failed readiness wait must not strand four
   // detached watcher groups that would own the ports for every later run

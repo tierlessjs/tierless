@@ -1,83 +1,27 @@
-diff -ruN a/tests/playwright/pages/Base.ts b/tests/playwright/pages/Base.ts
---- a/tests/playwright/pages/Base.ts	2026-07-09 23:02:50.854894552 +0000
-+++ b/tests/playwright/pages/Base.ts	2026-07-10 01:52:00.831215351 +0000
-@@ -40,24 +40,67 @@
-     timeout?: number;
-     responseStatusCodeToMatch?: number;
-   }) {
--    const [res] = await Promise.all([
--      this.rootPage.waitForResponse(
--        res =>
--          (requestUrlPathToMatch instanceof RegExp
--            ? requestUrlPathToMatch.test(res.url())
--            : res.url().includes(requestUrlPathToMatch)) &&
--          res.status() === responseStatusCodeToMatch &&
--          httpMethodsToMatch.includes(res.request().method()),
--        timeout ? { timeout } : undefined
--      ),
-+    // Transport-agnostic wait (tierless corpus run protocol, test patch — applied to
-+    // BOTH arms): the ported build serves these requests over a session socket, so no
-+    // HTTP response ever fires for them. Race the HTTP wait against the page's tierless
-+    // exec log (same url predicate, method, status). On the stock build the log never
-+    // exists and the race reduces to the original wait exactly.
-+    // a TIMESTAMP, not an index cursor: uiAction may navigate, which resets the page
-+    // world and restarts the log — wall clock stays comparable across documents
-+    const logFrom = await this.rootPage.evaluate(() => Date.now()).catch(() => Date.now());
-+    const httpWait = this.rootPage.waitForResponse(
-+      res =>
-+        (requestUrlPathToMatch instanceof RegExp
-+          ? requestUrlPathToMatch.test(res.url())
-+          : res.url().includes(requestUrlPathToMatch)) &&
-+        res.status() === responseStatusCodeToMatch &&
-+        httpMethodsToMatch.includes(res.request().method()),
-+      timeout ? { timeout } : undefined
-+    );
-+    const tierlessWait = this.rootPage.waitForFunction(
-+      ({ from, reSrc, reFlags, sub, methods, status }) => {
-+        const log = ((window as any).__tierlessExecLog || []) as { t: number; name: string; url: string; status?: number; body?: unknown }[];
-+        for (let i = 0; i < log.length; i++) {
-+          const e = log[i];
-+          if (!e || e.t < from) continue;
-+          const method = (e.name || '').split('.')[1]?.toUpperCase() || '';
-+          const urlOk = reSrc !== null ? new RegExp(reSrc, reFlags || '').test(e.url) : e.url.includes(sub as string);
-+          if (urlOk && e.status === status && (methods as string[]).includes(method)) return JSON.stringify(e.body ?? null);
-+        }
-+        return '';
-+      },
-+      {
-+        from: logFrom,
-+        reSrc: requestUrlPathToMatch instanceof RegExp ? requestUrlPathToMatch.source : null,
-+        reFlags: requestUrlPathToMatch instanceof RegExp ? requestUrlPathToMatch.flags : null,
-+        sub: typeof requestUrlPathToMatch === 'string' ? requestUrlPathToMatch : null,
-+        methods: httpMethodsToMatch,
-+        status: responseStatusCodeToMatch,
-+      },
-+      timeout ? { timeout } : undefined
-+    );
-+    // the losing wait's eventual timeout must not surface as an unhandled rejection
-+    void httpWait.catch(() => {});
-+    void tierlessWait.catch(() => {});
-+    const [winner] = await Promise.all([
-+      Promise.race([
-+        httpWait.then(res => ({ kind: 'http' as const, res })),
-+        // materialize the matched body AT MATCH TIME: uiAction may navigate afterwards,
-+        // which destroys the matching document — a late read would hit a restarted log
-+        tierlessWait.then(async h => ({ kind: 'tierless' as const, body: (await h.jsonValue()) as string })),
-+      ]),
-       uiAction(),
-     ]);
+--- a/tests/playwright/setup/index.ts	2026-07-16 02:56:54.532957062 +0000
++++ b/tests/playwright/setup/index.ts	2026-07-16 02:57:32.164746594 +0000
+@@ -5,6 +5,7 @@
+ import { Knex, knex } from 'knex';
+ import { promises as fs } from 'fs';
+ import { isEE } from './db';
++import { installTransportWaits } from 'tierless/playwright';
+ import { resetSakilaMssql, resetSakilaPg } from './knexHelper';
+ import path from 'path';
  
--    // handle JSON matcher if provided
-+    // handle JSON matcher if provided — the body comes from whichever transport won
-     let isResJsonMatched = true;
-     if (responseJsonMatcher) {
-       try {
--        isResJsonMatched = responseJsonMatcher(await res.json());
-+        if (winner.kind === 'http') {
-+          isResJsonMatched = responseJsonMatcher(await winner.res.json());
-+        } else {
-+          isResJsonMatched = responseJsonMatcher(JSON.parse(winner.body));
-+        }
-       } catch {
-         isResJsonMatched = false;
-       }
+@@ -453,6 +454,16 @@
+   resetSsoClients?: boolean;
+   resetPlugins?: boolean;
+ }): Promise<NcContext> => {
++  // Transport-agnostic waits (tierless corpus run protocol, test patch — applied to
++  // BOTH arms; docs/corpus.md test accommodations): the ported build serves API
++  // requests over a session socket, so no HTTP response ever fires for them.
++  // installTransportWaits patches waitForResponse/waitForRequest on this context's
++  // pages in place to also accept session crossings — the suite's own predicates
++  // (pages/Base.ts) run unchanged against a truthful facade of each crossing, so no
++  // spec or page-object file needs edits. On the stock build the crossing log never
++  // exists and every wait reduces to the original exactly. Idempotent per context.
++  await installTransportWaits(page.context());
++
+   if (debugLog) console.time('Setup');
+ 
+   let dbType = process.env.CI ? process.env.E2E_DB_TYPE : process.env.E2E_DEV_DB_TYPE;

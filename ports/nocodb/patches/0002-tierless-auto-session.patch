@@ -1,0 +1,62 @@
+--- a/packages/nc-gui/composables/useApi/interceptors.ts	2026-07-16 02:56:54.503126286 +0000
++++ b/packages/nc-gui/composables/useApi/interceptors.ts	2026-07-16 02:57:32.164282667 +0000
+@@ -1,4 +1,20 @@
++import axios from 'axios'
++import { axiosAdapter } from 'tierless/adapt-axios'
++import { autoSession } from 'tierless/adapt-auto'
+ import type { Api } from 'nocodb-sdk'
++
++// The tierless port (corpus, docs/corpus.md rung 3 — ONE patch on the packaged
++// surface): the app's own API, reached through this axios instance, crosses one ws
++// session to the gateway on :8180 (`tierless gateway`, spawned by ports/nocodb/boot.mts)
++// as one exec crossing per request. autoSession owns the conventions — preconnect, the
++// shaped-run override, the force-browser seam for intercepted routes, cookie authority
++// auto-declared off by the gateway's hello (nocodb's authority is the xc-auth header
++// their own interceptor attaches below). cross: () => true because this instance only
++// ever talks to the app's own backend, which the test rig serves on :8080 while the UI
++// rides :3000 — the origin split is the rig's, not the app's. tierlessWsUrl
++// (NUXT_PUBLIC_TIERLESS_WS_URL at serve time) routes the socket through a shaping relay
++// on measured runs.
++let tierless: ReturnType<typeof autoSession> | undefined
+ const DbNotFoundMsg = 'Database config not found'
+ 
+ const TIMEOUT_RETRY_COUNT = 1
+@@ -10,8 +26,25 @@
+   const optimisedQuery = useState('optimisedQuery', () => true)
+   const { $ncSocket } = useNuxtApp()
+ 
++  if (!tierless && typeof window !== 'undefined') {
++    const wsUrl = (useRuntimeConfig().public as any).tierlessWsUrl as string
++    tierless = autoSession({ url: wsUrl || undefined, gatewayPort: 8180, cross: () => true })
++  }
++
+   const axiosInstance = api.instance
+ 
++  // The tierless I/O bottom: axios above this line is untouched — the interceptors
++  // below, the generated sdk, models all run as always; requests are fulfilled as
++  // tierless resource requests over the session socket. Browser-pinned configs
++  // (progress, blobs, FormData) fall through to axios's own XHR adapter (absent under
++  // Node/SSR, where the stock adapter stays).
++  if (tierless) {
++    axiosInstance.defaults.adapter = axiosAdapter({
++      exec: tierless.execFor(axiosInstance.defaults.baseURL || '/'),
++      fallback: typeof XMLHttpRequest === 'undefined' ? undefined : axios.getAdapter('xhr'),
++    })
++  }
++
+   axiosInstance.interceptors.request.use((config) => {
+     config.headers['xc-gui'] = 'true'
+     config.headers['xc-socket-id'] = skipSocket ? null : $ncSocket.id() || null
+--- a/packages/nc-gui/nuxt.config.ts	2026-07-16 02:56:54.512907524 +0000
++++ b/packages/nc-gui/nuxt.config.ts	2026-07-16 02:57:32.164441975 +0000
+@@ -140,6 +140,10 @@
+ 
+   runtimeConfig: {
+     public: {
++      // tierless corpus port: the session-gateway ws URL, overridable at serve time
++      // (NUXT_PUBLIC_TIERLESS_WS_URL) so measured runs can route the socket through a
++      // shaping relay; empty = the autoSession convention (ws://<page-host>:8180)
++      tierlessWsUrl: '',
+       ncBackendUrl: '',
+       env: 'production',
+       maxPageDesignerTableRows: 100,
