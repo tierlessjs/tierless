@@ -1,0 +1,28 @@
+--- a/packages/testing/playwright/fixtures/base.ts	2026-07-16 19:47:44.658770317 +0000
++++ b/packages/testing/playwright/fixtures/base.ts	2026-07-16 19:47:44.675600267 +0000
+@@ -17,6 +17,7 @@
+ 	type QuarantineWorkerFixtures,
+ } from '../fixtures/quarantine';
+ import { v8CoverageFixtures } from '../fixtures/v8-coverage';
++import { installTransportWaits, recordForceBrowserRoutes } from 'tierless/playwright';
+ import { n8nPage } from '../pages/n8nPage';
+ import { ApiHelpers } from '../services/api-helper';
+ import { TestError, type TestRequirements } from '../Types';
+@@ -195,6 +196,17 @@
+ 	},
+ 
+ 	n8n: async ({ context, backendUrl, frontendUrl }, use, testInfo) => {
++		// Transport-agnostic waits (tierless corpus run protocol, test patch — applied to
++		// BOTH arms; docs/corpus.md test accommodations): the ported build serves /rest
++		// over a session socket, so no HTTP response fires for it. installTransportWaits
++		// patches waitForResponse/waitForRequest on this context's pages in place — the
++		// suite's own predicates run unchanged against truthful crossing facades; on the
++		// stock build every wait reduces to the original exactly. recordForceBrowserRoutes
++		// keeps route() mocks interceptable (their patterns register on the force-browser
++		// seam). This suite's playwright (1.60) seals the client classes, so the hook rides
++		// the suite's own fixture seam instead of the zero-touch config wrapper. Idempotent.
++		await installTransportWaits(context);
++		recordForceBrowserRoutes(context);
+ 		await setupDefaultInterceptors(context);
+ 		const page = await context.newPage();
+ 

@@ -54,6 +54,11 @@ cleanup; SHIM_PID=""; trap - EXIT
 if grep -q "tierless" packages/frontend/@n8n/rest-api-client/src/utils.ts 2>/dev/null; then
   (cd packages/frontend/@n8n/rest-api-client && corepack pnpm add "tierless@link:$PORTS_DIR/../packages/tierless")
 fi
+# BOTH variants: the suite's fixture hook (test patch 0002) imports tierless/playwright —
+# this suite's playwright (1.60) seals its client classes, so the waits ride the fixture
+# seam instead of the config wrapper. A harness dependency, not an app change; on the
+# stock arm the hook reduces to the original waits exactly.
+(cd packages/testing/playwright && corepack pnpm add -D "tierless@link:$PORTS_DIR/../packages/tierless")
 
 corepack pnpm run agent:setup build --concurrency 4
 

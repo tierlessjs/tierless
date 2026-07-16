@@ -54,7 +54,11 @@ export interface SuitePlaywright {
 /** Dig the suite's own playwright-core client classes out of its dependency tree
  *  (absolute-path require — the internals aren't in the exports map). `fromDir` is the
  *  suite directory whose resolution should be used, so the patched Page class is the
- *  SAME class the suite's fixtures hand to tests. */
+ *  SAME class the suite's fixtures hand to tests. Version-bounded and honest about it:
+ *  playwright-core ≤1.5x ships lib/client/*.js; 1.60 sealed the client classes inside
+ *  a bundle closure with no reachable export — there this THROWS with a message naming
+ *  the fallback (the suite's own fixture seam + installTransportWaits), and the config
+ *  wrapper catches it and runs the suite unpatched rather than killing it. */
 export declare function resolveSuitePlaywright(fromDir: string): SuitePlaywright;
 /** Patch the suite's Page class so EVERY page's waits are transport-agnostic — the
  *  zero-touch form of installTransportWaits, applied from a generated config wrapper
