@@ -139,10 +139,14 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
       } else {
         // the member LOOKUP itself can throw (a getter) — that's part of the awaited
         // expression, so it unwinds into the compiled catch exactly like the call would
-        let f: ((...a: unknown[]) => unknown) & { __tierless_program?: string } | undefined;
+        let f: ((...a: unknown[]) => unknown) & { __tierless_program?: string; __tierless_caps?: () => object } | undefined;
         try { f = (recv as Record<string, unknown> | null | undefined)?.[r.member] as typeof f; }
         catch (err) { if (!__unwind(stack, err)) throw err; return null; }
-        if (f && typeof f.__tierless_program === "string") stack.push({ fn: f.__tierless_program, pc: 0, args: [recv, ...r.args] });
+        // frame arg 0 differs by kind: a CLASS method's is its receiver (this park's
+        // recv — correct as-is); a STORE function's is its OWN caps, which only its
+        // closure can build — the compiler stamps the builder for exactly this dispatch
+        // (recv here is the CALLER's caps, the wrong frame for the sibling).
+        if (f && typeof f.__tierless_program === "string") stack.push({ fn: f.__tierless_program, pc: 0, args: [f.__tierless_caps ? f.__tierless_caps() : recv, ...r.args] });
         else await settle(() => f!.apply(recv as object, r.args));
       }
       return null;

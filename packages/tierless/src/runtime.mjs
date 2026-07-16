@@ -160,8 +160,12 @@ export function makePump(bundle, { twins } = {}) {
                         throw err;
                     return null;
                 }
+                // frame arg 0 differs by kind: a CLASS method's is its receiver (this park's
+                // recv — correct as-is); a STORE function's is its OWN caps, which only its
+                // closure can build — the compiler stamps the builder for exactly this dispatch
+                // (recv here is the CALLER's caps, the wrong frame for the sibling).
                 if (f && typeof f.__tierless_program === "string")
-                    stack.push({ fn: f.__tierless_program, pc: 0, args: [recv, ...r.args] });
+                    stack.push({ fn: f.__tierless_program, pc: 0, args: [f.__tierless_caps ? f.__tierless_caps() : recv, ...r.args] });
                 else
                     await settle(() => f.apply(recv, r.args));
             }

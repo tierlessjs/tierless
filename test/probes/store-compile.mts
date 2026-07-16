@@ -57,7 +57,18 @@ export const useThings = defineStore("things", () => {
   async function plain(x) { return x + state.flips; }               // no tier calls: untouched
   let counter = 0;
   async function bad(m) { counter++; const r = await svc.create(m); return r; }   // assigns a capture
-  return { state, svc, toggleAndReload, viaCaptured, plain, bad };
+  async function inner() {                       // the SIBLING a caller awaits (vikunja auth shape)
+    const r = await svc.reload();
+    state.items = r;
+    return r.length;
+  }
+  async function outer(m) {                      // login's true shape: fn-local service for the
+    const own = new Svc(globalThis.__probeHttp); // direct member await, then try/catch around the
+    const created = await own.create(m);         // sibling — and captures DISJOINT from inner's
+    try { const n = await inner(); return created.id + ":n=" + n; }   // ({Svc, inner} vs {svc, state}):
+    catch (e) { return "err:" + (e && e.message); }                   // the caller's caps must never
+  }                                                                   // stand in for the sibling's
+  return { state, svc, toggleAndReload, viaCaptured, plain, bad, inner, outer };
 });`;
 
 const { code, meta } = compile(SRC, { resources: { "this.http": "server" }, filename: "store.js" });
@@ -121,6 +132,22 @@ const store3 = mod.useThings();
 const r3 = await bhost.runLocal(peer, "things$toggleAndReload", [{ state: store3.state, svc: store3.svc, Svc: mod.Svc }, { t: "z" }], { migrate: () => true });
 check("migrate: the 2-method store chain is ONE crossing", r3 === "42:3" && counts.resume === 1 && !counts.exec, JSON.stringify({ r3, counts }));
 check("migrate: both calls served server-side; live state still mutated at home", twinServed.join(",") === "http.put:/things,http.get:/things" && store3.state.flips === 1 && store3.state.items.length === 3, JSON.stringify({ twinServed, state: store3.state }));
+
+// SIBLING AWAITS (the vikunja auth-store shape — login awaits checkAuth): a caller's
+// dyn park on a captured compiled sibling must hand the sibling ITS OWN caps (the
+// compiler-stamped __tierless_caps builder), never the caller's — the pre-fix push of
+// the caller's caps made every sibling read absent fields, unwind into the caller's
+// catch, and fail silently (vikunja's whole auth cluster).
+{
+  const store5 = mod.useThings();
+  mod.__bindTierlessMethods((prog: string, caps: object, args: unknown[]) => bhost.runLocal(peer, prog, [caps, ...args], {}));
+  reset();
+  const r5 = await store5.outer({ t: "s" });
+  mod.__bindTierlessMethods(null);
+  check("outer compiled (sibling-await + member-await shape)", (meta.methods as any[]).some((m) => m.method === "outer" && m.program === "things$outer"), "");
+  check("sibling await: the sibling runs on ITS OWN caps (value right, state landed, no silent catch)",
+    r5 === "42:n=3" && store5.state.items.length === 3 && counts.exec === 2, JSON.stringify({ r5, state: store5.state, counts }));
+}
 
 // captured-service receivers are PATHS through the caps handle: every dispatch fences
 // home — correct (value, no divergence), just unbatched. Their stores construct services

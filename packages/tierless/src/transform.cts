@@ -1252,7 +1252,14 @@ function compileStoreFunctions(ast: t.File, progs: string[], meta: CompileMeta):
         stmtPath.insertAfter([orig,
           // the stamp a compiled CALLER's dynamic park dispatches on (sibling store calls)
           t.expressionStatement(t.assignmentExpression("=",
-            t.memberExpression(t.identifier(fnName), t.identifier("__tierless_program")), t.stringLiteral(progName)))]);
+            t.memberExpression(t.identifier(fnName), t.identifier("__tierless_program")), t.stringLiteral(progName))),
+          // the CAPS BUILDER for that dispatch: a sibling's frame arg 0 is ITS OWN caps,
+          // which only this closure can build — a caller's dyn park must not hand the
+          // sibling the caller's caps (checkAuth reading login's caps was the vikunja
+          // auth cluster). Same literal the stub passes, built at dispatch time.
+          t.expressionStatement(t.assignmentExpression("=",
+            t.memberExpression(t.identifier(fnName), t.identifier("__tierless_caps")),
+            t.arrowFunctionExpression([], t.cloneNode(capsLit))))]);
       } catch (e) {
         meta.methods.push({ class: "store:" + storeKey, method: fnName, program: null, error: (e as Error).message.split("\n")[0] });
       }
