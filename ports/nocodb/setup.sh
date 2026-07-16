@@ -22,17 +22,14 @@ corepack pnpm --filter=nocodb --filter=nc-gui --filter=nc-sql-executor --filter=
 corepack pnpm run integrations:build
 corepack pnpm run registerIntegrations
 
-# the suite harness needs tierless on BOTH variants (test patches import
-# tierless/playwright + tierless/playwright-reporter — accommodations run on both arms;
-# on the stock build they reduce to no-ops). A harness dependency, not an app change.
-(cd tests/playwright && corepack pnpm add -D "tierless@link:../../../../../packages/tierless")
-
 # UI: their CI downloads a prebuilt artifact from private S3; build locally instead.
 # The root tsconfig extends ee/.nuxt/tsconfig.json — prepare the ee app once first.
 cd packages/nc-gui
 # ported tree only (patch 0002 imports tierless): the runtime as a linked install, not
-# a diff — same posture as Vikunja. The baseline tree never gets port patches or this.
-if grep -q "tierless/adapt-axios" composables/useApi/interceptors.ts 2>/dev/null; then
+# a diff — same posture as Vikunja. The baseline tree never gets port patches or this;
+# the suite harness (waits, reporter) reaches tierless by absolute path (pw-wrapper.mts)
+# and needs NO link at all.
+if grep -q "tierless/adapt-auto" composables/useApi/interceptors.ts 2>/dev/null; then
   corepack pnpm add "tierless@link:../../../../../packages/tierless"
 fi
 EE=true corepack pnpm exec nuxt prepare ./ee

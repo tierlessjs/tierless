@@ -1,3 +1,4 @@
+import { type AxiosishConfig } from "./adapt-axios.mjs";
 import type { Exec } from "./types.mjs";
 export interface AutoSessionOpts {
     /** Explicit ws URL (overrides the page-derived convention; the localStorage override
@@ -35,3 +36,26 @@ export interface AutoSession {
     wsUrl: string;
 }
 export declare function autoSession({ url, gatewayPort, path, storageKey, forceBrowser, auth, cross, awaitClaims, preconnect }?: AutoSessionOpts): AutoSession;
+interface AxiosModuleLike {
+    getAdapter?: (names: unknown) => (config: AxiosishConfig) => Promise<unknown>;
+}
+interface AxiosInstanceLike {
+    defaults: {
+        adapter?: unknown;
+        baseURL?: string;
+    };
+}
+/** The whole transport port for an axios app, one call at the app's own API client:
+ *
+ *     import { tierlessAxios } from 'tierless/adapt-auto'
+ *     tierlessAxios(axios, api.instance)
+ *
+ *  Installs the tierless I/O bottom (adapt-axios) fed by autoSession() — every request
+ *  through this instance crosses the session socket (the INSTALLATION CONTRACT in
+ *  adapt-axios.mts: the instance's baseURL IS the app's own API, wherever it is hosted;
+ *  explicit other-origin URLs still fall through at the adapter). Browser-pinned
+ *  configs fall through to the app's own stock adapter via `axios.getAdapter`. Under
+ *  SSR/Node this is a no-op — the stock adapter stays. Idempotent per instance; the
+ *  first call's opts configure the shared session (one socket per page). */
+export declare function tierlessAxios(axios: AxiosModuleLike, instance: AxiosInstanceLike, opts?: AutoSessionOpts): void;
+export {};

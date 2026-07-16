@@ -32,24 +32,31 @@
 // seam), or a wait whose removal reorders the app (semantic accommodations, each with
 // its own why-comment in the recipe's testPatches).
 import { Buffer } from "node:buffer";
+import { createRequire } from "node:module";
+import path from "node:path";
 const BINDING = "__tierlessCrossingPush";
 // Page-side wiring, per document (init script for future documents, evaluate for the
 // current one): turn the exec log on and forward each push to the Node-side binding.
 // The runtime does `__tierlessExecLog ||= []`, so wiring the array FIRST keeps ours; if
-// the runtime got there first, we wrap the existing array's own push in place. Entries
-// ride as JSON strings — they crossed the wire already, so they are JSON-safe by
-// construction. On a stock build nothing ever pushes and this is inert.
+// the runtime got there first, we wrap the existing array's own push in place AND drain
+// what already landed — the lazy (prototype-patched) path wires on a page's first wait,
+// which may be after crossings settled; the arm-time filter below keeps drained history
+// from satisfying a wait it predates. Entries ride as JSON strings — they crossed the
+// wire already, so they are JSON-safe by construction. On a stock build nothing ever
+// pushes and this is inert.
 const PAGE_WIRE = `(() => {
   const g = globalThis;
   g.__TIERLESS_EXEC_LOG__ = true;
   const log = (g.__tierlessExecLog = g.__tierlessExecLog || []);
   if (log.__tierlessPushWired) return;
   Object.defineProperty(log, "__tierlessPushWired", { value: true });
+  const fwd = (it) => {
+    try { const p = g.${BINDING}(JSON.stringify(it)); if (p && typeof p.catch === "function") p.catch(() => {}); } catch (e) { /* binding gone mid-navigation */ }
+  };
+  for (let i = 0; i < log.length; i++) fwd(log[i]);
   const base = log.push.bind(log);
   log.push = function () {
-    for (let i = 0; i < arguments.length; i++) {
-      try { const p = g.${BINDING}(JSON.stringify(arguments[i])); if (p && typeof p.catch === "function") p.catch(() => {}); } catch (e) { /* binding gone mid-navigation */ }
-    }
+    for (let i = 0; i < arguments.length; i++) fwd(arguments[i]);
     return base.apply(null, arguments);
   };
 })()`;
@@ -194,7 +201,10 @@ function matcherFor(arg, kind, st) {
 const STOPPED = Symbol("tierless-crossing-wait-stopped");
 // Resolve with the first crossing after `cursor` the matcher accepts; reject STOPPED
 // when the HTTP side settled first. Entries arriving mid-scan are picked up by seq.
-function firstCrossing(st, accept) {
+// `armT` (wall clock, same machine as the page) excludes crossings that COMPLETED
+// before this wait was armed — Playwright's own semantics — which matters on the lazy
+// path, where wiring a page's first wait drains crossings that predate it.
+function firstCrossing(st, accept, armT) {
     let stopped = false;
     const cursor = st.seq;
     const promise = (async () => {
@@ -204,6 +214,8 @@ function firstCrossing(st, accept) {
             const next = st.entries.find((c) => c.seq > last);
             if (next) {
                 last = next.seq;
+                if (next.e.t < armT)
+                    continue;
                 const facade = await accept(next);
                 if (facade != null)
                     return facade;
@@ -242,7 +254,7 @@ function patchPage(page, warn) {
     const st = stateFor(page, warn);
     for (const [method, kind] of [["waitForResponse", "response"], ["waitForRequest", "request"]]) {
         const orig = page[method].bind(page);
-        page[method] = (urlOrPredicate, options) => raced(orig(urlOrPredicate, options), firstCrossing(st, matcherFor(urlOrPredicate, kind, st)));
+        page[method] = (urlOrPredicate, options) => raced(orig(urlOrPredicate, options), firstCrossing(st, matcherFor(urlOrPredicate, kind, st), Date.now()));
     }
 }
 async function bindTarget(target, warn) {
@@ -272,6 +284,19 @@ async function bindTarget(target, warn) {
             throw err;
     }
     await target.addInitScript(PAGE_WIRE);
+}
+// Per-page wiring for the LAZY (prototype-patched) path: binding + init script + the
+// current document, memoized. Fire-and-forget from a wait call — the crossing watcher
+// reads the page's state, which fills as soon as this lands; a wait armed at the same
+// call only matches later crossings anyway (its cursor is taken at arm time).
+const WIRED = new WeakMap();
+function wirePage(page, warn) {
+    let p = WIRED.get(page);
+    if (!p) {
+        p = bindTarget(page, warn).then(() => page.evaluate(PAGE_WIRE).then(() => undefined, () => undefined));
+        WIRED.set(page, p);
+    }
+    return p;
 }
 /** Patch `waitForResponse`/`waitForRequest` on a Page — or on a BrowserContext and every
  *  page it ever creates (popups included) — to also accept tierless session crossings.
@@ -347,4 +372,75 @@ export function recordForceBrowserRoutes(context) {
     for (const p of context.pages())
         wrapPage(p);
     context.on("page", wrapPage);
+}
+/** Dig the suite's own playwright-core client classes out of its dependency tree
+ *  (absolute-path require — the internals aren't in the exports map). `fromDir` is the
+ *  suite directory whose resolution should be used, so the patched Page class is the
+ *  SAME class the suite's fixtures hand to tests. */
+export function resolveSuitePlaywright(fromDir) {
+    const req = createRequire(path.join(fromDir, "__tierless_resolve__.js"));
+    let corePkg;
+    try {
+        corePkg = req.resolve("playwright-core/package.json");
+    }
+    catch {
+        corePkg = createRequire(req.resolve("@playwright/test/package.json")).resolve("playwright-core/package.json");
+    }
+    const core = path.dirname(corePkg);
+    const { Page } = req(path.join(core, "lib/client/page.js"));
+    const { BrowserContext } = req(path.join(core, "lib/client/browserContext.js"));
+    return { Page, BrowserContext };
+}
+const PROTO_PATCHED = new WeakSet();
+/** Patch the suite's Page class so EVERY page's waits are transport-agnostic — the
+ *  zero-touch form of installTransportWaits, applied from a generated config wrapper.
+ *  `initScript` (optional) is added to every context before its first page — the
+ *  harness's channel for page-visible run parameters (e.g. seeding the tierlessWsUrl
+ *  localStorage override on shaped runs) without touching the app or the suite. */
+export function patchPlaywrightPages({ Page, BrowserContext }, { warn = (msg) => console.warn(msg), initScript } = {}) {
+    if (!PROTO_PATCHED.has(Page)) {
+        PROTO_PATCHED.add(Page);
+        for (const [method, kind] of [["waitForResponse", "response"], ["waitForRequest", "request"]]) {
+            const orig = Page.prototype[method];
+            Page.prototype[method] = function (urlOrPredicate, options) {
+                void wirePage(this, warn).catch(() => { }); // lazy per-page wiring; no-op once wired
+                const st = stateFor(this, warn);
+                return raced(orig.call(this, urlOrPredicate, options), firstCrossing(st, matcherFor(urlOrPredicate, kind, st), Date.now()));
+            };
+        }
+    }
+    if (initScript && !PROTO_PATCHED.has(BrowserContext)) {
+        PROTO_PATCHED.add(BrowserContext);
+        const seeded = new WeakSet();
+        const origNewPage = BrowserContext.prototype.newPage;
+        BrowserContext.prototype.newPage = async function () {
+            if (!seeded.has(this)) {
+                seeded.add(this);
+                try {
+                    await this.addInitScript(initScript);
+                }
+                catch { /* context already closing */ }
+            }
+            return origNewPage.call(this);
+        };
+    }
+}
+/** Re-anchor a config object's relative paths to the directory of the config file it
+ *  came from — what a `--config` wrapper OUTSIDE the suite tree needs, since Playwright
+ *  resolves these against the wrapper's own location. Projects are anchored too. */
+export function anchorPlaywrightConfig(config, dir) {
+    const FIELDS = ["testDir", "outputDir", "globalSetup", "globalTeardown", "snapshotDir"];
+    const anchor = (o) => {
+        const out = { ...o };
+        for (const f of FIELDS) {
+            const v = out[f];
+            if (typeof v === "string" && !path.isAbsolute(v))
+                out[f] = path.resolve(dir, v);
+        }
+        return out;
+    };
+    const out = anchor(config);
+    if (Array.isArray(out.projects))
+        out.projects = out.projects.map(anchor);
+    return out;
 }

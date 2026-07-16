@@ -64,6 +64,19 @@ const PAGE_HTML = `<!doctype html><html><body><h1>auto-session-live</h1>
     (e) => ({ err: String(e) }));
   window.cross = (m, p, b) => call(m, p, b).then((env) => env, (e) => ({ err: String(e) }));
   window.tfetch = async (p, init) => { const r = await fetchAdapter({ exec: t.exec })(p, init || {}); return { status: r.status, body: await r.text() }; };
+  window.axiosCheck = async () => {
+    // tierlessAxios mechanics with an axios-SHAPED module: install, a crossing through
+    // the real socket, and a pinned config falling through to the module's own adapter
+    const { tierlessAxios } = await import("/pkg/adapt-auto.mjs");
+    let fell = 0;
+    const fakeAxios = { getAdapter: () => async () => { fell++; return { status: 200, data: "host" }; } };
+    const instance = { defaults: { baseURL: location.origin } };
+    tierlessAxios(fakeAxios, instance, { url: q.get("ws") || undefined });
+    tierlessAxios(fakeAxios, instance, { url: q.get("ws") || undefined });   // idempotent
+    const crossed = await instance.defaults.adapter({ method: "get", url: "/api/axios-check", headers: {} });
+    const pinned = await instance.defaults.adapter({ method: "get", url: "/api/axios-check", responseType: "blob" });
+    return { status: crossed.status, path: crossed.data && crossed.data.path, fellForPinned: fell === 1 && pinned.data === "host" };
+  };
 </script></body></html>`;
 const pages = createServer((req, res) => {
   const path = (req.url ?? "").split("?")[0];
@@ -127,6 +140,13 @@ const page = await context.newPage();
   check("fetchAdapter crosses JSON requests over the socket", viaSocket.status === 200 && backendHits["/api/things"] === 1);
   const viaBrowser = await page.evaluate("window.tfetch('/direct.json', {})") as { body: string };
   check("fetchAdapter falls through to the browser for non-JSON accepts (page server saw HTTP)", (JSON.parse(viaBrowser.body) as { direct: boolean }).direct === true && pageHits["/direct.json"] === 1);
+}
+
+// 3b. the 2-line port call: tierlessAxios installs the whole bottom on an instance
+{
+  const r = await page.evaluate("window.axiosCheck()") as { status: number; path: string; fellForPinned: boolean };
+  check("tierlessAxios: an installed instance's requests cross the socket", r.status === 200 && r.path === "/api/axios-check" && backendHits["/api/axios-check"] === 1);
+  check("tierlessAxios: pinned configs fall through to the module's own adapter (install idempotent)", r.fellForPinned === true);
 }
 
 // 4. the force-browser seam: declared globs stay on the browser's own fetch

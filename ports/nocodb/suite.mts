@@ -17,23 +17,31 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { delayProxy, type WireCounter } from "../latency-proxy.mts";
+import { gzipProxy } from "../gzip-proxy.mts";
+import { writeSuiteConfig } from "../pw-wrapper.mts";
 
 const VARIANT = process.argv.includes("--baseline") ? "nocodb-baseline" : "nocodb";
 const TRUTH = !!process.env.TIERLESS_WIRE_TRUTH;
 const RTT = Number(process.env.TIERLESS_RTT_MS || 0);
-const GZIP = !!process.env.NC_TIERLESS_GZIP;   // env-gated stock compression (patch 0005) — the apples-to-apples arm
+const GZIP = !!process.env.NC_TIERLESS_GZIP;   // stock compression via the gzip RELAY (ports/gzip-proxy.mts) — the apples-to-apples arm
 if (TRUTH && RTT) { console.error("pick one: TIERLESS_WIRE_TRUTH (bytes) or TIERLESS_RTT_MS (time) — a counting relay inflates request-heavy tests"); process.exit(2); }
 const SRC = fileURLToPath(new URL(`../work/${VARIANT}/src/`, import.meta.url));
 const OUT = fileURLToPath(new URL(`../work/${VARIANT}/measure${TRUTH ? "-truth" : ""}${RTT ? `-rtt${RTT}` : ""}${GZIP ? "-gzip" : ""}.jsonl`, import.meta.url));
 
+// the gzip arm: browser-facing API traffic rides a compressing reverse proxy in front
+// of the backend — the nginx posture, no app patch. Counting/RTT relays chain in front.
+const API_ORIGIN = GZIP ? 29080 : 8080;
+if (GZIP) { gzipProxy(29080, 8080).unref(); console.log("gzip relay: :29080 -> :8080"); }
+if (GZIP && !TRUTH && !RTT) process.env.TIERLESS_BROWSER_API_URL = "http://127.0.0.1:29080";
+
 const wireUrls: string[] = [];
 if (TRUTH) {
   const api: WireCounter = { toServer: 0, toClient: 0 };
-  delayProxy(28080, 8080, 0, api).unref();
+  delayProxy(28080, API_ORIGIN, 0, api).unref();
   createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ apiOut: api.toServer, apiIn: api.toClient })); }).listen(14991, "127.0.0.1").unref();
   process.env.TIERLESS_BROWSER_API_URL = "http://127.0.0.1:28080";   // boot passes it to the frontend serve
-  wireUrls.push("http://127.0.0.1:14991", "http://127.0.0.1:8180/__tierless/wire");
-  console.log("wire truth: browser api via counting relay :28080, counters :14991, ws bytes at :8180/__tierless/wire");
+  wireUrls.push("http://127.0.0.1:14991", "http://127.0.0.1:3100/__tierless/wire");
+  console.log(`wire truth: browser api via counting relay :28080 -> :${API_ORIGIN}, counters :14991, ws bytes at :3100/__tierless/wire`);
 }
 
 if (RTT) {
@@ -41,12 +49,14 @@ if (RTT) {
   // throttling can't shape ws): frontend origin, API origin, session gateway. The
   // gateway->backend hop stays undelayed localhost, as deployed.
   delayProxy(13000, 3000, RTT / 2).unref();
-  delayProxy(18080, 8080, RTT / 2).unref();
-  delayProxy(18180, 8180, RTT / 2).unref();
+  delayProxy(18080, API_ORIGIN, RTT / 2).unref();
+  delayProxy(18180, 3100, RTT / 2).unref();
   process.env.TIERLESS_BROWSER_API_URL = "http://127.0.0.1:18080";
+  // consumed by the config wrapper: rides an init script into each context as the
+  // adapt-auto localStorage override — the app never learns about shaped runs
   process.env.TIERLESS_WS_URL = "ws://127.0.0.1:18180/__tierless";
   process.env.BASE_URL = "http://127.0.0.1:13000";
-  console.log(`RTT injection: ${RTT} ms via 13000->3000, 18080->8080, 18180->8180`);
+  console.log(`RTT injection: ${RTT} ms via 13000->3000, 18080->${API_ORIGIN}, 18180->3100`);
 }
 
 rmSync(OUT, { force: true });
@@ -61,7 +71,11 @@ for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => { app.cl
 // that matters: one shared sqlite backend cannot serve 4 racing browser contexts)
 // heavier shaping needs headroom over their 70 s per-test timeout — hundreds of
 // request round-trips × RTT lands inside the test body; both arms get it equally
-const suite = spawn("corepack", ["pnpm", "exec", "playwright", "test", "--workers=1", ...(RTT >= 50 ? ["--timeout=120000"] : []), ...(process.env.TIERLESS_SPEC || "").split(/\s+/).filter(Boolean)], {
+// their suite through the generated --config wrapper (ports/pw-wrapper.mts): waits
+// patched into their playwright-core, the measure reporter attached, paths re-anchored
+// — their tree carries NO test patches
+const CONFIG = writeSuiteConfig({ suiteDir: path.join(SRC, "tests/playwright"), outFile: fileURLToPath(new URL(`../work/${VARIANT}/tierless.config.ts`, import.meta.url)) });
+const suite = spawn("corepack", ["pnpm", "exec", "playwright", "test", "--config", CONFIG, "--workers=1", ...(RTT >= 50 ? ["--timeout=120000"] : []), ...(process.env.TIERLESS_SPEC || "").split(/\s+/).filter(Boolean)], {
   cwd: path.join(SRC, "tests/playwright"),
   stdio: "inherit",
   env: {

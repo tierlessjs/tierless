@@ -25,6 +25,7 @@
 import { configureTierless, sessionExec, sessionHello } from "./browser.mjs";
 import { cookieSessionAuth } from "./adapt-session-auth.mjs";
 import { restResources } from "./adapt.mjs";
+import { axiosAdapter } from "./adapt-axios.mjs";
 import { WS_PATH } from "./ws-path.mjs";
 import { matchesForceBrowser } from "./url-glob.mjs";
 export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "tierlessWsUrl", forceBrowser = [], auth = "auto", cross, awaitClaims, preconnect = true } = {}) {
@@ -73,4 +74,30 @@ export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "ti
         return e;
     };
     return { exec: execFor(), execFor, wsUrl };
+}
+let sharedAuto;
+const INSTALLED = new WeakSet();
+/** The whole transport port for an axios app, one call at the app's own API client:
+ *
+ *     import { tierlessAxios } from 'tierless/adapt-auto'
+ *     tierlessAxios(axios, api.instance)
+ *
+ *  Installs the tierless I/O bottom (adapt-axios) fed by autoSession() — every request
+ *  through this instance crosses the session socket (the INSTALLATION CONTRACT in
+ *  adapt-axios.mts: the instance's baseURL IS the app's own API, wherever it is hosted;
+ *  explicit other-origin URLs still fall through at the adapter). Browser-pinned
+ *  configs fall through to the app's own stock adapter via `axios.getAdapter`. Under
+ *  SSR/Node this is a no-op — the stock adapter stays. Idempotent per instance; the
+ *  first call's opts configure the shared session (one socket per page). */
+export function tierlessAxios(axios, instance, opts = {}) {
+    if (typeof window === "undefined" || typeof location === "undefined")
+        return;
+    if (INSTALLED.has(instance))
+        return;
+    INSTALLED.add(instance);
+    sharedAuto ??= autoSession({ ...opts, cross: () => true });
+    instance.defaults.adapter = axiosAdapter({
+        exec: sharedAuto.execFor(instance.defaults.baseURL || "/"),
+        fallback: typeof XMLHttpRequest !== "undefined" && axios.getAdapter ? axios.getAdapter(["xhr", "http"]) : undefined,
+    });
 }

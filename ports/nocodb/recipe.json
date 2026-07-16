@@ -20,9 +20,5 @@
   "patches": [
     "patches/0002-tierless-auto-session.patch"
   ],
-  "testPatches": [
-    "patches/0001-measure-reporter.patch",
-    "patches/0004-transport-agnostic-waits.patch",
-    "patches/0005-optional-gzip.patch"
-  ]
+  "testPatches": []
 }

@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { attachTierless, WS_PATH } from "tierless/server";
 import { restResources } from "tierless/adapt";
-import { installTransportWaits, globToRegexPattern } from "tierless/playwright";
+import { installTransportWaits, globToRegexPattern, resolveSuitePlaywright, patchPlaywrightPages } from "tierless/playwright";
 import { makeCheck } from "../lib/check.mts";
 
 // playwright: loaded via createRequire (no @types/playwright wired into this tsconfig) — chromium, browser, page are all any
@@ -201,6 +201,29 @@ check("the page's requests cross the session socket (no HTTP fired for them)", (
     "**/x?y", "**/{one,two}/end", "**/[ab]", "**/z\\*z", "http://h:1/exact", "**/a.b+c(d)|e^f$g"];
   const diverged = GLOBS.filter((g) => globToRegexPattern(g) !== theirs(g));
   check("glob compiler matches installed playwright-core token-for-token (" + GLOBS.length + " patterns)", diverged.length === 0, JSON.stringify(diverged));
+}
+
+// 10. zero-touch delivery: patch the suite's Page CLASS (what a generated --config
+//     wrapper does) — a page that never saw installTransportWaits gets everything:
+//     lazy wiring on its first wait, pre-arm crossings excluded, contexts seeded
+{
+  // the playwright package dir — resolveSuitePlaywright digs playwright-core out of the
+  // SAME install driving this test, so the patched class is the class of our pages
+  const pwDir = createRequire(process.env.PLAYWRIGHT_REQUIRE || "/opt/node22/lib/node_modules/").resolve("playwright").replace(/\/index\.js$/, "");
+  patchPlaywrightPages(resolveSuitePlaywright(pwDir), { warn: (m: string) => warnings.push(m), initScript: "localStorage.setItem('tierlessSeeded', 'yes')" });
+  const ctx = await browser.newContext();                    // NO install call anywhere
+  const page2 = await ctx.newPage();
+  await page2.goto(pageUrl + "/");
+  const before = await page2.evaluate("window.cross('get', '/api/items?pre=1')");   // settles BEFORE any wait exists
+  check("zero-touch: a crossing can settle before the page is even wired", (before as { settled: boolean }).settled === true);
+  const wait = page2.waitForResponse((res: { url(): string; ok(): boolean }) => res.url().includes("/api/items") && res.ok());
+  const pending = await Promise.race([wait.then(() => "matched"), new Promise((r) => setTimeout(() => r("pending"), 400))]);
+  check("zero-touch: the pre-arm crossing does NOT satisfy a later wait (drained history is filtered by arm time)", pending === "pending", String(pending));
+  await page2.evaluate("window.cross('get', '/api/items?post=1')");
+  const res = await wait;
+  check("zero-touch: an untouched page's unmodified wait resolves from the post-arm crossing", !!res.__tierlessCrossing && res.url().endsWith("/api/items?post=1"), res.url());
+  check("zero-touch: initScript seeded the context before its first page", (await page2.evaluate("localStorage.getItem('tierlessSeeded')")) === "yes");
+  await ctx.close();
 }
 
 await browser.close();

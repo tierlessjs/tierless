@@ -16,7 +16,7 @@ const WORK = fileURLToPath(new URL(`../work/${VARIANT}/`, import.meta.url));
 const SRC = path.join(WORK, "src/");
 export const API = "http://127.0.0.1:8080";
 export const FRONT = "http://127.0.0.1:3000";
-export const GATEWAY = "http://127.0.0.1:8180";
+export const GATEWAY = "http://127.0.0.1:3100";   // the autoSession convention: page port (:3000) + 100
 const EXECUTOR = "http://127.0.0.1:9000";
 
 // any HTTP answer means the port is owned (the executor 404s its root; that still
@@ -47,7 +47,7 @@ export async function bootNocodb(): Promise<{ close(): void }> {
   // backend URL is overridable (TIERLESS_BROWSER_API_URL routes browser data through
   // a counting relay on wire-truth runs; node-side test seeding hardcodes :8080 in
   // their setup and stays uncounted — the vikunja split, same shape)
-  const frontEnv = { ...env, NUXT_PAGE_TRANSITION_DISABLE: "true", NUXT_PUBLIC_ENV: "CI", NUXT_PUBLIC_NC_BACKEND_URL: process.env.TIERLESS_BROWSER_API_URL || "http://localhost:8080", NUXT_PUBLIC_TIERLESS_WS_URL: process.env.TIERLESS_WS_URL || "" };
+  const frontEnv = { ...env, NUXT_PAGE_TRANSITION_DISABLE: "true", NUXT_PUBLIC_ENV: "CI", NUXT_PUBLIC_NC_BACKEND_URL: process.env.TIERLESS_BROWSER_API_URL || "http://localhost:8080" };
   // detached process GROUPS: pnpm/rspack/nodemon spawn children of their own; killing
   // only the wrapper leaves a stale server owning the port. kill(-pid) takes the group.
   const procs: ChildProcess[] = [
@@ -61,6 +61,7 @@ export async function bootNocodb(): Promise<{ close(): void }> {
     spawn(process.execPath, [
       fileURLToPath(new URL("../../packages/tierless/bin/tierless.mjs", import.meta.url)), "gateway",
       "--backend", process.env.TIERLESS_API_URL || API,
+      "--port", "3100",                                  // page port + 100: the patch needs no gateway config
       "--allow-origin", process.env.TIERLESS_ALLOWED_ORIGINS ||
         ["3000", "13000"].flatMap((p) => [`http://localhost:${p}`, `http://127.0.0.1:${p}`]).join(","),
     ], { env, stdio: log("gateway"), detached: true }),

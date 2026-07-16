@@ -43,3 +43,29 @@ interface RoutableContext {
  *  (`window.__tierlessForceBrowser`, read by adapt-auto). Mocked requests then stay on
  *  the browser's fetch where the intercept can fire. Idempotent per target. */
 export declare function recordForceBrowserRoutes(context: RoutableContext): void;
+export interface SuitePlaywright {
+    Page: {
+        prototype: Record<string, unknown>;
+    };
+    BrowserContext: {
+        prototype: Record<string, unknown>;
+    };
+}
+/** Dig the suite's own playwright-core client classes out of its dependency tree
+ *  (absolute-path require — the internals aren't in the exports map). `fromDir` is the
+ *  suite directory whose resolution should be used, so the patched Page class is the
+ *  SAME class the suite's fixtures hand to tests. */
+export declare function resolveSuitePlaywright(fromDir: string): SuitePlaywright;
+/** Patch the suite's Page class so EVERY page's waits are transport-agnostic — the
+ *  zero-touch form of installTransportWaits, applied from a generated config wrapper.
+ *  `initScript` (optional) is added to every context before its first page — the
+ *  harness's channel for page-visible run parameters (e.g. seeding the tierlessWsUrl
+ *  localStorage override on shaped runs) without touching the app or the suite. */
+export declare function patchPlaywrightPages({ Page, BrowserContext }: SuitePlaywright, { warn, initScript }?: {
+    warn?: (msg: string) => void;
+    initScript?: string;
+}): void;
+/** Re-anchor a config object's relative paths to the directory of the config file it
+ *  came from — what a `--config` wrapper OUTSIDE the suite tree needs, since Playwright
+ *  resolves these against the wrapper's own location. Projects are anchored too. */
+export declare function anchorPlaywrightConfig<T extends Record<string, unknown>>(config: T, dir: string): T;
