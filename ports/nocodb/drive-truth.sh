@@ -27,7 +27,7 @@ commit_push() { # commit_push <message> <paths...>
   git -c user.email=noreply@anthropic.com -c user.name="Claude" commit -m "$msg
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01TV86rbddt84T6DDjTCxwod" || return 1
+Claude-Session: https://claude.ai/code/session_011JsGFUBBubsTp15Gf6Fi3j" || return 1
   for i in 1 2 3; do git push && return 0; sleep $((i * 4)); done
   return 1
 }
@@ -37,9 +37,9 @@ sweep_ports() { # a crashed run leaves detached watchers respawning servers
   # fixed ports' owners, watchers whose CWD is in the trees) — bare "rspack"/"nodemon"
   # patterns could kill a developer's unrelated jobs
   pkill -9 -f "ports/work/nocodb" 2>/dev/null
-  pkill -9 -f "nocodb/gateway.mts" 2>/dev/null
+  pkill -9 -f "tierless.mjs gateway" 2>/dev/null   # the CLI gateway (page+100 convention)
   sleep 2
-  ss -tlnp 2>/dev/null | grep -E ":8080|:9000|:3000|:8180|:28080|:14991" \
+  ss -tlnp 2>/dev/null | grep -E ":8080|:9000|:3000|:3100|:28080|:14991" \
     | grep -oE "pid=[0-9]+" | cut -d= -f2 | sort -u | xargs -r kill -9
   for pid in $(pgrep -f "rspack|watch:run|nodemon|output/server/index.mjs" 2>/dev/null); do
     case "$(readlink -f /proc/$pid/cwd 2>/dev/null)" in *ports/work/nocodb*) kill -9 "$pid" 2>/dev/null ;; esac
@@ -47,7 +47,7 @@ sweep_ports() { # a crashed run leaves detached watchers respawning servers
   sleep 2
 }
 
-# ---- 1. ported tree built (patches 0002+0003, gui bundle carries the fixed runtime) ----
+# ---- 1. ported tree built (patch 0002 — the 3-line seam; testPatches empty) ----
 if [ ! -f ports/work/nocodb/.drive-built ]; then
   say "building ported tree (setup.sh)"
   bash ports/nocodb/setup.sh || fail "ported setup.sh failed"
