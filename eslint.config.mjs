@@ -45,6 +45,7 @@ export default [
       // transform.cjs (from transform.cts) is the compiler itself: a CommonJS build tool that
       // needs the Babel toolchain, forced to .cjs emit by its own file extension.
       "packages/tierless/src/transform.cjs",
+      "packages/tierless/src/playwright-register.cjs",
       "packages/tierless/src/**/*.mjs",
       "packages/tierless/bin/tierless.mjs",
       "test/e2e/app/h.mjs",

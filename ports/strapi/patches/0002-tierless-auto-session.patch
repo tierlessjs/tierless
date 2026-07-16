@@ -1,0 +1,61 @@
+--- a/packages/core/admin/admin/src/utils/getFetchClient.ts	2026-07-16 11:28:56.790918550 +0000
++++ b/packages/core/admin/admin/src/utils/getFetchClient.ts	2026-07-16 11:29:20.423646738 +0000
+@@ -3,6 +3,22 @@
+ import qs from 'qs';
+ 
+ import { getCookieValue, setCookie } from './cookies';
++import { fetchAdapter } from 'tierless/adapt-fetch';
++import { autoSession } from 'tierless/adapt-auto';
++
++// The tierless port — the whole thing (docs/corpus.md rung 3): the four raw fetch call
++// sites below route over one ws session to the gateway on <page-port>+100 (`tierless
++// gateway --cookie-authority`, spawned by ports/strapi/suite.mts). Everything above
++// them — default headers, token refresh, FetchError shaping, RTK Query — runs
++// untouched. Crossability is the framework's (tierless/adapt-fetch): JSON negotiation
++// crosses; FormData, binary, external origins stay on stock fetch; abort races the
++// crossing. Cookie authority auto-engages from the gateway's hello declaration — auth
++// flows cross too, each crossing carrying the sealed jar blob (httpOnly preserved);
++// awaitClaims because this suite reads/clears the jar the instant auth flows settle.
++// Under SSR the stock fetch stays.
++const tierlessFetch = typeof window === 'undefined'
++  ? ((url: string | URL, init?: RequestInit) => fetch(url, init))
++  : fetchAdapter({ exec: autoSession({ awaitClaims: true }).exec, origin: () => window.strapi?.backendURL || '/' });
+ 
+ import type { errors } from '@strapi/utils';
+ 
+@@ -438,7 +454,7 @@
+           ...options?.headers,
+         });
+ 
+-        const response = await fetch(createRequestUrl(url), {
++        const response = await tierlessFetch(createRequestUrl(url), {
+           signal: options?.signal ?? defaultOptions.signal,
+           method: 'GET',
+           headers,
+@@ -470,7 +486,7 @@
+           headers.delete('Content-Type');
+         }
+ 
+-        const response = await fetch(createRequestUrl(url), {
++        const response = await tierlessFetch(createRequestUrl(url), {
+           signal: options?.signal ?? defaultOptions.signal,
+           method: 'POST',
+           headers,
+@@ -502,7 +518,7 @@
+           headers.delete('Content-Type');
+         }
+ 
+-        const response = await fetch(createRequestUrl(url), {
++        const response = await tierlessFetch(createRequestUrl(url), {
+           signal: options?.signal ?? defaultOptions.signal,
+           method: 'PUT',
+           headers,
+@@ -523,7 +539,7 @@
+           ...options?.headers,
+         });
+ 
+-        const response = await fetch(createRequestUrl(url), {
++        const response = await tierlessFetch(createRequestUrl(url), {
+           signal: options?.signal ?? defaultOptions.signal,
+           method: 'DELETE',
+           headers,

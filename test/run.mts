@@ -55,6 +55,7 @@ const cases: Case[] = [
   { file: "test/e2e/pw-waits-live.mts",  needs: ["installTransportWaits made UNMODIFIED upstream waits transport-agnostic"] },
   { file: "test/probes/adapt-fetch.mts", needs: ["the fetch adapter's crossability policy is framework-owned"] },
   { file: "test/probes/playwright-reporter.mts", needs: ["the measure reporter ships as tierless/playwright-reporter"] },
+  { file: "test/probes/playwright-register.mts", needs: ["playwright-register delivers the waits through NODE_OPTIONS"] },
   { file: "test/e2e/auto-session-live.mts", needs: ["one-call port surface, live"] },
   { file: "test/e2e/h2-connect-live.mts", needs: ["a websocket rode an HTTP/2 Extended CONNECT stream (RFC 8441) and carried a full tierless exec"] },
   { file: "test/e2e/webtransport-live.mts", needs: ["the WebTransport adapter length-frames tierless messages over a WHATWG byte duplex and carries full execs"] },

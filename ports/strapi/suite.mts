@@ -15,7 +15,7 @@
 // Counted bytes are serialized request+response messages (start line + headers + body
 // as transmitted) — message-true, not TCP-true; chunk framing (~a few bytes/response)
 // is the only wire cost it misses, identically on both arms. Session ws bytes ARE
-// TCP-true, counted inside the gateway (deflate included) at :8180/__tierless/wire.
+// TCP-true, counted inside the gateway (deflate included) at :8100/__tierless/wire.
 // Node-side test seeding (DTS reset per test) talks to :8000 directly and is never
 // counted. TIERLESS_RTT_MS: real RTT on both browser-facing hops via raw TCP relays.
 import { spawn } from "node:child_process";
@@ -24,17 +24,18 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { delayProxy } from "../latency-proxy.mts";
+import { gzipProxy } from "../gzip-proxy.mts";
 
 const VARIANT = process.argv.includes("--baseline") ? "strapi-baseline" : "strapi";
 const TRUTH = !!process.env.TIERLESS_WIRE_TRUTH;
 const RTT = Number(process.env.TIERLESS_RTT_MS || 0);
-const GZIP = !!process.env.STRAPI_TIERLESS_GZIP;   // env-gated stock compression (test patch) — the apples-to-apples arm
+const GZIP = !!process.env.STRAPI_TIERLESS_GZIP;   // stock compression via the gzip RELAY (ports/gzip-proxy.mts) — the apples-to-apples arm
 if (TRUTH && RTT) { console.error("pick one: TIERLESS_WIRE_TRUTH (bytes) or TIERLESS_RTT_MS (time) — a counting proxy inflates request-heavy tests"); process.exit(2); }
 const WORK = fileURLToPath(new URL(`../work/${VARIANT}/`, import.meta.url));
 const SRC = path.join(WORK, "src/");
 const OUT = path.join(WORK, `measure${TRUTH ? "-truth" : ""}${RTT ? `-rtt${RTT}` : ""}${GZIP ? "-gzip" : ""}.jsonl`);
 const API = 8000;        // their runner: test-app-0 gets 8000 + index; -c 1 pins index 0
-const GATEWAY = 8180;
+const GATEWAY = 8100;   // the autoSession convention: page port (:8000) + 100
 
 const serving = (url: string): Promise<boolean> => fetch(url).then(() => true, () => false);
 async function waitFor(url: string, ms: number): Promise<void> {
@@ -78,35 +79,49 @@ function countingProxy(listen: number, target: number, c: { apiOut: number; apiI
   return srv;
 }
 
+const REGISTER = fileURLToPath(new URL("../../packages/tierless/src/playwright-register.cjs", import.meta.url));
+const REPORTER = fileURLToPath(new URL("../../packages/tierless/src/playwright-reporter.mjs", import.meta.url));
 const env: Record<string, string | undefined> = {
   ...process.env,
   STRAPI_E2E_EDITION: "ce",                    // their CE lane — no license in this recipe
   TIERLESS_MEASURE_OUT: OUT,
+  // zero-patch waits: their runner GENERATES the Playwright configs (data, not code),
+  // so the --config wrapper channel isn't ours — the standard NODE_OPTIONS preload
+  // reaches the runner and every worker instead (tierless/playwright-register), and
+  // patches their own playwright-core Page class. The target tree stays pristine.
+  NODE_OPTIONS: `${process.env.NODE_OPTIONS || ""} --require ${REGISTER}`.trim(),
+  TIERLESS_SUITE_DIR: SRC,
   // this sandbox MITMs outbound TLS: without this the admin's github release check
   // never "finishes" in Playwright's accounting and wedges networkidle waits (see
   // playwright.base.config.js, test patch 0001) — identical on both arms
   TIERLESS_IGNORE_HTTPS_ERRORS: process.env.TIERLESS_IGNORE_HTTPS_ERRORS ?? "true",
 };
 
+// the gzip arm: browser-facing traffic (API and assets alike — the nginx posture)
+// rides a compressing reverse proxy; counting/RTT relays chain in front of it
+const APP_ORIGIN = GZIP ? 29000 : API;
+if (GZIP) { gzipProxy(29000, API).unref(); console.log("gzip relay: :29000 -> :8000"); }
+if (GZIP && !TRUTH && !RTT) env.TIERLESS_BASE_URL = "http://127.0.0.1:29000";
+
 const wireUrls: string[] = [];
 if (TRUTH) {
   const counters = { apiOut: 0, apiIn: 0, assetOut: 0, assetIn: 0 };
-  countingProxy(28000, API, counters).unref();
+  countingProxy(28000, APP_ORIGIN, counters).unref();
   http.createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(counters)); }).listen(14991, "127.0.0.1").unref();
   env.TIERLESS_BASE_URL = "http://127.0.0.1:28000";
   wireUrls.push("http://127.0.0.1:14991", `http://127.0.0.1:${GATEWAY}/__tierless/wire`);
-  console.log("wire truth: browser via counting proxy :28000, counters :14991, ws bytes at :8180/__tierless/wire");
+  console.log("wire truth: browser via counting proxy :28000 -> :" + APP_ORIGIN + ", counters :14991, ws bytes at :" + GATEWAY + "/__tierless/wire");
 }
 
 if (RTT) {
   // real round-trip latency on every browser-facing hop (websocket included — CDP
   // throttling can't shape ws): the app origin (assets + API, one origin on this app)
   // and the session gateway. The gateway->backend hop stays undelayed localhost.
-  delayProxy(18000, API, RTT / 2).unref();
+  delayProxy(18000, APP_ORIGIN, RTT / 2).unref();
   delayProxy(18180, GATEWAY, RTT / 2).unref();
   env.TIERLESS_BASE_URL = "http://127.0.0.1:18000";
   env.TIERLESS_WS_URL = "ws://127.0.0.1:18180/__tierless";
-  console.log(`RTT injection: ${RTT} ms via 18000->8000, 18180->8180`);
+  console.log(`RTT injection: ${RTT} ms via 18000->${APP_ORIGIN}, 18180->${GATEWAY}`);
 }
 if (wireUrls.length) env.TIERLESS_WIRE_URLS = wireUrls.join(",");
 
@@ -120,7 +135,17 @@ rmSync(OUT, { force: true });
 // the session gateway (both variants — env symmetry; the baseline build never connects).
 // A detached process GROUP so teardown takes any children with it.
 const glog = openSync(path.join(WORK, "gateway.log"), "w");
-const gateway = spawn(process.execPath, [fileURLToPath(new URL("./gateway.mts", import.meta.url))], { env: env as NodeJS.ProcessEnv, stdio: ["ignore", glog, glog], detached: true });
+// `tierless gateway` from the package CLI (the per-port gateway.mts, retired):
+// cookie authority mediates strapi's httpOnly refresh cookie (sealed blob in the ws
+// upgrade, in-band rotation, claim replay); reseal/claim trade credentials, so the
+// origin gate lists OUR page origins — :8000 direct, :28000 counting, :18000 RTT relay.
+const gateway = spawn(process.execPath, [
+  fileURLToPath(new URL("../../packages/tierless/bin/tierless.mjs", import.meta.url)), "gateway",
+  "--backend", `http://127.0.0.1:${API}`, "--port", String(GATEWAY), "--cookie-authority",
+  "--allow-origin", process.env.TIERLESS_ALLOWED_ORIGINS ||
+    ["8000", "28000", "18000"].flatMap((p) => [`http://localhost:${p}`, `http://127.0.0.1:${p}`]).join(","),
+  ...(TRUTH ? ["--wire-truth"] : []),
+], { env: env as NodeJS.ProcessEnv, stdio: ["ignore", glog, glog], detached: true });
 const closeGateway = (): void => { try { process.kill(-gateway.pid!, "SIGTERM"); } catch { gateway.kill(); } };
 process.on("exit", closeGateway);
 for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => { closeGateway(); process.exit(1); });
@@ -145,8 +170,10 @@ for (let i = 0; i < domains.length; i++) {
   // packages the app's installations registry missed (observed for @strapi/admin), so
   // the arm starts from a regenerated app linked to the store the run just published;
   // later domains reuse it (no builds happen mid-arm), their runner's own flow.
+  // --reporter rides their runner's own flag passthrough to the playwright CLI — the
+  // measure reporter without a config patch
   const args = ["tests/scripts/run-e2e-tests.js", "-c", "1", ...(i === 0 ? ["-f"] : []),
-    "--domains", domains[i], "--", ...specs, "--project=chromium"];
+    "--domains", domains[i], "--", ...specs, "--project=chromium", `--reporter=line,${REPORTER}`];
   console.log(`\n[suite] domain ${domains[i]} (${i + 1}/${domains.length})`);
   const suite = spawn(process.execPath, args, { cwd: SRC, stdio: "inherit", env: env as NodeJS.ProcessEnv });
   const code = await new Promise<number>((resolve) => {

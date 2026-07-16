@@ -372,3 +372,29 @@ Two separate timing facts, named separately:
    test into websocket frames saves browser request scheduling and Koa
    per-request middleware work — localhost CPU, visible at RTT 0, linear in request
    count, and honestly attributed to neither bytes nor latency.
+
+## Re-cut on the packaged surface (2026-07-16 — patches apply; runtime verification pending)
+
+The recipe now rides the packaged port surface — 897 → 95 patch lines:
+
+    patches/0002-tierless-auto-session.patch (61)  THE PORT: adapt-fetch + autoSession at the
+                                                   same four call sites (replaces the 0002
+                                                   adapter + 0003 socket + 0006 cookie
+                                                   authority — cookie mediation now
+                                                   auto-engages from the gateway's hello)
+    patches/0001-measure-config.patch (34)         baseURL + sandbox-TLS flag only — these are
+                                                   GENERATION-time env reads (their runner
+                                                   JSON.stringifies the base config), the one
+                                                   channel a wrapper can't reach
+
+Everything else arrives from outside the tree: the waits ride NODE_OPTIONS
+(`tierless/playwright-register` — their runner owns the Playwright invocation, so the
+nocodb-style `--config` wrapper isn't ours to pass; the standard Node preload reaches
+the runner and every worker), the reporter rides their runner's own flag passthrough
+(`--reporter=line,<abs>`), stock-arm gzip is the shared relay (ports/gzip-proxy.mts —
+the retired 0005 enabled their own koa middleware; the relay is the nginx posture),
+and the gateway is `tierless gateway --cookie-authority` on :8100 (page+100).
+
+Both variants fetch and apply. The measured numbers above were driven on the original
+six-patch cut; re-drive before quoting. Runtime verification of this cut (build + the
+login/content-manager subset on both arms) is queued behind the nocodb truth arms.

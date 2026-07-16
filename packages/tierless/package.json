@@ -135,6 +135,10 @@
     "./playwright-reporter": {
       "types": "./types/playwright-reporter.d.mts",
       "default": "./src/playwright-reporter.mjs"
+    },
+    "./playwright-register": {
+      "types": "./types/playwright-register.d.cts",
+      "default": "./src/playwright-register.cjs"
     }
   },
   "bin": {

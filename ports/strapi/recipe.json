@@ -18,13 +18,9 @@
     "codeload": null
   },
   "patches": [
-    "patches/0002-tierless-fetch-adapter.patch",
-    "patches/0003-session-socket.patch",
-    "patches/0006-sealed-cookie-authority.patch"
+    "patches/0002-tierless-auto-session.patch"
   ],
   "testPatches": [
-    "patches/0001-measure-reporter.patch",
-    "patches/0004-transport-agnostic-waits.patch",
-    "patches/0005-optional-gzip.patch"
+    "patches/0001-measure-config.patch"
   ]
 }

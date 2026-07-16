@@ -1,0 +1,34 @@
+--- a/playwright.base.config.js	2026-07-16 11:28:56.801161182 +0000
++++ b/playwright.base.config.js	2026-07-16 11:29:20.423892623 +0000
+@@ -96,7 +96,17 @@
+     /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
+     use: {
+       /* Base URL to use in actions like `await page.goto('/')`. */
+-      baseURL: `http://127.0.0.1:${port}`,
++      // tierless corpus harness (test patch, both arms): measured runs route the
++      // BROWSER through a counting/shaping relay; the webServer url stays the direct
++      // port (node-side seeding is never counted).
++      baseURL: process.env.TIERLESS_BASE_URL || `http://127.0.0.1:${port}`,
++
++      // Sandboxes that MITM outbound TLS break the admin's github release check in a
++      // way Playwright never sees finish (ERR_CERT_AUTHORITY_INVALID without a
++      // loadingFailed) — the phantom in-flight request wedges every later networkidle
++      // wait. Accepting the proxy's certificate lets the request complete (fast 403)
++      // on BOTH arms; on a normal network this flag changes nothing.
++      ...(process.env.TIERLESS_IGNORE_HTTPS_ERRORS === 'true' ? { ignoreHTTPSErrors: true } : {}),
+ 
+       /** Set timezone for consistency across any machine*/
+       timezoneId: 'Europe/Paris',
+--- a/tests/utils/global-setup.ts	2026-07-16 11:28:56.811172723 +0000
++++ b/tests/utils/global-setup.ts	2026-07-16 11:29:20.424021641 +0000
+@@ -50,7 +50,9 @@
+   }
+   const browser = await chromium.launch();
+   const context = await browser.newContext({
+-    baseURL: `http://127.0.0.1:${port}`,
++    // tierless corpus harness (test patch, both arms): the storage-state origin must
++    // be the origin the BROWSER uses — measured runs put a counting/shaping relay in front
++    baseURL: process.env.TIERLESS_BASE_URL || `http://127.0.0.1:${port}`,
+   });
+   const page = await context.newPage();
+ 
