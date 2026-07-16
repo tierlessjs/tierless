@@ -259,7 +259,8 @@ earlier cut — **42 tests per arm, identical ids, EXACT status parity: 32 passe
 skipped on both, zero diffs**. The suite's own waits (pages/Base.ts, PRISTINE)
 resolved from session crossings through the class-level facade.
 
-The measured numbers above (truth/rtt sections) were driven on the original hand-cut
-patches — transport-equivalent (same socket, same gateway posture; the ws-upgrade
-hello frame is new, a few bytes per session) but re-drive the arms before quoting them
-for this cut.
+The truth arms are RE-DRIVEN on this cut (2026-07-16, results/truth-*.jsonl — full
+suite, both arms through the zero-patch flow): **median 94% per-test bytes saved
+across 81 pass-parity pairs**, the same headline as the original cut, now measured on
+the 3-line port. The rtt/floor sections above were driven on the original hand-cut
+patches and remain transport-equivalent; re-drive before quoting them for this cut.
