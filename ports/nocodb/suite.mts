@@ -74,7 +74,7 @@ for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => { app.cl
 // their suite through the generated --config wrapper (ports/pw-wrapper.mts): waits
 // patched into their playwright-core, the measure reporter attached, paths re-anchored
 // — their tree carries NO test patches
-const CONFIG = writeSuiteConfig({ suiteDir: path.join(SRC, "tests/playwright"), outFile: fileURLToPath(new URL(`../work/${VARIANT}/tierless.config.ts`, import.meta.url)) });
+const CONFIG = writeSuiteConfig({ suiteDir: path.join(SRC, "tests/playwright"), outFile: fileURLToPath(new URL(`../work/${VARIANT}/pw/tierless.config.ts`, import.meta.url)) });
 const suite = spawn("corepack", ["pnpm", "exec", "playwright", "test", "--config", CONFIG, "--workers=1", ...(RTT >= 50 ? ["--timeout=120000"] : []), ...(process.env.TIERLESS_SPEC || "").split(/\s+/).filter(Boolean)], {
   cwd: path.join(SRC, "tests/playwright"),
   stdio: "inherit",
