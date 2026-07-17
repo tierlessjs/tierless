@@ -61,11 +61,17 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
     // count only, ports/vikunja); opt in via the page global (same pattern as the
     // run-protocol globals) where per-frame costs matter. Review once more ports exist.
     const raw = makePeer(wsPort(ws));
-    const peer = globalThis.__TIERLESS_EXEC_BATCH__ ? batchExec(raw) : raw;
+    const base = globalThis.__TIERLESS_EXEC_BATCH__ ? batchExec(raw) : raw;
     const ready = new Promise((res, rej) => {
         onEvent(ws, "open", () => res());
         onEvent(ws, "error", (e) => rej(new Error("tierless: websocket error" + (e && e.message ? ": " + e.message : ""))));
     });
+    // requests gate on the socket, not the machines: an async function's body runs
+    // SYNCHRONOUSLY to its first suspension (a compiled method must too — a stub that
+    // defers the whole body behind the socket reorders reads the original performed on
+    // the call, e.g. a localStorage read racing test-driver writes), so runLocal starts
+    // pumping immediately and only a run's first CROSSING waits here for the session.
+    const peer = { ...base, request: async (payload, bin) => { await ready; return base.request(payload, bin); } };
     // the gateway's unsolicited "hello" (server sends it the instant the socket is up):
     // sealed auth blob + pre-fetched boot GETs. Registered synchronously here so the frame
     // is never missed; resolves { blob:null } if the socket settles with no hello (a gateway
@@ -154,8 +160,9 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
                 throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
             return h.call(peer, entry, args);
         },
+        // NO ready-gate: the machine's synchronous prefix must run on the call, exactly like
+        // the original async function's body — the gated peer holds its first crossing instead
         runLocal: async (entry, args = [], module = "", opts) => {
-            await ready;
             const h = hosts.get(module || "");
             if (!h)
                 throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));

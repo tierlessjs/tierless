@@ -149,6 +149,25 @@ const inst2 = new bundle2.Svc({ get: async (url: string) => ({ data: [{ id: 9 }]
 const out2 = await inst2.getAll() as Array<{ tagged: boolean }>;
 check("unbound module: the untouched original runs against the instance's own http", out2.length === 1 && out2[0].tagged && inst2.totalPages === 1);
 
+// async-function semantics through the REAL browser path (configureTierless + bindMethods
+// + a fresh connection): an async function's body runs SYNCHRONOUSLY to its first
+// suspension, so the machine's synchronous prefix must execute ON the stub call — while
+// the socket is still CONNECTING — and only the first crossing waits for the session.
+// (vikunja email-confirm: verifyEmail's localStorage read deferred behind the socket lost
+// a race against a test-driver write and double-consumed the confirm token.)
+{
+  const { configureTierless, bindMethods } = await import("tierless/browser");
+  const bundle3 = await import(pathToFileURL(join(dir, "svc.mjs")).href + "?sync");
+  configureTierless({ url: `ws://localhost:${(wss.address() as { port: number }).port}`, tier: "browser" });
+  bindMethods(bundle3, { module: "" });
+  const inst3s = new bundle3.Svc({});
+  const args3s = { page: 0 };
+  const p3s = inst3s.getAll(args3s) as Promise<Array<{ tagged: boolean }>>;
+  check("the machine's synchronous prefix ran ON the call (socket still connecting)", args3s.page === 1, JSON.stringify(args3s));
+  const out3s = await p3s;
+  check("…and the gated first crossing still completes the run once the socket opens", out3s.length === 2 && inst3s.totalPages === 3, JSON.stringify(out3s));
+}
+
 ws.close(); wss.close();
 console.log(ok()
   ? "\nPASS — compiled methods run live: frame and instance stay put, resources fetch, errors unwind, unbound falls back"
