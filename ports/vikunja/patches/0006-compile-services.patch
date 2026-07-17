@@ -1,5 +1,5 @@
---- a/frontend/vite.config.ts	2026-07-16 21:39:34.218265548 +0000
-+++ b/frontend/vite.config.ts	2026-07-16 21:39:34.261627308 +0000
+--- a/frontend/vite.config.ts
++++ b/frontend/vite.config.ts
 @@ -2,6 +2,7 @@
  import {defineConfig, type PluginOption, loadEnv} from 'vite'
  import {configDefaults} from 'vitest/config'

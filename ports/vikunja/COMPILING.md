@@ -29,6 +29,49 @@ their real files through the transform; this file tracks what it finds.
    verbatim as a pure export — right outcome: the migration boundary is the service
    method call, reactivity stays in the browser.
 
+## compile:'auto' (2026-07-16): the selection is a feature, and the port runs on it
+
+Patch 0006 is now `compile: 'auto'`: eligibility is the compiler's verdict over every
+candidate module (top-level classes, Pinia setup stores), not a hand list, and the
+build emits what compiled and why as an artifact. On this app auto is a strict
+superset of the old hand list: **17 modules / 59 programs vs 4 / 32**
+(results/compile-coverage-auto.json — all four hand-picked files found, plus 13 more).
+
+Acceptance is their own suite, both arms on the same tierless build: hand list
+196/199 and auto 196/199, each failing exactly the documented stock exclusions
+(2 drag-simulation specs, 1 OpenID test needing their CI's Dex container).
+
+Widening 4 → 17 modules surfaced four latent tierless defects; per this port's
+tradition each was fixed in tierless — never worked around — and pinned by a probe
+that fails on the pre-fix code:
+
+- **Sibling dispatch caps** (the auth cluster, 16 failures): a compiled store
+  function awaiting a captured compiled sibling parked dyn with the CALLER's caps as
+  the sibling's frame arg 0; overlapping-caps siblings passed vacuously, disjoint
+  ones (login → checkAuth) failed. The compiler stamps store stubs with a
+  `__tierless_caps` builder and the dyn dispatch prefers it (store-compile probe).
+- **Park-scan stack overflow** (home-overview quick-add, 2 failures): the §5 stop
+  rule's handle scan walked every own property recursively, so a frame slot holding
+  a captured Pinia store reached the whole live app — Vue's reactivity dep linked
+  list included — and blew the JS stack once ~100 tasks were rendered. The scan is
+  now codec-bounded (descends only decoder-built shapes: plain object/Array/Map/Set)
+  and iterative (migrate-arm probe).
+- **Nested-closure locals half-hoisted** (latent on the hand list too): a nested
+  function's `const reader` compiled to a frame-slot write with bare reads — every
+  SVG-blob `getBlobUrl` call crashed. Declaration rewrites now stay within the
+  function being lowered (method-compile probe).
+- **Machine start deferred behind the socket** (the email-confirmation cluster): an
+  async function's body runs synchronously to its first suspension, but compiled
+  methods waited for the session socket before their first step — verifyEmail read
+  `localStorage` tens of ms late, saw a token written for the NEXT page, and
+  double-consumed it (412). The readiness gate moved to the peer's request(), so
+  machines start on the call and only the first crossing waits (method-live pin).
+
+The three earlier hand-list entries above describe the same mechanics on the narrow
+surface and stand unchanged; the twins audit (patch 0007) is untouched — which
+classes are SAFE to instantiate server-side stays a statement about state ownership,
+not something a compiler can infer.
+
 ## Open items (in order)
 
 Resolved since first written: runtime wiring (bindMethods + shared host, shipped

@@ -1,0 +1,716 @@
+{
+  "mode": "auto",
+  "modules": 96,
+  "compiledModules": 17,
+  "compiledPrograms": 59,
+  "perModule": {
+    "../../../../../packages/tierless/src/browser.mjs": {
+      "compiled": false,
+      "methods": []
+    },
+    "../../../../../packages/tierless/src/fetch.mjs": {
+      "compiled": false,
+      "methods": []
+    },
+    "../../../../../packages/tierless/src/graph.mjs": {
+      "compiled": false,
+      "methods": []
+    },
+    "../../../../../packages/tierless/src/host.mjs": {
+      "compiled": false,
+      "methods": []
+    },
+    "../../../../../packages/tierless/src/runtime.mjs": {
+      "compiled": false,
+      "methods": []
+    },
+    "../../../../../packages/tierless/src/wire-io.mjs": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/helpers/checkAndSetApiUrl.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/abstractModel.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/apiTokenModel.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/attachment.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/avatar.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/backgroundImage.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/bucket.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/caldavToken.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/emailUpdate.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/file.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/label.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/labelTask.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/linkShare.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/notification.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/passwordReset.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/passwordUpdate.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/project.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/projectDuplicateModel.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/projectView.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/reaction.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/savedFilter.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/subscription.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/task.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/taskAssignee.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/taskBucket.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/taskComment.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/taskPosition.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/taskRelation.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/taskReminder.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/team.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/teamMember.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/teamProject.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/teamShareBase.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/totp.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/user.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/userProject.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/userSettings.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/userShareBase.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/models/webhook.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/abstractService.ts": {
+      "compiled": true,
+      "methods": [
+        {
+          "class": "AbstractService",
+          "method": "get",
+          "program": "AbstractService$get"
+        },
+        {
+          "class": "AbstractService",
+          "method": "getM",
+          "program": "AbstractService$getM"
+        },
+        {
+          "class": "AbstractService",
+          "method": "getBlobUrl",
+          "program": "AbstractService$getBlobUrl"
+        },
+        {
+          "class": "AbstractService",
+          "method": "getAll",
+          "program": "AbstractService$getAll"
+        },
+        {
+          "class": "AbstractService",
+          "method": "create",
+          "program": "AbstractService$create"
+        },
+        {
+          "class": "AbstractService",
+          "method": "post",
+          "program": "AbstractService$post"
+        },
+        {
+          "class": "AbstractService",
+          "method": "update",
+          "program": "AbstractService$update"
+        },
+        {
+          "class": "AbstractService",
+          "method": "delete",
+          "program": "AbstractService$delete"
+        },
+        {
+          "class": "AbstractService",
+          "method": "uploadBlob",
+          "program": "AbstractService$uploadBlob"
+        },
+        {
+          "class": "AbstractService",
+          "method": "uploadFormData",
+          "program": "AbstractService$uploadFormData"
+        }
+      ]
+    },
+    "src/services/accountDelete.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/apiToken.ts": {
+      "compiled": true,
+      "methods": [
+        {
+          "class": "ApiTokenService",
+          "method": "getAvailableRoutes",
+          "program": "ApiTokenService$getAvailableRoutes"
+        }
+      ]
+    },
+    "src/services/attachment.ts": {
+      "compiled": true,
+      "methods": [
+        {
+          "class": "AttachmentService",
+          "method": "download",
+          "program": "AttachmentService$download"
+        }
+      ]
+    },
+    "src/services/avatar.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/backgroundUnsplash.ts": {
+      "compiled": true,
+      "methods": [
+        {
+          "class": "BackgroundUnsplashService",
+          "method": "thumb",
+          "program": "BackgroundUnsplashService$thumb"
+        }
+      ]
+    },
+    "src/services/backgroundUpload.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/bucket.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/caldavToken.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/dataExport.ts": {
+      "compiled": true,
+      "methods": [
+        {
+          "class": "DataExportService",
+          "method": "download",
+          "program": "DataExportService$download"
+        }
+      ]
+    },
+    "src/services/emailUpdate.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/label.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/labelTask.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/linkShare.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/migrator/abstractMigration.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/migrator/abstractMigrationFile.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/notification.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/passwordReset.ts": {
+      "compiled": true,
+      "methods": [
+        {
+          "class": "PasswordResetService",
+          "method": "resetPassword",
+          "program": "PasswordResetService$resetPassword"
+        },
+        {
+          "class": "PasswordResetService",
+          "method": "requestResetPassword",
+          "program": "PasswordResetService$requestResetPassword"
+        }
+      ]
+    },
+    "src/services/passwordUpdateService.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/project.ts": {
+      "compiled": true,
+      "methods": [
+        {
+          "class": "ProjectService",
+          "method": "background",
+          "program": "ProjectService$background"
+        },
+        {
+          "class": "ProjectService",
+          "method": "removeBackground",
+          "program": "ProjectService$removeBackground"
+        }
+      ]
+    },
+    "src/services/projectDuplicateService.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/projectUsers.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/projectViews.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/reactions.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/savedFilter.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/subscription.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/task.ts": {
+      "compiled": true,
+      "methods": [
+        {
+          "class": "TaskService",
+          "method": "markTaskAsRead",
+          "program": "TaskService$markTaskAsRead"
+        }
+      ]
+    },
+    "src/services/taskAssignee.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/taskBucket.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/taskCollection.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/taskComment.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/taskPosition.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/taskRelation.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/team.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/teamMember.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/teamProject.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/totp.ts": {
+      "compiled": true,
+      "methods": [
+        {
+          "class": "TotpService",
+          "method": "qrcode",
+          "program": "TotpService$qrcode"
+        }
+      ]
+    },
+    "src/services/user.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/userProject.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/userSettings.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/services/webhook.ts": {
+      "compiled": true,
+      "methods": [
+        {
+          "class": "WebhookService",
+          "method": "getAvailableEvents",
+          "program": "WebhookService$getAvailableEvents"
+        }
+      ]
+    },
+    "src/stores/attachments.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/stores/auth.ts": {
+      "compiled": true,
+      "methods": [
+        {
+          "class": "store:auth",
+          "method": "reloadAvatar",
+          "program": "auth$reloadAvatar"
+        },
+        {
+          "class": "store:auth",
+          "method": "login",
+          "program": "auth$login"
+        },
+        {
+          "class": "store:auth",
+          "method": "register",
+          "program": "auth$register"
+        },
+        {
+          "class": "store:auth",
+          "method": "openIdAuth",
+          "program": "auth$openIdAuth"
+        },
+        {
+          "class": "store:auth",
+          "method": "linkShareAuth",
+          "program": "auth$linkShareAuth"
+        },
+        {
+          "class": "store:auth",
+          "method": "checkAuth",
+          "program": "auth$checkAuth"
+        },
+        {
+          "class": "store:auth",
+          "method": "refreshUserInfo",
+          "program": null,
+          "error": "Property property of OptionalMemberExpression expected node to be of a type [\"Identifier\",\"PrivateName\"] but instead got \"MemberExpression\""
+        },
+        {
+          "class": "store:auth",
+          "method": "verifyEmail",
+          "program": "auth$verifyEmail"
+        },
+        {
+          "class": "store:auth",
+          "method": "saveUserSettings",
+          "program": null,
+          "error": "tierless: auth.saveUserSettings awaits a non-call value (line 292) — a pending native promise can't migrate; the function stays uncompiled"
+        },
+        {
+          "class": "store:auth",
+          "method": "logout",
+          "program": "auth$logout"
+        }
+      ]
+    },
+    "src/stores/base.ts": {
+      "compiled": true,
+      "methods": [
+        {
+          "class": "store:base",
+          "method": "handleSetCurrentProject",
+          "program": "base$handleSetCurrentProject"
+        },
+        {
+          "class": "store:base",
+          "method": "handleSetCurrentProjectIfNotSet",
+          "program": "base$handleSetCurrentProjectIfNotSet"
+        },
+        {
+          "class": "store:base",
+          "method": "loadApp",
+          "program": "base$loadApp"
+        }
+      ]
+    },
+    "src/stores/config.ts": {
+      "compiled": true,
+      "methods": [
+        {
+          "class": "store:config",
+          "method": "update",
+          "program": "config$update"
+        }
+      ]
+    },
+    "src/stores/kanban.ts": {
+      "compiled": true,
+      "methods": [
+        {
+          "class": "store:kanban",
+          "method": "loadBucketsForProject",
+          "program": "kanban$loadBucketsForProject"
+        },
+        {
+          "class": "store:kanban",
+          "method": "loadNextTasksForBucket",
+          "program": "kanban$loadNextTasksForBucket"
+        },
+        {
+          "class": "store:kanban",
+          "method": "createBucket",
+          "program": "kanban$createBucket"
+        },
+        {
+          "class": "store:kanban",
+          "method": "deleteBucket",
+          "program": "kanban$deleteBucket"
+        },
+        {
+          "class": "store:kanban",
+          "method": "updateBucket",
+          "program": "kanban$updateBucket"
+        }
+      ]
+    },
+    "src/stores/labels.ts": {
+      "compiled": true,
+      "methods": [
+        {
+          "class": "store:label",
+          "method": "loadAllLabels",
+          "program": "label$loadAllLabels"
+        },
+        {
+          "class": "store:label",
+          "method": "deleteLabel",
+          "program": "label$deleteLabel"
+        },
+        {
+          "class": "store:label",
+          "method": "updateLabel",
+          "program": "label$updateLabel"
+        },
+        {
+          "class": "store:label",
+          "method": "createLabel",
+          "program": "label$createLabel"
+        }
+      ]
+    },
+    "src/stores/projects.ts": {
+      "compiled": true,
+      "methods": [
+        {
+          "class": "store:project",
+          "method": "toggleSavedFilterFavorite",
+          "program": "project$toggleSavedFilterFavorite"
+        },
+        {
+          "class": "store:project",
+          "method": "createProject",
+          "program": "project$createProject"
+        },
+        {
+          "class": "store:project",
+          "method": "updateProject",
+          "program": "project$updateProject"
+        },
+        {
+          "class": "store:project",
+          "method": "deleteProject",
+          "program": "project$deleteProject"
+        },
+        {
+          "class": "store:project",
+          "method": "loadAllProjects",
+          "program": "project$loadAllProjects"
+        },
+        {
+          "class": "store:project",
+          "method": "loadProject",
+          "program": "project$loadProject"
+        }
+      ]
+    },
+    "src/stores/tasks.ts": {
+      "compiled": true,
+      "methods": [
+        {
+          "class": "store:task",
+          "method": "loadTasks",
+          "program": "task$loadTasks"
+        },
+        {
+          "class": "store:task",
+          "method": "update",
+          "program": "task$update"
+        },
+        {
+          "class": "store:task",
+          "method": "deleteTask",
+          "program": "task$deleteTask"
+        },
+        {
+          "class": "store:task",
+          "method": "addAssignee",
+          "program": "task$addAssignee"
+        },
+        {
+          "class": "store:task",
+          "method": "removeAssignee",
+          "program": "task$removeAssignee"
+        },
+        {
+          "class": "store:task",
+          "method": "addLabel",
+          "program": "task$addLabel"
+        },
+        {
+          "class": "store:task",
+          "method": "removeLabel",
+          "program": "task$removeLabel"
+        },
+        {
+          "class": "store:task",
+          "method": "addLabelsToTask",
+          "program": "task$addLabelsToTask"
+        },
+        {
+          "class": "store:task",
+          "method": "createNewTask",
+          "program": "task$createNewTask"
+        },
+        {
+          "class": "store:task",
+          "method": "toggleFavorite",
+          "program": "task$toggleFavorite"
+        },
+        {
+          "class": "store:task",
+          "method": "markTaskAsRead",
+          "program": "task$markTaskAsRead"
+        }
+      ]
+    },
+    "src/stores/viewFilters.ts": {
+      "compiled": false,
+      "methods": []
+    },
+    "src/tierlessTwins.ts": {
+      "compiled": false,
+      "methods": []
+    }
+  }
+}

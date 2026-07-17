@@ -15,7 +15,7 @@ app-owned frame before host machinery.
 ## The diff to their app
 
     patches/0005-tierless-axios-adapter.patch   fetcher.ts: +14 lines (the adapter, Node-guarded)
-    patches/0006-compile-services.patch         vite.config.ts: +2 lines (plugin entry)
+    patches/0006-compile-services.patch         vite.config.ts: +10 lines (2 code: import + compile:'auto' plugin entry)
     patches/0007-session-twins.patch            2 new files (~50 lines): the audited twin list
 
 plus `pnpm add tierless` (a dependency install, not a diff). What the patches do:
@@ -26,8 +26,13 @@ plus `pnpm add tierless` (a dependency install, not a diff). What the patches do
    can honor (blob/stream responses, FormData/Blob bodies, progress callbacks) fall
    through to axios's own XHR adapter, decided per request by declared semantics plus
    an ownership scan, never by serialization failure alone.
-2. **The plugin line** names `src/services/abstractService.ts` and three store files
-   for compilation. The service HTTP methods (getAll/get/create/update/delete...)
+2. **The plugin line** sets `compile: 'auto'`: eligibility is the compiler's verdict
+   over every candidate module — 17 modules / 59 programs on this app (the build
+   writes what compiled and why to `dist-tierless/tierless.compile-coverage.json`;
+   a copy is committed at `results/compile-coverage-auto.json`). Acceptance: their
+   full suite scores identically to the stock exclusion set on both the old 4-file
+   hand list and auto (COMPILING.md records the four tierless defects the widening
+   surfaced, all fixed with probes). The service HTTP methods (getAll/get/create/update/delete...)
    become serializable state machines; all ~40 service classes inherit them, so every
    service call site in the app can park at the session socket. Compiled STORE
    functions suspend on method calls (dynamic call parks), so a store chain can
@@ -140,7 +145,10 @@ Full suite, stock and ported arms run identically: **196 pass on both, and the 3
 failures are the same 3 tests in both arms** — the two drag-to-project specs that
 upstream's own CI retries for (`retries: process.env.CI ? 2 : 0`; both pass in
 isolation on both builds), and the OpenID login that needs the Dex container their
-CI boots. Nothing fails on the ported build that passes on stock.
+CI boots. Nothing fails on the ported build that passes on stock. Re-verified
+2026-07-17 on the `compile: 'auto'` surface (17 modules / 59 programs): same 196
+passing, same 3 exclusions. The four additional tierless defects the widening
+surfaced — and fixed — are recorded in COMPILING.md.
 
 The suite caught four real boundary defects on the way, each fixed in tierless
 rather than worked around: the interceptor chain must run browser-side (backend
@@ -163,6 +171,10 @@ and no assertion was weakened.
 - Async request interceptors and browser-pinned configs (blobs, FormData, progress)
   fall through to stock XHR by design — those requests are in the baseline's column
   on both arms.
+- The byte/timing tables above were measured on the 4-file hand-list build
+  (2026-07-07). The compile surface is now `compile: 'auto'` (17 modules) — parity
+  is re-verified, but re-drive both measured arms before quoting those numbers for
+  the current cut.
 - Their service-worker registration fails under `vite preview` in both variants
   (upstream workbox path issue) — no effect on the comparison.
 - One app: this is the recipe's first native data point, not the corpus median.

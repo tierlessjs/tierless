@@ -1143,10 +1143,14 @@ function lower(p) {
     normalize(p); // hoist suspensions out of expression positions first
     const node = p.node;
     const params = node.params.map((x) => x.name); // desugarParams already reduced these to plain identifiers
+    // frame locals are THIS function's own declarations. A nested closure's local is plain
+    // JS that never suspends — it stays a real `const`; collecting it here (or rewriting its
+    // declaration below) would split it across the frame (`F.reader = …` written, bare
+    // `reader` read) and clobber any same-named frame slot.
     const locals = new Set();
-    p.traverse({ VariableDeclarator(v) { if (t.isIdentifier(v.node.id))
+    p.traverse({ VariableDeclarator(v) { if (v.getFunctionParent()?.node === node && t.isIdentifier(v.node.id))
             locals.add(v.node.id.name); } });
-    p.traverse({ CatchClause(c) { if (c.node.param && t.isIdentifier(c.node.param))
+    p.traverse({ CatchClause(c) { if (c.getFunctionParent()?.node === node && c.node.param && t.isIdentifier(c.node.param))
             locals.add(c.node.param.name); } });
     p.traverse({ CallExpression(cp) {
             const c = cp.node.callee;
@@ -1188,6 +1192,8 @@ function lower(p) {
             ip.skip();
         } });
     p.traverse({ VariableDeclaration(v) {
+            if (v.getFunctionParent()?.node !== node)
+                return; // a nested closure's declaration stays a real const/let
             if (isSusp(v.node) || callSusp(v.node))
                 return; // leave suspensions for compileStmt
             if (t.isForStatement(v.parent) && v.parent.init === v.node)
