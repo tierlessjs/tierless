@@ -122,25 +122,33 @@ itself — same build, one variable per pair:
 `TIERLESS_RTT_MS=20 node ports/vikunja/suite.mts [--baseline]` routes the browser
 through TCP delay relays (TCP_NODELAY set — Nagle + delayed ACK otherwise reads as
 ~40 ms per small ws frame and once masqueraded as a ported regression). RTT 20 ms
-models residential latency; TIERLESS_BPS adds link bandwidth (1 Gbps: measured zero
+models residential latency; TIERLESS_BPS adds link bandwidth (1 Gbps, re-measured
+2026-07-17: arm deltas within ±0.3 min in OPPOSITE directions — no consistent
 effect at this app's payload sizes, results/rtt20-bps1g-*.jsonl).
 
-Measured 2026-07-07 (results/rtt20-*.jsonl; full parity, exclusions identical on
-stock): wall clock 8.5 -> 8.3 min with the locked profile shipping the app's ONE
-stable chain and session twins serving it (results/rtt20-chains-ported.jsonl).
+Measured 2026-07-17 on the `compile: 'auto'` build (results/rtt20-*.jsonl): wall
+clock 9.0 min stock -> 8.9 min ported at RTT 20, and the same 8.9 with the locked
+profile shipping the app's ONE stable chain (results/rtt20-chains-ported.jsonl;
+chains vs plain ported, per-test median +22 ms — parity).
+
 The network-wait decomposition (dur@RTT20 minus a PLAIN unshaped floor run,
 results/floor-*.jsonl — wire-truth runs are NOT valid floors, their counting
-relay inflates request-heavy tests): TOTAL network wait 77.0s stock vs 77.5s
-ported — parity within single-run noise — with the per-test MEDIAN 471 -> 421 ms
-(11% less). The pool is 15% of suite wall time at 20 ms RTT: the ceiling any
-flow rewrite has to work with.
+relay inflates request-heavy tests): TOTAL network wait 39.0s stock vs 69.7s
+ported, per-test MEDIAN 313 -> 348 ms. The gap is concentrated, not broad: 8
+request-heavy specs (five date-display variants, the >50-task quick-add,
+comment-pagination, one related-task flow) carry 29.6s of the 30.7s — their many
+sequential parks serialize one RTT each on the session where stock's HTTP
+requests overlap. The pool is 7% of suite wall at 20 ms RTT, which is why wall
+clock stays at parity regardless.
 
-The chain itself, measured with repetition (5 runs/arm, medians): the migrating
-test folds one crossing (wsOut 7 -> 6) and saves 52 ms; non-migrating tests are
-unchanged. One RTT per chain occurrence, linear in RTT — real, small at
-residential latency, and the census is honest: their suite has exactly one stable
-chain (project$toggleSavedFilterFavorite), found only once trajectory stats were
-conditioned on the run's ENTRY (a shared touch site had drowned it).
+The census, re-run on the widened auto surface (7,615 trace records, 6,493/6,493
+complete runs, 36 sites): their suite still has exactly ONE stable chain —
+project$toggleSavedFilterFavorite > getM, stability 100% — and the profile folds
+it as before (the toggle spec −76 ms this run; 5-run medians on the 2026-07-07
+hand-list build measured the fold at 52 ms per occurrence, wsOut 7 -> 6; same
+chain, same machine code). The RTT tail above is a DIFFERENT structure the
+method-boundary profile cannot ship — sequential parks INSIDE one method's run —
+and this decomposition is what prices that open §6 item.
 
 ## Correctness — their own suite as the judge
 
@@ -174,10 +182,6 @@ and no assertion was weakened.
 - Async request interceptors and browser-pinned configs (blobs, FormData, progress)
   fall through to stock XHR by design — those requests are in the baseline's column
   on both arms.
-- The byte/timing tables above were measured on the 4-file hand-list build
-  (2026-07-07). The compile surface is now `compile: 'auto'` (17 modules) — parity
-  is re-verified, but re-drive both measured arms before quoting those numbers for
-  the current cut.
 - Their service-worker registration fails under `vite preview` in both variants
   (upstream workbox path issue) — no effect on the comparison.
 - One app: this is the recipe's first native data point, not the corpus median.
