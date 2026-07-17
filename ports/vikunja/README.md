@@ -77,12 +77,14 @@ The report pairs tests by id, drops pairs that don't pass in BOTH arms (listed,
 never silent), and states its byte provenance. Both arms' JSONL is committed under
 `results/truth-*.jsonl`, so the report reruns without the two ~9-minute suite runs.
 
-Measured 2026-07-07 (196/196 pass parity; 186 pairs touch the session):
+Measured 2026-07-17 on the `compile: 'auto'` build (195 pass-parity pairs — the
+3 stock exclusions plus one single-run flake the report lists; all 195 pairs
+touch the port):
 
-    suite-wide      31.5 MB -> 27.5 MB   (13% less IO)
-                    6,229  -> 5,259 round trips   (16% fewer)
-    per test        median 35% fewer bytes · 22% fewer trips (covered subset)
-    best case       236 KB -> 18 KB, 112 -> 13 trips (comment-pagination spec:
+    suite-wide      31.2 MB -> 26.9 MB   (14% less IO)
+                    6,181  -> 5,432 round trips   (12% fewer)
+    per test        median 34% fewer bytes · 17% fewer trips (covered subset)
+    best case       240 KB -> 18 KB, 117 -> 14 trips (comment-pagination spec:
                     the per-comment avatar refetch antipattern collapses)
 
 No batching is in those numbers: there, every service call was its own crossing.
@@ -100,14 +102,15 @@ itself — same build, one variable per pair:
   per-element results, errors shaped exactly as a lone call's. Safe by
   construction: only requests already in flight together merge.
 
-  Measured 2026-07-09 (results/truth-batch-*.jsonl; 195/195 pass parity both
-  arms): session ws frames 1,094 -> 834 out and 1,076 -> 805 in (24% fewer),
-  and NO test sent more frames. TCP-true ws bytes only 1% less — the win is
-  frame count, not bytes (deflate already amortizes payload repetition). Wall
-  time parity at RTT 0 and at RTT 20 (results/rtt20-batch-*.jsonl, per-test
-  median delta −3 ms): the one-timer-turn hold costs nothing measurable, and
-  concurrent crossings already overlapped their RTTs, so fewer frames does not
-  mean fewer round-trip waits.
+  Measured 2026-07-17 on the `compile: 'auto'` build (results/truth-batch-*
+  .jsonl; 194 shared passed pairs): session ws frames 1,326 -> 1,058 out and
+  1,300 -> 1,039 in (20% fewer each), and NO test sent more frames. TCP-true
+  ws bytes only 0.4% less — the win is frame count, not bytes (deflate already
+  amortizes payload repetition). Wall time parity at RTT 0 and at RTT 20
+  (results/rtt20-batch-*.jsonl, 195 shared passed, per-test median delta
+  0 ms): the one-timer-turn hold costs nothing measurable, and concurrent
+  crossings already overlapped their RTTs, so fewer frames does not mean
+  fewer round-trip waits.
 
   Verdict: neutral on every metric this suite prices — DEFAULT OFF
   (`__TIERLESS_EXEC_BATCH__` page global / `TIERLESS_EXEC_BATCH=1` suite env
