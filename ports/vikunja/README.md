@@ -14,7 +14,7 @@ app-owned frame before host machinery.
 
 ## The diff to their app
 
-    patches/0005-tierless-axios-adapter.patch   fetcher.ts: +14 lines (the adapter, Node-guarded)
+    patches/0005-tierless-axios-adapter.patch   fetcher.ts +14, main.ts +5 (the adapter; session preconnect at bootstrap)
     patches/0006-compile-services.patch         vite.config.ts: +10 lines (2 code: import + compile:'auto' plugin entry)
     patches/0007-session-twins.patch            2 new files (~50 lines): the audited twin list
 
@@ -126,27 +126,38 @@ models residential latency; TIERLESS_BPS adds link bandwidth (1 Gbps, re-measure
 2026-07-17: arm deltas within ±0.3 min in OPPOSITE directions — no consistent
 effect at this app's payload sizes, results/rtt20-bps1g-*.jsonl).
 
-Measured 2026-07-17 on the `compile: 'auto'` build (results/rtt20-*.jsonl): wall
-clock 9.0 min stock -> 8.9 min ported at RTT 20, and the same 8.9 with the locked
-profile shipping the app's ONE stable chain (results/rtt20-chains-ported.jsonl;
-chains vs plain ported, per-test median +22 ms — parity).
+Measured 2026-07-17 on the `compile: 'auto'` build, three runs per arm with
+per-test medians (results/rtt20-{baseline,ported}*.jsonl; single runs on heavy
+tests swing by seconds, so no single-run number below). Direct per-test
+comparison at RTT 20, ported vs stock: **median −0 ms** (quartiles −62/0/+40),
+suite total −1.6 s — parity. The locked profile shipping the app's ONE stable
+chain measures the same (results/rtt20-chains-ported.jsonl, median +22 ms vs
+plain ported).
 
-The network-wait decomposition (dur@RTT20 minus a PLAIN unshaped floor run,
-results/floor-*.jsonl — wire-truth runs are NOT valid floors, their counting
-relay inflates request-heavy tests): TOTAL network wait 39.0s stock vs 69.7s
-ported, per-test MEDIAN 313 -> 348 ms. The gap is concentrated, not broad: 8
-request-heavy specs (five date-display variants, the >50-task quick-add,
-comment-pagination, one related-task flow) carry 29.6s of the 30.7s — their many
-sequential parks serialize one RTT each on the session where stock's HTTP
-requests overlap. The pool is 7% of suite wall at 20 ms RTT, which is why wall
-clock stays at parity regardless.
+That parity is one patch line deep: without `configureTierless({preconnect:
+true})` in main.ts (now part of patch 0005), the same comparison reads median
++35 ms, total +4.6 s — one to two RTTs per test, the fresh page's TCP +
+ws-upgrade handshake landing on the first service call's critical path, which
+stock never pays (its first XHR reuses the pool afterwards). Preconnect folds
+the handshake into app bootstrap, where it overlaps asset loading
+(results/rtt20-preconnect-r*.jsonl vs rtt20-ported*/rtt20-batch-off).
+
+Floor-subtracted "network wait" (dur@RTT20 minus an unshaped floor run,
+results/floor-*.jsonl) is only valid where the workload is latency-STABLE: 36
+of 189 tests change their request COUNT with timing — comment-pagination stock
+issues 117 requests at 0 ms but 15 at RTT 20 (the avatar-refetch storm is
+latency-gated), while the ported arm issues 9 at every latency — so
+subtracting floors there compares different workloads (in one single-run cut
+it read as 30 s of phantom ported wait; in another, as parity). Over the 153
+latency-stable tests, medians of 3: network wait stock 55.3 s total / 379 ms
+median vs ported 59.6 s / 389 ms — the same near-parity as the direct
+comparison, before preconnect.
 
 The census, re-run on the widened auto surface (7,615 trace records, 6,493/6,493
 complete runs, 36 sites): their suite still has exactly ONE stable chain —
 project$toggleSavedFilterFavorite > getM, stability 100% — and the profile folds
-it as before (the toggle spec −76 ms this run; 5-run medians on the 2026-07-07
-hand-list build measured the fold at 52 ms per occurrence, wsOut 7 -> 6; same
-chain, same machine code). The RTT tail above is a DIFFERENT structure the
+it as before (5-run medians on the 2026-07-07 hand-list build measured the fold
+at 52 ms per occurrence, wsOut 7 -> 6; same chain, same machine code). The RTT tail above is a DIFFERENT structure the
 method-boundary profile cannot ship — sequential parks INSIDE one method's run —
 and this decomposition is what prices that open §6 item.
 

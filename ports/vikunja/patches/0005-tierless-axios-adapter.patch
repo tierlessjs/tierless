@@ -24,3 +24,15 @@
  
  	instance.interceptors.request.use((config) => {
  		// by setting the baseURL fresh for every request
+--- a/frontend/src/main.ts
++++ b/frontend/src/main.ts
+@@ -1,4 +1,9 @@
+ import {createApp} from 'vue'
++import {configureTierless} from 'tierless/browser'
++
++// open the session socket during app bootstrap: the TCP + upgrade handshake overlaps
++// asset loading instead of landing on the first service call's critical path
++configureTierless({preconnect: true})
+ 
+ import pinia from './pinia'
+ import router from './router'
