@@ -1,6 +1,11 @@
 // Time decomposition over the four measured runs (docs/corpus.md run protocol):
 //
-//   node ports/report-time.mts <truth-base> <truth-ported> <rtt-base> <rtt-ported>
+//   node ports/report-time.mts <floor-base[,run2,…]> <floor-ported[,…]> <rtt-base[,…]> <rtt-ported[,…]>
+//
+// Each position accepts one run or a comma-separated list; with lists, every per-test
+// duration is the MEDIAN across that cell's runs and a pair counts only if the test
+// passed in every run. Single runs on heavy tests swing by seconds (ports/vikunja,
+// 2026-07-17) — one run per cell is accepted but the header says so.
 //
 // A test's durationMs sums four things: network waits (the ONLY part a flow rewrite can
 // improve), browser render/JS, Playwright machinery (actionability/expect polling), and
@@ -15,7 +20,7 @@
 import { readFileSync } from "node:fs";
 
 interface Rec { id: string; status: string; retry: number; durationMs?: number }
-const load = (f: string): Map<string, Rec> => {
+const loadRun = (f: string): Map<string, Rec> => {
   const out = new Map<string, Rec>();
   for (const line of readFileSync(f, "utf8").split("\n").filter(Boolean)) {
     const r: Rec = JSON.parse(line);
@@ -23,24 +28,40 @@ const load = (f: string): Map<string, Rec> => {
   }
   return out;
 };
+const medianOf = (xs: number[]): number => { const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
+// a cell = one or more runs of the same condition; per test, the duration is the
+// median across runs, valid only if the test passed (with a duration) in EVERY run
+interface Cell { runs: number; seen: number; dur: Map<string, number> }
+const loadCell = (spec: string): Cell => {
+  const files = spec.split(",").filter(Boolean);
+  const runs = files.map(loadRun);
+  const dur = new Map<string, number>();
+  for (const id of runs[0].keys()) {
+    const rows = runs.map((m) => m.get(id));
+    if (rows.every((r) => r?.status === "passed" && r.durationMs !== undefined)) dur.set(id, medianOf(rows.map((r) => r!.durationMs!)));
+  }
+  return { runs: files.length, seen: runs[0].size, dur };
+};
 
-const files = process.argv.slice(2);
-if (files.length !== 4) { console.error("usage: node ports/report-time.mts <floor-base> <floor-ported> <rtt-base> <rtt-ported>"); process.exit(2); }
-const [tb, tp, rb, rp] = files.map(load);
-// a pair counts only when the test PASSED in all four runs and every run timed it
-const ids = [...tb.keys()].filter((id) =>
-  [tb, tp, rb, rp].every((m) => m.get(id)?.status === "passed" && m.get(id)!.durationMs !== undefined));
-const dropped = [...tb.keys()].length - ids.length;
+const specs = process.argv.slice(2);
+if (specs.length !== 4) { console.error("usage: node ports/report-time.mts <floor-base[,…]> <floor-ported[,…]> <rtt-base[,…]> <rtt-ported[,…]>"); process.exit(2); }
+const [tb, tp, rb, rp] = specs.map(loadCell);
+const totalRuns = tb.runs + tp.runs + rb.runs + rp.runs;
+// a pair counts only when the test PASSED (timed) in every run of all four cells
+const ids = [...tb.dur.keys()].filter((id) => [tp, rb, rp].every((c) => c.dur.has(id)));
+const dropped = tb.seen - ids.length;
 // bail before medians over nothing print NaN as if it were a result
-if (!ids.length) { console.error(`no test passed in all four runs (${dropped} dropped) — nothing to decompose`); process.exit(1); }
+if (!ids.length) { console.error(`no test passed in all runs (${dropped} dropped) — nothing to decompose`); process.exit(1); }
+if (totalRuns === 4) console.log("SINGLE run per cell — heavy tests swing by seconds run-to-run; prefer medians of 3 for timing claims");
+else console.log(`per-test durations are MEDIANS: ${tb.runs}/${tp.runs} floor and ${rb.runs}/${rp.runs} RTT run(s) per arm`);
 
 interface Row { id: string; netB: number; netP: number; base0: number; port0: number }
 const rows: Row[] = ids.map((id) => ({
   id,
-  netB: rb.get(id)!.durationMs! - tb.get(id)!.durationMs!,
-  netP: rp.get(id)!.durationMs! - tp.get(id)!.durationMs!,
-  base0: tb.get(id)!.durationMs!,
-  port0: tp.get(id)!.durationMs!,
+  netB: rb.dur.get(id)! - tb.dur.get(id)!,
+  netP: rp.dur.get(id)! - tp.dur.get(id)!,
+  base0: tb.dur.get(id)!,
+  port0: tp.dur.get(id)!,
 }));
 
 const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
