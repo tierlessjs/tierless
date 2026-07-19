@@ -31,42 +31,48 @@ its API on ONE origin, and the first whose client bottom is plain `fetch`, not a
 
 ## The diff to their app
 
-    patches/0002-tierless-fetch-adapter.patch   getFetchClient.ts: 4 call sites -> tierlessFetch
-                                                + tierlessFetch.ts (new, ~120 lines): the I/O bottom
-    patches/0003-session-socket.patch           tierlessFetch.ts: the exec becomes the session socket
-    patches/0006-sealed-cookie-authority.patch  tierlessFetch.ts: auth flows cross too (see below)
+    patches/0002-tierless-auto-session.patch    getFetchClient.ts: fetchAdapter + autoSession
+                                                at the same 4 call sites (61 lines)
 
 plus `yarn workspace @strapi/admin add tierless@link:…` (a dependency install, not a
-diff — setup.sh). Test patches (BOTH arms): 0001 measure reporter + relay-able
-baseURL, 0004 transport-agnostic waits, 0005 env-gated stock gzip. What the port does:
+diff — setup.sh). One test patch (BOTH arms): 0001 measure-config (34 lines —
+baseURL + sandbox-TLS flag, generation-time env reads their runner JSON.stringifies).
+Everything else arrives from OUTSIDE the tree: the transport-agnostic waits ride
+NODE_OPTIONS (`tierless/playwright-register`), the reporter rides their runner's own
+`--reporter` passthrough, stock-arm gzip is a relay (ports/gzip-proxy.mts), and the
+gateway is `tierless gateway --cookie-authority` on :8100. What the port does:
 
-1. **The adapter** (0002) routes every crossable request through a tierless resource
-   request (`api.<method>`, origin-relative path, explicit headers — the Authorization
-   bearer their client attached rides in the request; no ambient authority), and
-   rebuilds the reply into a real `Response` for their own `responseInterceptor`.
-   NOT crossable — stock fetch, decided per request by declared semantics:
-   FormData bodies (media uploads), requests not negotiating JSON (their client omits
-   `Accept: application/json` exactly when responseType is blob/text/arrayBuffer),
-   and URLs leaving the backend origin. **Auth flows cross too** (patch 0006 —
-   sealed cookie authority, the session-auth layer the n8n port built): login's reply
-   sets the httpOnly refresh cookie, which no script-reconstructed reply can plant,
-   so the gateway seals every mediated Set-Cookie into an opaque blob the page
-   carries on later crossings, and a short-lived claim ticket's HTTP replay keeps
-   the REAL jar current — their raw-fetch token refresh and their suite's own
-   `httpOnly: true` assertions read the jar, not the blob. Authority still travels
-   per request; the gateway stores none of it and a restart self-heals.
+1. **The adapter** (`fetchAdapter` from tierless/adapt-fetch) routes every crossable
+   request through a tierless resource request (origin-relative path, explicit
+   headers — the Authorization bearer their client attached rides in the request; no
+   ambient authority), and rebuilds the reply into a real `Response` for their own
+   `responseInterceptor`. NOT crossable — stock fetch, decided per request by
+   declared semantics: FormData bodies (media uploads), requests not negotiating
+   JSON (their client omits `Accept: application/json` exactly when responseType is
+   blob/text/arrayBuffer), and URLs leaving the backend origin. **Auth flows cross
+   too**: login's reply sets the httpOnly refresh cookie, which no
+   script-reconstructed reply can plant, so the gateway seals every mediated
+   Set-Cookie into an opaque blob the page carries on later crossings, and a
+   short-lived claim ticket's HTTP replay keeps the REAL jar current — their
+   raw-fetch token refresh and their suite's own `httpOnly: true` assertions read
+   the jar, not the blob. Cookie mediation auto-engages from the gateway's hello
+   (`sealed: true`); `autoSession({awaitClaims: true})` holds rotating crossings
+   until their claim lands. Authority still travels per request; the gateway stores
+   none of it and a restart self-heals.
    One deliberate divergence from the axios-adapter posture: **AbortSignal is handled
    browser-side** (abort races the crossing; the caller sees an immediate AbortError,
    the late reply is discarded) instead of pinning to stock — Strapi's RTK Query layer
    attaches a signal to EVERY request, so signal-pins would leave nothing at the
    socket. Stock abort also lets the server finish its handler; the divergence is
    wire-only.
-2. **The session socket** (0003): crossings ride ONE websocket to a standalone gateway
-   (ports/strapi/gateway.mts, :8180) colocated with the backend; gateway→backend is
-   localhost. permessage-deflate WITH context takeover: one deflate window for the
-   whole session. The gateway is exec-only (no compiled surfaces yet) and holds no
-   credentials. Backend RESTARTS (content-type-builder flows) cost nothing: the
-   gateway fetches per request, so a restarted backend just serves the next crossing.
+2. **The session socket** (`autoSession`): crossings ride ONE websocket to the CLI
+   gateway (`tierless gateway`, :8100 — page origin + 100, a convention that holds
+   through measurement relays via passthroughs) colocated with the backend;
+   gateway→backend is localhost. permessage-deflate WITH context takeover: one
+   deflate window for the whole session. The gateway is exec-only (no compiled
+   surfaces yet) and holds no credentials. Backend RESTARTS (content-type-builder
+   flows) cost nothing: the gateway fetches per request, so a restarted backend just
+   serves the next crossing.
 
 ## Reproduce
 
@@ -82,9 +88,10 @@ baseURL, 0004 transport-agnostic waits, 0005 env-gated stock gzip. What the port
 
 `node ports/drive-arms.mts strapi --rtt 80` is the STANDARD result: all six arms
 (floors, truth, RTT 80), idempotent with per-arm checkpoint commits, ending in both
-reports — bytes AND network wait. `drive-truth.sh` remains the first-time path (it
-adds the sealed-auth smoke gate before the long arms); `drive-gzip.sh` adds the
-compressed-stock pair. Transport note: this sandbox's proxy blocks
+reports — bytes AND network wait. Timing claims use two extra repetition passes per
+cell and `report-time.mts` with comma-separated run lists (medians of 3); the
+compressed-stock pair is `STRAPI_TIERLESS_GZIP=1` on the truth arms. Transport
+note: this sandbox's proxy blocks
 codeload zips for out-of-scope repos; the recipe's `git` transport (shallow clone at
 the release tag, checkout verified against the pinned sha) is the one that works
 here. The tree hash pins content either way.
@@ -124,8 +131,8 @@ Runtime facts, verified in this sandbox (2026-07-12):
 
 - Recipe pinned and fetched (git transport, tree hash verified); patch series applies
   cleanly to a pristine tree and reproduces the measured work tree byte-for-byte.
-- Adapter (0002) certified at smoke level: admin/login green with crossings on a
-  direct-fetch exec. Session socket (0003): the full CE suite below.
+- Adapter certified at smoke level: admin/login green with crossings on a
+  direct-fetch exec. Session socket: the full CE suite below.
 
 ## What the suite caught (the requirements list this app contributes)
 
@@ -135,15 +142,15 @@ Three real boundary defects, each fixed at the right layer rather than worked ar
    Login's reply sets the httpOnly refresh cookie; a Response reconstructed from a
    crossing cannot write the cookie jar. Their own suite asserts the cookie after
    login and caught it. First treatment: auth flows browser-pinned by MEANING.
-   Final treatment (patch 0006): sealed cookie authority — the layer the n8n port
-   built — lets them cross while the claim replay keeps the real jar current; the
-   pin is gone and the same assertions pass.
+   Final treatment: sealed cookie authority — the layer the n8n port built — lets
+   them cross while the claim replay keeps the real jar current; the pin is gone
+   and the same assertions pass.
 2. **Harness waits can assert the REQUEST, not just the reply.** Their i18n specs
    match `waitForRequest(...).postDataJSON()` on `uid/generate` — the exec log
    recorded only replies, so the accommodation had nothing to race. Fix in the
    RUNTIME: the opt-in exec log now records each crossing's own payload (`reqBody`),
-   and test patch 0004 grew `waitForTransportRequestBody` (assertions preserved
-   intact).
+   and the transport-agnostic waits grew `waitForTransportRequestBody` (assertions
+   preserved intact).
 3. **A ported app reaches network-quiet earlier, and load-state waits notice.** This
    sandbox MITMs outbound TLS, so the admin's github release check dies with a cert
    error Playwright never sees finish; the phantom in-flight request wedges
@@ -152,23 +159,22 @@ Three real boundary defects, each fixed at the right layer rather than worked ar
    slowly. Fix: `TIERLESS_IGNORE_HTTPS_ERRORS` (test patch 0001, both arms) lets the
    proxied request complete; a normal network never hits this.
 
-## The suite at the socket (2026-07-13, results/*-truth.jsonl; ported arm re-run
-## under sealed cookie authority — patch 0006)
+## The suite at the socket (2026-07-19, results/*-truth.jsonl — the 95-line packaged cut)
 
 Both arms by one command each (`TIERLESS_WIRE_TRUTH=1 node ports/strapi/suite.mts
-[--baseline]`, orchestrated end-to-end by drive-truth.sh). 289 paired tests; 225
+[--baseline]`, orchestrated by ports/drive-arms.mts). 289 paired tests; 224
 pass-parity pairs (62 symmetric skips — EE- and future-flag-gated specs on the CE
-lane — plus the two flakes below); 216 of 225 touch the session socket (the rest are
-reporter-attribution dropouts, see caveat).
+lane — plus the three one-off flakes below); 217 of 224 touch the session socket
+(the rest are reporter-attribution dropouts, see caveat).
 
-    API+ws bytes   97.7 MB -> 7.9 MB   (92% less IO)
-    per test       median 92% fewer bytes (p10 91%, p90 94%)
-    ported split   7.65 MB session ws (deflate included) + 0.22 MB residual HTTP —
-                   with auth flows on the socket (patch 0006) the residual is only
-                   the by-design pins: FormData uploads, non-JSON responses, and
-                   their raw-fetch token refresh. (Auth-pinned, the residual was
-                   0.92 MB; that arm's suite-wide number was the same 92%.)
-    best case      1,335 KB -> 194 KB (admin home: the key-statistics widget flow)
+    API+ws bytes   90.8 MB -> 7.6 MB   (92% less IO)
+    per test       median 92% fewer bytes (p10 91%, p90 93%)
+    ported split   7.38 MB session ws (deflate included) + 0.21 MB residual HTTP —
+                   with auth flows on the socket (cookie mediation auto-engages
+                   from the gateway hello) the residual is only the by-design
+                   pins: FormData uploads, non-JSON responses, and their raw-fetch
+                   token refresh.
+    best case      1,537 KB -> 132 KB (content-type builder: add attribute to component)
     asset traffic  ~6.4 MB per test (each test's fresh context refetches the admin
                    bundle) — identical on both arms, excluded from the comparison
     uncounted      reseal/claim ride plain HTTP to the gateway (a claim must be an
@@ -182,13 +188,13 @@ session, and one deflate window amortizes all of it.
 
 ### Apples-to-apples: against a COMPRESSED stock (results/truth-*-gzip.jsonl)
 
-Test patch 0005 enables Strapi's own shipped compression middleware
-(`strapi::compression`, koa-compress) under `STRAPI_TIERLESS_GZIP=1`. The default
+`STRAPI_TIERLESS_GZIP=1` puts a gzip RELAY (ports/gzip-proxy.mts — the nginx
+posture) in front of the app origin for browser-facing traffic. The default
 measured stack stays what their CI runs (raw); this pair answers "what if they
 deployed compression":
 
-    stock, gzip              98.3 MB -> 32.6 MB api bytes (gzip cuts stock's API 67%)
-    ported+gzip vs it        32.5 MB -> 8.1 MB   (75% less IO; median per-test 72%)
+    stock, gzip              90.8 MB -> 30.4 MB (gzip cuts stock's traffic 66%)
+    ported+gzip vs it        30.4 MB -> 7.6 MB   (75% less IO; median per-test 71%)
                              — the SYMMETRIC pair; ported(raw) vs it is the same 75%
                              (the ported arm's residual direct HTTP barely compresses)
 
@@ -198,18 +204,18 @@ deflate window, headers that never re-send — the same shape as NocoDB (where g
 captured a third) and Vikunja (half): payload-size distribution decides how much of
 the win is compressible.
 
-Pass sets: every test that runs on the CE lane passes on BOTH arms, except two
-UI-timing flakes excluded by the pass-parity gate: blocks.spec.ts:13 (the Blocks
-editor fill — has failed single runs on EACH arm across the four full pairings) and
-rbac/permissions-enforcement.spec.ts:14 (a toast wait; failed one ported full run,
-then passed three consecutive re-runs including its full domain). Neither failure is
+Pass sets: every test that runs on the CE lane passes on BOTH arms, except three
+one-off UI-timing flakes excluded by the pass-parity gate this pairing:
+blocks.spec.ts:13 (the Blocks editor fill — a known repeat offender, stock-side
+this time), conditional-fields visibility, and the preview iframe wait (each
+failed once ported-side and passed a targeted re-run, 6/6 with 1 skip). None is
 at a transport seam; the sealed-auth flows themselves (login/logout/re-login as a
-second user, cookie assertions incl. httpOnly) pass everywhere. One real race the
-suite DID catch after the rebase onto main's runtime: the fire-and-forget claim can
-replant the refresh cookie a beat after a clearCookies that raced it (stock fetch
-applies Set-Cookie synchronously with the response). Fixed at the runtime layer:
-`awaitClaims` (opt-in, set by patch 0006) holds a ROTATING crossing until its claim
-lands — auth flows only, the data plane never rotates.
+second user, cookie assertions incl. httpOnly) pass everywhere. One real race an
+earlier pairing DID catch: the fire-and-forget claim can replant the refresh
+cookie a beat after a clearCookies that raced it (stock fetch applies Set-Cookie
+synchronously with the response). Fixed at the runtime layer: `awaitClaims` holds
+a ROTATING crossing until its claim lands — auth flows only, the data plane never
+rotates. On this cut it engages via autoSession({awaitClaims: true}) in patch 0002.
 
 Caveats:
 
@@ -225,161 +231,51 @@ Caveats:
   below are the timing instrument (their proxy-free floors reproduce the wall gap,
   so it is real, but quote it from there).
 
-## Shaped timing (2026-07-14, results/floor-*.jsonl, rtt80-*.jsonl — sealed-authority build)
+## Shaped timing (2026-07-19, results/floor-*.jsonl x3, rtt80-*.jsonl x3 — medians of 3)
 
-The standard result is now produced by the generic driver — all six arms, both
-reports, one command (`node ports/drive-arms.mts strapi --rtt 80`): bytes alone is
-half the headline; network wait is the half a flow rewrite actually targets. RTT is
-injected for real on both browser-facing hops (raw TCP relays, TCP_NODELAY), the
+Produced by the generic driver (`node ports/drive-arms.mts strapi --rtt 80`) plus
+two repetition passes per cell, interleaved across arms: single runs of this suite
+swing by minutes (an earlier pass read the ported floor 18% fast, another 20% slow),
+so every per-test duration below is the MEDIAN of 3 runs per cell
+(`node ports/report-time.mts` with comma-separated run lists). RTT is injected for
+real on both browser-facing hops (raw TCP relays, TCP_NODELAY), the
 gateway->backend hop stays undelayed localhost, and the settled metric is NETWORK
-WAIT = dur@RTT − dur@unshaped-floor per test (`node ports/report-time.mts`). The
-RTT-20 arms from the first pass were dropped with the auth-pinned build: at 20 ms
-this suite's decomposition was fully variance-dominated (the baseline pool itself
-measured negative) — 80 ms is the instrument.
+WAIT = dur@RTT − dur@unshaped-floor per test. RTT-20 was dropped earlier for this
+suite (fully variance-dominated at 20 ms) — 80 ms is the instrument.
 
-At RTT 80, over 212 tests passing in all four runs:
+At RTT 80, medians of 3, over 205 tests passing in all twelve runs:
 
-    unimprovable floor    2,640 s baseline / 2,665 s ported — PARITY
-    network-wait pool     ~300 s baseline; pool share of wall 10% — the ceiling ANY
-                          transport work has here. The pool-total comparison is
-                          variance-dominated (96 of 212 tests measure a negative net
-                          component; the ported pool total lands below zero).
-    median per test       1,411 -> 1,290 ms network wait (9% less)
-    wall clock            49.5 -> 44.5 min total (median per-test 1% — tail-dominated)
+    RTT-0 floor           2,696 s baseline / 2,191 s ported — the ported build runs
+                          the suite ~19% (8.4 min) FASTER at localhost, reproducible
+                          across all three floor pairs: 92% fewer bytes, and session
+                          frames replacing per-request browser scheduling and Koa
+                          middleware work that no longer happens. (An earlier single-run
+                          pass saw this, was corrected to "variance", and the
+                          correction was itself the variance casualty — medians of 3
+                          settle it.)
+    network-wait pool     220 s baseline; pool share of wall 8% — the ceiling ANY
+                          transport work has here. Pool TOTALS stay noise-dominated
+                          even at 3 runs (38 of 205 tests measure a negative net);
+                          medians and the decile are the quotable numbers.
+    median per test       1,422 -> 1,332 ms network wait (6% less)
+    network-bound decile  the top 21 tests by baseline net wait: 99.8 s -> 40.5 s
+                          (59% of that pool removed), median 4,121 -> 1,312 ms —
+                          where network dominates, the port removes most of it.
 
-The verdict, third app in a row: per-interaction crossings pay per-interaction RTTs
-(this app's stock API was already same-origin keep-alive HTTP — no preflights to
-eliminate), so the 92% byte win buys single-digit network-wait medians, not
-wall-clock wins. Restructuring flows (§6 chains / migrations — not shipped in this
-port) is where the timing ceiling moves; the pool it would work against is 10% of
-wall.
+The verdict, third app in a row, now sharper: per-interaction crossings pay
+per-interaction RTTs (this app's stock API was already same-origin keep-alive HTTP —
+no preflights to eliminate), so suite-wide network-wait medians move single digits —
+but the network-BOUND tests improve 3x, and the RTT-0 floor win is real and large
+on this request-heavy suite. Restructuring flows (§6 chains / migrations — not
+shipped in this port) is where the remaining 8% pool moves.
 
-CORRECTION (2026-07-14): the first shaped pass measured the auth-pinned ported
-floor ~18% below baseline's, and this README attributed the gap to per-request
-processing overhead. The re-run on the sealed-authority build does not replicate it
-(floors are parity, and the sealed-auth blob work cannot account for a 25% floor
-swing) — the gap was single-run sandbox variance. Wall-clock differences at RTT 0
-between single runs are not attributable on this rig; the per-test network-wait
-MEDIAN under injected RTT is the defensible timing metric, and it reads 9% less.
-
-## The suite at the socket (2026-07-13, results/*-truth.jsonl; ported arm re-run
-## under sealed cookie authority — patch 0006)
-
-Both arms by one command each (`TIERLESS_WIRE_TRUTH=1 node ports/strapi/suite.mts
-[--baseline]`, orchestrated end-to-end by drive-truth.sh). 289 paired tests; 225
-pass-parity pairs (62 symmetric skips — EE- and future-flag-gated specs on the CE
-lane — plus the two flakes below); 216 of 225 touch the session socket (the rest are
-reporter-attribution dropouts, see caveat).
-
-    API+ws bytes   97.7 MB -> 7.9 MB   (92% less IO)
-    per test       median 92% fewer bytes (p10 91%, p90 94%)
-    ported split   7.65 MB session ws (deflate included) + 0.22 MB residual HTTP —
-                   with auth flows on the socket (patch 0006) the residual is only
-                   the by-design pins: FormData uploads, non-JSON responses, and
-                   their raw-fetch token refresh. (Auth-pinned, the residual was
-                   0.92 MB; that arm's suite-wide number was the same 92%.)
-    best case      1,335 KB -> 194 KB (admin home: the key-statistics widget flow)
-    asset traffic  ~6.4 MB per test (each test's fresh context refetches the admin
-                   bundle) — identical on both arms, excluded from the comparison
-    uncounted      reseal/claim ride plain HTTP to the gateway (a claim must be an
-                   HTTP response — that is where httpOnly can be planted): ~1 KB per
-                   login, outside both counters, port-side overhead if counted
-
-Why the number matches NocoDB's 92-94% rather than Vikunja's 13-35%: their Koa
-backend serves raw, uncompressed JSON (no compression middleware in their template or
-CI lane), the admin's init/permissions/settings payloads repeat heavily across a
-session, and one deflate window amortizes all of it.
-
-### Apples-to-apples: against a COMPRESSED stock (results/truth-*-gzip.jsonl)
-
-Test patch 0005 enables Strapi's own shipped compression middleware
-(`strapi::compression`, koa-compress) under `STRAPI_TIERLESS_GZIP=1`. The default
-measured stack stays what their CI runs (raw); this pair answers "what if they
-deployed compression":
-
-    stock, gzip              98.3 MB -> 32.6 MB api bytes (gzip cuts stock's API 67%)
-    ported+gzip vs it        32.5 MB -> 8.1 MB   (75% less IO; median per-test 72%)
-                             — the SYMMETRIC pair; ported(raw) vs it is the same 75%
-                             (the ported arm's residual direct HTTP barely compresses)
-
-Compression captures about two thirds of the raw gap; the port's win over a
-compressed stock is structural — bodies that never repeat across a session-long
-deflate window, headers that never re-send — the same shape as NocoDB (where gzip
-captured a third) and Vikunja (half): payload-size distribution decides how much of
-the win is compressible.
-
-Pass sets: every test that runs on the CE lane passes on BOTH arms, except two
-UI-timing flakes excluded by the pass-parity gate: blocks.spec.ts:13 (the Blocks
-editor fill — has failed single runs on EACH arm across the four full pairings) and
-rbac/permissions-enforcement.spec.ts:14 (a toast wait; failed one ported full run,
-then passed three consecutive re-runs including its full domain). Neither failure is
-at a transport seam; the sealed-auth flows themselves (login/logout/re-login as a
-second user, cookie assertions incl. httpOnly) pass everywhere. One real race the
-suite DID catch after the rebase onto main's runtime: the fire-and-forget claim can
-replant the refresh cookie a beat after a clearCookies that raced it (stock fetch
-applies Set-Cookie synchronously with the response). Fixed at the runtime layer:
-`awaitClaims` (opt-in, set by patch 0006) holds a ROTATING crossing until its claim
-lands — auth flows only, the data plane never rotates.
-
-Caveats:
-
-- HTTP bytes are message-true (serialized request+response, headers included), not
-  raw-TCP; session ws bytes ARE TCP-true, counted inside the gateway. See
-  "Measurement design" above.
-- Per-test wire attribution is best-effort (Playwright does not await async reporter
-  hooks): a handful of rows credit a test's bytes to its neighbor — visible as
-  0-byte outliers, excluded from the covered subset; medians and the suite totals
-  are the robust numbers.
-- Wall clock from the truth runs is NOT quotable on its own: the counting proxy adds
-  a hop per HTTP request, which taxes the request-heavy stock arm — the shaped runs
-  below are the timing instrument (their proxy-free floors reproduce the wall gap,
-  so it is real, but quote it from there).
-
-## Shaped timing (2026-07-13, results/floor-*.jsonl, rtt20-*.jsonl, rtt80-*.jsonl)
-
-`TIERLESS_RTT_MS=<n> node ports/strapi/suite.mts [--baseline]` — real RTT on both
-browser-facing hops (the app origin and the session ws; raw TCP relays, TCP_NODELAY),
-gateway→backend on undelayed localhost, as deployed. The settled metric is NETWORK
-WAIT = dur@RTT − dur@unshaped-floor per test (`node ports/report-time.mts`).
-
-At 20 ms (225 pass-parity pairs): wall clock 39.6 -> 39.4 min — parity — and the
-decomposition is fully variance-dominated (the baseline pool itself measures
-NEGATIVE: run-to-run noise exceeds the 20 ms signal). Same verdict as NocoDB at
-20 ms. At 80 ms (213 tests passing in all four runs):
-
-    unimprovable floor    2,580 s baseline / 2,123 s ported (see below)
-    network-wait pool     318.3 s -> 298.5 s   (6% of the POOL removed)
-    median per test       1,412 -> 1,338 ms network wait
-    pool share of wall    11% (baseline) — the ceiling ANY transport work has here
-    wall clock            48.7 -> 40.5 min (17% less; median per-test 7%)
-
-(The shaped arms measured the auth-pinned build — patch 0006 landed after. Auth
-flows were under 1% of suite bytes and their crossings pay the same per-request RTT
-as their pinned HTTP did, so neither verdict below moves.)
-
-Two separate timing facts, named separately:
-
-1. **Network wait is parity within noise.** Per-interaction crossings pay
-   per-interaction RTTs, and this app's stock API was already same-origin keep-alive
-   HTTP (no preflights to eliminate). The 92% byte win does not become RTT wins
-   without restructuring flows (§6 chains / migrations — not shipped in this port).
-   Third app, same verdict: the timing ceiling lives in the request-per-interaction
-   structure.
-2. **The wall-clock win is real but it is not network wait — it is per-request
-   overhead.** The ported arm's UNSHAPED floor is ~18% faster (2,123 vs 2,580 s), and
-   the gap replicates across all four ported runs (floors, both RTTs, and the
-   proxy-taxed truth arms agree). Collapsing hundreds of HTTP request lifecycles per
-   test into websocket frames saves browser request scheduling and Koa
-   per-request middleware work — localhost CPU, visible at RTT 0, linear in request
-   count, and honestly attributed to neither bytes nor latency.
-
-## Re-cut on the packaged surface (2026-07-16 — patches apply; runtime verification pending)
+## Re-cut on the packaged surface (2026-07-16; all arms re-measured on this cut 2026-07-19)
 
 The recipe now rides the packaged port surface — 897 → 95 patch lines:
 
     patches/0002-tierless-auto-session.patch (61)  THE PORT: adapt-fetch + autoSession at the
-                                                   same four call sites (replaces the 0002
-                                                   adapter + 0003 socket + 0006 cookie
+                                                   same four call sites (replaces the earlier
+                                                   hand-rolled adapter, socket, and cookie
                                                    authority — cookie mediation now
                                                    auto-engages from the gateway's hello)
     patches/0001-measure-config.patch (34)         baseURL + sandbox-TLS flag only — these are
@@ -403,6 +299,6 @@ out of the parity gate). Wire-truth smoke on the admin domain: 6/6 passed with 1
 of real session-ws bytes — the crossings ride the socket through the register-delivered
 waits and the CLI gateway's cookie authority. The verification also caught and fixed a
 harness gap: on shaped/counted arms the page's origin is the relay, so the page+100
-convention now holds THROUGH relays (passthroughs at 28100/18100). The measured numbers
-above were driven on the original six-patch cut; re-drive the full arms before quoting
-them for this cut.
+convention now holds THROUGH relays (passthroughs at 28100/18100). Every measured
+number above — truth pair, gzip pair, and the medians-of-3 shaped arms — was driven
+on THIS cut (2026-07-19); nothing quoted predates it.
