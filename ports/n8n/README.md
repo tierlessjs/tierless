@@ -131,37 +131,38 @@ invisible at the same bar as the direct-fetch stage. (672 > baseline's 666
 passed: a few baseline flakes happened to land green this run; the paired,
 parity-gated set is the honest comparison, not the raw pass counts.)
 
-### Wire-truth byte A/B (results/{baseline,ported}-truth.jsonl, report-0005-session-socket.txt)
+### Wire-truth byte A/B (2026-07-20, results/{baseline,ported}-truth.jsonl)
 
 Both arms under the TCP-true counting relay (bytes are socket-level, deflate
-included; browser data path only, node-side seeding excluded):
+included; browser data path only, node-side seeding excluded), single machine
+epoch, 661 pass-parity pairs:
 
-    651 pass-parity pairs (537 the port serves)
-    total wire IO   11,139,155 KB -> 5,694,159 KB   —  49% LESS
-    median per-test bytes saved                     —  50%
-    wall time       88.8 min -> 78.5 min            —  12% less (median 12%)
+    total wire IO   5,605,510 KB -> 6,081,963 KB   —  8% MORE on the ported arm
+    median per test                                —  2% more
 
-The mechanism, per test: n8n's node-types metadata and `/rest` fan-out cross
-the session socket **deflate-compressed** (~1.3 MB ws) where the stock arm
-sends them as uncompressed HTTP with per-request headers; assets and the
-force-browser'd `/rest` (settings, mocks) stay HTTP (~7.8 MB, identical both
-arms, so they wash out of the delta). This is the session-socket stage's
-payoff, on a structurally different app than Vikunja (task CRUD, 35% median)
-and NocoDB (data grid) — the editor SPA's MB-scale metadata is exactly the
-shape a deflate window over one session compresses hardest.
+**This retracts the previously published 49%.** That number was computed
+against a baseline artifact assembled after a mid-run container restart by a
+max-bytes dedup; per-test comparison against clean arms shows that dedup
+inflated the old baseline uniformly ~2x (median new/old ratio 0.50 across 518
+tests) — the old PORTED artifact matches the new one, only the baseline was
+wrong. On clean same-epoch arms, n8n is the corpus's honest null-to-negative
+byte data point, and the anatomy says why:
 
-Honesty notes on this measurement:
-- 24 of the 651 pairs recorded 0 baseline bytes (API-only or uncounted-path
-  tests). They are left IN the aggregate, which only makes 49%/50%
-  conservative — a 0->N pair scores as a loss. Excluding them, median is ~39%
-  higher-confidence... i.e. the true saving is at least the reported figure.
-- The baseline arm's raw JSONL was contaminated by a stale prefix after a
-  container restart mid-run; `results/baseline-truth.jsonl` is deduped by
-  keeping the real measured attempt per test id (max bytes, passed) — recovers
-  the fresh run's numbers, invents nothing.
-- reseal/claim auth requests are small and uncounted (the gateway's wire
-  counter tracks ws sockets only); the app relay counts assets + force-browser
-  `/rest`, the ws counter counts the session.
+- The dominant per-test wire is a constant BOTH arms pay through the single
+  origin: editor assets and the push channel (~7-8 MB/test; fresh context per
+  test refetches the bundle).
+- The ported arm's session ws is ~1.75 MB per page session — the app's ~18
+  boot `/rest` fetches, deflate-compressed (verified: the quantum is 2x on
+  two-page tests, absent on session-less tests, and invariant under the
+  TIERLESS_PREBOOT=0 ablation — prebooted-in-hello or crossed, same bytes).
+- What that displaces from HTTP is roughly the same magnitude, so the
+  suite-wide delta is the session cargo minus the displacement: slightly
+  negative. Crossings themselves are real and correct (a sampled run shows
+  the gateway executing the editor's data GETs; pass parity holds at 661
+  pairs) — this app's traffic shape just doesn't reward a session transport:
+  unlike Strapi (raw MB-scale JSON re-sent per request, 92% win) or NocoDB,
+  n8n's repeated payloads are already amortized behind its asset bundle and
+  push channel.
 
 Reproduce:
 
@@ -170,50 +171,39 @@ Reproduce:
     TIERLESS_WIRE_TRUTH=1 node ports/n8n/suite.mts
     node ports/report.mts ports/work/n8n-baseline/measure-truth.jsonl ports/work/n8n/measure-truth.jsonl
 
-### Network wait — was a loss, now fixed to the websocket floor (results/report-time-rtt80-p2.txt)
+### Wall time and network wait (2026-07-20; floors same-epoch, RTT arms caveated)
 
-Four arms — floor (RTT0) and shaped (RTT 80 ms) × baseline/ported — decomposed by
-`report-time.mts` as `net = dur(80) − dur(0)`, the only component transport can move.
-The port originally **added ~20% network wait** (median +740 ms) even as it cut bytes
-49%. Two fixes — the reseal folded into the ws upgrade and the boot GETs pre-fetched at
-the upgrade (below) — cut that to **+6%**. Over 618 tests passing in all four runs:
+The one defensible timing comparison on this rig is a back-to-back same-epoch
+floor pair (single runs of this 1.5 h suite swing by minutes across container
+epochs — the same instrument lesson as vikunja and strapi, and this suite is
+too long for a medians-of-3 matrix between restarts):
 
-                                           PRE-FIX                    FIXED (P2)
-    floor (compute/render, unimprovable)   4428 ≈ 4381 s              4441 ≈ 4402 s   (isolation clean)
-    network-wait pool     baseline->ported 1903 -> 2286 s (+20%)      1914 -> 2029 s (+6%)
-    median per-test net wait               2946 -> 3686 ms (+740)     2946 -> 3211 ms (+265)
+    RTT-0 floor wall   88.5 min stock -> 95.9 min ported   (8% SLOWER)
+    per-test median    +778 ms ported (quartiles +2 / +778 / +1333)
 
-**The aggregate loss inverts on the tests that are actually network-bound.** Ranking the
-618 tests by *baseline* net wait (the workload's own measure, independent of the port) and
-cutting the top decile — 62 tests, netB ≥ 6020 ms — the port is **faster**: 510 → 485 s, a
-**+5%** win where the −6% is a loss (median 7094 → 7026 ms). The reason is the crossover: the
-socket handshake is a fixed per-context cost, so it's a large *fraction* of a test that barely
-touches the network (dragging the compute-heavy 90% of the suite negative) but a small one on a
-network-bound test, where the 49% byte cut and the eliminated CORS preflights win outright. A
-port that pays a fixed transport tax and returns a per-byte/per-round-trip saving *should* look
-exactly like this. `report-time.mts` prints this decile for every port.
+The slowdown is entirely SESSION BOOT, measured by correlation: grouping the
+same tests by their session count (from the truth arm's ws quantum), the floor
+delta is −5 ms at zero sessions, +1.1 s at one, +2.8 s at two, +3.4 s at
+three — ~1.1 s per fresh-page session, parity without one. This retracts the
+old cut's floor-parity/wall-win numbers along with the byte headline (same
+contaminated baseline artifact), and it is a REGRESSION against the old cut's
+own boot-latency study (boot crossings 19 -> 1, floors at parity) — the
+packaged autoSession path re-pays a boot cost the hand-rolled port had
+eliminated. OPEN ITEM, the port's cost center: localize the ~1.1 s (the
+preboot join demonstrably still serves — candidates are the hello pre-fetch
+gating the first crossing, and boot fetches outside the manifest) and fix it
+in tierless, then re-drive the floors. The RTT-80 arms exist
+(results/rtt80-*.jsonl) but span a restart; their decomposition is not quoted.
 
-**The residual +6% is 86% the websocket handshake, paid once per real session.** The
-excess pool is 115 s / 618 tests = 187 ms/test. A websocket needs its own TCP + upgrade
-(2 RTT = 160 ms at 80 ms) regardless of origin — that is 99 s (86%) of the 115 s, paid
-**per fresh browser context**. The e2e harness gives every test a fresh context, so it
-pays the handshake 618×; a real long-lived session pays it **once**. So the harness
-number overstates the loss: on the persistent socket a real session runs at ~parity on
-wait with the 49% byte win. Over **ws-over-H2** (`docs/transports.md`) the handshake halves
-again — a ws colocated on the app's H2 origin **coalesces onto the page's warm connection**
-and pays 1 RTT (the Extended CONNECT stream), not 2 (measured: transport-bench 167→84 ms).
-So over H2-on-both-with-colocation the 99 s handshake term is ~49 s and the pool excess is
-~66 s (**~+3%**); plain ws over separate origins is the fallback floor these numbers assume.
-(This is the one case where colocation matters: for *plain* ws it buys ~0 — a plain ws needs
-its own TCP+upgrade to any origin — but for ws-over-H2 colocation is exactly what makes the
-socket coalescible, worth that 1 saved RTT.) The remaining 17 s
-(14%) is a handful of workflow-ID/project-specific editor GETs (`/rest/workflows/:id`,
-`.../exists`, `credentials/for-workflow?projectId=`) that a static preboot manifest can't
-cover — the IDs are generated per test, unknown at the upgrade — and they multiplex (~1
-RTT). The boot fan-out itself is fully covered: 13/16 editor boot GETs join the preboot
-buffer (`capture-editor.mts`), all 18 home boot GETs join.
+Structural notes that survive the retraction: the harness pays every per-session
+cost once PER TEST (fresh context), where a real long-lived session pays it once —
+harness numbers are the worst case for any per-session tax. Over **ws-over-H2**
+(`docs/transports.md`) the socket handshake itself halves — a ws colocated on the
+app's H2 origin coalesces onto the page's warm connection and pays 1 RTT, not 2
+(measured independently: transport-bench 167 -> 84 ms).
 
-The two fixes, proven (results/boot-setup.txt, per-context boot timing @ RTT80):
+The boot-latency mechanisms, built and measured on the original cut
+(results/boot-setup.txt, per-context boot timing @ RTT80) and still shipped:
 
 - **Reseal folded into the ws upgrade** — the gateway seals THIS socket's cookie at the
   upgrade and hands the blob back in an unsolicited `hello`, so the startup blob rides the
@@ -231,13 +221,10 @@ The two fixes, proven (results/boot-setup.txt, per-context boot timing @ RTT80):
 
 Both fixes are ON by default (boot.mts); each is env-toggleable
 (`TIERLESS_HELLO_AUTH`, `TIERLESS_PREBOOT`) so a run can isolate its contribution.
-
-Reproduce:
-
-    TIERLESS_RTT_MS=80 node ports/n8n/suite.mts --baseline
-    TIERLESS_RTT_MS=80 node ports/n8n/suite.mts                 # P2 default (both fixes on)
-    node ports/report-time.mts results/floor-baseline.jsonl results/floor-ported-p2.jsonl \
-                               results/rtt80-baseline.jsonl results/rtt80-ported-p2.jsonl
+On the re-cut, the preboot join is verified serving (a logged run shows zero
+manifest paths crossing; bytes are invariant under the ablation) — yet the
+~1.1 s/session floor cost stands. Whatever re-introduced it is the open item
+above, not these mechanisms' design.
 
 ## Reproduce
 
@@ -377,5 +364,10 @@ session-ws bytes. Two findings from the verification: this suite's playwright (1
 SEALS the client classes, so the waits ride the suite's own fixture seam (test patch
 0002, ~10 lines — the wrapper degrades gracefully and says so); and upstream's
 frontend webServer entry misses the SKIP guard its backend entry has (test patch 0005,
-15 lines, semantic). Total: 986 → 134 patch lines, one 56-line port patch. The
-measured numbers above were driven on the original cut; re-drive before quoting.
+15 lines, semantic). Total: 986 → 134 patch lines, one 56-line port patch.
+
+RE-MEASURED on this cut (2026-07-20): the full six-arm drive plus a same-epoch
+floor pair. Behavior holds (661 pass-parity pairs, crossings verified at the
+gateway); the wire and wall numbers above are this cut's — including the byte
+retraction and the open ~1.1 s/session boot regression, which is the next
+tierless work item, not a caveat on the data.
