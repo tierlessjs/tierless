@@ -125,7 +125,18 @@ proven (the executable proofs behind `npm test`).
   (`__TIERLESS_EXEC_BATCH__` opts in). Decision rule: if no later port
   surfaces a case where frame count is the paid unit (per-message pricing,
   mobile radio budgets), remove the mechanism and keep the Vikunja results
-  as the recorded answer.
+  as the recorded answer. n8n (2026-07-20) was the candidate frame-cost app
+  and measured neutral too — its expensive boot crossings are sequential
+  dependents, nothing to coalesce. One more port, then remove.
+
+- **Session-boot contention (n8n diagnosis, 2026-07-20).** Crossings inside a
+  page's boot render-storm pay 2-5x CPU contention on a shared box (main-thread
+  decode + the gateway hop); quiet-period crossings are at parity with direct
+  HTTP. ~1.1 s/session on n8n's heavy editor boot, per fresh page — the harness
+  pays it per test. Candidates if a port needs it fixed rather than documented:
+  off-main-thread frame decode (Worker), crossing scheduling priority, letting
+  the preboot join FEED the mount storm more gradually. Evidence:
+  ports/n8n/README.md wall-time section.
 
 - **The corpus program** (`docs/corpus.md`): a statistical claim over real apps —
   "median X× less network wait, Y% less IO across N apps' own e2e journeys."

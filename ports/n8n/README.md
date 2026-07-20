@@ -189,11 +189,22 @@ old cut's floor-parity/wall-win numbers along with the byte headline (same
 contaminated baseline artifact), and it is a REGRESSION against the old cut's
 own boot-latency study (boot crossings 19 -> 1, floors at parity) — the
 packaged autoSession path re-pays a boot cost the hand-rolled port had
-eliminated. OPEN ITEM, the port's cost center: localize the ~1.1 s (the
-preboot join demonstrably still serves — candidates are the hello pre-fetch
-gating the first crossing, and boot fetches outside the manifest) and fix it
-in tierless, then re-drive the floors. The RTT-80 arms exist
-(results/rtt80-*.jsonl) but span a restart; their decomposition is not quoted.
+eliminated. DIAGNOSED (2026-07-20, phase-instrumented single-test runs, both
+arms): no tierless queueing or correctness defect — the readiness gate costs
+0-7 ms, preboot joins return in 0-5 ms, and crossings on a QUIET page run at
+parity with stock direct HTTP (e.g. the workflow-run POST: 69-97 ms ported vs
+87 ms stock). The ~1.1 s is crossings that land inside the boot render-storm
+window paying 2-5x CPU contention on this shared box (browser main-thread
+decode + the gateway hop + a backend whose editor endpoints already cost
+100-200 ms each) — amplified by an irony: the instant preboot join starts the
+mount storm EARLIER, so the editor fetches land inside it, where stock's
+slower boot staggered them apart. Burst coalescing was A/B-tested here and is
+neutral (the expensive crossings are sequential dependents, not coalescible
+bursts — n8n confirms the vikunja default-off verdict). Remaining candidates
+are scheduling-shaped (off-main-thread decode, crossing priority) and live on
+the roadmap; the harness pays this per test, a real session pays it once per
+page. The RTT-80 arms exist (results/rtt80-*.jsonl) but span a restart; their
+decomposition is not quoted.
 
 Structural notes that survive the retraction: the harness pays every per-session
 cost once PER TEST (fresh context), where a real long-lived session pays it once —
