@@ -1,0 +1,24 @@
+--- a/packages/nc-gui/nuxt.config.ts
++++ b/packages/nc-gui/nuxt.config.ts
+@@ -8,6 +8,7 @@
+ import { FileSystemIconLoader } from 'unplugin-icons/loaders'
+ 
+ import PurgeIcons from 'vite-plugin-purge-icons'
++import tierless from 'tierless/vite'
+ // https://nuxt.com/docs/api/configuration/nuxt-config
+ export default defineNuxtConfig({
+   future: {
+@@ -171,6 +172,13 @@
+       },
+     },
+     plugins: [
++      // The tierless real-code compile pass (compile:'auto'): every module carrying a
++      // compilable form (top-level classes, Pinia setup stores) runs through the
++      // compiler; inclusion is the compiler's own verdict, recorded per method in
++      // dist-tierless/tierless.compile-coverage.json. Uncompiled methods keep their
++      // originals; the session the compiled methods bind to is the one the port's
++      // tierlessAxios call already configures (page port + 100).
++      tierless({ apiUrl: process.env.TIERLESS_API_URL || 'http://localhost:8080', compile: 'auto' }),
+       VueI18nPlugin({
+         include: [resolve(dirname('./lang/*.json'))],
+         runtimeOnly: false,
