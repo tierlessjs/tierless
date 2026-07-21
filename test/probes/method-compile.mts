@@ -128,6 +128,16 @@ export class V { async m(p) { await p; const r = this.http.get("/x"); return r; 
 { resources: { "this.http": "server" }, filename: "v.js" });
 check("a BARE await (no call to dispatch on) still rejects with the reason", metaBare.methods.length === 1 && metaBare.methods[0].program === null && /awaits a non-resource/.test(metaBare.methods[0].error || ""), JSON.stringify(metaBare.methods));
 
+// ---- optional member access whose property name collides with a frame local -------------
+// The frame rewrite (locals -> F.x) must skip the non-computed property position of an
+// OPTIONAL member too: `r.data?.type` with a local `type` corrupted the AST before the
+// guard covered OptionalMemberExpression (seen live on 3 NocoDB nc-gui methods).
+const { code: codeOpt, meta: metaOpt } = compile(`"use tierless";
+export class O { async m(id) { const type = "x"; const r = this.http.get("/a/" + id); const t2 = r.data?.type; return t2 + type; } }`,
+{ resources: { "this.http": "server" }, filename: "o.js" });
+check("optional member property colliding with a local compiles", metaOpt.methods.length === 1 && metaOpt.methods[0].program === "O$m", JSON.stringify(metaOpt.methods));
+check("the property stayed a plain name; the local reads rewrote to the frame", /\?\.type/.test(codeOpt) && /F\.type/.test(codeOpt));
+
 // ---- super use stays uncompiled with a reason -------------------------------------------
 const { meta: meta3 } = compile(`"use tierless";
 class B { async m() { return 1; } }

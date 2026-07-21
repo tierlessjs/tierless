@@ -989,7 +989,7 @@ function lower(p: NodePath<t.FunctionDeclaration>): string {
     const name = ip.node.name;
     if (name === "F" || !(params.includes(name) || locals.has(name))) return;
     const par = ip.parent;
-    if (t.isMemberExpression(par) && par.property === ip.node && !par.computed) return;
+    if ((t.isMemberExpression(par) || t.isOptionalMemberExpression(par)) && par.property === ip.node && !par.computed) return;
     if (t.isObjectProperty(par) && par.key === ip.node && !par.computed) return;
     if (t.isVariableDeclarator(par) && par.id === ip.node) return;
     if (t.isCatchClause(par) && par.param === ip.node) return;

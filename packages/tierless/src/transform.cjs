@@ -1167,7 +1167,7 @@ function lower(p) {
             if (name === "F" || !(params.includes(name) || locals.has(name)))
                 return;
             const par = ip.parent;
-            if (t.isMemberExpression(par) && par.property === ip.node && !par.computed)
+            if ((t.isMemberExpression(par) || t.isOptionalMemberExpression(par)) && par.property === ip.node && !par.computed)
                 return;
             if (t.isObjectProperty(par) && par.key === ip.node && !par.computed)
                 return;
