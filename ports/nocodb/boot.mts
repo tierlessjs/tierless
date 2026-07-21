@@ -64,6 +64,11 @@ export async function bootNocodb(): Promise<{ close(): void }> {
       "--port", "3100",                                  // page port + 100: the patch needs no gateway config
       "--allow-origin", process.env.TIERLESS_ALLOWED_ORIGINS ||
         ["3000", "13000"].flatMap((p) => [`http://localhost:${p}`, `http://127.0.0.1:${p}`]).join(","),
+      // compiled machines (compile:'auto' in nc-gui's nuxt config): mount the build's
+      // manifest so a migrated method can resume gateway-side. Only the ported build
+      // emits one — the baseline (and a pre-compile ported build) stays exec-only.
+      ...(existsSync(path.join(SRC, "packages/nc-gui/dist-tierless/tierless.manifest.json"))
+        ? ["--machines", path.join(SRC, "packages/nc-gui/dist-tierless")] : []),
     ], { env, stdio: log("gateway"), detached: true }),
   ];
   // cleanup exists BEFORE any await: a failed readiness wait must not strand four
