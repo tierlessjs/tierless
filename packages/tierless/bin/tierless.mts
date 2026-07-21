@@ -58,7 +58,7 @@ const usage = `usage:
   tierless build   <in.js> <out.mjs> [--bare] [--head=<file>] [--auto-deref] [--auto-writeback] [--track-writes] [--source-map] [--resource=ns:tier]
   tierless explain <file.js> [--json] [--resource=ns:tier ...]
   tierless api     <service.mjs>
-  tierless gateway --backend <url> [--port 8180] [--host 127.0.0.1] [--allow-origin o1,o2] [--cookie-authority] [--preboot /path ...] [--preboot-file <f>] [--log-gets <f>] [--no-upgrade-seal] [--wire-truth]
+  tierless gateway --backend <url> [--port 8180] [--host 127.0.0.1] [--allow-origin o1,o2] [--cookie-authority] [--preboot /path ...] [--preboot-file <f>] [--log-gets <f>] [--no-upgrade-seal] [--wire-truth] [--machines <dist-tierless>]
   tierless types   <service.mjs> [out.d.ts]`;
 
 const parseResources = (flags: string[]): Record<string, string> => {
@@ -267,20 +267,66 @@ if (cmd === "build") {
     }
     return v;
   };
+  // --machines <dist-tierless>: host this build's compiled machines (the manifest the
+  // vite plugin emits — the same resolution the plugin's own preview server performs).
+  // Compiled APP modules (wire ids m:<hash>) resolve to ONE merged machine world
+  // (docs/migrate-arm.md slice 3): a migrated store frame's dynamic call park must find
+  // the service module's programs whatever module id the wire carries. Sessions gain a
+  // `http.*` twin of the app's client (compiled class methods park there) and, when the
+  // manifest names a twins bundle, session twin INSTANCES of the app's own classes.
+  // Without the flag the gateway stays exec-only, exactly as before.
+  const machinesDir = flag("--machines") || process.env.TIERLESS_MACHINES;
+  const EXEC_ONLY = { PROGRAMS: {}, __unwind: () => false };
+  let bundleFor: ((id: string) => unknown | Promise<unknown>) | null = null;
+  let makeTwinsFn: ((o: { token: string | null; apiUrl: string }) => (cls: string) => object | undefined) | undefined;
+  if (machinesDir) {
+    const pathMod = await import("node:path");
+    const { pathToFileURL } = await import("node:url");
+    const { bundleResolverFromManifest } = await import("tierless/server");
+    const manifestPath = pathMod.join(machinesDir, "tierless.manifest.json");
+    const fromManifest = await bundleResolverFromManifest(manifestPath) as (id: string) => unknown;
+    const manifest = JSON.parse(readF(manifestPath, "utf8")) as { modules: Record<string, string>; twins?: string };
+    let appMerged: { PROGRAMS: Record<string, unknown>; __unwind: unknown; __slots: Record<string, unknown> } | null | undefined;
+    const mergedApp = async (): Promise<typeof appMerged> => {
+      if (appMerged !== undefined) return appMerged;
+      const merged = { PROGRAMS: {} as Record<string, unknown>, __unwind: null as unknown, __slots: {} as Record<string, unknown> };
+      for (const id of Object.keys(manifest.modules)) {
+        if (!id.startsWith("m:")) continue;
+        const b = await fromManifest(id) as { PROGRAMS: Record<string, unknown>; __unwind: unknown; __slots?: Record<string, unknown> };
+        Object.assign(merged.PROGRAMS, b.PROGRAMS);
+        if (b.__slots) Object.assign(merged.__slots, b.__slots);
+        if (!merged.__unwind) merged.__unwind = b.__unwind;
+      }
+      return (appMerged = merged.__unwind ? merged : null);
+    };
+    bundleFor = async (id: string) => {
+      if (id.startsWith("m:")) { try { const m = await mergedApp(); if (m) return m; } catch { /* fall through */ } }
+      try { return await fromManifest(id); } catch { return EXEC_ONLY; }
+    };
+    if (manifest.twins) {
+      try {
+        const mod = await import(pathToFileURL(pathMod.join(machinesDir, manifest.twins)).href) as { makeTwins?: typeof makeTwinsFn };
+        if (typeof mod.makeTwins === "function") makeTwinsFn = mod.makeTwins;
+      } catch { /* no twins bundle: chains dispatch home, correctness unchanged */ }
+    }
+  }
+  const { httpResources, twinHttp } = machinesDir ? await import("tierless/adapt") : { httpResources: null, twinHttp: null } as never;
   attachTierless(server, {
-    // exec-only: no compiled machines (the adapter path crosses per request); compiled
-    // surfaces resolve from a manifest when a port lands them
-    bundle: { PROGRAMS: {}, __unwind: () => false } as never,
+    bundle: (bundleFor ?? (EXEC_ONLY as never)) as never,
     wire,
     session: async (req) => {
       // websockets don't do CORS: loopback binding alone doesn't stop a hostile page the
       // developer happens to visit from reaching the backend through this exec bridge
       const origin = String(req.headers.origin || "");
       if (origins.length && !origins.includes(origin)) throw new Error("tierless gateway: origin not allowed: " + JSON.stringify(origin));
+      // machine-hosting sessions: compiled class methods park http.* against a twin of
+      // the app's client; api.* stays the gateway exec (authority-mediated when on)
+      const sessionExec: typeof exec = !machinesDir ? exec : (r) => (String(r.name).startsWith("http.") ? httpResources(twinHttp(backend, {}))(r as never) : exec(r));
+      const twins = makeTwinsFn ? makeTwinsFn({ token: null, apiUrl: backend }) : undefined;
       return authority
         // TIERLESS_PREBOOT=0: the ablation arm — manifest configured, pre-fetch off
-        ? { exec, hello: await authority.hello(String(req.headers.cookie || ""), { auth: upgradeSeal, preboot: prebootPaths.length > 0 && process.env.TIERLESS_PREBOOT !== "0" }) }
-        : { exec };
+        ? { exec: sessionExec, ...(twins ? { twins } : {}), hello: await authority.hello(String(req.headers.cookie || ""), { auth: upgradeSeal, preboot: prebootPaths.length > 0 && process.env.TIERLESS_PREBOOT !== "0" }) }
+        : { exec: sessionExec, ...(twins ? { twins } : {}) };
     },
   });
   // print the BOUND port (--port 0 lets a harness pick a free one and parse it back)
