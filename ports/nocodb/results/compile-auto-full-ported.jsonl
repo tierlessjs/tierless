@@ -1,0 +1,3 @@
+{"id":"db/general/sourceRestrictions.spec.ts:31 › Source Restrictions › Readonly data source","status":"passed","retry":0,"durationMs":49377}
+{"id":"db/general/sourceRestrictions.spec.ts:58 › Source Restrictions › Readonly schema source","status":"passed","retry":0,"durationMs":43724}
+{"id":"db/general/sourceRestrictions.spec.ts:89 › Source Restrictions › Readonly schema source - edit column","status":"passed","retry":0,"durationMs":52479}
