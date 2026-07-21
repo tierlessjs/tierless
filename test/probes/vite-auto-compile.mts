@@ -74,6 +74,20 @@ const cov = JSON.parse(readFileSync(join(dir, "dist-tierless", "tierless.compile
 check("coverage artifact: mode auto, per-module verdicts with the compiler's reasons", cov.mode === "auto" && cov.perModule["src/svc.ts"]?.compiled === true && cov.perModule["src/store.ts"]?.compiled === true && cov.perModule["src/decoy.ts"]?.compiled === false);
 check("coverage artifact: program counts match what transformed", cov.compiledModules === 2 && cov.compiledPrograms >= 2, JSON.stringify({ m: cov.compiledModules, p: cov.compiledPrograms }));
 
+// ---- the Nuxt shape: the SAME plugin object then runs the app's SERVER (SSR/nitro)
+// build. That build must neither compile (its modules never bind a browser session) nor
+// touch the client build's emitted artifacts — before the ssrBuild gate its empty
+// writeBundle overwrote the coverage with 0/0 and deleted the manifest (seen live on
+// NocoDB's nc-gui build).
+check("client build emitted the manifest", existsSync(join(dir, "dist-tierless", "tierless.manifest.json")));
+plugin.configResolved({ root: dir, resolve: { alias: [] }, build: { ssr: true } });
+plugin.buildStart();
+check("ssr build: a compilable class runs stock (no browser binder emitted server-side)", (await t(svc)) === null);
+plugin.writeBundle();
+const cov2 = JSON.parse(readFileSync(join(dir, "dist-tierless", "tierless.compile-coverage.json"), "utf8"));
+check("ssr build leaves the client build's coverage artifact intact", cov2.compiledModules === 2, JSON.stringify(cov2));
+check("ssr build leaves the client build's manifest intact", existsSync(join(dir, "dist-tierless", "tierless.manifest.json")));
+
 const { pass, fail } = counts();
 console.log(fail === 0
   ? `OK — compile:"auto" makes eligibility a build feature: the compiler judges every candidate form, non-candidates and refusals run stock, mix modules are untouched, and the coverage artifact is the committed evidence (${pass} checks)`

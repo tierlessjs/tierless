@@ -148,7 +148,7 @@ export interface TierlessPlugin {
   name: string;
   enforce: "pre";
   transform(code: string, id: string): Promise<{ code: string; map: null } | null> | { code: string; map: null } | null;
-  configResolved(config: { root?: string; resolve?: { alias?: Array<{ find: string | RegExp; replacement: string }> } }): void;
+  configResolved(config: { root?: string; resolve?: { alias?: Array<{ find: string | RegExp; replacement: string }> }; build?: { ssr?: boolean | string } }): void;
   buildStart(): void;
   writeBundle(): void;
   resolveId(id: string): string | undefined;
@@ -198,6 +198,14 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
   const appMachines = new Map<string, { code: string; resolveDir: string }>();
   let root = process.cwd();                     // Vite root, captured in configResolved (for the build emit path)
   let aliases: Record<string, string> = {};     // string finds from Vite's resolved alias, for the server-machine bundle
+  // A framework build (Nuxt) runs the SAME plugin object through two sequential Vite
+  // builds: client, then server (nitro/SSR). The machine world — compiled methods, the
+  // manifest, the coverage artifact — is the CLIENT build's: bindMethods routes through
+  // the browser session, and the manifest maps ids the BROWSER stamps on the wire. The
+  // server build must neither compile (its modules never bind a session) nor touch the
+  // client build's emitted artifacts (its empty writeBundle would overwrite the coverage
+  // and delete the manifest). Flipped per build in configResolved.
+  let ssrBuild = false;
 
   const SHIM_ID = "\0tierless-shim";
   // The shim virtual module: the compiled adapt-shim body plus this build's route table.
@@ -238,12 +246,12 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
       // server emit: the fetch arm never runs the machine server-side (handleExec only
       // needs the exec), which also sidesteps app-alias imports (@/…) in Node.
       const cleanId = id.split("?")[0];
-      const explicit = !autoCompile && hasCompile && compileTargets.has(path.resolve(cleanId));
+      const explicit = !ssrBuild && !autoCompile && hasCompile && compileTargets.has(path.resolve(cleanId));
       // AUTO: candidacy is a cheap truthful prefilter — the two forms the compiler
       // carries (top-level classes, Pinia setup stores) — and INCLUSION is the
       // compiler's own verdict below (at least one method compiled). Fail-safe: any
       // error under auto records in the coverage report and the module runs stock.
-      const auto = autoCompile && !explicit &&
+      const auto = autoCompile && !ssrBuild && !explicit &&
         !id.startsWith("\0") && !cleanId.includes("node_modules") &&
         /\.(m?[tj]s|[tj]sx)$/.test(cleanId) && !isTierlessModule(code) &&
         (/\bclass\s+[A-Za-z_$]/.test(code) || /\bdefineStore\s*\(/.test(code));
@@ -295,7 +303,8 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
       return { code: compiled + "\n" + wrappers + "\n", map: null };
     },
 
-    configResolved(config: { root?: string; resolve?: { alias?: Array<{ find: string | RegExp; replacement: string }> } }): void {
+    configResolved(config: { root?: string; resolve?: { alias?: Array<{ find: string | RegExp; replacement: string }> }; build?: { ssr?: boolean | string } }): void {
+      ssrBuild = !!config?.build?.ssr;
       if (config?.root) root = config.root;
       compileTargets = new Set(Array.isArray(compileList) ? compileList.map((p) => path.resolve(root, p)) : []);
       // string alias finds ('@' -> src) carry over to the server-machine esbuild bundle;
@@ -303,7 +312,7 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
       // time if a machine import then fails to resolve — never silently misresolved).
       aliases = Object.fromEntries((config?.resolve?.alias || []).filter((a) => typeof a.find === "string").map((a) => [a.find as string, a.replacement]));
     },
-    buildStart(): void { machines.clear(); appMachines.clear(); coverage.clear(); },   // fresh build: transform repopulates the maps
+    buildStart(): void { if (!ssrBuild) { machines.clear(); appMachines.clear(); coverage.clear(); } },   // fresh CLIENT build: transform repopulates the maps (an SSR build must not wipe them)
 
     // Build: emit the server side of what the client build just produced. For every "use tierless"
     // module the transform compiled, write its machine (byte-identical to `tierless build --bare` —
@@ -312,6 +321,7 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
     // `bundleResolverFromManifest` — no hand-written module resolver, no re-compile. Runs on build
     // only (Vite never calls writeBundle in dev serve).
     writeBundle(): void {
+      if (ssrBuild) return;   // the server (nitro/SSR) build: the artifacts below are the client build's
       // the coverage artifact — what compiled and what didn't, with the compiler's own
       // per-method reasons. Written whenever compilation was configured (auto or list),
       // even when nothing compiled: "nothing eligible" is evidence too.

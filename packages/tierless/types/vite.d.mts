@@ -75,6 +75,9 @@ export interface TierlessPlugin {
                 replacement: string;
             }>;
         };
+        build?: {
+            ssr?: boolean | string;
+        };
     }): void;
     buildStart(): void;
     writeBundle(): void;
