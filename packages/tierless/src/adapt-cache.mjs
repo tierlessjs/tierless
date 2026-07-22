@@ -49,10 +49,13 @@ export function conditionalCrossings({ store } = {}) {
             // store at IDLE, not on the reply path: serializing a large envelope on the main
             // thread inside a page's boot window is exactly the contention that costs n8n
             // ~1.1 s/session (ports/n8n/README.md wall section) — the cache must never add
-            // to it. A page that navigates away before idle just pays full price next time.
+            // to it. The cap is TIGHT (2.5 s: past the 1-2 s boot storm, well inside a page's
+            // life): a busy canvas starves requestIdleCallback for its whole lifetime, and a
+            // store that fires after the user navigated is a store that never happens — the
+            // n8n suite's page-to-page moves outran a 10 s cap and the cache never warmed.
             if (env?.status === 200 && etag) {
                 const idle = (typeof requestIdleCallback === "function"
-                    ? (fn) => requestIdleCallback(fn, { timeout: 10_000 })
+                    ? (fn) => requestIdleCallback(fn, { timeout: 2_500 })
                     : (fn) => setTimeout(fn, 0)); // no render loop to yield to off-browser
                 idle(() => void s.set(path, { etag, envelope: env }));
             }
