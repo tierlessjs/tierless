@@ -36,11 +36,20 @@ const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 // ---- mock backend: reachable ONLY via the gateways (no CORS headers) ---------------------
 const backendHits: Record<string, number> = {};
 const backendCookies: Record<string, string> = {};
+let heavyFull = 0, heavyRevalidated = 0;   // the conditional-crossings arm: full 200s vs 0-byte 304s
 const backend = createServer((req, res) => {
   const path = (req.url ?? "").split("?")[0];
   backendHits[path] = (backendHits[path] ?? 0) + 1;
   backendCookies[path] = String(req.headers.cookie ?? "");
   res.setHeader("content-type", "application/json");
+  if (path === "/api/heavy") {
+    // an ETag'd mega-GET, the n8n community-node-types shape: If-None-Match -> 0-byte 304
+    res.setHeader("etag", 'W/"heavy-v1"');
+    if (req.headers["if-none-match"] === 'W/"heavy-v1"') { heavyRevalidated++; res.statusCode = 304; res.end(); return; }
+    heavyFull++;
+    res.end(JSON.stringify({ nodes: Array.from({ length: 2000 }, (_, i) => ({ name: "node" + i, props: { i } })) }));
+    return;
+  }
   res.end(JSON.stringify({ path, hit: backendHits[path], sawCookie: backendCookies[path] }));
 });
 await new Promise<void>((r) => backend.listen(0, r));
@@ -160,6 +169,19 @@ const page = await context.newPage();
   await page.route("**/api/mocked*", (route: { fulfill(o: unknown): Promise<void> }) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ mock: true }) }));
   const env = await page.evaluate("window.cross('get', '/api/mocked')") as { status: number; body: { mock: boolean } };
   check("recordForceBrowserRoutes keeps mocked routes interceptable (the mock answered)", env.status === 200 && env.body.mock === true && !backendHits["/api/mocked"]);
+}
+
+// 5b. conditional crossings: an ETag'd mega-GET pays once, then revalidates — across
+// page loads (CacheStorage spans them, like the browser's own HTTP cache would have)
+{
+  const first = await page.evaluate("window.cross('get', '/api/heavy')") as { status: number; body: { nodes: unknown[] } };
+  check("cold: the heavy GET crosses in full", first.status === 200 && first.body.nodes.length === 2000 && heavyFull === 1);
+  await page.waitForTimeout(200);                          // the store is off the reply path
+  const second = await page.evaluate("window.cross('get', '/api/heavy')") as { status: number; body: { nodes: unknown[] } };
+  check("warm, same page: revalidated to a 304 and replayed in full", second.status === 200 && second.body.nodes.length === 2000 && heavyFull === 1 && heavyRevalidated === 1, JSON.stringify({ heavyFull, heavyRevalidated }));
+  await page.goto(pageUrl + "/?ws=" + encodeURIComponent(wsHeader));   // a FRESH page session, same context
+  const third = await page.evaluate("window.cross('get', '/api/heavy')") as { status: number; body: { nodes: unknown[] } };
+  check("fresh page session: the envelope survived the page load — 304, never a re-ship", third.status === 200 && third.body.nodes.length === 2000 && heavyFull === 1 && heavyRevalidated === 2, JSON.stringify({ heavyFull, heavyRevalidated }));
 }
 
 // 6. the cookie arm: sealed authority from the ws upgrade, no app configuration

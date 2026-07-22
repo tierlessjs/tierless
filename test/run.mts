@@ -55,6 +55,7 @@ const cases: Case[] = [
   { file: "test/e2e/preboot-live.mts",   needs: ["the ws-upgrade hello folded the reseal round trip into the handshake and pre-delivered a boot GET the first crossing joined"] },
   { file: "test/e2e/pw-waits-live.mts",  needs: ["installTransportWaits made UNMODIFIED upstream waits transport-agnostic"] },
   { file: "test/probes/adapt-fetch.mts", needs: ["the fetch adapter's crossability policy is framework-owned"] },
+  { file: "test/probes/adapt-cache.mts", needs: ["conditional crossings give session GETs the browser cache's own revalidation"] },
   { file: "test/probes/playwright-reporter.mts", needs: ["the measure reporter ships as tierless/playwright-reporter"] },
   { file: "test/probes/playwright-register.mts", needs: ["playwright-register delivers the waits through NODE_OPTIONS"] },
   { file: "test/e2e/auto-session-live.mts", needs: ["one-call port surface, live"] },

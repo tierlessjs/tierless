@@ -120,6 +120,10 @@
       "types": "./types/adapt-session-auth.d.mts",
       "default": "./src/adapt-session-auth.mjs"
     },
+    "./adapt-cache": {
+      "types": "./types/adapt-cache.d.mts",
+      "default": "./src/adapt-cache.mjs"
+    },
     "./adapt-fetch": {
       "types": "./types/adapt-fetch.d.mts",
       "default": "./src/adapt-fetch.mjs"

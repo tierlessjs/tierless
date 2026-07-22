@@ -1,0 +1,65 @@
+// Probe: conditional crossings (adapt-cache.mts) — the browser cache's HTTP
+// revalidation semantics, on the session socket. A miss crosses clean and stores the
+// ETag'd envelope; a hit attaches If-None-Match; a 304 replays the stored envelope
+// (server-validated THIS crossing, never a staleness heuristic); a changed ETag
+// restores; un-ETag'd and non-GET traffic is untouched. This is the fix for n8n's +8%
+// byte regression (one 12.4 MB payload re-crossed per page session that stock
+// browsers revalidate to a 0-byte 304 — ports/n8n/README.md byte anatomy).
+//
+// Run:  node test/probes/adapt-cache.mts
+import { conditionalCrossings, memoryStore } from "tierless/adapt-cache";
+import type { ResourceRequest } from "../../packages/tierless/src/types.mjs";
+import { makeCounter } from "../lib/check.mts";
+
+const { check, counts } = makeCounter();
+
+// a fake backend-of-envelopes: versioned bodies per path, 304 on a matching validator
+const versions = new Map<string, { etag: string; body: unknown }>();
+versions.set("/big", { etag: 'W/"v1"', body: { nodes: Array.from({ length: 50 }, (_, i) => ({ i })) } });
+versions.set("/plain", { etag: "", body: { ok: 1 } });
+const seen: Array<{ name: string; path: string; inm?: string }> = [];
+const inner = async (req: ResourceRequest): Promise<unknown> => {
+  const [path, , opts] = req.args as [string, unknown?, { headers?: Record<string, string> }?];
+  const inm = opts?.headers?.["if-none-match"];
+  seen.push({ name: req.name, path, ...(inm ? { inm } : {}) });
+  if (req.name !== "api.get") return { status: 200, headers: {}, body: "posted" };
+  const v = versions.get(path)!;
+  if (inm && inm === v.etag) return { status: 304, headers: { ...(v.etag ? { etag: v.etag } : {}) }, body: "" };
+  return { status: 200, headers: { "content-type": "application/json", ...(v.etag ? { etag: v.etag } : {}) }, body: v.body };
+};
+
+const wrap = conditionalCrossings({ store: memoryStore() }).wrap(inner as never);
+const get = (path: string): Promise<{ status?: number; body?: unknown }> =>
+  wrap({ op: "res", tier: "server", name: "api.get", args: [path] } as never) as never;
+
+console.log("Probe: conditional crossings — HTTP revalidation on the session socket\n");
+
+const first = await get("/big");
+check("cold cache: crosses clean (no validator) and returns the 200", seen[0].inm === undefined && first.status === 200 && Array.isArray((first.body as { nodes: unknown[] }).nodes));
+
+const second = await get("/big");
+check("warm cache: the crossing carries If-None-Match", seen[1].inm === 'W/"v1"');
+check("304 replays the stored envelope — full body, status 200, no re-ship", second.status === 200 && (second.body as { nodes: unknown[] }).nodes.length === 50);
+
+versions.set("/big", { etag: 'W/"v2"', body: { nodes: [{ i: -1 }] } });
+const third = await get("/big");
+check("changed content: validator misses, the new 200 comes through", third.status === 200 && (third.body as { nodes: unknown[] }).nodes.length === 1);
+const fourth = await get("/big");
+check("…and the NEW etag revalidates next time", seen[3].inm === 'W/"v2"' && fourth.status === 200 && (fourth.body as { nodes: unknown[] }).nodes.length === 1);
+
+await get("/plain"); await get("/plain");
+check("un-ETag'd GETs never attach a validator", seen[4].inm === undefined && seen[5].inm === undefined);
+
+const posted = await wrap({ op: "res", tier: "server", name: "api.post", args: ["/big", { x: 1 }] } as never) as { body?: unknown };
+check("non-GET traffic passes through untouched", posted.body === "posted" && seen[6].name === "api.post" && seen[6].inm === undefined);
+
+// a 304 with NO cached entry (another tab primed the server-side validator path, or a
+// cold wrap behind a shared proxy): surfaced as-is — never invent a body
+const bare = await (conditionalCrossings({ store: memoryStore() }).wrap((async () => ({ status: 304, headers: {}, body: "" })) as never))({ op: "res", tier: "server", name: "api.get", args: ["/big"] } as never) as { status?: number };
+check("a 304 without a cache entry surfaces as-is", bare.status === 304);
+
+const { pass, fail } = counts();
+console.log(fail === 0
+  ? `\nOK — conditional crossings give session GETs the browser cache's own revalidation: validated replay on 304, full fetch on change, untouched otherwise (${pass} checks)`
+  : `\nFAIL (${pass} passed, ${fail} failed)`);
+process.exit(fail === 0 ? 0 : 1);

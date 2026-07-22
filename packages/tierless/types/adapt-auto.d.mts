@@ -25,6 +25,10 @@ export interface AutoSessionOpts {
     /** Open the socket now so the upgrade handshake never lands on an interaction's
      *  critical path. Default true. */
     preconnect?: boolean;
+    /** Conditional crossings (adapt-cache.mts): ETag'd GETs revalidate with
+     *  If-None-Match instead of re-crossing in full — the browser cache's own
+     *  semantics on the socket. Default true; false is the measurement ablation. */
+    conditional?: boolean;
 }
 export interface AutoSession {
     /** The exec for the page's own origin (session socket + force-browser fallthrough). */
@@ -35,7 +39,7 @@ export interface AutoSession {
     /** The ws URL in effect (after overrides) — the gateway origin derives from it. */
     wsUrl: string;
 }
-export declare function autoSession({ url, gatewayPort, path, storageKey, forceBrowser, auth, cross, awaitClaims, preconnect }?: AutoSessionOpts): AutoSession;
+export declare function autoSession({ url, gatewayPort, path, storageKey, forceBrowser, auth, cross, awaitClaims, preconnect, conditional }?: AutoSessionOpts): AutoSession;
 interface AxiosModuleLike {
     getAdapter?: (names: unknown) => (config: AxiosishConfig) => Promise<unknown>;
 }

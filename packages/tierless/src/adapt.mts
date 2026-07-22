@@ -239,7 +239,11 @@ export function restResources(baseUrl: string, { token, headers = {}, fetchImpl 
     const isJson = (r.headers.get("content-type") || "").includes("json");
     if (!r.ok && !envelopeErrors) throw new Error(`api.${m[1]} ${path}: ${r.status} ${text.slice(0, 200)}`);
     const hdrs: Record<string, string> = {};
-    r.headers.forEach((v, k) => { if (k === "content-type" || k.startsWith("x-")) hdrs[k] = v; });
+    // etag rides along for conditional crossings (adapt-cache.mts): the browser-side
+    // wrap keys its envelope cache on it and revalidates with If-None-Match — which
+    // already forwards through reqOpts.headers above, and a 304 is a tiny envelope
+    // (envelopeErrors mode), exactly HTTP's own revalidation shape on the socket.
+    r.headers.forEach((v, k) => { if (k === "content-type" || k === "etag" || k.startsWith("x-")) hdrs[k] = v; });
     return { status: r.status, headers: hdrs, body: isJson && text ? JSON.parse(text) : text };
   };
 }

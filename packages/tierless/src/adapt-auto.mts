@@ -24,6 +24,7 @@
 //     no-ops. Costs header-auth apps nothing (attachTierless always sends a hello).
 import { configureTierless, sessionExec, sessionHello } from "./browser.mjs";
 import { cookieSessionAuth } from "./adapt-session-auth.mjs";
+import { conditionalCrossings } from "./adapt-cache.mjs";
 import { restResources } from "./adapt.mjs";
 import { axiosAdapter, type AxiosishConfig } from "./adapt-axios.mjs";
 import { WS_PATH } from "./ws-path.mjs";
@@ -55,6 +56,10 @@ export interface AutoSessionOpts {
   /** Open the socket now so the upgrade handshake never lands on an interaction's
    *  critical path. Default true. */
   preconnect?: boolean;
+  /** Conditional crossings (adapt-cache.mts): ETag'd GETs revalidate with
+   *  If-None-Match instead of re-crossing in full — the browser cache's own
+   *  semantics on the socket. Default true; false is the measurement ablation. */
+  conditional?: boolean;
 }
 
 export interface AutoSession {
@@ -67,7 +72,7 @@ export interface AutoSession {
   wsUrl: string;
 }
 
-export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "tierlessWsUrl", forceBrowser = [], auth = "auto", cross, awaitClaims, preconnect = true }: AutoSessionOpts = {}): AutoSession {
+export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "tierlessWsUrl", forceBrowser = [], auth = "auto", cross, awaitClaims, preconnect = true, conditional = true }: AutoSessionOpts = {}): AutoSession {
   if (typeof location === "undefined") throw new Error("autoSession: browser-only (SSR/twin bundles keep their host fetch — gate the call on typeof location)");
   const pagePort = Number(location.port || (location.protocol === "https:" ? 443 : 80));
   const scheme = location.protocol === "https:" ? "wss" : "ws";
@@ -87,9 +92,13 @@ export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "ti
     return matchesForceBrowser(list, full);
   };
 
-  const session: Exec = auth === "none"
+  const bare: Exec = auth === "none"
     ? sessionExec()
     : cookieSessionAuth({ gateway: new URL(wsUrl.replace(/^ws/, "http")).origin, hello: sessionHello(), ...(awaitClaims !== undefined ? { awaitClaims } : {}) }).wrap(sessionExec());
+  // stock HTTP caching semantics on the socket (adapt-cache.mts): an ETag'd GET
+  // revalidates instead of re-crossing in full — what the browser's own cache would
+  // have done for these requests. conditional:false is the measurement ablation.
+  const session: Exec = conditional ? conditionalCrossings().wrap(bare) : bare;
 
   const crosses = cross ?? ((origin: string) => origin === location.origin);
   const byOrigin = new Map<string, Exec>();

@@ -24,11 +24,12 @@
 //     no-ops. Costs header-auth apps nothing (attachTierless always sends a hello).
 import { configureTierless, sessionExec, sessionHello } from "./browser.mjs";
 import { cookieSessionAuth } from "./adapt-session-auth.mjs";
+import { conditionalCrossings } from "./adapt-cache.mjs";
 import { restResources } from "./adapt.mjs";
 import { axiosAdapter } from "./adapt-axios.mjs";
 import { WS_PATH } from "./ws-path.mjs";
 import { matchesForceBrowser } from "./url-glob.mjs";
-export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "tierlessWsUrl", forceBrowser = [], auth = "auto", cross, awaitClaims, preconnect = true } = {}) {
+export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "tierlessWsUrl", forceBrowser = [], auth = "auto", cross, awaitClaims, preconnect = true, conditional = true } = {}) {
     if (typeof location === "undefined")
         throw new Error("autoSession: browser-only (SSR/twin bundles keep their host fetch — gate the call on typeof location)");
     const pagePort = Number(location.port || (location.protocol === "https:" ? 443 : 80));
@@ -58,9 +59,13 @@ export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "ti
         }
         return matchesForceBrowser(list, full);
     };
-    const session = auth === "none"
+    const bare = auth === "none"
         ? sessionExec()
         : cookieSessionAuth({ gateway: new URL(wsUrl.replace(/^ws/, "http")).origin, hello: sessionHello(), ...(awaitClaims !== undefined ? { awaitClaims } : {}) }).wrap(sessionExec());
+    // stock HTTP caching semantics on the socket (adapt-cache.mts): an ETag'd GET
+    // revalidates instead of re-crossing in full — what the browser's own cache would
+    // have done for these requests. conditional:false is the measurement ablation.
+    const session = conditional ? conditionalCrossings().wrap(bare) : bare;
     const crosses = cross ?? ((origin) => origin === location.origin);
     const byOrigin = new Map();
     const execFor = (baseUrl = "/") => {
