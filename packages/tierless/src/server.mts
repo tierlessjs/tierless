@@ -158,7 +158,7 @@ const wireLogPort = (port: Port): Port => {
       } else if (obj?.kind === "reply") { p = paths.get(obj.id); paths.delete(obj.id); }
     } catch { /* anatomy only — never let the instrument drop a frame */ }
     const n = 8 + Buffer.byteLength(JSON.stringify(obj)) + (bin?.length ?? 0);
-    try { fs.appendFileSync(file, JSON.stringify({ d, n, k: obj?.kind, t: obj?.payload?.type, ...(p !== undefined ? { p } : {}) }) + "\n"); } catch { /* full disk etc. */ }
+    try { fs.appendFileSync(file, JSON.stringify({ ts: Date.now(), d, n, k: obj?.kind, t: obj?.payload?.type, ...(p !== undefined ? { p } : {}) }) + "\n"); } catch { /* full disk etc. */ }
   };
   return {
     send: (obj, bin) => { line("out", obj, bin ?? null); port.send(obj, bin); },

@@ -122,7 +122,7 @@ const wireLogPort = (port) => {
         catch { /* anatomy only — never let the instrument drop a frame */ }
         const n = 8 + Buffer.byteLength(JSON.stringify(obj)) + (bin?.length ?? 0);
         try {
-            fs.appendFileSync(file, JSON.stringify({ d, n, k: obj?.kind, t: obj?.payload?.type, ...(p !== undefined ? { p } : {}) }) + "\n");
+            fs.appendFileSync(file, JSON.stringify({ ts: Date.now(), d, n, k: obj?.kind, t: obj?.payload?.type, ...(p !== undefined ? { p } : {}) }) + "\n");
         }
         catch { /* full disk etc. */ }
     };
