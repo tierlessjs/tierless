@@ -65,13 +65,23 @@ export const cacheStorageStore = (cacheName = "tierless-envelopes"): EnvelopeSto
       } catch { return undefined; }
     },
     async set(p, etag, env) {
-      try {
-        await (await caches.open(cacheName)).put(key(p), new Response(JSON.stringify(env), { headers: { "content-type": "application/json" } }));
-        idx.set(p, etag);
-        localStorage.setItem(LS_KEY, JSON.stringify(Object.fromEntries(idx)));   // body FIRST: an index entry must never precede its body
-      } catch { /* over quota: next use pays full price, correctness unchanged */ }
+      // no catch here: the caller logs-and-swallows, so a quota/serialization failure
+      // is at least VISIBLE to the debug log instead of silently costing full price
+      await (await caches.open(cacheName)).put(key(p), new Response(JSON.stringify(env), { headers: { "content-type": "application/json" } }));
+      idx.set(p, etag);
+      localStorage.setItem(LS_KEY, JSON.stringify(Object.fromEntries(idx)));   // body FIRST: an index entry must never precede its body
     },
   };
+};
+
+// The cache's own trace, next to __tierlessExecLog and under the same debug gate: a
+// store that silently never happens (starved idle callback, quota, a navigation) is
+// indistinguishable from a working cold cache without it.
+const dbg = (ev: string, path: string): void => {
+  const g = globalThis as { __TIERLESS_EXEC_LOG__?: unknown; __tierlessCacheLog?: Array<{ t: number; ev: string; path: string }> };
+  if (!g.__TIERLESS_EXEC_LOG__) return;
+  (g.__tierlessCacheLog ||= []).push({ t: Date.now(), ev, path });
+  if (g.__tierlessCacheLog.length > 200) g.__tierlessCacheLog.splice(0, 100);
 };
 
 export function conditionalCrossings({ store }: { store?: EnvelopeStore } = {}): { wrap(inner: Exec): Exec } {
@@ -80,6 +90,10 @@ export function conditionalCrossings({ store }: { store?: EnvelopeStore } = {}):
   const idle = (typeof requestIdleCallback === "function"
     ? (fn: () => void) => requestIdleCallback(fn, { timeout: 2_500 })
     : (fn: () => void) => setTimeout(fn, 0));                 // no render loop to yield to off-browser
+  const storeAt = (when: string, path: string, etag: string, env: unknown): void => {
+    dbg("sched:" + when, path);
+    idle(() => { dbg("run", path); s.set(path, etag, env).then(() => dbg("ok", path), (e) => dbg("fail:" + String(e).slice(0, 80), path)); });
+  };
   return {
     wrap: (inner) => async (req) => {
       const r = req as ResourceRequest;
@@ -88,7 +102,7 @@ export function conditionalCrossings({ store }: { store?: EnvelopeStore } = {}):
       if (!etag) {
         const env = await inner(req) as { status?: number; headers?: Record<string, string> } | null;
         const fresh = r.name === "api.get" ? env?.headers?.etag : undefined;
-        if (env?.status === 200 && fresh) idle(() => void s.set(path, fresh, env));
+        if (env?.status === 200 && fresh) storeAt("cold", path, fresh, env);
         return env;
       }
       const bodyRead = s.body(path).catch(() => undefined);   // CONCURRENT with the crossing — hides under the RTT
@@ -96,7 +110,7 @@ export function conditionalCrossings({ store }: { store?: EnvelopeStore } = {}):
       const env = await inner({ ...r, args: [p0, p1, { ...(opts ?? {}), headers: { ...(opts?.headers ?? {}), "if-none-match": etag } }] }) as { status?: number; headers?: Record<string, string> } | null;
       if (env?.status !== 304) {
         const fresh = env?.headers?.etag;
-        if (env?.status === 200 && fresh && fresh !== etag) idle(() => void s.set(path, fresh, env));
+        if (env?.status === 200 && fresh && fresh !== etag) storeAt("changed", path, fresh, env);
         return env;
       }
       const cached = await bodyRead;
