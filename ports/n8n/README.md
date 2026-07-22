@@ -155,14 +155,26 @@ byte data point, and the anatomy says why:
   boot `/rest` fetches, deflate-compressed (verified: the quantum is 2x on
   two-page tests, absent on session-less tests, and invariant under the
   TIERLESS_PREBOOT=0 ablation — prebooted-in-hello or crossed, same bytes).
-- What that displaces from HTTP is roughly the same magnitude, so the
-  suite-wide delta is the session cargo minus the displacement: slightly
-  negative. Crossings themselves are real and correct (a sampled run shows
-  the gateway executing the editor's data GETs; pass parity holds at 661
-  pairs) — this app's traffic shape just doesn't reward a session transport:
+- ANATOMY LOCALIZED (2026-07-22, ports/n8n/measure-wire-cost.mts + the
+  TIERLESS_WIRE_LOG per-message instrument): the quantum's body is ONE
+  payload — `/rest/community-node-types`, 12.40 MB raw JSON, fetched once
+  per page session. Per payload the session transport is at PARITY with
+  stock: 1,891,695 B over the session socket vs 1,891,765 B stock gzip
+  (ratio 1.00); the binary codec's plaintext is 4.66 MB (0.38x the JSON
+  text — MORE compact, not less). The compressor and codec are exonerated.
+- The +8% is HTTP CACHING the crossing path lacks: the endpoint serves a
+  weak ETag and answers If-None-Match with a 0-byte 304 (verified live), so
+  a multi-page STOCK test pays the 1.9 MB once and revalidates after; every
+  ported page session re-crosses it in full. The arm totals reproduce from
+  this one mechanism: 837 MB ws / 1.89 MB = ~443 crossings vs 372 MB
+  displaced / 1.89 MB = ~197 stock full fetches — the ~246 repeat crossings
+  x 1.89 MB = the whole +465 MB delta. Fix direction (roadmap): conditional
+  crossings — cache api.get envelopes browser-side keyed by path+ETag, send
+  If-None-Match on the crossing, replay the cached envelope on a 304 reply.
+  Crossings themselves are real and correct (pass parity at 661 pairs);
   unlike Strapi (raw MB-scale JSON re-sent per request, 92% win) or NocoDB,
-  n8n's repeated payloads are already amortized behind its asset bundle and
-  push channel.
+  n8n's repeated payloads sit behind its asset bundle, push channel, and
+  this one revalidated mega-endpoint.
 
 Reproduce:
 

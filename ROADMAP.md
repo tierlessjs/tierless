@@ -138,6 +138,16 @@ proven (the executable proofs behind `npm test`).
   the preboot join FEED the mount storm more gradually. Evidence:
   ports/n8n/README.md wall-time section.
 
+- **Conditional crossings (n8n byte diagnosis, 2026-07-22).** The session
+  transport lacks HTTP caching semantics: n8n's +8% wire bytes is entirely
+  repeat-session crossings of one 12.4 MB ETag'd endpoint that stock browsers
+  revalidate to a 0-byte 304 (per-payload the session equals gzip exactly —
+  compressor and codec measured at parity; ports/n8n/README.md byte section).
+  Design: cache api.get envelopes browser-side keyed by path+ETag, attach
+  If-None-Match to the crossing, replay the cached envelope on a 304 reply —
+  stock HTTP semantics on the socket. Would zero n8n's byte regression and
+  helps any app with large revalidated GETs.
+
 - **The corpus program** (`docs/corpus.md`): a statistical claim over real apps —
   "median X× less network wait, Y% less IO across N apps' own e2e journeys."
   Rungs 1–3 are built (harness verified against socket ground truth; REST-proxy
