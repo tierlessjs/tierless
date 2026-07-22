@@ -34,20 +34,27 @@ const get = (path: string): Promise<{ status?: number; body?: unknown }> =>
 
 console.log("Probe: conditional crossings — HTTP revalidation on the session socket\n");
 
+// the store is DEFERRED to idle (never on the reply path — a page's boot window is
+// contended); a tick between calls is part of the contract under test
+const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 20));
+
 const first = await get("/big");
 check("cold cache: crosses clean (no validator) and returns the 200", seen[0].inm === undefined && first.status === 200 && Array.isArray((first.body as { nodes: unknown[] }).nodes));
 
+await settle();
 const second = await get("/big");
 check("warm cache: the crossing carries If-None-Match", seen[1].inm === 'W/"v1"');
 check("304 replays the stored envelope — full body, status 200, no re-ship", second.status === 200 && (second.body as { nodes: unknown[] }).nodes.length === 50);
 
 versions.set("/big", { etag: 'W/"v2"', body: { nodes: [{ i: -1 }] } });
+await settle();
 const third = await get("/big");
 check("changed content: validator misses, the new 200 comes through", third.status === 200 && (third.body as { nodes: unknown[] }).nodes.length === 1);
+await settle();
 const fourth = await get("/big");
 check("…and the NEW etag revalidates next time", seen[3].inm === 'W/"v2"' && fourth.status === 200 && (fourth.body as { nodes: unknown[] }).nodes.length === 1);
 
-await get("/plain"); await get("/plain");
+await get("/plain"); await settle(); await get("/plain");
 check("un-ETag'd GETs never attach a validator", seen[4].inm === undefined && seen[5].inm === undefined);
 
 const posted = await wrap({ op: "res", tier: "server", name: "api.post", args: ["/big", { x: 1 }] } as never) as { body?: unknown };

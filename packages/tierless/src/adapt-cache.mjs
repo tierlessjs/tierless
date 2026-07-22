@@ -46,8 +46,16 @@ export function conditionalCrossings({ store } = {}) {
             if (env?.status === 304 && hit)
                 return hit.envelope; // validated THIS crossing — replay
             const etag = env?.headers?.etag;
-            if (env?.status === 200 && etag)
-                void s.set(path, { etag, envelope: env }); // store off the reply path
+            // store at IDLE, not on the reply path: serializing a large envelope on the main
+            // thread inside a page's boot window is exactly the contention that costs n8n
+            // ~1.1 s/session (ports/n8n/README.md wall section) — the cache must never add
+            // to it. A page that navigates away before idle just pays full price next time.
+            if (env?.status === 200 && etag) {
+                const idle = (typeof requestIdleCallback === "function"
+                    ? (fn) => requestIdleCallback(fn, { timeout: 10_000 })
+                    : (fn) => setTimeout(fn, 0)); // no render loop to yield to off-browser
+                idle(() => void s.set(path, { etag, envelope: env }));
+            }
             return env;
         },
     };
