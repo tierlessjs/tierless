@@ -25,7 +25,12 @@ const { encodeArgs } = await import("tierless/wire");
 
 const MANIFEST = fileURLToPath(new URL("./results/preboot-manifest.txt", import.meta.url));
 const OWNER = { email: "nathan@n8n.io", password: "PlaywrightTest123", firstName: "N", lastName: "R", mfaEnabled: false };
-const paths = readFileSync(MANIFEST, "utf8").split("\n").filter(Boolean).filter((p) => p !== "/rest/login");
+const paths = [
+  ...readFileSync(MANIFEST, "utf8").split("\n").filter(Boolean).filter((p) => p !== "/rest/login"),
+  // not in the preboot manifest, but THE session payload: one crossing per session,
+  // 12.4 MB pre-deflate in the tags-spec wire log — the per-session quantum's body
+  "/rest/community-node-types",
+];
 
 const boot = await bootN8n();
 const counter: WireCounter = { toServer: 0, toClient: 0 };
