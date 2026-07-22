@@ -65,6 +65,21 @@ check("non-GET traffic passes through untouched", posted.body === "posted" && se
 const bare = await (conditionalCrossings({ store: memoryStore() }).wrap((async () => ({ status: 304, headers: {}, body: "" })) as never))({ op: "res", tier: "server", name: "api.get", args: ["/big"] } as never) as { status?: number };
 check("a 304 without a cache entry surfaces as-is", bare.status === 304);
 
+// INDEX DRIFT: the path->etag index says hit, but the body entry was evicted. The 304
+// must fall back to ONE unconditional re-crossing (never a replayed undefined), and
+// the dead index entry stops attaching validators.
+const driftSeen: Array<string | undefined> = [];
+const driftInner = async (req: ResourceRequest): Promise<unknown> => {
+  const inm = (req.args as [string, unknown?, { headers?: Record<string, string> }?])[2]?.headers?.["if-none-match"];
+  driftSeen.push(inm);
+  return inm ? { status: 304, headers: {}, body: "" } : { status: 200, headers: { etag: 'W/"v9"' }, body: { real: true } };
+};
+const drift = conditionalCrossings({ store: { index: () => new Map([["/big", 'W/"v1"']]), body: async () => undefined, set: async () => {} } }).wrap(driftInner as never);
+const recovered = await drift({ op: "res", tier: "server", name: "api.get", args: ["/big"] } as never) as { status?: number; body?: { real?: boolean } };
+check("evicted body behind a live index: 304 falls back to one unconditional re-crossing", recovered.status === 200 && recovered.body?.real === true && driftSeen[0] === 'W/"v1"' && driftSeen[1] === undefined, JSON.stringify(driftSeen));
+const again = await drift({ op: "res", tier: "server", name: "api.get", args: ["/big"] } as never) as { status?: number };
+check("…and the dead index entry stops attaching validators", again.status === 200 && driftSeen[2] === undefined);
+
 const { pass, fail } = counts();
 console.log(fail === 0
   ? `\nOK — conditional crossings give session GETs the browser cache's own revalidation: validated replay on 304, full fetch on change, untouched otherwise (${pass} checks)`
