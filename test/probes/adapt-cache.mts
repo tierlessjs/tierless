@@ -80,6 +80,24 @@ check("evicted body behind a live index: 304 falls back to one unconditional re-
 const again = await drift({ op: "res", tier: "server", name: "api.get", args: ["/big"] } as never) as { status?: number };
 check("…and the dead index entry stops attaching validators", again.status === 200 && driftSeen[2] === undefined);
 
+// THE WIRE SHAPE of a forwarded validator (regression for the n8n gateway finding):
+// undici's fetch stamps `cache-control: no-cache` onto conditional requests, and
+// Express fresh() then refuses the 304 — restResources must preempt with max-age=0
+// (a browser reload's own shape) or revalidation silently never works through a
+// gateway. Assert against a real HTTP round trip, not a mock.
+{
+  const { createServer } = await import("node:http");
+  const { restResources } = await import("tierless/adapt");
+  let got: Record<string, unknown> = {};
+  const srv = createServer((req, res) => { got = { ...req.headers }; res.setHeader("etag", 'W/"e1"'); res.statusCode = 304; res.end(); });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const exec = restResources("http://127.0.0.1:" + (srv.address() as { port: number }).port, { envelopeErrors: true });
+  const env = await exec({ op: "res", tier: "server", name: "api.get", args: ["/big", undefined, { headers: { "if-none-match": 'W/"e1"' } }] } as never) as { status: number };
+  srv.close();
+  check("a forwarded If-None-Match rides with cache-control max-age=0, never undici's no-cache", got["if-none-match"] === 'W/"e1"' && got["cache-control"] === "max-age=0", JSON.stringify({ inm: got["if-none-match"], cc: got["cache-control"] }));
+  check("the 304 comes back as a tiny envelope (envelopeErrors mode)", env.status === 304);
+}
+
 const { pass, fail } = counts();
 console.log(fail === 0
   ? `\nOK — conditional crossings give session GETs the browser cache's own revalidation: validated replay on 304, full fetch on change, untouched otherwise (${pass} checks)`

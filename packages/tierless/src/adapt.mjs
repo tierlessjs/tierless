@@ -225,14 +225,24 @@ export function restResources(baseUrl, { token, headers = {}, fetchImpl = fetch,
         }
         else
             throw new Error("restResources: first argument must be an absolute path or same-origin URL, got " + JSON.stringify(path));
+        const merged = {
+            ...(body !== undefined ? { "content-type": "application/json" } : {}),
+            ...(token ? { authorization: token.startsWith("Bearer ") ? token : "Bearer " + token } : {}),
+            ...headers,
+            ...(reqOpts?.headers || {}),
+        };
+        // undici's fetch stamps `cache-control: no-cache` onto any request carrying a
+        // conditional header (WHATWG fetch §HTTP-network-or-cache: conditional headers flip
+        // the cache mode) — and Express's fresh() refuses to 304 exactly when the request
+        // says no-cache, so a forwarded If-None-Match could never revalidate. max-age=0 is
+        // what a browser reload sends, preempts undici (it only adds no-cache when absent),
+        // and leaves the server's conditional handling intact.
+        if (Object.keys(merged).some((k) => k.toLowerCase() === "if-none-match") && !Object.keys(merged).some((k) => k.toLowerCase() === "cache-control")) {
+            merged["cache-control"] = "max-age=0";
+        }
         const r = await fetchImpl(url, {
             method,
-            headers: {
-                ...(body !== undefined ? { "content-type": "application/json" } : {}),
-                ...(token ? { authorization: token.startsWith("Bearer ") ? token : "Bearer " + token } : {}),
-                ...headers,
-                ...(reqOpts?.headers || {}),
-            },
+            headers: merged,
             ...(body !== undefined ? { body: typeof body === "string" ? body : JSON.stringify(body) } : {}),
         });
         const text = await r.text();
