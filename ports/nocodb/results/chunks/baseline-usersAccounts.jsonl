@@ -1,9 +1,0 @@
-{"id":"db/usersAccounts/accounSetup.spec.ts:30 › App setup › Configure email settings","status":"passed","retry":0,"durationMs":17676}
-{"id":"db/usersAccounts/accounSetup.spec.ts:53 › App setup › Configure storage settings","status":"passed","retry":0,"durationMs":17318}
-{"id":"db/usersAccounts/accountTokenManagement.spec.ts:23 › Token Management › Create and Delete token","status":"passed","retry":0,"durationMs":31106}
-{"id":"db/usersAccounts/accountUserManagement.spec.ts:60 › User roles › Invite user, assign workspace role, verify access and delete user","status":"passed","retry":0,"durationMs":119245}
-{"id":"db/usersAccounts/accountUserSettings.spec.ts:26 › App settings › Toggle invite only signup","status":"skipped","retry":0,"durationMs":0}
-{"id":"db/usersAccounts/authChangePassword.spec.ts:31 › Auth › Change password","status":"skipped","retry":0,"durationMs":0}
-{"id":"db/usersAccounts/rolesCreate.spec.ts:36 › User roles › Create role","status":"skipped","retry":0,"durationMs":0}
-{"id":"db/usersAccounts/rolesPreview.spec.ts:83 › Preview Mode › Preview Mode","status":"skipped","retry":0,"durationMs":18306}
-{"id":"db/usersAccounts/rolesSuperUser.spec.ts:19 › Super user › AppStore access","status":"skipped","retry":0,"durationMs":0}

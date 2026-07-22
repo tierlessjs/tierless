@@ -1,0 +1,280 @@
+{"id":"db/columns/columnAttachments.spec.ts:17 › Attachment column › Create and verify attachment column, verify it in shared form,","status":"failed","retry":0,"durationMs":48502}
+{"id":"db/columns/columnBarcode.spec.ts:69 › Virtual Columns › Barcode Column › creation, showing, updating value and change barcode column title and reference column","status":"passed","retry":0,"durationMs":39465}
+{"id":"db/columns/columnBarcode.spec.ts:121 › Virtual Columns › Barcode Column › deletion of the barcode column: a) directly and b) indirectly when the reference value column is deleted","status":"passed","retry":0,"durationMs":34468}
+{"id":"db/columns/columnBarcode.spec.ts:146 › Virtual Columns › Barcode Column › a) showing an error message for non-compatible barcode input and b) changing the format of the Barcode is reflected in the change of the actual rendered barcode","status":"passed","retry":0,"durationMs":29759}
+{"id":"db/columns/columnButton.spec.ts:35 › Button column › Create and verify Button Column,","status":"passed","retry":0,"durationMs":32842}
+{"id":"db/columns/columnCheckbox.spec.ts:97 › Checkbox - cell, filter, sort › Checkbox","status":"passed","retry":0,"durationMs":46165}
+{"id":"db/columns/columnDateTime.spec.ts:126 › DateTime Column › Create DateTime Column","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/columns/columnDateTime.spec.ts:191 › Date Column › Create Date Column","status":"passed","retry":0,"durationMs":42514}
+{"id":"db/columns/columnDuration.spec.ts:59 › Duration column › Create duration column","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/columns/columnFormula.spec.ts:312 › Virtual Columns › Formula - suite 0","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/columns/columnFormula.spec.ts:315 › Virtual Columns › Formula - suite 1","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/columns/columnGeoData.spec.ts:21 › Geo Data column › creation, validation and deleting geo data column","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/columns/columnLinkToAnotherRecord.spec.ts:24 › LTAR create & update › LTAR","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/columns/columnLinkToAnotherRecord.spec.ts:266 › Links after edit record › Existing LTAR table verification","status":"passed","retry":0,"durationMs":37851}
+{"id":"db/columns/columnLinkToAnotherRecord.spec.ts:364 › LTAR custom display field › Set custom display field and verify dropdown shows it","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/columns/columnLinkToAnotherRecordAdvanceOptions.spec.ts:29 › LTAR create & update › LTAR","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/columns/columnLinkToAnotherRecordAdvanceOptions.spec.ts:271 › Links after edit record › Existing LTAR table verification","status":"passed","retry":0,"durationMs":38248}
+{"id":"db/columns/columnLinkV2AutoLink.spec.ts:35 › V2 LTAR auto-link on create — #13770 › V2 One-to-Many: new record from \"+\" auto-links to parent","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/columns/columnLookupRollup.spec.ts:18 › Virtual columns › Lookup","status":"passed","retry":0,"durationMs":31712}
+{"id":"db/columns/columnLtarDragdrop.spec.ts:72 › Links › drag drop for Link, lookup creation","status":"passed","retry":0,"durationMs":35425}
+{"id":"db/columns/columnMenuOperations.spec.ts:57 › Column menu operations › Duplicate fields","status":"passed","retry":0,"durationMs":35375}
+{"id":"db/columns/columnMenuOperations.spec.ts:78 › Column menu operations › Insert after","status":"passed","retry":0,"durationMs":29054}
+{"id":"db/columns/columnMenuOperations.spec.ts:94 › Column menu operations › Insert before","status":"passed","retry":0,"durationMs":27641}
+{"id":"db/columns/columnMenuOperations.spec.ts:112 › Column menu operations › Hide column","status":"passed","retry":0,"durationMs":24061}
+{"id":"db/columns/columnMenuOperations.spec.ts:126 › Column menu operations › Sort column","status":"passed","retry":0,"durationMs":25153}
+{"id":"db/columns/columnMultiSelect.spec.ts:46 › Multi select › Select and clear options and rename options","status":"passed","retry":0,"durationMs":46674}
+{"id":"db/columns/columnMultiSelect.spec.ts:129 › Multi select › Remove a option, reorder option and delete the column","status":"passed","retry":0,"durationMs":44014}
+{"id":"db/columns/columnMultiSelect.spec.ts:168 › Multi select › Add new option directly from cell","status":"passed","retry":0,"durationMs":37553}
+{"id":"db/columns/columnMultiSelect.spec.ts:304 › Multi select - filters › Select and clear options and rename options","status":"passed","retry":0,"durationMs":62714}
+{"id":"db/columns/columnQrCode.spec.ts:36 › Virtual Columns › QrCode Column › creation, showing, updating value and change qr column title and reference column","status":"passed","retry":0,"durationMs":40165}
+{"id":"db/columns/columnQrCode.spec.ts:121 › Virtual Columns › QrCode Column › deletion of the QR column: directly and indirectly when the reference value column is deleted","status":"passed","retry":0,"durationMs":34372}
+{"id":"db/columns/columnRating.spec.ts:49 › Rating - cell, filter, sort › Rating","status":"passed","retry":0,"durationMs":68031}
+{"id":"db/columns/columnRelationalExtendedTests.spec.ts:18 › Relational Columns › Relational columns: HM, BT, MM","status":"passed","retry":0,"durationMs":61023}
+{"id":"db/columns/columnSingleSelect.spec.ts:38 › Single select › Select and clear options and rename options","status":"passed","retry":0,"durationMs":43160}
+{"id":"db/columns/columnSingleSelect.spec.ts:71 › Single select › Remove a option, reorder option and delete the column","status":"passed","retry":0,"durationMs":46084}
+{"id":"db/columns/columnSingleSelect.spec.ts:102 › Single select › Add new option directly from cell","status":"passed","retry":0,"durationMs":37538}
+{"id":"db/columns/columnSingleSelect.spec.ts:197 › Single select - filter & sort › Select and clear options and rename options","status":"passed","retry":0,"durationMs":48547}
+{"id":"db/columns/columnUserSelect.spec.ts:90 › User single select › Verify the default option count, select default value and verify","status":"passed","retry":0,"durationMs":42144}
+{"id":"db/columns/columnUserSelect.spec.ts:124 › User single select › Rename column title and delete the column","status":"passed","retry":0,"durationMs":51202}
+{"id":"db/columns/columnUserSelect.spec.ts:142 › User single select › Field operations - duplicate column, convert to SingleLineText","status":"passed","retry":0,"durationMs":42390}
+{"id":"db/columns/columnUserSelect.spec.ts:177 › User single select › Cell Operation - edit, copy-paste and delete","status":"passed","retry":0,"durationMs":57216}
+{"id":"db/columns/columnUserSelect.spec.ts:369 › User single select - filter, sort & GroupBy › User sort & validate, filter & validate","status":"passed","retry":0,"durationMs":83911}
+{"id":"db/columns/columnUserSelect.spec.ts:473 › User multiple select › Verify the default option count, select default value and verify","status":"passed","retry":0,"durationMs":30021}
+{"id":"db/columns/columnUserSelect.spec.ts:511 › User multiple select › Field operations - duplicate column, convert to SingleLineText","status":"passed","retry":0,"durationMs":33056}
+{"id":"db/columns/columnUserSelect.spec.ts:563 › User multiple select › Cell Operation - edit, copy-paste and delete","status":"passed","retry":0,"durationMs":40533}
+{"id":"db/columns/columnUserSelect.spec.ts:768 › User multiple select - filter, sort & GroupBy › User sort & validate, filter & validate","status":"passed","retry":0,"durationMs":71524}
+{"id":"db/features/baseShare.spec.ts:64 › Shared base › #1","status":"passed","retry":0,"durationMs":48760}
+{"id":"db/features/command.spec.ts:18 › Command Shortcuts › Verify Command J Docs","status":"passed","retry":0,"durationMs":24497}
+{"id":"db/features/command.spec.ts:36 › Command Shortcuts › Verify Command K","status":"passed","retry":0,"durationMs":25910}
+{"id":"db/features/command.spec.ts:61 › Command Shortcuts › Verify Command L Recent Switch","status":"passed","retry":0,"durationMs":38235}
+{"id":"db/features/defaultOrg.spec.ts:15 › Default Organization › appInfo should contain defaultOrgId on licensed on-prem","status":"passed","retry":0,"durationMs":14655}
+{"id":"db/features/defaultOrg.spec.ts:30 › Default Organization › user list should include org_roles on licensed on-prem","status":"passed","retry":0,"durationMs":14659}
+{"id":"db/features/defaultOrg.spec.ts:49 › Default Organization › org role update API works on licensed on-prem","status":"skipped","retry":0,"durationMs":15394}
+{"id":"db/features/defaultOrg.spec.ts:87 › Default Organization › last admin cannot be removed from org","status":"skipped","retry":0,"durationMs":14592}
+{"id":"db/features/docs/docsBasic.spec.ts:23 › Docs — Basic CRUD › Create a document from the sidebar","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsBasic.spec.ts:46 › Docs — Basic CRUD › Rename a document via the title input","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsBasic.spec.ts:66 › Docs — Basic CRUD › Delete a document via the context menu","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsBasic.spec.ts:92 › Docs — Basic CRUD › Set a document icon via the editor icon picker","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsEditor.spec.ts:31 › Docs — Editor Content › Slash command menu — open, navigate, and select heading","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsEditor.spec.ts:47 › Docs — Editor Content › Insert headings via slash commands","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsEditor.spec.ts:70 › Docs — Editor Content › Insert bullet list via slash command","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsEditor.spec.ts:88 › Docs — Editor Content › Insert numbered list via slash command","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsEditor.spec.ts:104 › Docs — Editor Content › Insert task list via slash command and toggle checkbox","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsEditor.spec.ts:122 › Docs — Editor Content › Insert blockquote via slash command","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsEditor.spec.ts:134 › Docs — Editor Content › Insert divider via slash command","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsEditor.spec.ts:149 › Docs — Editor Content › Insert code block via slash command","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsEditor.spec.ts:161 › Docs — Editor Content › Insert table via slash command and fill cells","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsEditor.spec.ts:193 › Docs — Editor Content › Insert callout via slash command","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsEditor.spec.ts:205 › Docs — Editor Content › Slash command — type to filter and select","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsEditor.spec.ts:227 › Docs — Editor Content › Slash command — Embed YouTube video via URL input","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsEditor.spec.ts:245 › Docs — Editor Content › Insert multiple callout types via slash commands","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsEditor.spec.ts:257 › Docs — Editor Content › Backspace on empty first list item should not delete entire list","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsEditor.spec.ts:298 › Docs — Editor Content › Text formatting — bold, italic, underline via keyboard shortcuts","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsHeadingRail.spec.ts:58 › Docs — Heading marker rail › renders one dash per heading once there are multiple headings","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsHeadingRail.spec.ts:78 › Docs — Heading marker rail › hover opens the outline panel and clicking a row jumps to the heading","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsHeadingRail.spec.ts:97 › Docs — Heading marker rail › scroll-spy marks the heading in view as active","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsHierarchy.spec.ts:23 › Docs — Sub-documents & Hierarchy › Create a sub-document via context menu","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsHierarchy.spec.ts:50 › Docs — Sub-documents & Hierarchy › Duplicate a document via context menu","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsHierarchy.spec.ts:75 › Docs — Sub-documents & Hierarchy › Delete parent cascades children from sidebar","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsHistory.spec.ts:29 › Docs — Revision history › open history, preview a revision, and restore it","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsMultiPage.spec.ts:48 › Docs — Multi-document › Create multiple documents and verify all appear in sidebar","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsMultiPage.spec.ts:83 › Docs — Multi-document › Switch between documents and verify editor content changes","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/docs/docsMultiPage.spec.ts:118 › Docs — Multi-document › Delete one document from multiple and verify others remain","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/erd.spec.ts:63 › Erd › Verify default config, all columns disabled, only PK and FK disabled, Sql views and MM table option, junction table names","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/erd.spec.ts:187 › Erd › Verify ERD Table view, and verify column operations are reflected to the ERD view","status":"passed","retry":0,"durationMs":43000}
+{"id":"db/features/erd.spec.ts:280 › Erd › Verify table operations sync with ERD","status":"passed","retry":0,"durationMs":31539}
+{"id":"db/features/expandedFormModeFiles.spec.ts:40 › Expanded form files mode › Mode switch and functionality","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/expandedFormModeFiles.spec.ts:75 › Expanded form files mode › Various file types correct rendering","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/expandedFormUrl.spec.ts:110 › Expanded form URL › Grid","status":"passed","retry":0,"durationMs":72368}
+{"id":"db/features/expandedFormUrl.spec.ts:115 › Expanded form URL › Gallery","status":"passed","retry":0,"durationMs":69316}
+{"id":"db/features/expandedFormUrl.spec.ts:135 › Expanded record duplicate & delete options › Grid","status":"passed","retry":0,"durationMs":48743}
+{"id":"db/features/filters.spec.ts:243 › Filter Tests: Numerical › Filter: Number","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:247 › Filter Tests: Numerical › Filter: Decimal","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:251 › Filter Tests: Numerical › Filter: Percent","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:255 › Filter Tests: Numerical › Filter: Currency","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:259 › Filter Tests: Numerical › Filter: Rating","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:263 › Filter Tests: Numerical › Filter: Duration","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:267 › Filter Tests: Numerical › Filter: Year","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:271 › Filter Tests: Numerical › Filter: Time","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:399 › Filter Tests: Text based › Filter: Single Line Text","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:403 › Filter Tests: Text based › Filter: Long Text","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:407 › Filter Tests: Text based › Filter: Email","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:411 › Filter Tests: Text based › Filter: PhoneNumber","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:415 › Filter Tests: Text based › Filter: URL","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:525 › Filter Tests: Select based › Filter: Single Select","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:530 › Filter Tests: Select based › Filter: Multi Select","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:847 › Filter Tests: Date based › Date : filters-1","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:851 › Filter Tests: Date based › Date : filters-2","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:957 › Filter Tests: AddOn › Filter: Checkbox","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:1095 › Filter Tests: Link to another record, Lookup, Rollup › Filter: LTAR columns","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:1099 › Filter Tests: Link to another record, Lookup, Rollup › Filter: Lookup columns","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:1103 › Filter Tests: Link to another record, Lookup, Rollup › Filter: Rollup columns","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:1139 › Filter Tests: Toggle button › Filter: Toggle NULL & EMPTY button","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/filters.spec.ts:1223 › Filter Tests: Filter groups › Filter: Empty filters","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/findRowByScanner.spec.ts:23 › Find row by scanner › clicking on the toolbars scanner button › opens the scanner overlay","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/import.spec.ts:25 › Import › Airtable","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/import.spec.ts:35 › Import › CSV","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/import.spec.ts:39 › Import › Excel","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/import.spec.ts:71 › Import › JSON","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/keyboardShortcuts.spec.ts:53 › Verify shortcuts › Verify shortcuts","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/keyboardShortcuts.spec.ts:344 › Clipboard support › single cell- all data types","status":"passed","retry":0,"durationMs":38615}
+{"id":"db/features/keyboardShortcuts.spec.ts:348 › Clipboard support › multiple cells - horizontal, all data types","status":"skipped","retry":0,"durationMs":40036}
+{"id":"db/features/keyboardShortcuts.spec.ts:377 › Clipboard support › multiple cells - vertical","status":"skipped","retry":0,"durationMs":33852}
+{"id":"db/features/language.spec.ts:64 › Common › Language","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/metaLTAR.spec.ts:263 › Test table › Delete record - single, over UI","status":"timedOut","retry":0,"durationMs":100101}
+{"id":"db/features/metaLTAR.spec.ts:300 › Test table › Delete record - bulk, over UI","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/metaLTAR.spec.ts:319 › Test table › Delete column","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/metaLTAR.spec.ts:361 › Test table › Delete table","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/metaSync.spec.ts:51 › Meta sync › Meta sync","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/metaSync.spec.ts:269 › Meta sync › Hide, filter, sort","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/mobileMode.spec.ts:24 › Mobile Mode › activating and deactivating Mobile Mode results correct behavior","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/multiFieldEditor.spec.ts:180 › Multi Field Editor › Verify system fields listed, Add New field, update & Restore, reset","status":"passed","retry":0,"durationMs":38727}
+{"id":"db/features/multiFieldEditor.spec.ts:222 › Multi Field Editor › Add all fields and check status on clicking each field","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/multiFieldEditor.spec.ts:242 › Multi Field Editor › Field operations: CopyId, Duplicate, InsertAbove, InsertBelow, Delete, Hide","status":"skipped","retry":0,"durationMs":18195}
+{"id":"db/features/multiFieldEditor.spec.ts:282 › Multi Field Editor › Search field and verify","status":"passed","retry":0,"durationMs":29774}
+{"id":"db/features/multiFieldEditor.spec.ts:310 › Multi Field Editor › Field Reorder and verify","status":"passed","retry":0,"durationMs":34677}
+{"id":"db/features/multiFieldEditor.spec.ts:358 › Multi Field Editor › Keyboard shortcuts: add new field, save and delete","status":"passed","retry":0,"durationMs":25837}
+{"id":"db/features/pagination.spec.ts:18 › Grid pagination › Access next page, prev page & offset page","status":"passed","retry":0,"durationMs":22748}
+{"id":"db/features/swagger.spec.ts:18 › Swagger › Create column","status":"passed","retry":0,"durationMs":22846}
+{"id":"db/features/timezone.spec.ts:175 › Timezone-XCDB : Japan/Tokyo › API insert, verify display value","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/timezone.spec.ts:211 › Timezone-XCDB : Japan/Tokyo › API Insert, verify API read response","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/timezone.spec.ts:277 › Timezone-XCDB : Asia/Hong-kong › API insert, verify display value","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/timezone.spec.ts:370 › Timezone-XCDB : Asia/Hong-kong › Cell insert","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/timezone.spec.ts:397 › Timezone-XCDB : Asia/Hong-kong › Expanded record insert","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/timezone.spec.ts:430 › Timezone-XCDB : Asia/Hong-kong › Copy paste","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/timezone.spec.ts:578 › Timezone- ExtDB : DateTime column, Browser Timezone same as server timezone › Formula, verify display value","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/timezone.spec.ts:746 › Timezone- ExtDB : DateTime column, Browser Timezone same as server timezone › Verify display value, UI insert, API response","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/timezone.spec.ts:924 › Timezone- ExtDB : DateTime column, Browser Timezone set to HKT › Formula, verify display value","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/timezone.spec.ts:1075 › Timezone- ExtDB (MySQL Only) : DB Timezone configured as HKT › Verify display value, UI Insert, API response","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/undo-redo.spec.ts:128 › Undo Redo › Row: Create, Update, Delete","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/undo-redo.spec.ts:170 › Undo Redo › Fields: Hide, Show, Reorder","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/undo-redo.spec.ts:225 › Undo Redo › Fields: Sort","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/undo-redo.spec.ts:254 › Undo Redo › Fields: Filter","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/undo-redo.spec.ts:292 › Undo Redo › Row height","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/undo-redo.spec.ts:326 › Undo Redo › Column width","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/undo-redo.spec.ts:421 › Undo Redo - Table & view rename operations › Table & View rename","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/undo-redo.spec.ts:605 › Undo Redo - LTAR › Row: Link, Unlink","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/undo-redo.spec.ts:623 › Undo Redo - LTAR › Row with links: Delete & Undo","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/undo-redo.spec.ts:708 › Undo Redo - Select based › Kanban","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/verticalFillHandle.spec.ts:65 › Fill Handle › Text based","status":"passed","retry":0,"durationMs":32604}
+{"id":"db/features/verticalFillHandle.spec.ts:105 › Fill Handle › Number based","status":"passed","retry":0,"durationMs":37365}
+{"id":"db/features/verticalFillHandle.spec.ts:176 › Fill Handle › Select based","status":"passed","retry":0,"durationMs":36103}
+{"id":"db/features/verticalFillHandle.spec.ts:228 › Fill Handle › Miscellaneous (Checkbox, attachment)","status":"passed","retry":0,"durationMs":33404}
+{"id":"db/features/verticalFillHandle.spec.ts:285 › Fill Handle › Date Time Based","status":"passed","retry":0,"durationMs":31477}
+{"id":"db/features/webhook.spec.ts:141 › Webhook › CRUD","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/webhook.spec.ts:341 › Webhook › Conditional webhooks","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/webhook.spec.ts:472 › Webhook › Bulk operations","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/webhook.spec.ts:586 › Webhook › Virtual columns","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/webhook.spec.ts:787 › Webhook › Delete operations","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/features/webhook.spec.ts:856 › Webhook › Include user option","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/cellSelection.spec.ts:21 › Verify cell selection › Suite-1","status":"passed","retry":0,"durationMs":34472}
+{"id":"db/general/cellSelection.spec.ts:73 › Verify cell selection › Suite-2","status":"passed","retry":0,"durationMs":32357}
+{"id":"db/general/groupCRUD.spec.ts:37 › GroupBy CRUD Operations › Single GroupBy CRUD Operations","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/groupCRUD.spec.ts:104 › GroupBy CRUD Operations › Double GroupBy CRUD Operations","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/groupCRUD.spec.ts:172 › GroupBy CRUD Operations › Three GroupBy CRUD Operations","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/groupCRUD.spec.ts:241 › GroupBy CRUD Operations › Single GroupBy CRUD Operations - Links","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/megaTable.spec.ts:49 › Test table › mega table","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/megaTable.spec.ts:165 › Test table › mega table - LinkToAnotherRecord","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/multiFieldEditor.spec.ts:18 › MultiFieldEditor › Hide Columns","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/projectOperations.spec.ts:60 › Base operations › rename, delete","status":"passed","retry":0,"durationMs":27350}
+{"id":"db/general/projectOperations.spec.ts:67 › Base operations › project_duplicate","status":"passed","retry":0,"durationMs":53552}
+{"id":"db/general/sourceRestrictions.spec.ts:31 › Source Restrictions › Readonly data source","status":"passed","retry":0,"durationMs":48492}
+{"id":"db/general/sourceRestrictions.spec.ts:58 › Source Restrictions › Readonly schema source","status":"passed","retry":0,"durationMs":43910}
+{"id":"db/general/sourceRestrictions.spec.ts:89 › Source Restrictions › Readonly schema source - edit column","status":"failed","retry":0,"durationMs":66075}
+{"id":"db/general/tableColumnOperation.spec.ts:18 › Table Column Operations › Create column","status":"passed","retry":0,"durationMs":50409}
+{"id":"db/general/tableOperations.spec.ts:23 › Table Operations › Create, and delete table, verify in audit tab, rename City table, update icon and reorder tables","status":"passed","retry":0,"durationMs":32069}
+{"id":"db/general/tableOperations.spec.ts:74 › Table Operations › duplicate_table","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/tableOperations.spec.ts:103 › Table Operations › duplicate_table_with_no_data_views","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/toolbarOperations.spec.ts:30 › Toolbar operations (GRID) › Create a GroupBy and Verify With Sort, Filter, Hide","status":"skipped","retry":0,"durationMs":18972}
+{"id":"db/general/toolbarOperations.spec.ts:159 › Toolbar operations (GRID) › Create Two GroupBy and Verify With Sort, Filter, Hide","status":"skipped","retry":0,"durationMs":18785}
+{"id":"db/general/toolbarOperations.spec.ts:294 › Toolbar operations (GRID) › Create Three GroupBy and Verify With Sort, Filter, Hide","status":"skipped","retry":0,"durationMs":18061}
+{"id":"db/general/toolbarOperations.spec.ts:449 › Toolbar operations (GRID) › Update GroupBy and Verify","status":"skipped","retry":0,"durationMs":18194}
+{"id":"db/general/toolbarOperations.spec.ts:495 › Toolbar operations (GRID) › Change View and Verify GroupBy","status":"skipped","retry":0,"durationMs":18119}
+{"id":"db/general/toolbarOperations.spec.ts:518 › Toolbar operations (GRID) › Duplicate View and Verify GroupBy","status":"passed","retry":0,"durationMs":31005}
+{"id":"db/general/toolbarOperations.spec.ts:539 › Toolbar operations (GRID) › Delete GroupBy and Verify","status":"skipped","retry":0,"durationMs":18195}
+{"id":"db/general/toolbarOperations.spec.ts:575 › Toolbar operations (GRID) › Hide, Sort, Filter","status":"passed","retry":0,"durationMs":29689}
+{"id":"db/general/toolbarOperations.spec.ts:623 › Toolbar operations (GRID) › row height","status":"passed","retry":0,"durationMs":23840}
+{"id":"db/general/viewMenu.spec.ts:19 › Grid view locked › ReadOnly lock & collaboration mode","status":"passed","retry":0,"durationMs":27956}
+{"id":"db/general/viewMenu.spec.ts:42 › Grid view locked › Download CSV","status":"passed","retry":0,"durationMs":23465}
+{"id":"db/general/views.spec.ts:24 › Views CRUD Operations › Create views, reorder and delete","status":"passed","retry":0,"durationMs":39457}
+{"id":"db/general/views.spec.ts:94 › Views CRUD Operations › Save search query for each table and view","status":"passed","retry":0,"durationMs":62204}
+{"id":"db/usersAccounts/accounSetup.spec.ts:30 › App setup › Configure email settings","status":"passed","retry":0,"durationMs":18133}
+{"id":"db/usersAccounts/accounSetup.spec.ts:53 › App setup › Configure storage settings","status":"passed","retry":0,"durationMs":17842}
+{"id":"db/usersAccounts/accountTokenManagement.spec.ts:23 › Token Management › Create and Delete token","status":"passed","retry":0,"durationMs":31089}
+{"id":"db/usersAccounts/accountUserManagement.spec.ts:60 › User roles › Invite user, assign workspace role, verify access and delete user","status":"passed","retry":0,"durationMs":120770}
+{"id":"db/usersAccounts/accountUserSettings.spec.ts:26 › App settings › Toggle invite only signup","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/usersAccounts/authChangePassword.spec.ts:31 › Auth › Change password","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/usersAccounts/rolesCreate.spec.ts:36 › User roles › Create role","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/usersAccounts/rolesPreview.spec.ts:83 › Preview Mode › Preview Mode","status":"skipped","retry":0,"durationMs":19066}
+{"id":"db/usersAccounts/rolesSuperUser.spec.ts:19 › Super user › AppStore access","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewCalendar.spec.ts:136 › Calendar View › Calendar Sidebar Verify Sidebar Filter, Calendar View Mode","status":"passed","retry":0,"durationMs":72121}
+{"id":"db/views/viewCalendar.spec.ts:302 › Calendar View › Calendar Drag and Drop & Undo Redo Operations","status":"passed","retry":0,"durationMs":59358}
+{"id":"db/views/viewCalendar.spec.ts:383 › Calendar View › Calendar shared view operations","status":"passed","retry":0,"durationMs":68661}
+{"id":"db/views/viewCalendar.spec.ts:442 › Calendar View › Calendar Operations Date Fields","status":"passed","retry":0,"durationMs":55610}
+{"id":"db/views/viewEditorPermissions.spec.ts:106 › View editor permissions — UI (owner) › Create View dialog — all three lock-type radios visible for owner","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:125 › View editor permissions — UI (owner) › Locked view — Filter menu embeds the GeneralLockedViewFooter footer","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:140 › View editor permissions — UI (owner) › Action menu on collab view — Rename / Duplicate / Delete enabled, all lock-type subactions available","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:172 › View editor permissions — UI (owner) › Multiple collab grids — Personal subaction is enabled on each (self-exclusion fix)","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:206 › View editor permissions — UI (owner) › Convert personal → locked → collab on one view does not stale-disable siblings","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:434 › View editor permissions — UI (editor role) › Editor — Create View dialog hides the Locked radio","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:453 › View editor permissions — UI (editor role) › Editor — collab view action menu: Rename / Duplicate / Delete enabled; Locked subaction disabled","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:477 › View editor permissions — UI (editor role) › Editor — locked view action menu: Rename / Delete disabled; Duplicate enabled; View mode submenu disabled","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:511 › View editor permissions — UI (editor role) › Editor — other user's personal view action menu: Rename / Edit description / Change icon / Delete disabled","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:526 › View editor permissions — UI (editor role) › Editor — own personal view action menu: Rename / Duplicate / Delete enabled","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:549 › View editor permissions — UI (editor role) › Editor — Section \"+\" menu disabled with creator-only tooltip","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:572 › View editor permissions — UI (editor role) › Editor — Share button visible on view toolbar","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:577 › View editor permissions — UI (editor role) › Editor — Share modal does NOT show Share Base section or Manage Base Access","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:596 › View editor permissions — UI (editor role) › Editor — collab view menu has Edit description + Change icon items enabled","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:613 › View editor permissions — UI (editor role) › Editor — own personal view menu has Edit description + Change icon items enabled","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:624 › View editor permissions — UI (editor role) › Editor — section three-dot context menu does not expose rename / delete / recolour","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:651 › View editor permissions — UI (editor role) › Editor — adding a filter on collab view fires filterCreate POST (not filterArrJson transient)","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:678 › View editor permissions — UI (editor role) › Editor — Fields menu on locked view hides \"Show system fields\" footer","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:695 › View editor permissions — UI (editor role) › Editor — Form view: opens and form designer is reachable","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:705 › View editor permissions — UI (editor role) › Editor — Gallery view: opens and Fields menu (cover image config) reachable","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:717 › View editor permissions — UI (editor role) › Editor — Kanban view: Stack-by dropdown is enabled and lists SingleSelect columns","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:732 › View editor permissions — UI (editor role) › Editor — Calendar view: date-range dropdown opens and from-field picker is reachable","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:747 › View editor permissions — UI (editor role) › Editor — Grid view: Fields toolbar menu opens and lists columns","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:761 › View editor permissions — UI (editor role) › Editor — Grid view: row-height toolbar menu opens","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:870 › View permissions — UI (viewer / commenter regressions) › viewer — no Create View button on the active table","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:878 › View permissions — UI (viewer / commenter regressions) › viewer — no toolbar config buttons (Filter / Sort / Fields / Group / Colour)","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:890 › View permissions — UI (viewer / commenter regressions) › viewer — three-dot menu has no Rename/Duplicate/Delete items","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:870 › View permissions — UI (viewer / commenter regressions) › commenter — no Create View button on the active table","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:878 › View permissions — UI (viewer / commenter regressions) › commenter — no toolbar config buttons (Filter / Sort / Fields / Group / Colour)","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:890 › View permissions — UI (viewer / commenter regressions) › commenter — three-dot menu has no Rename/Duplicate/Delete items","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewEditorPermissions.spec.ts:952 › View permissions — UI (single collab grid → block conversion) › Owner — single collab grid: Personal subaction is DISABLED with last-grid tooltip","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewForm.spec.ts:30 › Form view › Field re-order operations","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewForm.spec.ts:77 › Form view › Form elements validation","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewForm.spec.ts:206 › Form view › Form share, verify attachment file","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewForm.spec.ts:328 › Form view with LTAR › Form view with LTAR","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewForm.spec.ts:406 › Form view › Select fields in form view","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewForm.spec.ts:656 › Form view: field validation › Form builder field validation","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewForm.spec.ts:974 › Form view: field validation › Form builder field validation: limit to range","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewForm.spec.ts:1314 › Form view: field validation › Form builder field validation: attachment","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewForm.spec.ts:1551 › Form view: conditional fields › Form builder conditional field","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewFormGridLayout.spec.ts:21 › Form view grid layout › two fields on the same row render at equal width","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewFormGridLayout.spec.ts:26 › Form view grid layout › max 5 fields per row — 6th drop is rejected","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewFormGridLayout.spec.ts:30 › Form view grid layout › long-text / attachment fields stay full-width","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewFormGridLayout.spec.ts:35 › Form view grid layout › shared form on mobile viewport collapses to single column","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewFormShareSurvey.spec.ts:21 › Share form › Survey","status":"skipped","retry":0,"durationMs":18101}
+{"id":"db/views/viewGantt.spec.ts:196 › Gantt View › creates a Gantt view and renders bars once date-dependency is configured","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewGantt.spec.ts:212 › Gantt View › default Fields-menu visibility is PV-only","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewGantt.spec.ts:227 › Gantt View › narrow bars spill their label to the right (Airtable-style)","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewGantt.spec.ts:259 › Gantt View › switching zoom level preserves rendered bars","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewGantt.spec.ts:274 › Gantt View › clicking next pans the date axis without refetching rows","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewGantt.spec.ts:308 › Gantt View › dependency graph endpoint returns edges between linked rows","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewGantt.spec.ts:354 › Gantt View › public shared Gantt view renders bars and edges without auth","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewGantt.spec.ts:388 › Gantt View › clicking a bar opens the right-rail inspector","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewGantt.spec.ts:415 › Gantt View › two Gantt views on the same table carry independent rules","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewGantt.spec.ts:472 › Gantt View › dependency arrows render as DOM elements between linked rows","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewGantt.spec.ts:513 › Gantt View › public shared Gantt view is read-only — no drag handles","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewGridShare.spec.ts:17 › Shared view › Grid Share with GroupBy","status":"timedOut","retry":0,"durationMs":100180}
+{"id":"db/views/viewGridShare.spec.ts:124 › Shared view › Grid share ","status":"skipped","retry":0,"durationMs":19072}
+{"id":"db/views/viewGridShare.spec.ts:268 › Shared view › Shared view: password","status":"passed","retry":0,"durationMs":46272}
+{"id":"db/views/viewKanban.spec.ts:60 › View › Kanban","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewKanban.spec.ts:202 › View › Kanban view operations","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewKanban.spec.ts:332 › View › Kanban shared view operations","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewMap.spec.ts:55 › Map View › shows the marker and opens the expanded form view when clicking on it","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewTimeline.spec.ts:94 › Timeline View › creates a timeline view and renders bars","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewTimeline.spec.ts:111 › Timeline View › default Fields-menu visibility is minimal — display + range only","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/views/viewTimeline.spec.ts:136 › Timeline View › clicking next slides the buffer and issues a windowed fetch","status":"skipped","retry":0,"durationMs":0}

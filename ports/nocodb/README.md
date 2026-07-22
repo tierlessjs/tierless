@@ -264,3 +264,44 @@ suite, both arms through the zero-patch flow): **median 94% per-test bytes saved
 across 81 pass-parity pairs**, the same headline as the original cut, now measured on
 the 3-line port. The rtt/floor sections above were driven on the original hand-cut
 patches and remain transport-equivalent; re-drive before quoting them for this cut.
+
+## compile:'auto' (2026-07-22, patch 0003 + results/compile-auto-full-*.jsonl)
+
+The second native compile data point after Vikunja, on a codebase we didn't write.
+Patch 0003 is one plugin entry in nc-gui's nuxt config (`tierless({ apiUrl,
+compile: 'auto' })`); the compiler judged all **124 candidate modules and compiled 9
+(17 programs)**: four Pinia stores (base — loadTables/loadProject/updateProject/
+loadProjectMetaInfo/hasEmptyOrNullFilters; bases; views; workspace), three grid
+canvas loaders (ActionManager, BaseRoleLoader, TableMetaLoader — plus ImageLoader's
+generateQR), and lib/form.ts (three FormFilters methods). The build emits the
+evidence: `dist-tierless/tierless.compile-coverage.json`, per-method reasons
+included — 9 methods refused honestly (awaits of non-call values, one native-promise
+await), everything else simply had no tier-reaching method.
+
+Building it surfaced two tierless defects, both fixed upstream with probes:
+
+- **Nuxt's second (SSR/nitro) Vite build wiped the client build's artifacts**
+  through the shared plugin object (coverage overwritten 0/0, manifest deleted).
+  SSR builds now neither compile nor emit (vite.mts `ssrBuild` gate).
+- **The frame rewrite corrupted `obj?.name` when `name` collided with a frame
+  local** (raw babel error on 3 nc-gui methods). Guard widened; those 3 methods
+  compile now — coverage went 8→9 modules, 14→17 programs.
+
+The gateway hosts the build's machines: boot.mts mounts `--machines
+<dist-tierless>` whenever the ported build emits a manifest (baseline stays
+exec-only), and `test/e2e/gateway-machines-live.mts` proves a migrated chain resumes
+gateway-side through that path. In the parity arms below nothing migrates (no §6
+profile is loaded), so compiled programs ran in-browser on the fetch arm — machine
+hosting is proven by the e2e, not exercised by the suite.
+
+Status parity, both arms full `tests/db`, chunked identically (one suite boot per
+spec dir — timings not comparable to a continuous run; these arms are status-only):
+**280 test ids identical on both arms; 81 pass-parity pairs; 193 skipped on both;
+zero ported-only deterministic failures.** The 3 non-passes common to both arms
+(columnAttachments:17 failed, metaLTAR:263 and viewGridShare:17 timedOut) are the
+same three that failed identically on both arms in the 2026-07-10 continuous truth
+arms. 3 one-sided flakes split across arms (baseline 2, ported 1), each passing on
+the other arm; sourceRestrictions:58 additionally passed 3/3 isolated on the ported
+build (results/compile-auto-srcres-isolated.jsonl). A continuous ported full run
+(same build) matched: 83 passed / 2 failed / 2 timedOut / 195 skipped — the chunked
+arms carry 280 of its 282 ids, the 2 absent both skipped rows.
