@@ -1,0 +1,31 @@
+{"id":"db/general/cellSelection.spec.ts:21 › Verify cell selection › Suite-1","status":"passed","retry":0,"durationMs":34395}
+{"id":"db/general/cellSelection.spec.ts:73 › Verify cell selection › Suite-2","status":"passed","retry":0,"durationMs":32662}
+{"id":"db/general/groupCRUD.spec.ts:37 › GroupBy CRUD Operations › Single GroupBy CRUD Operations","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/groupCRUD.spec.ts:104 › GroupBy CRUD Operations › Double GroupBy CRUD Operations","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/groupCRUD.spec.ts:172 › GroupBy CRUD Operations › Three GroupBy CRUD Operations","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/groupCRUD.spec.ts:241 › GroupBy CRUD Operations › Single GroupBy CRUD Operations - Links","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/megaTable.spec.ts:49 › Test table › mega table","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/megaTable.spec.ts:165 › Test table › mega table - LinkToAnotherRecord","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/multiFieldEditor.spec.ts:18 › MultiFieldEditor › Hide Columns","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/projectOperations.spec.ts:60 › Base operations › rename, delete","status":"passed","retry":0,"durationMs":27964}
+{"id":"db/general/projectOperations.spec.ts:67 › Base operations › project_duplicate","status":"passed","retry":0,"durationMs":53544}
+{"id":"db/general/sourceRestrictions.spec.ts:31 › Source Restrictions › Readonly data source","status":"passed","retry":0,"durationMs":48833}
+{"id":"db/general/sourceRestrictions.spec.ts:58 › Source Restrictions › Readonly schema source","status":"failed","retry":0,"durationMs":57904}
+{"id":"db/general/sourceRestrictions.spec.ts:89 › Source Restrictions › Readonly schema source - edit column","status":"passed","retry":0,"durationMs":52601}
+{"id":"db/general/tableColumnOperation.spec.ts:18 › Table Column Operations › Create column","status":"passed","retry":0,"durationMs":49758}
+{"id":"db/general/tableOperations.spec.ts:23 › Table Operations › Create, and delete table, verify in audit tab, rename City table, update icon and reorder tables","status":"passed","retry":0,"durationMs":30644}
+{"id":"db/general/tableOperations.spec.ts:74 › Table Operations › duplicate_table","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/tableOperations.spec.ts:103 › Table Operations › duplicate_table_with_no_data_views","status":"skipped","retry":0,"durationMs":0}
+{"id":"db/general/toolbarOperations.spec.ts:30 › Toolbar operations (GRID) › Create a GroupBy and Verify With Sort, Filter, Hide","status":"skipped","retry":0,"durationMs":17884}
+{"id":"db/general/toolbarOperations.spec.ts:159 › Toolbar operations (GRID) › Create Two GroupBy and Verify With Sort, Filter, Hide","status":"skipped","retry":0,"durationMs":18428}
+{"id":"db/general/toolbarOperations.spec.ts:294 › Toolbar operations (GRID) › Create Three GroupBy and Verify With Sort, Filter, Hide","status":"skipped","retry":0,"durationMs":18117}
+{"id":"db/general/toolbarOperations.spec.ts:449 › Toolbar operations (GRID) › Update GroupBy and Verify","status":"skipped","retry":0,"durationMs":18015}
+{"id":"db/general/toolbarOperations.spec.ts:495 › Toolbar operations (GRID) › Change View and Verify GroupBy","status":"skipped","retry":0,"durationMs":17895}
+{"id":"db/general/toolbarOperations.spec.ts:518 › Toolbar operations (GRID) › Duplicate View and Verify GroupBy","status":"passed","retry":0,"durationMs":30693}
+{"id":"db/general/toolbarOperations.spec.ts:539 › Toolbar operations (GRID) › Delete GroupBy and Verify","status":"skipped","retry":0,"durationMs":18014}
+{"id":"db/general/toolbarOperations.spec.ts:575 › Toolbar operations (GRID) › Hide, Sort, Filter","status":"passed","retry":0,"durationMs":28839}
+{"id":"db/general/toolbarOperations.spec.ts:623 › Toolbar operations (GRID) › row height","status":"passed","retry":0,"durationMs":26380}
+{"id":"db/general/viewMenu.spec.ts:19 › Grid view locked › ReadOnly lock & collaboration mode","status":"passed","retry":0,"durationMs":29937}
+{"id":"db/general/viewMenu.spec.ts:42 › Grid view locked › Download CSV","status":"passed","retry":0,"durationMs":23890}
+{"id":"db/general/views.spec.ts:24 › Views CRUD Operations › Create views, reorder and delete","status":"passed","retry":0,"durationMs":41310}
+{"id":"db/general/views.spec.ts:94 › Views CRUD Operations › Save search query for each table and view","status":"passed","retry":0,"durationMs":62811}
