@@ -38,11 +38,15 @@ try {
   const cookie = (login.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).join("; ");
   if (!cookie) throw new Error("no login cookie");
 
-  // session socket through the counting relay, cookie on the upgrade (hello seals it)
+  // session socket through the counting relay, cookie on the upgrade (hello seals it);
+  // the hello's blob must ride every exec as the session-auth header (what
+  // cookieSessionAuth's attach does browser-side) or the gateway serves unauthorized
   const ws = new WebSocket("ws://127.0.0.1:15780/__tierless", ["tierless"], { headers: { cookie, origin: "http://127.0.0.1:5680" } });
   await new Promise<void>((r, j) => { ws.on("open", r); ws.on("error", j); });
   const peer = makePeer(wsPort(ws as never));
-  await new Promise((r) => setTimeout(r, 500));   // hello + any upgrade chatter settles
+  const blob = await new Promise<string | null>((r) => { (peer as { on(ev: string, cb: (p: { blob?: string | null }) => void): void }).on("hello", (p) => r(p?.blob ?? null)); setTimeout(() => r(null), 5000); });
+  if (!blob) throw new Error("no sealed blob in hello — execs would be unauthorized");
+  await new Promise((r) => setTimeout(r, 500));   // upgrade chatter settles before deltas
 
   const curl = (p: string, enc: string): number => Number(execFileSync("curl", ["-s", "-o", "/dev/null", "-w", "%{size_download}", "-H", `cookie: ${cookie}`, "-H", `Accept-Encoding: ${enc}`, "--max-time", "30", APP + p]).toString().trim());
 
@@ -52,9 +56,10 @@ try {
     const raw = curl(p, "identity");
     const gz = curl(p, "gzip");
     const before = counter.toServer + counter.toClient;
-    let env: unknown;
-    try { env = await execOver(peer, { op: "res", tier: "server", name: "api.get", args: [p] } as never); }
+    let env: { status?: number } | undefined;
+    try { env = await execOver(peer, { op: "res", tier: "server", name: "api.get", args: [p, undefined, { headers: { "x-tierless-session-auth": blob } }] } as never) as { status?: number }; }
     catch (e) { console.log(p.padEnd(58) + " EXEC FAIL: " + (e as Error).message.slice(0, 80)); continue; }
+    if (env?.status !== 200) { console.log(p.padEnd(58) + ` NOT 200 over session: ${env?.status}`); continue; }
     await new Promise((r) => setTimeout(r, 300));   // let frames flush through the relay
     const sess = counter.toServer + counter.toClient - before;
     // the codec split, offline: the envelope exactly as the reply carries it

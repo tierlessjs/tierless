@@ -21,6 +21,7 @@ import { createRequire } from "node:module";
 import { makeHost, answerWith } from "./host.mjs";
 import { makeCoherence } from "./coherence.mjs";
 import { makePeer, wsPort } from "./transport.mjs";
+import { decodeArgs } from "./wire-binary.mjs";
 import { h2Port, isWebSocketConnect } from "./transport-h2.mjs";
 import { WS_PATH } from "./ws-path.mjs";
 const { WebSocketServer } = createRequire(import.meta.url)("ws");
@@ -92,6 +93,46 @@ async function serveSessionOn(peer, req, cfg) {
             onDone(value);
     } // full-tierless mode: the server starts the session
 }
+// TIERLESS_WIRE_LOG=<file>: per-message wire anatomy, appended as JSON lines
+// {d:in|out, n:<plaintext frame bytes>, k:kind, t:payload type, p:<api path>}. Byte
+// counts are PRE-deflate (the shared compression window makes true per-message
+// compressed sizes unobservable); pair with the TCP-true totals from --wire-truth to
+// see what content a session's bytes actually are. Debug instrument: measurable
+// decode cost per message, so it stays behind the env gate.
+const wireLogPort = (port) => {
+    const file = typeof process !== "undefined" ? process.env?.TIERLESS_WIRE_LOG : undefined;
+    if (!file)
+        return port;
+    const paths = new Map(); // request id -> api path, labels the reply
+    const line = (d, obj, bin) => {
+        let p;
+        try {
+            if (obj?.payload?.type === "exec" && bin) {
+                const [name, args] = decodeArgs(bin);
+                if (typeof name === "string" && name.startsWith("api."))
+                    p = String((args ?? [])[0] ?? "");
+                if (p !== undefined)
+                    paths.set(obj.id, p);
+            }
+            else if (obj?.kind === "reply") {
+                p = paths.get(obj.id);
+                paths.delete(obj.id);
+            }
+        }
+        catch { /* anatomy only — never let the instrument drop a frame */ }
+        const n = 8 + Buffer.byteLength(JSON.stringify(obj)) + (bin?.length ?? 0);
+        try {
+            fs.appendFileSync(file, JSON.stringify({ d, n, k: obj?.kind, t: obj?.payload?.type, ...(p !== undefined ? { p } : {}) }) + "\n");
+        }
+        catch { /* full disk etc. */ }
+    };
+    return {
+        send: (obj, bin) => { line("out", obj, bin ?? null); port.send(obj, bin); },
+        onMessage: (cb) => port.onMessage((obj, bin) => { line("in", obj, bin); cb(obj, bin); }),
+        onClose: (cb) => port.onClose(cb),
+        close: () => port.close(),
+    };
+};
 export function attachTierless(httpServer, { bundle, tier = "server", session, path: wsPath = WS_PATH, wire, heap = true, maxConnections = DEFAULT_MAX_CONNECTIONS }) {
     // STREAMING compression, not per-message: with context takeover the deflate window
     // persists across messages, so every exec's headers, URL prefixes, and JSON field
@@ -148,7 +189,7 @@ export function attachTierless(httpServer, { bundle, tier = "server", session, p
         if (wire && ws._socket)
             wire.track(ws._socket);
         try {
-            await serveSessionOn(makePeer(wsPort(ws)), req, { resolveBundle, session, heap, tier });
+            await serveSessionOn(makePeer(wireLogPort(wsPort(ws))), req, { resolveBundle, session, heap, tier });
         }
         catch (e) {
             try {
