@@ -156,6 +156,15 @@ const wireLogPort = (port: Port): Port => {
         if (typeof name === "string" && name.startsWith("api.")) p = String((args ?? [])[0] ?? "");
         if (p !== undefined) paths.set(obj.id, p);
       } else if (obj?.kind === "reply") { p = paths.get(obj.id); paths.delete(obj.id); }
+      // the hello's preboot map is per-path cargo hiding inside ONE message — decompose
+      // it so a wire budget can price preboot over-delivery per endpoint (an envelope
+      // shipped at upgrade that the page never consumes is cost with no HTTP twin)
+      const pb = obj?.payload?.type === "hello" ? obj?.payload?.preboot : undefined;
+      if (pb && typeof pb === "object") {
+        for (const [pbPath, env] of Object.entries(pb)) {
+          try { fs.appendFileSync(file, JSON.stringify({ ts: Date.now(), d, n: Buffer.byteLength(JSON.stringify(env)), k: "hello", t: "preboot", p: pbPath }) + "\n"); } catch { /* full disk etc. */ }
+        }
+      }
     } catch { /* anatomy only — never let the instrument drop a frame */ }
     const n = 8 + Buffer.byteLength(JSON.stringify(obj)) + (bin?.length ?? 0);
     try { fs.appendFileSync(file, JSON.stringify({ ts: Date.now(), d, n, k: obj?.kind, t: obj?.payload?.type, ...(p !== undefined ? { p } : {}) }) + "\n"); } catch { /* full disk etc. */ }

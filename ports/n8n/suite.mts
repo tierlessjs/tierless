@@ -24,9 +24,15 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { writeSuiteConfig } from "../pw-wrapper.mts";
 import { delayProxy, type WireCounter } from "../latency-proxy.mts";
+import { httpLogProxy } from "../http-log-proxy.mts";
 
 const VARIANT = process.argv.includes("--baseline") ? "n8n-baseline" : "n8n";
 const TRUTH = !!process.env.TIERLESS_WIRE_TRUTH;
+// TIERLESS_WIRE_BUDGET=1: the decomposition arm (ports/wire-budget.mts) — the browser
+// origin goes through the HTTP-logging proxy CHAINED BEHIND the counting relay (both
+// per-path attribution AND the TCP-true total, reconciled by the budget script), and
+// the gateway writes its per-message session log. Composes with TIERLESS_WIRE_TRUTH.
+const BUDGET = !!process.env.TIERLESS_WIRE_BUDGET;
 const RTT = Number(process.env.TIERLESS_RTT_MS || 0);
 if (TRUTH && RTT) { console.error("pick one: TIERLESS_WIRE_TRUTH (bytes) or TIERLESS_RTT_MS (time) — a counting relay inflates request-heavy tests"); process.exit(2); }
 const SRC = fileURLToPath(new URL(`../work/${VARIANT}/src/`, import.meta.url));
@@ -34,9 +40,19 @@ const OUT = fileURLToPath(new URL(`../work/${VARIANT}/measure${TRUTH ? "-truth" 
 
 let editorUrl = "";                          // browser-facing origin; empty = direct
 const wireUrls: string[] = [];
+if (BUDGET && !TRUTH) { console.error("TIERLESS_WIRE_BUDGET composes with TIERLESS_WIRE_TRUTH=1 — the budget's reconciliation needs the TCP totals; set both"); process.exit(2); }
+if (BUDGET) {
+  // per-path HTTP attribution, chained INSIDE the counting relay so the TCP total
+  // still covers everything the page sent; the gateway's session log lands beside it
+  rmSync(fileURLToPath(new URL(`../work/${VARIANT}/wire-http.jsonl`, import.meta.url)), { force: true });
+  rmSync(fileURLToPath(new URL(`../work/${VARIANT}/wire-session.jsonl`, import.meta.url)), { force: true });
+  httpLogProxy(35680, 5680, fileURLToPath(new URL(`../work/${VARIANT}/wire-http.jsonl`, import.meta.url))).unref();
+  process.env.TIERLESS_WIRE_LOG = fileURLToPath(new URL(`../work/${VARIANT}/wire-session.jsonl`, import.meta.url));
+  console.log("wire budget: per-path HTTP log behind the relay, session log via TIERLESS_WIRE_LOG");
+}
 if (TRUTH) {
   const app: WireCounter = { toServer: 0, toClient: 0 };
-  delayProxy(25680, 5680, 0, app).unref();
+  delayProxy(25680, BUDGET ? 35680 : 5680, 0, app).unref();
   delayProxy(25780, 5780, 0).unref();   // ws passthrough (page port+100 rule); the gateway counts its own TCP-true bytes
   // api* keys: report.mts sums wireApiIn/Out + wireWsIn/Out as the byte total (the
   // "app" origin serves both api and assets here — single origin — but the field name
