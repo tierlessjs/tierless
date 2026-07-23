@@ -404,3 +404,29 @@ floor pair. Behavior holds (661 pass-parity pairs, crossings verified at the
 gateway); the wire and wall numbers above are this cut's — including the byte
 retraction and the open ~1.1 s/session boot regression, which is the next
 tierless work item, not a caveat on the data.
+
+## The wire budget (2026-07-23, results/wire-budget.txt)
+
+Per-path attribution for a full arm-pair (TIERLESS_WIRE_BUDGET=1: HTTP-message
+bytes per request behind the counting relay, the gateway's per-message session
+log, ports/wire-budget.mts) — built because the +8% was previously attributed
+by aggregate ratios, wrongly. Arm totals this pair (conditional crossings on):
+5,958 MB stock vs 6,214 MB ported TCP-true (+4.3%; baseline had an elevated 46
+failures this run — arm-level totals, not pass-parity-gated). Attribution
+reconciles within 2.2% of TCP on the stock arm. What the table says:
+
+- `/rest/community-node-types` is at wire parity now: 832 MB stock HTTP over
+  **484 fetches** vs ~840 MB deflated session. (The earlier "197 stock
+  fetches" arithmetic was wrong; the count is 484.)
+- **The dominant remaining term never touches the session**:
+  `/types/nodes.json`, plain browser HTTP in BOTH arms — 805 full 200s
+  (1,174 MB) stock vs **1,007 full 200s (1,467 MB) ported: +294 MB from 202
+  extra downloads**, zero 304s either arm. Why the ported build's pages fetch
+  it more is an open, now-countable question (their loader uses plain fetch;
+  the port doesn't touch that path).
+- Hello/preboot cargo: 242 MB plaintext across sessions (nearly all preboot
+  envelopes; ~60-90 MB deflated on the wire) against partially-displaced boot
+  GETs — second-order, not the headline the preboot-over-delivery hypothesis
+  expected.
+- The rebuilt editor's asset chunks pair off against stock's (+2-4 MB per
+  tierless-bearing chunk); roughly a wash.

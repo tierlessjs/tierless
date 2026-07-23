@@ -1,0 +1,30 @@
+Per-path wire budget (MB; session = PRE-deflate plaintext, [preboot] = per-path share of the hello frame, informational)
+path                                                             baseHTTP portHTTP  session  preboot    delta  n0/n1
+/rest/community-node-types                                            832              5523              4691  484/0
+/types/nodes.json                                                    1174     1468                        294  805/1008
+[session:hello]                                                                         242               242  0/0
+/assets/ParameterInputList-Bq7nLLJZ.js                                         218                        218  0/708
+/assets/ParameterInputList-FIUwl5og.js                                216                             -215.73  702/0
+/assets/index-BWqy2U4J.js                                                      207                        207  0/714
+/assets/index-msyzkfRW.js                                             205                             -204.67  707/0
+/assets/workflowDocument.store-C6aFSleE.js                                     140                        140  0/710
+/assets/workflowDocument.store-lVDnv3eB.js                            139                             -138.62  705/0
+/assets/useWorkflowDocumentRenderData-DQSoXli-.js                               86                         86  0/708
+/assets/useWorkflowDocumentRenderData-CD5bzgOd.js                      85                              -85.13  702/0
+/assets/RunData-DxcJ2c3-.js                                                     55                         55  0/708
+/assets/RunData-B1Pzm58e.js                                            54                              -54.08  702/0
+/assets/useRootStore-1apk61tq.js                                                51                         51  0/712
+/assets/WorkflowDiffView-DTZs2zoV.js                                            40                         40  0/708
+/assets/WorkflowDiffView-CLT4o4iO.js                                   39                              -39.39  702/0
+/assets/useRootStore-Cls9JR4X.js                                       31                              -31.28  706/0
+/assets/router-9AXbGFL-.js                                                      30                         30  0/708
+/assets/router-CorWdBdz.js                                             29                              -29.33  702/0
+/assets/NodeView-D6RrPeV3.js                                           26                              -26.47  476/0
+/assets/NodeView-CpCX576M.js                                                    26                         26  0/475
+/assets/useCanvasOperations-2gpew5Qs.js                                         23                         23  0/708
+[875 more paths]                                                     3262     3232       21      242    -8.04
+TOTAL                                                                6092     5574     5787
+
+arm delta (attributed): 5268.6 MB — session column is plaintext; the TCP reconciliation below is the honest total
+baseline: TCP-true 5958 MB vs HTTP-message 6092 MB -> -133.9 MB unattributed (framing/TLS/keep-alive/other channels)
+ported:   TCP-true 6214 MB vs HTTP-message+session-plaintext 11360 MB (plaintext OVERSTATES the deflated ws — a session share below TCP is expected)
