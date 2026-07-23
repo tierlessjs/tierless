@@ -138,15 +138,22 @@ proven (the executable proofs behind `npm test`).
   the preboot join FEED the mount storm more gradually. Evidence:
   ports/n8n/README.md wall-time section.
 
-- **Conditional crossings (n8n byte diagnosis, 2026-07-22).** The session
-  transport lacks HTTP caching semantics: n8n's +8% wire bytes is entirely
-  repeat-session crossings of one 12.4 MB ETag'd endpoint that stock browsers
-  revalidate to a 0-byte 304 (per-payload the session equals gzip exactly —
-  compressor and codec measured at parity; ports/n8n/README.md byte section).
-  Design: cache api.get envelopes browser-side keyed by path+ETag, attach
-  If-None-Match to the crossing, replay the cached envelope on a 304 reply —
-  stock HTTP semantics on the socket. Would zero n8n's byte regression and
-  helps any app with large revalidated GETs.
+- **Conditional crossings — SHIPPED (2026-07-23, tierless/adapt-cache).**
+  Session GETs now carry the browser cache's own revalidation: path+ETag
+  envelope cache (sync localStorage index + CacheStorage bodies, idle-capped
+  stores, body reads concurrent with the crossing), default-on in
+  autoSession. On n8n it revalidates the whole multi-session pool (49 tests
+  drop >=1.5 MB) and took the byte delta +8.5% -> +6.8% — a fifth of the
+  regression, not all of it as the diagnosis first claimed. Also fixed en
+  route: undici stamps no-cache onto conditional requests (Express fresh()
+  then never 304s) — restResources forwards validators with max-age=0.
+
+- **n8n's remaining +6.8% — preboot over-delivery suspect.** The hello
+  pre-fetches all 18 boot GETs per upgrade regardless of what the page
+  consumes; stock pays only for actual fetches. Price it with the existing
+  TIERLESS_PREBOOT=0 ablation on a truth arm; if confirmed, preboot should
+  deliver lazily or per-route (the route-aware preboot idea from the boot
+  study).
 
 - **The corpus program** (`docs/corpus.md`): a statistical claim over real apps —
   "median X× less network wait, Y% less IO across N apps' own e2e journeys."

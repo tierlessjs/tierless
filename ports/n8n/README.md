@@ -162,19 +162,29 @@ byte data point, and the anatomy says why:
   stock: 1,891,695 B over the session socket vs 1,891,765 B stock gzip
   (ratio 1.00); the binary codec's plaintext is 4.66 MB (0.38x the JSON
   text — MORE compact, not less). The compressor and codec are exonerated.
-- The +8% is HTTP CACHING the crossing path lacks: the endpoint serves a
-  weak ETag and answers If-None-Match with a 0-byte 304 (verified live), so
-  a multi-page STOCK test pays the 1.9 MB once and revalidates after; every
-  ported page session re-crosses it in full. The arm totals reproduce from
-  this one mechanism: 837 MB ws / 1.89 MB = ~443 crossings vs 372 MB
-  displaced / 1.89 MB = ~197 stock full fetches — the ~246 repeat crossings
-  x 1.89 MB = the whole +465 MB delta. Fix direction (roadmap): conditional
-  crossings — cache api.get envelopes browser-side keyed by path+ETag, send
-  If-None-Match on the crossing, replay the cached envelope on a 304 reply.
-  Crossings themselves are real and correct (pass parity at 661 pairs);
-  unlike Strapi (raw MB-scale JSON re-sent per request, 92% win) or NocoDB,
-  n8n's repeated payloads sit behind its asset bundle, push channel, and
-  this one revalidated mega-endpoint.
+- Part of the +8% is HTTP CACHING the crossing path lacked: the endpoint
+  serves a weak ETag and answers If-None-Match with a 0-byte 304 (verified
+  live), so a multi-page STOCK test pays the 1.9 MB once and revalidates
+  after, while every ported page session re-crossed it in full. FIXED —
+  conditional crossings (tierless/adapt-cache, default-on in autoSession):
+  cache api.get envelopes browser-side keyed by path+ETag, attach
+  If-None-Match, replay on 304. Re-driven truth arm
+  (results/truth-ported-conditional.jsonl, 659 pass-parity pairs): 49 tests
+  drop >=1.5 MB of session ws — the entire multi-session pool (44 tests) —
+  for −41 MB, taking the suite total from +8.5% to **+6.8%**. Getting there
+  surfaced a general bug: undici's fetch stamps cache-control:no-cache onto
+  conditional requests and Express fresh() then refuses the 304 — the
+  gateway now forwards validators with max-age=0 (a browser reload's shape).
+- The REMAINING ~+6.8% is not repeat crossings (an earlier draft of this
+  section overclaimed that; the measured repeat pool was only the 44
+  multi-session tests). The open suspect is preboot over-delivery: the
+  hello pre-fetches all 18 boot GETs on every upgrade whether or not that
+  page consumes them, where stock pays only for what the app fetches. The
+  TIERLESS_PREBOOT=0 ablation exists to price this. Crossings themselves
+  are real and correct (pass parity held across all three arms:
+  667/664/663 passed); unlike Strapi (raw MB-scale JSON re-sent per
+  request, 92% win) or NocoDB, n8n's repeated payloads sit behind its
+  asset bundle, push channel, and one revalidated mega-endpoint.
 
 Reproduce:
 
