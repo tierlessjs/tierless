@@ -421,9 +421,26 @@ reconciles within 2.2% of TCP on the stock arm. What the table says:
 - **The dominant remaining term never touches the session**:
   `/types/nodes.json`, plain browser HTTP in BOTH arms — 805 full 200s
   (1,174 MB) stock vs **1,007 full 200s (1,467 MB) ported: +294 MB from 202
-  extra downloads**, zero 304s either arm. Why the ported build's pages fetch
-  it more is an open, now-countable question (their loader uses plain fetch;
-  the port doesn't touch that path).
+  extra downloads**, zero 304s either arm. CAUSE ESTABLISHED (2026-07-23):
+  an UPSTREAM double-fetch race the port's boot contention amplifies. Two of
+  their callers guard the fetch with an emptiness check and share no
+  in-flight promise (`loadNodeTypesIfNotLoaded` at app boot;
+  `initializeData`'s `allNodeTypes.length === 0` at canvas init —
+  useWorkflowInitialization.ts): any page where the second check lands
+  before the first fetch's 12 MB parse+ingest completes downloads the
+  1.46 MB twice. Stock hits that window on 25% of nodes.json pages (150
+  double-fetch pairs — the race is theirs); the ported arm's boot-window
+  CPU contention (the wall-time finding above) stretches parse+ingest and
+  hits it on 54% (342 pairs). Retry-loop theory refuted from the log: 491
+  of 492 pairs have byte-identical full-size members — nothing for their
+  retry (which fires only on malformed bodies) to act on. Caveat: the
+  overlapping-starts observation itself wasn't captured (a bare page
+  doesn't reproduce the fetch; suite-like state is needed) — the mechanism
+  rests on the code shape, the window statistics, and the refuted
+  alternative. Upstream fix is one shared in-flight promise; port-side,
+  this is the boot-contention roadmap item wearing a second costume:
+  BOTH remaining n8n regressions (wall +8%, bytes +294 MB) now trace to
+  the same root.
 - Hello/preboot cargo: 242 MB plaintext across sessions (nearly all preboot
   envelopes; ~60-90 MB deflated on the wire) against partially-displaced boot
   GETs — second-order, not the headline the preboot-over-delivery hypothesis
