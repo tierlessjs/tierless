@@ -52,6 +52,9 @@ export function wsPort(ws) {
         onMessage(cb) {
             on("message", (ev) => {
                 const data = ev && ev.data !== undefined ? ev.data : ev;
+                const g = globalThis;
+                const trace = !!g.__TIERLESS_EXEC_LOG__ && typeof performance !== "undefined";
+                const t0 = trace ? performance.now() : 0;
                 let msg;
                 try {
                     msg = decodeMessage(data);
@@ -63,7 +66,16 @@ export function wsPort(ws) {
                     catch { /* already gone */ }
                     return;
                 } // …drop the peer, never the host
+                const t1 = trace ? performance.now() : 0;
                 cb(msg.obj, msg.bin);
+                if (trace) {
+                    const t2 = performance.now();
+                    const log = (g.__tierlessWirePhases ||= []);
+                    log.push({ t: t0, gap: g.__tierlessLastFrameEnd !== undefined ? t0 - g.__tierlessLastFrameEnd : 0, dec: t1 - t0, dlv: t2 - t1, bytes: data.byteLength ?? data.length ?? 0, k: msg.obj?.kind, ty: msg.obj?.payload?.type });
+                    if (log.length > 1000)
+                        log.splice(0, 500);
+                    g.__tierlessLastFrameEnd = t2;
+                }
             });
         },
         onClose(cb) { on("close", () => cb()); },

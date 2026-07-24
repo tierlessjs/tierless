@@ -54,6 +54,18 @@ export interface Port {
   onClose(cb: () => void): void;
   close(): void;
 }
+
+// Per-frame phase telemetry, gated on the same debug global as __tierlessExecLog (off =
+// one boolean test per frame). Each inbound frame decomposes into the two phases this
+// layer owns — DECODE (TextDecoder + header JSON.parse) and DELIVER (the synchronous
+// peer callback; promise continuations run in later microtasks and show up in the exec
+// log's own end-to-end times instead) — plus the GAP since the previous frame's handler
+// ended: single-socket head-of-line blocking reads as small replies whose gap tracks a
+// big previous frame's dec+dlv. Built to phase-decompose the n8n boot-window contention
+// (ROADMAP "Session-boot contention") after a fix designed from the un-measured
+// narrative was falsified — this time the seam itself reports.
+interface WirePhase { t: number; gap: number; dec: number; dlv: number; bytes: number; k?: string; ty?: string }
+interface PhaseGlobals { __TIERLESS_EXEC_LOG__?: unknown; __tierlessWirePhases?: WirePhase[]; __tierlessLastFrameEnd?: number }
 // Adapt a WebSocket-like object (a browser WebSocket or a `ws` socket) to a small duplex
 // port, normalizing the two event APIs and binary payload types.
 export function wsPort(ws: any): Port {
@@ -64,10 +76,21 @@ export function wsPort(ws: any): Port {
     onMessage(cb: (obj: any, bin: Uint8Array | null) => void): void {
       on("message", (ev: any) => {
         const data = ev && ev.data !== undefined ? ev.data : ev;
+        const g = globalThis as PhaseGlobals;
+        const trace = !!g.__TIERLESS_EXEC_LOG__ && typeof performance !== "undefined";
+        const t0 = trace ? performance.now() : 0;
         let msg;
         try { msg = decodeMessage(data); }                              // a truncated/garbage frame throws in the decoder…
         catch { try { ws.close(1003, "malformed frame"); } catch { /* already gone */ } return; }  // …drop the peer, never the host
+        const t1 = trace ? performance.now() : 0;
         cb(msg.obj, msg.bin);
+        if (trace) {
+          const t2 = performance.now();
+          const log = (g.__tierlessWirePhases ||= []);
+          log.push({ t: t0, gap: g.__tierlessLastFrameEnd !== undefined ? t0 - g.__tierlessLastFrameEnd : 0, dec: t1 - t0, dlv: t2 - t1, bytes: (data as ArrayBuffer).byteLength ?? (data as Uint8Array).length ?? 0, k: msg.obj?.kind, ty: msg.obj?.payload?.type });
+          if (log.length > 1000) log.splice(0, 500);
+          g.__tierlessLastFrameEnd = t2;
+        }
       });
     },
     onClose(cb: () => void): void { on("close", () => cb()); },
