@@ -26,6 +26,16 @@ export interface RestResourcesOpts {
      *  semantics themselves (the axios adapter honors validateStatus) need status,
      *  headers, and error body intact. Default false: workflow code sees a throw. */
     envelopeErrors?: boolean;
+    /** GATEWAY-SIDE: ask the upstream for `identity` instead of letting fetch negotiate
+     *  gzip. The session socket deflates every reply anyway (permessage-deflate), so
+     *  upstream compression is pure recompression: the backend gzips and the gateway
+     *  immediately gunzips, burning CPU in BOTH processes to shrink a hop that is
+     *  normally localhost or same-VPC. Measured on an 8.9 MB JSON reply: 46 ms backend
+     *  gzip + 147 ms gateway gunzip, for bytes that never reach the browser in that
+     *  form. The trade is real and stated: the upstream hop carries the full body
+     *  uncompressed, so leave this OFF when the gateway is far from the backend.
+     *  A caller's own accept-encoding header always wins. */
+    upstreamIdentity?: boolean;
 }
 /** An Exec servicing `api.get(path)` / `api.post(path, body)` — and per-request headers
  *  via `api.get(path, undefined, {headers})` — against a real REST base URL.
@@ -73,4 +83,4 @@ export declare function crossHttpRequest(instance: {
     };
 } | null | undefined, req: ResourceRequest): ResourceRequest | null | Promise<ResourceRequest | null>;
 export declare function httpResources(instance: Record<string, unknown>): Exec;
-export declare function restResources(baseUrl: string, { token, headers, fetchImpl, envelopeErrors }?: RestResourcesOpts): Exec;
+export declare function restResources(baseUrl: string, { token, headers, fetchImpl, envelopeErrors, upstreamIdentity }?: RestResourcesOpts): Exec;

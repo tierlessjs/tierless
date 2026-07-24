@@ -207,7 +207,7 @@ export function httpResources(instance) {
         return { data: r.data, status: r.status, statusText: r.statusText ?? "", headers: r.headers?.toJSON ? r.headers.toJSON() : { ...r.headers } };
     };
 }
-export function restResources(baseUrl, { token, headers = {}, fetchImpl = fetch, envelopeErrors = false } = {}) {
+export function restResources(baseUrl, { token, headers = {}, fetchImpl = fetch, envelopeErrors = false, upstreamIdentity = false } = {}) {
     const base = baseUrl.replace(/\/$/, "");
     return async (req) => {
         const m = /^api\.(get|post|put|patch|delete|head|options)$/.exec(req.name);
@@ -226,6 +226,9 @@ export function restResources(baseUrl, { token, headers = {}, fetchImpl = fetch,
         else
             throw new Error("restResources: first argument must be an absolute path or same-origin URL, got " + JSON.stringify(path));
         const merged = {
+            // no upstream gzip to immediately gunzip: the socket recompresses anyway (see
+            // upstreamIdentity). First in the spread so anything explicit still wins.
+            ...(upstreamIdentity ? { "accept-encoding": "identity" } : {}),
             ...(body !== undefined ? { "content-type": "application/json" } : {}),
             ...(token ? { authorization: token.startsWith("Bearer ") ? token : "Bearer " + token } : {}),
             ...headers,

@@ -311,7 +311,7 @@ else if (cmd === "gateway") {
         res.statusCode = 200;
         res.end("tierless gateway"); // the suite's boot readiness wait
     });
-    const baseExec = authority ? authority.exec : restResources(backend, { envelopeErrors: true });
+    const baseExec = authority ? authority.exec : restResources(backend, { envelopeErrors: true, upstreamIdentity: true });
     // --log-gets: profiling for the preboot manifest — append each distinct 2xx GET path,
     // so one boot capture becomes the --preboot-file of the frozen arm. Zero cost unset.
     const seenGets = new Set();

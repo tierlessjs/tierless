@@ -81,6 +81,16 @@ export interface RestResourcesOpts {
    *  semantics themselves (the axios adapter honors validateStatus) need status,
    *  headers, and error body intact. Default false: workflow code sees a throw. */
   envelopeErrors?: boolean;
+  /** GATEWAY-SIDE: ask the upstream for `identity` instead of letting fetch negotiate
+   *  gzip. The session socket deflates every reply anyway (permessage-deflate), so
+   *  upstream compression is pure recompression: the backend gzips and the gateway
+   *  immediately gunzips, burning CPU in BOTH processes to shrink a hop that is
+   *  normally localhost or same-VPC. Measured on an 8.9 MB JSON reply: 46 ms backend
+   *  gzip + 147 ms gateway gunzip, for bytes that never reach the browser in that
+   *  form. The trade is real and stated: the upstream hop carries the full body
+   *  uncompressed, so leave this OFF when the gateway is far from the backend.
+   *  A caller's own accept-encoding header always wins. */
+  upstreamIdentity?: boolean;
 }
 
 /** An Exec servicing `api.get(path)` / `api.post(path, body)` — and per-request headers
@@ -212,7 +222,7 @@ export function httpResources(instance: Record<string, unknown>): Exec {
   };
 }
 
-export function restResources(baseUrl: string, { token, headers = {}, fetchImpl = fetch, envelopeErrors = false }: RestResourcesOpts = {}): Exec {
+export function restResources(baseUrl: string, { token, headers = {}, fetchImpl = fetch, envelopeErrors = false, upstreamIdentity = false }: RestResourcesOpts = {}): Exec {
   const base = baseUrl.replace(/\/$/, "");
   return async (req: ResourceRequest) => {
     const m = /^api\.(get|post|put|patch|delete|head|options)$/.exec(req.name);
@@ -226,6 +236,9 @@ export function restResources(baseUrl: string, { token, headers = {}, fetchImpl 
       url = path;
     } else throw new Error("restResources: first argument must be an absolute path or same-origin URL, got " + JSON.stringify(path));
     const merged: Record<string, string> = {
+      // no upstream gzip to immediately gunzip: the socket recompresses anyway (see
+      // upstreamIdentity). First in the spread so anything explicit still wins.
+      ...(upstreamIdentity ? { "accept-encoding": "identity" } : {}),
       ...(body !== undefined ? { "content-type": "application/json" } : {}),
       ...(token ? { authorization: token.startsWith("Bearer ") ? token : "Bearer " + token } : {}),
       ...headers,

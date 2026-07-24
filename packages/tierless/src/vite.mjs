@@ -432,7 +432,7 @@ export default function tierless(opts = {}) {
                 },
                 session: async (req) => {
                     const token = bearerFromUpgrade(req);
-                    const rest = restResources(apiUrl, { token });
+                    const rest = restResources(apiUrl, { token, upstreamIdentity: true });
                     // the twin of the app's own axios instance: http.* from compiled class methods
                     const twin = httpResources(twinHttp(apiUrl, { token }));
                     const log = !!process.env.TIERLESS_LOG_EXEC;

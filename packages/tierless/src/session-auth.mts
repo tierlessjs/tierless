@@ -108,7 +108,9 @@ export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_00
       captured.push(...((resp.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ?? []));
       return resp;
     };
-    const inner = restResources(backendUrl, { envelopeErrors: true, fetchImpl: capturing });
+    // upstreamIdentity: the reply is deflated by the socket anyway — asking the backend
+    // for gzip would burn a gzip there and a gunzip here for a hop that is normally local
+    const inner = restResources(backendUrl, { envelopeErrors: true, fetchImpl: capturing, upstreamIdentity: true });
     const env = await inner({ ...r, args: [path, data, { ...(reqOpts ?? {}), headers }] }) as Record<string, unknown>;
     if (captured.length) {
       env[AUTH_FIELD] = {
@@ -168,7 +170,7 @@ export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_00
   const hello = async (cookie: string, { auth = true, preboot = true }: { auth?: boolean; preboot?: boolean } = {}): Promise<{ blob: string | null; sealed: boolean; preboot?: Record<string, unknown> }> => {
     const blob = auth && cookie ? seal({ p: "session", c: cookie, iat: now() }) : null;
     if (!preboot || !cookie || !prebootPaths.length) return { blob, sealed: auth };
-    const inner = restResources(backendUrl, { envelopeErrors: true, fetchImpl: baseFetch });
+    const inner = restResources(backendUrl, { envelopeErrors: true, fetchImpl: baseFetch, upstreamIdentity: true });
     const pb: Record<string, unknown> = {};
     await Promise.all(prebootPaths.map(async (path) => {
       try { pb[path] = await inner({ op: "resource", tier: "server", name: "api.get", args: [path, undefined, { headers: { cookie } }] } as ResourceRequest); }

@@ -98,6 +98,39 @@ check("…and the dead index entry stops attaching validators", again.status ===
   check("the 304 comes back as a tiny envelope (envelopeErrors mode)", env.status === 304);
 }
 
+// NO UNNECESSARY RECOMPRESSION on the gateway hop: the session socket deflates every
+// reply, so letting fetch negotiate gzip upstream buys nothing and costs a gzip in the
+// backend plus a gunzip in the gateway (measured 46 ms + 147 ms on an 8.9 MB reply).
+// upstreamIdentity asks for identity; an explicit caller header still wins; the
+// decoded envelope is identical either way.
+{
+  const { createServer } = await import("node:http");
+  const { gzipSync } = await import("node:zlib");
+  const { restResources } = await import("tierless/adapt");
+  const payload = { rows: Array.from({ length: 200 }, (_, i) => ({ i, name: "row" + i })) };
+  const seenEnc: string[] = [];
+  const srv = createServer((req, res) => {
+    const enc = String(req.headers["accept-encoding"] ?? "");
+    seenEnc.push(enc);
+    res.setHeader("content-type", "application/json");
+    if (/\bgzip\b/.test(enc)) { res.setHeader("content-encoding", "gzip"); res.end(gzipSync(Buffer.from(JSON.stringify(payload)))); }
+    else res.end(JSON.stringify(payload));
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = "http://127.0.0.1:" + (srv.address() as { port: number }).port;
+  const call = (opts: object, reqOpts?: object): Promise<{ body?: unknown }> =>
+    restResources(base, { envelopeErrors: true, ...opts })({ op: "res", tier: "server", name: "api.get", args: ["/x", undefined, reqOpts] } as never) as never;
+
+  const idEnv = await call({ upstreamIdentity: true });
+  check("upstreamIdentity asks the backend for identity — no gzip to gunzip", seenEnc[0] === "identity", seenEnc[0]);
+  check("…and the envelope is byte-for-byte the same data", JSON.stringify(idEnv.body) === JSON.stringify(payload));
+  await call({});
+  check("default still negotiates normally (browser-side execs unchanged)", /gzip/.test(seenEnc[1]), seenEnc[1]);
+  await call({ upstreamIdentity: true }, { headers: { "accept-encoding": "gzip" } });
+  check("an explicit caller accept-encoding wins over upstreamIdentity", /gzip/.test(seenEnc[2]), seenEnc[2]);
+  srv.close();
+}
+
 const { pass, fail } = counts();
 console.log(fail === 0
   ? `\nOK — conditional crossings give session GETs the browser cache's own revalidation: validated replay on 304, full fetch on change, untouched otherwise (${pass} checks)`

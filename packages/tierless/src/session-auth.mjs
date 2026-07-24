@@ -91,7 +91,9 @@ export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_00
             captured.push(...(resp.headers.getSetCookie?.() ?? []));
             return resp;
         };
-        const inner = restResources(backendUrl, { envelopeErrors: true, fetchImpl: capturing });
+        // upstreamIdentity: the reply is deflated by the socket anyway — asking the backend
+        // for gzip would burn a gzip there and a gunzip here for a hop that is normally local
+        const inner = restResources(backendUrl, { envelopeErrors: true, fetchImpl: capturing, upstreamIdentity: true });
         const env = await inner({ ...r, args: [path, data, { ...(reqOpts ?? {}), headers }] });
         if (captured.length) {
             env[AUTH_FIELD] = {
@@ -160,7 +162,7 @@ export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_00
         const blob = auth && cookie ? seal({ p: "session", c: cookie, iat: now() }) : null;
         if (!preboot || !cookie || !prebootPaths.length)
             return { blob, sealed: auth };
-        const inner = restResources(backendUrl, { envelopeErrors: true, fetchImpl: baseFetch });
+        const inner = restResources(backendUrl, { envelopeErrors: true, fetchImpl: baseFetch, upstreamIdentity: true });
         const pb = {};
         await Promise.all(prebootPaths.map(async (path) => {
             try {
