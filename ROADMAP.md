@@ -141,10 +141,22 @@ proven (the executable proofs behind `npm test`).
   none yet measured: the extra TextDecoder pass over the frame; HEAD-OF-LINE
   blocking (one 12 MB reply serializes ahead of every small reply on the ONE
   session socket, where stock spreads over 6 connections); gateway-side
-  re-stringify per crossing; plain render competition stock also pays. Next
-  instrument: phase-decompose a contended crossing browser-side (decode ms vs
-  queue-wait ms vs parse ms) before ANY further fix attempt. Evidence:
-  ports/n8n/README.md wall-time section.
+  re-stringify per crossing; plain render competition stock also pays.
+  MEASURED (2026-07-24, per-frame phase telemetry in wsPort, gated on
+  __TIERLESS_EXEC_LOG__): the browser transport is EXONERATED — a cold n8n
+  canvas boot's entire frame handling is ~112 ms (111 ms of it the 12.66 MB
+  reply's native TextDecoder+JSON.parse, comparable to stock's own parse; a
+  WARM boot is ~1 ms, the conditional-crossings replay stores envelopes
+  parsed), and no head-of-line signature (inter-reply gaps are app pacing,
+  seconds, vs the one 111 ms frame). The ~1.1 s/session cannot be
+  browser-main-thread transport work. Remaining mass points at the SHARED
+  MEASUREMENT BOX: the gateway hop and backend burn the same saturated cores
+  as the render storm — cost a deployment with a separate gateway machine
+  does not pay — plus the earlier-mount-storm timing shift. Next
+  discriminator: re-run the #15 single-test phase comparison with the
+  gateway/backend CPU-pinned away from the browser (taskset); if the wall
+  delta collapses, the regression is a harness artifact to document, not a
+  transport defect to fix. Evidence: ports/n8n/README.md wall-time section.
 
 - **Conditional crossings — SHIPPED (2026-07-23, tierless/adapt-cache).**
   Session GETs now carry the browser cache's own revalidation: path+ETag
