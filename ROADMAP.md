@@ -129,13 +129,21 @@ proven (the executable proofs behind `npm test`).
   and measured neutral too — its expensive boot crossings are sequential
   dependents, nothing to coalesce. One more port, then remove.
 
-- **Session-boot contention (n8n diagnosis, 2026-07-20).** Crossings inside a
-  page's boot render-storm pay 2-5x CPU contention on a shared box (main-thread
-  decode + the gateway hop); quiet-period crossings are at parity with direct
-  HTTP. ~1.1 s/session on n8n's heavy editor boot, per fresh page — the harness
-  pays it per test. Candidates if a port needs it fixed rather than documented:
-  off-main-thread frame decode (Worker), crossing scheduling priority, letting
-  the preboot join FEED the mount storm more gradually. Evidence:
+- **Session-boot contention (n8n diagnosis, 2026-07-20; narrowed 2026-07-24).**
+  Crossings inside a page's boot render-storm pay 2-5x CPU contention on a
+  shared box; quiet-period crossings are at parity with direct HTTP.
+  ~1.1 s/session on n8n's heavy editor boot — and the budget traced the
+  nodes.json double-fetch (+294 MB) to the same window. RULED OUT (2026-07-24,
+  a JsonText edge-parse implementation was built, falsified by its own e2e,
+  and reverted): per-reply structural decode — exec replies ride the message's
+  JSON header and the browser ALREADY parses them with one native JSON.parse;
+  there is no JS graph walk on the fetch arm's replies. Remaining candidates,
+  none yet measured: the extra TextDecoder pass over the frame; HEAD-OF-LINE
+  blocking (one 12 MB reply serializes ahead of every small reply on the ONE
+  session socket, where stock spreads over 6 connections); gateway-side
+  re-stringify per crossing; plain render competition stock also pays. Next
+  instrument: phase-decompose a contended crossing browser-side (decode ms vs
+  queue-wait ms vs parse ms) before ANY further fix attempt. Evidence:
   ports/n8n/README.md wall-time section.
 
 - **Conditional crossings — SHIPPED (2026-07-23, tierless/adapt-cache).**
