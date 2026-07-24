@@ -149,14 +149,25 @@ proven (the executable proofs behind `npm test`).
   WARM boot is ~1 ms, the conditional-crossings replay stores envelopes
   parsed), and no head-of-line signature (inter-reply gaps are app pacing,
   seconds, vs the one 111 ms frame). The ~1.1 s/session cannot be
-  browser-main-thread transport work. Remaining mass points at the SHARED
-  MEASUREMENT BOX: the gateway hop and backend burn the same saturated cores
-  as the render storm — cost a deployment with a separate gateway machine
-  does not pay — plus the earlier-mount-storm timing shift. Next
-  discriminator: re-run the #15 single-test phase comparison with the
-  gateway/backend CPU-pinned away from the browser (taskset); if the wall
-  delta collapses, the regression is a harness artifact to document, not a
-  transport defect to fix. Evidence: ports/n8n/README.md wall-time section.
+  browser-main-thread transport work. LOCATED INSTEAD ON THE GATEWAY, and it
+  is REAL deployment cost on the critical path, not a shared-box artifact (an
+  earlier draft of this entry said otherwise — corrected by measurement): the
+  gateway round-trips every large body through JS per crossing, where stock
+  streams pre-gzipped bytes the browser parses once. Timed on an 8.9 MB
+  node-types-shaped payload: stock backend 46 ms (one gzip) vs ported 435 ms
+  (backend gzip 46 + gateway gunzip 147 + JSON.parse 83 + JSON.stringify into
+  the message header 122 + deflate 37) — ~390 ms extra per crossing, ~540 ms
+  at n8n's 12.4 MB, between backend response and browser reply.
+  FIX (designed, not built): BODY PASSTHROUGH. encodeMessage's frame is
+  already [u32 jsonLen][u32 binLen][json][bin] — a large body rides the bin
+  slot as raw UTF-8, so the gateway never parses or re-stringifies it and the
+  browser does exactly ONE native parse (stock's own cost); request identity
+  encoding from the backend and the gunzip goes too (~390 ms -> ~40 ms). Note
+  this is the JsonText idea at the RIGHT tier: that attempt targeted a
+  browser-side structural decode that does not exist, and was reverted.
+  Sequencing: build passthrough, then re-run the #15 single-test phase
+  comparison; whatever wall delta survives is the shared-box/mount-storm
+  residue, and CPU-pinning (taskset) sizes that separately.
 
 - **Conditional crossings — SHIPPED (2026-07-23, tierless/adapt-cache).**
   Session GETs now carry the browser cache's own revalidation: path+ETag
