@@ -429,20 +429,36 @@ pass-parity-gated arm pair after (a) the gateway fixes — re-serialization,
 and (b) removing the nodes.json double-fetch confound from BOTH arms
 (`commonPatches/0006`). 736 tests per arm, 553 comparable pairs:
 
-    total bytes   5.700 GB stock -> 5.710 GB ported   (+9.9 MB, +0.17%)
-    median per-test                                   (+2.2%; quartiles +0.1% / +2.3%)
+    total bytes   6.132 GB stock -> 6.095 GB ported   (-37 MB, -0.60%)
 
-So the byte regression is **+4.3% -> +0.17%, essentially parity**, and the
-+294 MB nodes.json term is gone by construction (both arms now fetch it once
-per page). The old figure was never all tierless: most of it was an upstream
-race the port amplified.
+read from the INDEPENDENT instruments — the per-path HTTP log for everything the
+browser fetched, plus the gateway's ws counter — NOT by summing per-test deltas
+(see the attribution note below). Pass-parity-gated per-test sums put the same
+pair at +0.17% (median per-test +2.2%); both readings are parity within 1%, and
+the arm-level figure is the one comparable to the +4.3% above.
 
-Two instrument notes, both load-bearing. Five pairs reported ZERO bytes in one
-arm and ~9 MB in the other — a missed counter read, not a measurement, since a
-test cannot load an app page in one arm and use no bytes in the other. Left in,
-four of them carried 34.1 MB of a 35.0 MB delta and turned parity into a +0.6%
-regression; `ports/report.mts` now excludes and lists one-sided zeros on the
-same discipline as pass-parity. And WALL TIME IS NOT RE-MEASURED HERE: a
+So the byte regression is **+4.3% -> parity (-0.6% to +0.2% depending on
+basis)**, and the +294 MB nodes.json term is gone by construction (both arms now
+fetch it once per page). The old figure was never all tierless: most of it was an
+upstream race the port amplified.
+
+ATTRIBUTION, and why the arm-level figure is the honest one. Five pairs reported
+ZERO bytes in one arm and ~9 MB in the other, which cannot be real — a test does
+not load an app page in one arm and use no bytes in the other. Chasing those five
+found the actual defect: the reporter took two INDEPENDENT counter reads per test
+(`onTestBegin`, `onTestEnd`), so traffic in the gap BETWEEN tests belonged to
+nobody and was silently dropped from per-test sums. Measured against the
+independent HTTP log, that lost **155 MB of 6.13 GB on the stock arm (2.53%) and
+64 MB of 5.25 GB on the ported arm (1.21%)** — an asymmetry an order of magnitude
+larger than the arm difference being measured, and biased AGAINST the port.
+Fixed: the reporter now CHAINS snapshots (each test's opening read is the previous
+test's closing one), so the sum of deltas is exactly the counters' total movement;
+jitter can move bytes between neighbours, conservation holds
+(`test/probes/playwright-reporter.mts`). `ports/report.mts` also excludes and
+lists one-sided zeros, on the same discipline as pass-parity. The n8n numbers
+above are read from the independent instruments and so predate none of this.
+
+WALL TIME IS NOT RE-MEASURED HERE: a
 wire-truth+budget arm puts two userspace relay hops on the app origin and a
 third on the session socket, which only the ported arm uses for data — an
 asymmetric instrument cost (this run reads +23%, against +8% for the

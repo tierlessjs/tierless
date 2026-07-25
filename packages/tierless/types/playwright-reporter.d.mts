@@ -20,10 +20,15 @@ interface FullConfigLike {
 export default class TierlessMeasureReporter {
     private rootDir;
     private projectNames;
-    private before;
+    /** The previous test's CLOSING snapshot — this test's opening one. null until the first
+     *  read lands (or after a failed read), which flags rather than resets. */
+    private last;
+    /** Serializes counter reads and row appends: reporter hooks are not awaited, so without
+     *  this two reads could interleave and the chain's ordering guarantee would be lost. */
+    private chain;
     onBegin(config: FullConfigLike): void;
-    onTestBegin(_test: TestCaseLike): Promise<void>;
-    onTestEnd(test: TestCaseLike, result: TestResultLike): Promise<void>;
+    onTestEnd(test: TestCaseLike, result: TestResultLike): void;
+    private record;
     printsToStdio(): boolean;
 }
 export {};
