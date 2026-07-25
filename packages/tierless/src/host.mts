@@ -14,6 +14,7 @@
 // correlation ids keep their bounces apart.
 import { makePump, initialStack } from "./runtime.mjs";
 import { encodeWireBinary, decodeWireBinary, encodeArgs, decodeArgs } from "./wire-binary.mjs";
+import { RawJsonBody } from "./transport.mjs";
 import { makeRecorder, decide, siteKey, argFeatures, type RecorderOpts, type Recorder, type Profile } from "./trace.mjs";
 import { DEREF_TIER, usesHeap, type Coherence } from "./coherence.mjs";
 import type { EncodeOptions } from "./graph.mjs";
@@ -101,6 +102,9 @@ function ownedUnit(v: unknown): boolean {
 }
 
 let nextSid = 1;
+
+const TE = new TextEncoder();
+const TD = new TextDecoder();
 
 export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn, twins, placement }: MakeHostOpts): Host {
   const placeProfile = placement?.profile ?? null;
@@ -378,7 +382,16 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
     handleExec: async (payload, bin) => {
       try {
         const [name, rargs] = decodeArgs(bin!) as [string, unknown[]];
-        const value = await exec({ op: "resource", tier: payload.tier || tier, name, args: rargs });
+        // raw: THIS reply goes straight out, so an unparsed JSON body can ride the
+        // frame's binary slot — the exec skips a parse and the encoder skips a
+        // stringify of the whole body (transport.mts RawJsonBody). Only here: the
+        // pump's own execHere makes continuation state and must get real values.
+        const value = await exec({ op: "resource", tier: payload.tier || tier, name, args: rargs, raw: true });
+        const raw = (value as { body?: unknown } | null)?.body;
+        if (raw instanceof RawJsonBody) {
+          const { body: _raw, ...rest } = value as { body?: unknown };   // drop the key outright, not to undefined
+          return { obj: { type: "done", value: rest, rawBody: true }, bin: TE.encode(raw.text) };
+        }
         return { obj: { type: "done", value } };
       } catch (e: any) {
         const r = e?.response;
@@ -405,7 +418,13 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
 // them either way). This is exactly the exchange runLocal's fetch arm performs at a
 // park; exposed so an I/O-bottom adapter can cross the session without a machine.
 export async function execOver(peer: Peer, req: ResourceRequest, meta: Record<string, unknown> = {}): Promise<unknown> {
-  const { obj } = await peer.request({ type: "exec", tier: req.tier, ...meta }, encodeArgs([req.name, req.args]));
+  const { obj, bin } = await peer.request({ type: "exec", tier: req.tier, ...meta }, encodeArgs([req.name, req.args]));
+  // a body that rode the binary slot: parse it back in — ONE parse at this edge, the
+  // same one the caller's data always cost when the body travelled inside the header
+  if (obj.type === "done" && obj.rawBody && bin) {
+    try { obj.value = { ...(obj.value as object), body: JSON.parse(TD.decode(bin)) }; }
+    catch { throw new Error("tierless: malformed JSON body from " + String((req.args ?? [])[0] ?? req.name)); }
+  }
   if (obj.type === "error") {
     const err = new Error(obj.message) as Error & { response?: unknown; isAxiosError?: boolean; code?: string };
     if (obj.response) {                                      // HTTP-semantics failure: app code reads error.response.data

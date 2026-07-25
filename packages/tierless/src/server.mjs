@@ -72,7 +72,22 @@ export function bearerFromUpgrade(req) {
 // fire the hello, wire §5 coherence, build the module-host map, and answer. The transport
 // differs only in how the Peer's Port is made — the session logic is identical.
 async function serveSessionOn(peer, req, cfg) {
-    const { exec, entry, args = [], onDone, twins, hello } = await cfg.session(req);
+    const setup = await cfg.session(req);
+    const { entry, args = [], onDone, twins, hello } = setup;
+    // GATEWAY-SIDE phase timing (TIERLESS_WIRE_LOG): how long each crossing spends
+    // upstream+decoding before the reply exists. Pairs with the send-side timing in
+    // wireLogPort (frame encode) and the browser's __tierlessWirePhases to give one
+    // per-crossing timeline across both tiers — the decomposition the boot-contention
+    // diagnosis needs before attributing anything (ROADMAP).
+    const exec = !wireLogFile() ? setup.exec : async (r) => {
+        const t0 = Date.now();
+        try {
+            return await setup.exec(r);
+        }
+        finally {
+            wireLogLine({ ph: "exec", ms: Date.now() - t0, name: String(r.name), p: String((r.args ?? [])[0] ?? "") });
+        }
+    };
     // fold a startup round trip into the handshake: fire the hello the instant the pipe is
     // up — ALWAYS, defaulting to "no cookie authority here" so the browser's auth wrapper
     // (auth:"auto") settles at socket-open instead of its 5s no-hello safety net.
@@ -99,8 +114,18 @@ async function serveSessionOn(peer, req, cfg) {
 // compressed sizes unobservable); pair with the TCP-true totals from --wire-truth to
 // see what content a session's bytes actually are. Debug instrument: measurable
 // decode cost per message, so it stays behind the env gate.
+const wireLogFile = () => (typeof process !== "undefined" ? process.env?.TIERLESS_WIRE_LOG : undefined);
+const wireLogLine = (o) => {
+    const file = wireLogFile();
+    if (!file)
+        return;
+    try {
+        fs.appendFileSync(file, JSON.stringify({ ts: Date.now(), ...o }) + "\n");
+    }
+    catch { /* full disk etc. */ }
+};
 const wireLogPort = (port) => {
-    const file = typeof process !== "undefined" ? process.env?.TIERLESS_WIRE_LOG : undefined;
+    const file = wireLogFile();
     if (!file)
         return port;
     const paths = new Map(); // request id -> api path, labels the reply
@@ -139,7 +164,10 @@ const wireLogPort = (port) => {
         catch { /* full disk etc. */ }
     };
     return {
-        send: (obj, bin) => { line("out", obj, bin ?? null); port.send(obj, bin); },
+        // the send is timed: this is where encodeMessage's JSON.stringify serializes the
+        // whole reply — the gateway-side serde cost a large body pays on its way out
+        send: (obj, bin) => { line("out", obj, bin ?? null); const t0 = Date.now(); port.send(obj, bin); const ms = Date.now() - t0; if (ms > 0)
+            wireLogLine({ ph: "send", ms, k: obj.kind }); },
         onMessage: (cb) => port.onMessage((obj, bin) => { line("in", obj, bin); cb(obj, bin); }),
         onClose: (cb) => port.onClose(cb),
         close: () => port.close(),

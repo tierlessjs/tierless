@@ -42,6 +42,26 @@ export function decodeMessage(data) {
 export function onEvent(ws, event, fn) {
     return typeof ws.on === "function" ? ws.on(event, fn) : ws.addEventListener(event, fn);
 }
+/** A response body that is ALREADY valid JSON text. A gateway's restResources hands it
+ *  over UNPARSED when the caller signalled it can take raw text (`ResourceRequest.raw`,
+ *  set only by handleExec — the fetch arm, whose reply goes straight out); handleExec
+ *  then ships the text in the frame's BINARY slot, so the reply's JSON header never
+ *  re-serializes it either. That removes a full parse AND a full stringify of the body
+ *  on the gateway — measured 83 ms + 122 ms on an 8.9 MB reply — for bytes the gateway
+ *  never looks at. The receiving edge parses once, exactly as it already did when the
+ *  body travelled inside the header.
+ *
+ *  Deliberately NOT used on the migrate arm or the hello preboot: there the envelope
+ *  becomes continuation state or rides a JSON message, and a marker object would
+ *  serialize as data instead of the body. The `raw` hint keeps those paths on the
+ *  parsed path by simply not asking. Trade: malformed upstream JSON now surfaces at
+ *  the receiving edge rather than in the gateway. */
+export class RawJsonBody {
+    text;
+    constructor(text) {
+        this.text = text;
+    }
+}
 // Adapt a WebSocket-like object (a browser WebSocket or a `ws` socket) to a small duplex
 // port, normalizing the two event APIs and binary payload types.
 export function wsPort(ws) {

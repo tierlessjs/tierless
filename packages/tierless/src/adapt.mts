@@ -17,6 +17,7 @@
 // exactly as if the browser had sent it. (The reference-monitor api service remains the
 // trust model for apps that own their backend; this adapter is the no-rewrite seam.)
 import { serializeParams } from "./adapt-axios.mjs";
+import { RawJsonBody } from "./transport.mjs";
 import type { Exec, ResourceRequest } from "./types.mjs";
 
 // What twinHttp's methods resolve to / reject with — the axios-response subset real
@@ -267,6 +268,11 @@ export function restResources(baseUrl: string, { token, headers = {}, fetchImpl 
     // already forwards through reqOpts.headers above, and a 304 is a tiny envelope
     // (envelopeErrors mode), exactly HTTP's own revalidation shape on the socket.
     r.headers.forEach((v, k) => { if (k === "content-type" || k === "etag" || k.startsWith("x-")) hdrs[k] = v; });
+    // NO SERDE WE DON'T NEED: when the caller signalled it takes raw text (handleExec —
+    // the fetch arm, which ships the body in the frame's binary slot), the gateway hands
+    // the JSON straight through instead of parsing it here only for the reply encoder to
+    // stringify it right back. It never inspects this body. See transport.mts RawJsonBody.
+    if (isJson && text && (req as ResourceRequest).raw) return { status: r.status, headers: hdrs, body: new RawJsonBody(text) };
     return { status: r.status, headers: hdrs, body: isJson && text ? JSON.parse(text) : text };
   };
 }

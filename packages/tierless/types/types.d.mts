@@ -39,6 +39,12 @@ export interface ResourceRequest {
     tier: string;
     name: string;
     args: unknown[];
+    /** The caller can take an UNPARSED JSON body (transport.mts RawJsonBody) — set only
+     *  by handleExec, whose reply ships the text in the frame's binary slot instead of
+     *  re-serializing it. Every other path (the pump's own execHere, whose result becomes
+     *  continuation state; the hello preboot, which rides a JSON message) leaves it unset
+     *  and gets a parsed body. An exec that does not understand the hint may ignore it. */
+    raw?: boolean;
 }
 /** The §5 stop rule's park marker (docs/migrate-arm.md): the stack must go to `tier` —
  *  where the handle in slot `name` lives — before its next segment can run. Pump-internal;
@@ -87,10 +93,15 @@ export interface Peer {
     close(): void;
 }
 /** A host's answer to handleStart/handleResume — mirrors the wire protocol host.mts documents. */
-export type HostReply = {
+export type HostReply = 
+/** rawBody: the envelope's `body` was omitted from this JSON header and rides the
+ *  frame's binary slot as raw JSON text (transport.mts RawJsonBody) — execOver parses
+ *  it back in at the receiving edge. */
+{
     type: "done";
     value: unknown;
     twinDeltas?: TwinDelta[];
+    rawBody?: boolean;
 } | {
     type: "suspend";
     twinDeltas?: TwinDelta[];
