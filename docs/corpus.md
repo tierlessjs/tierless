@@ -98,6 +98,43 @@ about the page; each hand hunk carries a comment saying why. Failures that remai
 (e.g. a login provider whose container we don't run) fail identically in both arms and
 fall out of the report's pass-parity gate, listed with both statuses.
 
+## What a byte headline actually reports
+
+Two ports produced very different numbers on the same transport — vikunja cut suite IO,
+n8n came out at parity — and the difference is the WORKLOAD, not the port quality. The
+decomposition (n8n measured 2026-07-25, `ports/n8n/report-anatomy.mts`):
+
+    byte win  ~=  addressable share  x  per-slice win
+
+- **Addressable share** — the fraction of the app's browser bytes on paths the session
+  can serve at all. On n8n that is **15.0%**: 918 MB of `/rest/*` against 5,214 MB of
+  bundles, fonts and `/types/nodes.json` that are plain HTTP in BOTH arms and can only
+  dilute a percentage. A transport choice cannot reach 85% of this app's bytes.
+- **Per-slice win** — how much cheaper the session is on the traffic it does carry. On
+  n8n, **7.0%** (918 MB HTTP -> 854 MB session).
+
+Product: ~1% suite-wide, and the measured arm pair is -0.6%. Parity, and predictable.
+
+The per-slice win is where the interesting variation lives, and it is driven by REQUEST
+SHAPE rather than byte volume. A persistent session eliminates per-request overhead and
+compresses across calls, so it wins where traffic is MANY SMALL responses. n8n's
+addressable traffic is the opposite: **96.9% of its 918 MB sits in 511 responses over
+1 MB**, while 15,056 small calls averaging 1.8 KB carry only 3.1%. Request headers —
+the overhead a socket removes outright — are **1.57%** of addressable traffic there.
+There is simply little for the transport to win on a few huge, already-compressed
+bodies. Vikunja's addressable traffic is small-and-many, and its per-slice win is
+several times larger on a similar addressable share.
+
+Two consequences for the study:
+
+- Report the decomposition, not just the headline. "Parity" on an app whose bytes are
+  85% unreachable is a different fact from "parity" on an app the transport fully
+  serves, and only the decomposition distinguishes them.
+- Expect the distribution across 10–20 apps to be bimodal by workload shape, and say so
+  in advance rather than discovering it in the median. Chat/CRUD/dashboard apps with
+  chatty small APIs should land near vikunja; apps that ship large static catalogues to
+  the browser should land near n8n.
+
 ## Honesty constraints (bind all rungs)
 
 - **Bytes, trips, and latency are all measured — never via CDP throttling.** CDP's

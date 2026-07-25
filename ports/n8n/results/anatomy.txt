@@ -1,0 +1,47 @@
+
+=== baseline — 224,836 browser HTTP requests,   6132 MB ===
+  band           requests     bytes  share
+  < 10 KB         185,674    624 MB  10.2%
+  10-100 KB        29,297    906 MB  14.8%
+  100 KB-1 MB       8,580   2537 MB  41.4%
+  > 1 MB            1,285   2065 MB  33.7%
+  ADDRESSABLE (/rest/*, what the session can serve over HTTP here): 15,567 reqs,    918 MB,  15.0% of this arm's HTTP
+  top paths by bytes:
+      1011 MB  16.5%    694 reqs  [untouchable]  /types/nodes.json
+       888 MB  14.5%    510 reqs  [addressable]  /rest/community-node-types
+       557 MB   9.1%    731 reqs  [untouchable]  /assets/src-XWsjz-dU.js
+       472 MB   7.7%    731 reqs  [untouchable]  /assets/constants-DDbk7QLF.js
+       238 MB   3.9%    673 reqs  [untouchable]  /assets/InterVariable-DiVDrmQJ.woff2
+       224 MB   3.6%    728 reqs  [untouchable]  /assets/ParameterInputList-5alCjoJ5.js
+
+=== ported — 211,020 browser HTTP requests,   5246 MB ===
+  band           requests     bytes  share
+  < 10 KB         172,324    601 MB  11.5%
+  10-100 KB        29,329    927 MB  17.7%
+  100 KB-1 MB       8,593   2542 MB  48.5%
+  > 1 MB              774   1176 MB  22.4%
+  ADDRESSABLE (/rest/*, what the session can serve over HTTP here): 1,431 reqs,      4 MB,   0.1% of this arm's HTTP
+  top paths by bytes:
+      1011 MB  19.3%    695 reqs  [untouchable]  /types/nodes.json
+       558 MB  10.6%    732 reqs  [untouchable]  /assets/src-XWsjz-dU.js
+       473 MB   9.0%    732 reqs  [untouchable]  /assets/constants-DDbk7QLF.js
+       239 MB   4.6%    676 reqs  [untouchable]  /assets/InterVariable-DiVDrmQJ.woff2
+       224 MB   4.3%    729 reqs  [untouchable]  /assets/ParameterInputList-_jA7ScSj.js
+       212 MB   4.0%    732 reqs  [untouchable]  /assets/index-Bjlg0o0y.js
+
+=== what a transport choice can even reach ===
+  stock HTTP on addressable paths      918 MB   15.0% of stock browser HTTP
+  stock HTTP everywhere else          5214 MB   85.0%  <- identical in both arms, pure dilution
+  ported still on HTTP (addressable)      4 MB   (the rest moved to the session socket)
+  ported HTTP everywhere else         5242 MB
+
+  CEILING: even if the session carried every addressable byte for free, the
+  suite-wide win could not exceed  15.0%. A parity result on n8n is
+  therefore mostly a statement about the workload, not about the transport.
+
+=== on the slice it actually serves ===
+  stock     918 MB over HTTP
+  ported    854 MB over the session socket (+      4 MB residual HTTP)
+  => 7.0% cheaper on addressable traffic,
+     which is 1.0% of the suite. That product — addressable share x
+     per-slice win — is what a port's headline byte number actually reports.
