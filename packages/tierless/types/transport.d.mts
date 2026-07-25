@@ -27,6 +27,13 @@ export declare class RawJsonBody {
     readonly text: string;
     constructor(text: string);
 }
+/** The original JSON text of a body that crossed in the binary slot, hung off the
+ *  reassembled envelope under a symbol key: invisible to app code, ignored by
+ *  JSON.stringify, and free — the receiving edge already holds it. It exists so a cache
+ *  can persist the envelope WITHOUT re-serializing a body it was just handed as bytes,
+ *  which is what let the envelope store become a cheap, synchronous write instead of a
+ *  deferred one that lost races to page navigation (adapt-cache.mts). */
+export declare const RAW_TEXT: unique symbol;
 export interface Port {
     send(obj: object, bin?: Uint8Array): void;
     onMessage(cb: (obj: any, bin: Uint8Array | null) => void): void;

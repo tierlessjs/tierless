@@ -86,6 +86,13 @@ export class RawJsonBody {
         this.text = text;
     }
 }
+/** The original JSON text of a body that crossed in the binary slot, hung off the
+ *  reassembled envelope under a symbol key: invisible to app code, ignored by
+ *  JSON.stringify, and free — the receiving edge already holds it. It exists so a cache
+ *  can persist the envelope WITHOUT re-serializing a body it was just handed as bytes,
+ *  which is what let the envelope store become a cheap, synchronous write instead of a
+ *  deferred one that lost races to page navigation (adapt-cache.mts). */
+export const RAW_TEXT = Symbol("tierless.rawText");
 // Adapt a WebSocket-like object (a browser WebSocket or a `ws` socket) to a small duplex
 // port, normalizing the two event APIs and binary payload types.
 export function wsPort(ws) {

@@ -16,10 +16,17 @@
 // caches.open/match per crossing queues behind the render storm and flipped that
 // suite's marginal waits. So validator lookups are SYNCHRONOUS against a small
 // path->etag index (one localStorage getItem at construction — an ASYNC hydration
-// loses the race to a contended page's first crossings), the body read for a hit
-// runs CONCURRENT with the crossing (its latency hides under the RTT), and stores
-// happen at idle with a tight cap (past the boot storm, inside a page's lifetime —
-// a store that fires after navigation never happens at all).
+// loses the race to a contended page's first crossings), and the body read for a hit
+// runs CONCURRENT with the crossing (its latency hides under the RTT).
+//
+// The WRITE is synchronous — awaited before the crossing resolves — because its reader
+// is the next page load, a realm that cannot wait on anything this one is still doing.
+// It is affordable because it no longer serializes: the body arrives as text (the frame
+// carries it in the binary slot) and is stored as those same bytes. An earlier version
+// deferred the write to idle to dodge a re-serialization cost that no longer exists,
+// and lost the race on every fast navigation — measured on n8n as three concurrent cold
+// re-fetches of the same 12.4 MB payload, ~50 s of backend stall in one spec.
+import { RAW_TEXT } from "./transport.mjs";
 import type { Exec, ResourceRequest } from "./types.mjs";
 
 export interface EnvelopeStore {
@@ -29,8 +36,10 @@ export interface EnvelopeStore {
   index(): Map<string, string>;
   /** The stored envelope for a path (undefined = evicted/never stored). */
   body(path: string): Promise<unknown>;
-  /** Persist an envelope + its etag, and fold the pair into the index. */
-  set(path: string, etag: string, envelope: unknown): Promise<void>;
+  /** Persist an envelope + its etag, and fold the pair into the index. `bodyText`, when
+   *  given, is the body's ORIGINAL JSON text (transport.mts RAW_TEXT) — store it as-is
+   *  instead of re-serializing the parsed body. */
+  set(path: string, etag: string, envelope: unknown, bodyText?: string): Promise<void>;
 }
 
 export const memoryStore = (): EnvelopeStore => {
@@ -64,10 +73,17 @@ export const cacheStorageStore = (cacheName = "tierless-envelopes"): EnvelopeSto
         return hit ? await hit.json() : undefined;
       } catch { return undefined; }
     },
-    async set(p, etag, env) {
+    async set(p, etag, env, bodyText) {
+      // Build the stored JSON by CONCATENATION when we have the body's original text: a
+      // memcpy instead of a full re-serialization of a body the edge was just handed as
+      // bytes. That is what makes this write cheap enough to do immediately (below).
+      const e = env as { status?: number; headers?: Record<string, string> };
+      const json = bodyText !== undefined
+        ? '{"status":' + JSON.stringify(e.status ?? 200) + ',"headers":' + JSON.stringify(e.headers ?? {}) + ',"body":' + bodyText + "}"
+        : JSON.stringify(env);
       // no catch here: the caller logs-and-swallows, so a quota/serialization failure
       // is at least VISIBLE to the debug log instead of silently costing full price
-      await (await caches.open(cacheName)).put(key(p), new Response(JSON.stringify(env), { headers: { "content-type": "application/json" } }));
+      await (await caches.open(cacheName)).put(key(p), new Response(json, { headers: { "content-type": "application/json" } }));
       idx.set(p, etag);
       localStorage.setItem(LS_KEY, JSON.stringify(Object.fromEntries(idx)));   // body FIRST: an index entry must never precede its body
     },
@@ -87,12 +103,17 @@ const dbg = (ev: string, path: string): void => {
 export function conditionalCrossings({ store }: { store?: EnvelopeStore } = {}): { wrap(inner: Exec): Exec } {
   const s = store ?? (typeof caches === "undefined" || typeof localStorage === "undefined" ? memoryStore() : cacheStorageStore());
   const etags = s.index();                                    // sync — no crossing ever waits on hydration
-  const idle = (typeof requestIdleCallback === "function"
-    ? (fn: () => void) => requestIdleCallback(fn, { timeout: 2_500 })
-    : (fn: () => void) => setTimeout(fn, 0));                 // no render loop to yield to off-browser
-  const storeAt = (when: string, path: string, etag: string, env: unknown): void => {
-    dbg("sched:" + when, path);
-    idle(() => { dbg("run", path); s.set(path, etag, env).then(() => dbg("ok", path), (e) => dbg("fail:" + String(e).slice(0, 80), path)); });
+  // READ-YOUR-WRITES, across page loads. The reader of this cache is the NEXT page in
+  // the same context — a different JS realm, so there is no pending write to coordinate
+  // with and no version token to wait on: the write must simply have landed. It is
+  // therefore awaited before the crossing resolves. That is affordable only because the
+  // write no longer serializes the body (see set()'s bodyText path); the earlier
+  // deferred-to-idle version existed to dodge that cost and lost the race on every fast
+  // navigation, so each page re-fetched the same megabytes.
+  const persist = async (when: string, path: string, etag: string, env: unknown, bodyText?: string): Promise<void> => {
+    dbg("store:" + when, path);
+    try { await s.set(path, etag, env, bodyText); dbg("ok", path); }
+    catch (e) { dbg("fail:" + String(e).slice(0, 80), path); }   // over quota etc: next use pays full price, correctness unchanged
   };
   return {
     wrap: (inner) => async (req) => {
@@ -102,7 +123,7 @@ export function conditionalCrossings({ store }: { store?: EnvelopeStore } = {}):
       if (!etag) {
         const env = await inner(req) as { status?: number; headers?: Record<string, string> } | null;
         const fresh = r.name === "api.get" ? env?.headers?.etag : undefined;
-        if (env?.status === 200 && fresh) storeAt("cold", path, fresh, env);
+        if (env?.status === 200 && fresh) await persist("cold", path, fresh, env, (env as Record<symbol, unknown>)[RAW_TEXT] as string | undefined);
         return env;
       }
       const bodyRead = s.body(path).catch(() => undefined);   // CONCURRENT with the crossing — hides under the RTT
@@ -110,7 +131,7 @@ export function conditionalCrossings({ store }: { store?: EnvelopeStore } = {}):
       const env = await inner({ ...r, args: [p0, p1, { ...(opts ?? {}), headers: { ...(opts?.headers ?? {}), "if-none-match": etag } }] }) as { status?: number; headers?: Record<string, string> } | null;
       if (env?.status !== 304) {
         const fresh = env?.headers?.etag;
-        if (env?.status === 200 && fresh && fresh !== etag) storeAt("changed", path, fresh, env);
+        if (env?.status === 200 && fresh && fresh !== etag) await persist("changed", path, fresh, env, (env as Record<symbol, unknown>)[RAW_TEXT] as string | undefined);
         return env;
       }
       const cached = await bodyRead;

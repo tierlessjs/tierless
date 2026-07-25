@@ -14,7 +14,7 @@
 // correlation ids keep their bounces apart.
 import { makePump, initialStack } from "./runtime.mjs";
 import { encodeWireBinary, decodeWireBinary, encodeArgs, decodeArgs } from "./wire-binary.mjs";
-import { RawJsonBody } from "./transport.mjs";
+import { RawJsonBody, RAW_TEXT } from "./transport.mjs";
 import { makeRecorder, decide, siteKey, argFeatures, type RecorderOpts, type Recorder, type Profile } from "./trace.mjs";
 import { DEREF_TIER, usesHeap, type Coherence } from "./coherence.mjs";
 import type { EncodeOptions } from "./graph.mjs";
@@ -422,8 +422,10 @@ export async function execOver(peer: Peer, req: ResourceRequest, meta: Record<st
   // a body that rode the binary slot: parse it back in — ONE parse at this edge, the
   // same one the caller's data always cost when the body travelled inside the header
   if (obj.type === "done" && obj.rawBody && bin) {
-    try { obj.value = { ...(obj.value as object), body: JSON.parse(TD.decode(bin)) }; }
+    const text = TD.decode(bin);
+    try { obj.value = { ...(obj.value as object), body: JSON.parse(text) }; }
     catch { throw new Error("tierless: malformed JSON body from " + String((req.args ?? [])[0] ?? req.name)); }
+    (obj.value as Record<symbol, unknown>)[RAW_TEXT] = text;   // free: a cache can store bytes instead of re-serializing
   }
   if (obj.type === "error") {
     const err = new Error(obj.message) as Error & { response?: unknown; isAxiosError?: boolean; code?: string };

@@ -6,8 +6,10 @@ export interface EnvelopeStore {
     index(): Map<string, string>;
     /** The stored envelope for a path (undefined = evicted/never stored). */
     body(path: string): Promise<unknown>;
-    /** Persist an envelope + its etag, and fold the pair into the index. */
-    set(path: string, etag: string, envelope: unknown): Promise<void>;
+    /** Persist an envelope + its etag, and fold the pair into the index. `bodyText`, when
+     *  given, is the body's ORIGINAL JSON text (transport.mts RAW_TEXT) — store it as-is
+     *  instead of re-serializing the parsed body. */
+    set(path: string, etag: string, envelope: unknown, bodyText?: string): Promise<void>;
 }
 export declare const memoryStore: () => EnvelopeStore;
 export declare const cacheStorageStore: (cacheName?: string) => EnvelopeStore;

@@ -14,7 +14,7 @@
 // correlation ids keep their bounces apart.
 import { makePump, initialStack } from "./runtime.mjs";
 import { encodeWireBinary, decodeWireBinary, encodeArgs, decodeArgs } from "./wire-binary.mjs";
-import { RawJsonBody } from "./transport.mjs";
+import { RawJsonBody, RAW_TEXT } from "./transport.mjs";
 import { makeRecorder, decide, siteKey, argFeatures } from "./trace.mjs";
 import { DEREF_TIER, usesHeap } from "./coherence.mjs";
 const isRecorder = (t) => typeof t.ship === "function";
@@ -449,12 +449,14 @@ export async function execOver(peer, req, meta = {}) {
     // a body that rode the binary slot: parse it back in — ONE parse at this edge, the
     // same one the caller's data always cost when the body travelled inside the header
     if (obj.type === "done" && obj.rawBody && bin) {
+        const text = TD.decode(bin);
         try {
-            obj.value = { ...obj.value, body: JSON.parse(TD.decode(bin)) };
+            obj.value = { ...obj.value, body: JSON.parse(text) };
         }
         catch {
             throw new Error("tierless: malformed JSON body from " + String((req.args ?? [])[0] ?? req.name));
         }
+        obj.value[RAW_TEXT] = text; // free: a cache can store bytes instead of re-serializing
     }
     if (obj.type === "error") {
         const err = new Error(obj.message);
