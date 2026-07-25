@@ -15,7 +15,14 @@ import net from "node:net";
 import { appendFileSync } from "node:fs";
 
 export interface HttpLogLine {
-  ts: number; method: string; path: string; status: number;
+  ts: number;          // response END (the line is written when the body completes)
+  startedAt: number;   // request ARRIVAL. The pair makes CONCURRENCY observable: two
+                       // requests for one path overlap iff the second starts before the
+                       // first ends. Without it, duplicate-fetch analysis can only compare
+                       // completion gaps and cannot tell one page fetching twice from two
+                       // pages fetching once — the gap that left n8n's nodes.json
+                       // double-fetch resting on code shape rather than measurement.
+  method: string; path: string; status: number;
   reqBytes: number;    // request line + headers + body, as forwarded
   respBytes: number;   // status line + headers + body, as transferred
   enc?: string;        // response content-encoding, when present
@@ -31,6 +38,7 @@ const headerBlockSize = (firstLine: string, raw: string[]): number => {
  *  request to `file`. Returns the server (unref it in drivers, close it in tests). */
 export function httpLogProxy(listen: number, target: number, file: string): http.Server {
   const srv = http.createServer((req, res) => {
+    const startedAt = Date.now();
     let reqBytes = headerBlockSize(`${req.method} ${req.url} HTTP/1.1`, req.rawHeaders);
     const up = http.request({ host: "127.0.0.1", port: target, method: req.method, path: req.url, headers: req.headers }, (ur) => {
       let respBytes = headerBlockSize(`HTTP/1.1 ${ur.statusCode} ${ur.statusMessage ?? ""}`, ur.rawHeaders);
@@ -39,7 +47,7 @@ export function httpLogProxy(listen: number, target: number, file: string): http
       ur.on("end", () => {
         res.end();
         const line: HttpLogLine = {
-          ts: Date.now(), method: req.method ?? "", path: req.url ?? "", status: ur.statusCode ?? 0,
+          ts: Date.now(), startedAt, method: req.method ?? "", path: req.url ?? "", status: ur.statusCode ?? 0,
           reqBytes, respBytes,
           ...(ur.headers["content-encoding"] ? { enc: String(ur.headers["content-encoding"]) } : {}),
         };
