@@ -153,6 +153,14 @@ for (const p of toApply) {
   // plain patch(1), NOT `git apply`: the work tree lives inside this repo (gitignored), and
   // git apply silently no-ops (exit 0!) on paths under an ignored directory of the enclosing
   // repository. patch -p1 is cwd-relative and repo-oblivious, and fails loudly.
+  //
+  // The SAME hazard bites the BUILD after a patch, and it is worth knowing before you
+  // debug it the hard way: turbo hashes a package's inputs via git, so a file patched
+  // here is invisible to its cache key. `turbo run build` (which is what `pnpm build`
+  // and `pnpm agent:setup build` both run) then reports FULL TURBO and RESTORES a stale
+  // dist — not merely skipping the patch, but reverting the tree to whatever that cache
+  // entry held. Rebuild the changed package directly (`pnpm --filter <pkg> run build`)
+  // and verify the output hash actually moved.
   execFileSync("patch", ["-p1", "--no-backup-if-mismatch", "-i", path.join(recipeDir, p)], { cwd: src, stdio: "inherit" });
   applied.set(p, digest);
   writeApplied();
