@@ -51,6 +51,28 @@ export function mergeCookies(header, setCookies) {
 export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_000, fetchImpl, prebootPaths = [], now = Date.now, coalescePaths = [] }) {
     const key = randomBytes(32); // per boot, shared with no one
     const coalesced = (e) => (coalescePaths.length ? coalesceGets(e, coalescePaths) : e);
+    // ONE upstream fetcher for the whole authority. Building this per request — as an
+    // earlier cut did — gives the coalescer a fresh empty in-flight map every time, so it
+    // can never join anything: the bug only shows with two concurrent SESSIONS, which is
+    // why the unit probe (one wrapper, module scope) missed it.
+    //
+    // The captured Set-Cookie travels WITH the shared result, so a joiner adopts a
+    // rotation triggered by the request it joined — correct, since joining requires the
+    // same credential, and each caller still seals its own blob from it.
+    const fetchUpstream = coalesced(async (r) => {
+        const captured = [];
+        // capture set-cookie at the FETCH layer: restResources rightly drops it from the
+        // envelope (browsers never expose it to script), but rotation is exactly this signal
+        const capturing = async (...a) => {
+            const resp = await baseFetch(...a);
+            captured.push(...(resp.headers.getSetCookie?.() ?? []));
+            return resp;
+        };
+        // upstreamIdentity: the reply is deflated by the socket anyway — asking the backend
+        // for gzip would burn a gzip there and a gunzip here for a hop that is normally local
+        const env = await restResources(backendUrl, { envelopeErrors: true, fetchImpl: capturing, upstreamIdentity: true })(r);
+        return { env, captured };
+    });
     const allowed = new Set(allowedOrigins);
     const baseFetch = fetchImpl ?? ((...a) => fetch(...a));
     const seal = (payload) => {
@@ -84,20 +106,8 @@ export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_00
         }
         if (cookie)
             headers.cookie = cookie;
-        // capture set-cookie at the FETCH layer: restResources rightly drops it from the
-        // envelope (browsers never expose it to script), but rotation is exactly this signal
-        const captured = [];
-        const capturing = async (...a) => {
-            const resp = await baseFetch(...a);
-            captured.push(...(resp.headers.getSetCookie?.() ?? []));
-            return resp;
-        };
-        // upstreamIdentity: the reply is deflated by the socket anyway — asking the backend
-        // for gzip would burn a gzip there and a gunzip here for a hop that is normally local
-        // coalescing sits HERE, below the blob->cookie translation: the sealed blob is
-        // re-randomized per session, so keying above this would never match across pages
-        const inner = coalesced(restResources(backendUrl, { envelopeErrors: true, fetchImpl: capturing, upstreamIdentity: true }));
-        const env = await inner({ ...r, args: [path, data, { ...(reqOpts ?? {}), headers }] });
+        const { env: shared, captured } = await fetchUpstream({ ...r, args: [path, data, { ...(reqOpts ?? {}), headers }] });
+        const env = { ...shared }; // OWN copy: a coalesced joiner must not see another session's rotation field
         if (captured.length) {
             env[AUTH_FIELD] = {
                 blob: seal({ p: "session", c: mergeCookies(cookie, captured), iat: now() }),

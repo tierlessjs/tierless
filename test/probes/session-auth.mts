@@ -138,5 +138,42 @@ assert.equal(denied.status, 403, "reseal refuses origins outside the allowlist")
 
 assert.equal(mergeCookies("a=1; b=2", ["b=3; Path=/", "c=4; HttpOnly", "a=; Max-Age=0"]), "b=3; c=4", "mergeCookies: update, insert, delete");
 
-console.log("sealed cookie authority: blob crossings, in-band rotation, claim/reseal, expiry, and the two-tab 401 recovery all hold");
+// COALESCING IS WIRED AT AUTHORITY SCOPE, not per request. Two SESSIONS holding the same
+// cookie carry DIFFERENT sealed blobs (the seal is re-randomized), so the join must key on
+// the resolved credential — and the in-flight map must outlive a single request. An earlier
+// cut built the coalescer inside the per-request exec: every request got a fresh empty map
+// and nothing ever joined, while a module-scope unit test passed. This is that regression.
+{
+  let upstream = 0;
+  const slow = createServer((req, res) => {
+    upstream++;
+    setTimeout(() => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ n: upstream, saw: String(req.headers.cookie ?? "") })); }, 120);
+  });
+  slow.listen(0, "127.0.0.1"); await once(slow, "listening");
+  const url = "http://127.0.0.1:" + (slow.address() as { port: number }).port;
+  const auth = cookieAuthority({ backendUrl: url, allowedOrigins: ["http://x.test"], coalescePaths: ["/shared"] });
+  const blobA = (await auth.hello("sid=same")).blob!;
+  const blobB = (await auth.hello("sid=same")).blob!;
+  assert.notEqual(blobA, blobB, "two sessions on one cookie hold different sealed blobs");
+  const call = async (blob: string, path = "/shared"): Promise<unknown> =>
+    auth.exec({ op: "resource", tier: "server", name: "api.get", args: [path, undefined, { headers: { [SESSION_AUTH_HEADER]: blob } }] } as ResourceRequest);
+
+  upstream = 0;
+  const [ra, rb] = await Promise.all([call(blobA), call(blobB)]) as Array<{ body: { saw: string } }>;
+  assert.equal(upstream, 1, "two concurrent sessions on one credential cost the backend ONE request");
+  assert.equal(ra.body.saw, "sid=same", "the joined response carries the resolved cookie");
+  assert.notEqual(ra, rb, "each session gets its own envelope (rotation stays private)");
+
+  upstream = 0;
+  const other = (await auth.hello("sid=other")).blob!;
+  await Promise.all([call(blobA), call(other)]);
+  assert.equal(upstream, 2, "different credentials NEVER join, however concurrent");
+
+  upstream = 0;
+  await Promise.all([call(blobA, "/not-listed"), call(blobB, "/not-listed")]);
+  assert.equal(upstream, 2, "a path outside coalescePaths is never joined");
+  slow.close();
+}
+
+console.log("sealed cookie authority: blob crossings, in-band rotation, claim/reseal, expiry, the two-tab 401 recovery, and authority-scope GET coalescing all hold");
 process.exit(0);   // keep-alive fetch sockets otherwise hold the loop open
