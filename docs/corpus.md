@@ -135,6 +135,36 @@ Two consequences for the study:
   chatty small APIs should land near vikunja; apps that ship large static catalogues to
   the browser should land near n8n.
 
+## Candidate pipeline (selection is a constraint problem, and the constraints are hard)
+
+Ported: vikunja (win), strapi, nocodb, n8n (parity). What actually eliminates candidates,
+learned by checking rather than guessing:
+
+- **No Docker daemon.** The sandbox has the client, not the daemon, so any app whose e2e
+  stack is docker-compose is out regardless of merit: Ghost (Caddy/MySQL/Redis/Mailpit),
+  immich, outline, plane, cal.com, mattermost, rocket.chat.
+- **A BROWSER suite, not an API suite.** The workload must be the app's own browser
+  journeys, since that is what we measure. Directus's `tests/e2e` is Vitest against the
+  API — no browser, so nothing to port.
+- **A convertible data path.** GraphQL-only (twenty) and socket.io-only (uptime-kuma)
+  apps give the REST adapter nothing to serve; a local-first app (actual budget) barely
+  talks to a server at all. These are not failures of the transport, they are
+  out-of-scope workloads, and saying so up front beats discovering it after a port.
+
+**Next: Grafana.** Go backend on SQLite by default, React frontend, Playwright at the
+repo root (`yarn e2e:playwright`), no Docker. Its frontend routes every call through one
+fetch-based `backendSrv`, so the adapter has a single seam instead of a scatter of call
+sites.
+
+It is chosen to TEST THE MODEL, not just to add a row. The decomposition above predicts,
+in advance and falsifiably: a **high per-slice win** (dashboard/datasource/search traffic
+is many small JSON responses, where per-request overhead is a large fraction — the
+opposite of n8n's 511 responses carrying 96.9% of its addressable bytes), against a
+**modest addressable share** (Grafana ships large JS bundles that no transport choice
+touches). Estimate 15–35% addressable × >30% per-slice, so a **5–10% suite byte win**.
+If Grafana instead lands at parity, the model is wrong and the corpus needs a better
+predictor than request shape.
+
 ## Honesty constraints (bind all rungs)
 
 - **Bytes, trips, and latency are all measured — never via CDP throttling.** CDP's
