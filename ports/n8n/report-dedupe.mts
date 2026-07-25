@@ -20,7 +20,10 @@ const TARGET = "/types/nodes.json";
 // and the shared promise removes. Comparing completion gaps instead cannot tell one page
 // fetching twice from two pages fetching once, which is why the original diagnosis had
 // to rest on code shape; http-log-proxy now records startedAt so it does not have to.
-for (const arm of ["ported", "baseline"]) {
+// "ablate" is the ported tree with 0006 REVERTED and the editor rebuilt — the control
+// that tells you whether the spec can detect the race at all. Without it, "0 overlapping
+// with the fix" is unfalsifiable: a spec that never races reports 0 either way.
+for (const arm of ["ported", "baseline", "ablate"]) {
   const f = DIR + arm + "-http.jsonl";
   if (!existsSync(f)) { console.log(`${arm}: no log yet`); continue; }
   const rows = readFileSync(f, "utf8").trim().split("\n").filter(Boolean)
@@ -46,5 +49,7 @@ for (const arm of ["ported", "baseline"]) {
   );
   console.log(`${" ".repeat(10)}total HTTP rows ${rows.length}`);
 }
-console.log(`\nPre-fix, for scale (full-suite budget arm, ports/n8n/README.md — completion-gap\npairing, so not directly comparable): stock 805 full 200s / 150 pairs, ported 1,007 / 342.`);
-console.log(`What settles it here: overlapping fetches should be 0 once both callers share one promise.`);
+console.log(`\nRead this against the ABLATE row, not against the pre-fix figures. The +294 MB came`);
+console.log(`from a FULL-SUITE arm (1,007 fetches over ~665 pages); the workflows-list spec used`);
+console.log(`here does ~24. If ablate shows 0 overlapping too, this spec simply never races and`);
+console.log(`proves nothing about the fix either way — only a suite-scale arm can settle it.`);
