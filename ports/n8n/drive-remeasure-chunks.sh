@@ -21,8 +21,11 @@ mkdir -p "$OUT"
 BRANCH=claude/tierless-port-generality-uwm1f9
 
 # grouped to balance run length against per-chunk n8n boot cost (~1-2 min each);
-# workflows is by far the biggest dir so it is split by subdirectory
-GROUPS=(
+# workflows is by far the biggest dir so it is split by subdirectory.
+# NOT named GROUPS: that is a bash built-in holding the caller's gid list, and bash
+# ignores/rejects assignment to it — the loop then iterates over "0" and every chunk
+# runs an empty spec filter.
+CHUNKS=(
   "editor:tests/e2e/workflows/editor"
   "wf-rest:tests/e2e/workflows/list tests/e2e/workflows/executions tests/e2e/workflows/templates tests/e2e/workflows/checklist tests/e2e/workflows/demo-diff.spec.ts tests/e2e/workflows/demo-executable-chat-trigger.spec.ts"
   "ai:tests/e2e/ai tests/e2e/instance-ai tests/e2e/chat-hub"
@@ -36,7 +39,7 @@ GROUPS=(
 for arm in ported baseline; do
   flag=""; work=n8n
   [ "$arm" = baseline ] && { flag=--baseline; work=n8n-baseline; }
-  for entry in "${GROUPS[@]}"; do
+  for entry in "${CHUNKS[@]}"; do
     name=${entry%%:*}; specs=${entry#*:}
     out="$OUT/$arm-$name-measure.jsonl"
     [ -s "$out" ] && { echo "== skip $arm/$name (done)"; continue; }
