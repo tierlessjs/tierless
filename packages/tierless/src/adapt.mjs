@@ -229,7 +229,7 @@ export function restResources(baseUrl, { token, headers = {}, fetchImpl = fetch,
         const merged = {
             // no upstream gzip to immediately gunzip: the socket recompresses anyway (see
             // upstreamIdentity). First in the spread so anything explicit still wins.
-            ...(upstreamIdentity ? { "accept-encoding": "identity" } : {}),
+            ...(upstreamIdentity && (typeof process === "undefined" || process.env?.TIERLESS_UPSTREAM_GZIP !== "1") ? { "accept-encoding": "identity" } : {}),
             ...(body !== undefined ? { "content-type": "application/json" } : {}),
             ...(token ? { authorization: token.startsWith("Bearer ") ? token : "Bearer " + token } : {}),
             ...headers,
