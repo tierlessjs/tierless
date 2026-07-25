@@ -1,0 +1,12 @@
+preboot A/B — 3 run(s) ON, 3 OFF, spec-level
+pass-parity set: 9/10 tests compared
+
+ws bytes gateway->page ON      5.99 MB   OFF      5.91 MB   ON-OFF      0.08 MB  (1.3%)   within-arm spread 0.02 MB
+ws bytes page->gateway ON      0.04 MB   OFF      0.06 MB   ON-OFF     -0.02 MB  (-30.5%)   within-arm spread 0.01 MB
+http bytes in (+assets) ON    138.96 MB   OFF    137.92 MB   ON-OFF      1.03 MB  (0.7%)   within-arm spread 23.55 MB  <- does NOT clear noise
+http bytes out         ON      5.06 MB   OFF      5.05 MB   ON-OFF      0.01 MB  (0.2%)   within-arm spread 0.77 MB  <- does NOT clear noise
+wall (sum of tests)    ON       98.9 s   OFF       99.0 s   ON-OFF       -0.2 s  (-0.2%)   within-arm spread 14.5 s  <- does NOT clear noise
+
+(RTT0 arm: preboot's round-trip saving is worth ~0 here by construction; the BYTE line is what this run decides.)
+BYTES: over-delivery REAL — preboot ships 0.08 MB the page never used across 9 sessions (0.01 MB/session).
+WALL: preboot saves 0.2 s (0.2%) at RTT0 — inside noise.

@@ -200,12 +200,28 @@ proven (the executable proofs behind `npm test`).
   decide it on a port where a credential-independent endpoint actually
   dominates, not on this one.
 
-- **n8n's remaining +6.8% — preboot over-delivery suspect.** The hello
-  pre-fetches all 18 boot GETs per upgrade regardless of what the page
-  consumes; stock pays only for actual fetches. Price it with the existing
-  TIERLESS_PREBOOT=0 ablation on a truth arm; if confirmed, preboot should
-  deliver lazily or per-route (the route-aware preboot idea from the boot
-  study).
+- **n8n's remaining +6.8% — preboot over-delivery: SUSPECT CLEARED
+  (2026-07-25).** The hypothesis was that the hello pre-fetches all 18 boot
+  GETs per upgrade regardless of what the page consumes, so the unconsumed
+  ones are waste. Priced directly with the TIERLESS_PREBOOT=0 ablation on
+  wire-truth arms (ports/n8n/drive-preboot-ab.sh, 3 runs each, workflows-list
+  spec, pass-parity 9/10; ports/n8n/results/preboot-ab.txt). The ws-byte
+  difference ON-OFF *is* the unconsumed cargo — the bytes the page actually
+  wants are paid in both arms, as hello cargo or as crossings.
+  VERDICT: over-delivery is REAL but negligible — **+0.08 MB over 9 sessions
+  (~9 KB/session, 1.3% of session ws bytes, 0.05% of the spec's total wire
+  bytes)**, against a 0.02 MB within-arm spread. It cannot account for a
+  +6.8% regression, and the page evidently consumes nearly all of what the
+  manifest ships. Structural reason it was always a weak suspect: all 18
+  manifest paths are small endpoints (settings, license, tags, projects) —
+  the 12.4 MB node-types payload is not among them, so the waste is bounded
+  by eighteen small responses however few the page uses. Route-aware /
+  lazy preboot is therefore NOT worth building for bytes.
+  Bonus from the same arms: preboot is also FREE in wall time at RTT0
+  (-0.2 s, inside a 14.5 s spread), so its RTT80 win (boot data path -1.4 s)
+  comes at no measured cost when latency is absent. Keep it as-is.
+  n8n's byte regression remains attributed to the nodes.json double-fetch
+  (+294 MB, upstream race amplified by boot contention) — the item above.
 
 - **The corpus program** (`docs/corpus.md`): a statistical claim over real apps —
   "median X× less network wait, Y% less IO across N apps' own e2e journeys."

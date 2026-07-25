@@ -452,6 +452,15 @@ reconciles within 2.2% of TCP on the stock arm. What the table says:
 - Hello/preboot cargo: 242 MB plaintext across sessions (nearly all preboot
   envelopes; ~60-90 MB deflated on the wire) against partially-displaced boot
   GETs — second-order, not the headline the preboot-over-delivery hypothesis
-  expected.
+  expected. SETTLED by ablation (2026-07-25, `drive-preboot-ab.sh`, 3 runs per
+  arm, wire-truth, pass-parity 9/10 — `results/preboot-ab.txt`): that cargo is
+  not waste, it is CONSUMED. Turning preboot off (`TIERLESS_PREBOOT=0`) saves
+  only **0.08 MB of ws bytes over 9 sessions — ~9 KB/session, 1.3% of session
+  ws bytes, 0.05% of the spec's total wire bytes** — against a 0.02 MB
+  within-arm spread. The difference IS the unconsumed cargo by construction:
+  whatever the page actually wants is paid in both arms, as hello cargo or as
+  crossings. Preboot over-delivery is real and negligible, and it does not
+  explain the +6.8%. It is also free in wall time at RTT0 (-0.2 s, inside a
+  14.5 s spread), so the RTT80 boot win costs nothing when latency is absent.
 - The rebuilt editor's asset chunks pair off against stock's (+2-4 MB per
   tierless-bearing chunk); roughly a wash.
