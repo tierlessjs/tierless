@@ -1,0 +1,664 @@
+baseline: 8 chunk(s), 736 test rows
+ported: 8 chunk(s), 736 test rows
+
+
+paired 736 tests (736 baseline, 736 ported)
+SINGLE run per arm — request-heavy tests swing by seconds run-to-run; prefer medians of 3 for timing claims
+bytes are TCP-TRUE (socket-level, compression included; browser data path only — node-side seeding excluded)
+
+pass-parity EXCLUDED (71) — statuses baseline/ported (all runs):
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/instance-ai/instance-ai-timeouts.spec.ts:8 › Instance AI timeouts › should show a timeout message when a stuck background task times out
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/credentials/oauth.spec.ts:9 › OAuth Credentials › should create and connect with Google OAuth2
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:247 › Canvas Zoom Functionality › should open and close the about modal on keyboard shortcut
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/code-node.spec.ts:102 › Code node › Run Once for Each Item › should show lint errors in `runOnceForEachItem` mode
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/workflows/editor/editor-after-route-changes.spec.ts:16 › Editor zoom should work after route changes › should maintain zoom functionality after switching between Editor and Workflow history and Workflow list
+  passed / failed  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/debug.spec.ts:46 › Debug mode › should enter debug mode for failed executions
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/debug.spec.ts:102 › Debug mode › should show error for pinned data mismatch
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/execution.spec.ts:95 › Execution › should test manual workflow stop
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/execution.spec.ts:237 › Execution › connections should be colored differently for pinned data › when executing the workflow
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/execution.spec.ts:241 › Execution › connections should be colored differently for pinned data › when executing a node
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/execution.spec.ts:245 › Execution › connections should be colored differently for pinned data › when connecting pinned node by output drag and drop
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/execution.spec.ts:249 › Execution › connections should be colored differently for pinned data › when connecting pinned node after adding an unconnected node
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/inject-previous.spec.ts:14 › Inject previous execution › can map keys from previous execution
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/previous-nodes.spec.ts:12 › Execute previous nodes › should execute only previous nodes and not the current node
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/inline.spec.ts:39 › Inline expression editor › Basic UI functionality › should switch between expression and fixed using keyboard
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/mapping.spec.ts:268 › Data Mapping › maps expressions to updated fields correctly
+  failed / passed  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:71 › NDV Data Display › Schema View › should not display pagination for schema
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:172 › NDV Parameters › Expression Editor Features › should allow selecting item for expressions
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/pinning.spec.ts:209 › Data pinning › Advanced pinning scenarios › should not use pin data in production webhook executions
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:217 › Workflow Archive › should unpublish a published workflow
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/copy-paste.spec.ts:19 › Workflow Copy Paste › should copy nodes
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/copy-paste.spec.ts:39 › Workflow Copy Paste › should paste nodes (both current and old node versions)
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/copy-paste.spec.ts:53 › Workflow Copy Paste › should allow importing nodes without names
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/duplicate.spec.ts:16 › Workflow Duplicate › should duplicate unsaved workflow
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/duplicate.spec.ts:24 › Workflow Duplicate › should duplicate saved workflow
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/run.spec.ts:19 › Workflow Run › should keep endpoint click working when switching between execution and editor tab
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/run.spec.ts:38 › Workflow Run › should run workflow on button click
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/run.spec.ts:47 › Workflow Run › should run workflow using keyboard shortcut
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/run.spec.ts:56 › Workflow Run › should not run empty workflows
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/settings.spec.ts:15 › Workflow Settings › should update workflow settings
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/settings.spec.ts:67 › Workflow Settings › Menu entry Push To Git › should not show up in the menu for members @auth:member
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/settings.spec.ts:72 › Workflow Settings › Menu entry Push To Git › should show up for owners @auth:owner
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/logs.spec.ts:28 › Logs › should populate logs as manual execution progresses
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/logs.spec.ts:80 › Logs › should show the actions menu when the overflow button is clicked
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/logs.spec.ts:92 › Logs › should allow to trigger partial execution
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/logs.spec.ts:118 › Logs › should show input and output data in the selected display mode
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/logs.spec.ts:163 › Logs › should show input and output data of correct run index and branch
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/logs.spec.ts:215 › Logs › should keep populated logs unchanged when workflow get edits after the execution
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/logs.spec.ts:232 › Logs › should show logs for a past execution
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/logs.spec.ts:262 › Logs › should show logs for a workflow with a node that waits for webhook
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/logs.spec.ts:295 › Logs › should allow to cancel a workflow with a node that waits for webhook
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/viewer-permissions.spec.ts:94 › Workflow Viewer Permissions › user without workflow:update can copy but cannot paste @auth:owner
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/workflows/editor/viewer-permissions.spec.ts:74 › Workflow Viewer Permissions › user without workflow:update scope cannot drag nodes @auth:owner
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/editor/viewer-permissions.spec.ts:110 › Workflow Viewer Permissions › user with workflow:update scope can drag and paste @auth:owner
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/api/waiting-endpoint-security.spec.ts:75 › Waiting Endpoint Security › form-waiting signature validation › should reject unsigned and tampered requests, accept valid signature
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/data-tables/details.spec.ts:364 › Data Table details view › Should filter correctly using column filters
+  passed / timedOut  ../src/packages/testing/playwright/tests/e2e/journeys/admin-views-executions-list.spec.ts:10 › an admin can view the execution list › renders the project executions list with seeded executions
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/api/workflow-publication-service.spec.ts:75 › Workflow Publication Service › reconciles a webhook that went missing from storage on re-publish
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/node-creator/navigation.spec.ts:30 › Node Creator Navigation › should search for nodes with various queries
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/nodes/form-trigger-node.spec.ts:78 › Form Trigger › should create and submit a multi-page form
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/nodes/form-trigger-node.spec.ts:140 › Form Trigger › form execution with basic auth › form submission works with basic auth
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/nodes/form-trigger-node.spec.ts:207 › Form Trigger › form execution with basic auth › multi-step form submission works with basic auth
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/node-creator/categories.spec.ts:6 › Node Creator Categories
+  failed / passed  ../src/packages/testing/playwright/tests/e2e/projects/folders-operations.spec.ts:47 › Folders - Operations › Rename and delete folders › should warn before deleting non-empty folder from breadcrumb dropdown
+  failed / passed  ../src/packages/testing/playwright/tests/e2e/projects/folders-operations.spec.ts:164 › Folders - Operations › Move folders and workflows › should move empty folder to another folder - from list breadcrumbs
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/sharing/credential-sharing.spec.ts:13 › Credential Sharing › should share credential with another user via UI
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/sharing/credential-visibility.spec.ts:57 › Credential Visibility Rules › should show personal and shared credentials for members
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/sharing/workflow-sharing.spec.ts:11 › Workflow Sharing › should share workflow with another user via UI
+  failed / passed  ../src/packages/testing/playwright/tests/e2e/app-config/demo-reimport.spec.ts:21 › Demo reimport › Workflow reimport — connections and layout › should preserve connections when same workflow is reimported
+  failed / passed  ../src/packages/testing/playwright/tests/e2e/app-config/demo-reimport.spec.ts:33 › Demo reimport › Workflow reimport — connections and layout › should show correct connections when switching to a different workflow
+  failed / passed  ../src/packages/testing/playwright/tests/e2e/app-config/demo-reimport.spec.ts:49 › Demo reimport › Workflow reimport — connections and layout › should show all nodes in viewport after reimport (fitView)
+  failed / passed  ../src/packages/testing/playwright/tests/e2e/app-config/demo.spec.ts:31 › Demo › can import workflow with pin data
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/app-config/nps-survey.spec.ts:43 › NPS Survey
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/settings/users/users.spec.ts:10 › Users Settings › should prevent non-owners to access UM settings
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/checklist/production-checklist.spec.ts:109 › Workflow Production Checklist › should show completed state for configured actions
+  failed / passed  ../src/packages/testing/playwright/tests/e2e/workflows/demo-executable-chat-trigger.spec.ts:59 › Demo executable preview - Chat Trigger › hides execute button and exposes Open chat that opens logs panel
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/executions/list.spec.ts:18 › Executions Filter › should keep popover open when selecting from dropdown inside it
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/executions/list.spec.ts:205 › Workflow Executions › when workflow is saved › should show workflow data in executions tab after hard reload and modify name and tags
+  skipped / skipped  ../src/packages/testing/playwright/tests/e2e/workflows/executions/list.spec.ts:211 › Workflow Executions › when workflow is saved › should load items and auto scroll after filter change
+  failed / passed  ../src/packages/testing/playwright/tests/e2e/workflows/executions/preview-isolation.spec.ts:11 › Execution preview isolation › should preserve unsaved editor changes while previewing an execution
+  failed / failed  ../src/packages/testing/playwright/tests/e2e/workflows/templates/templates.spec.ts:176 › Workflow templates › For api.n8n.io › Redirects to website when visiting templates page directly
+
+one-sided ZERO-BYTE reads EXCLUDED (5) — a missed counter read, not a measurement:
+  0.0 MB / 9.2 MB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:229 › Canvas Zoom Functionality › should remove unknown credentials on pasting workflow
+  0.0 MB / 9.2 MB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/execution.spec.ts:215 › Execution › execution preview › when deleting the last execution, it should show empty state
+  0.0 MB / 9.0 MB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/publish.spec.ts:128 › Workflow Publish › Webhook conflict validation › Rejects publishing a workflow containing local conflicts
+  8.9 MB / 0.0 MB  ../src/packages/testing/playwright/tests/e2e/nodes/webhook.spec.ts:102 › Webhook Trigger node › should listen for a GET request and respond with last node binary data
+  0.0 MB / 6.7 MB  ../src/packages/testing/playwright/tests/e2e/app-config/demo.spec.ts:41 › Demo › can override theme to dark
+
+== suite-wide (660 pass-parity pairs; 543 touch the port) ==
+  total bytes   5566064.8 KB -> 5575686.8 KB   (-0% less IO)
+  trips: n/a (wire-only rows carry no request/frame counts)
+  median per-test bytes saved   -2%
+
+== elapsed time (real, wall clock of each test; compare only same-RTT runs) ==
+  total   61.0 min -> 74.8 min   (-23% less)
+  median per-test time saved   -22%
+  per-test delta ported-stock: median +1442 ms, total 826.1s
+  covered subset: total 60.3 -> 74.0 min (-23% less), median per-test -24% less
+
+== covered subset (543 tests whose interaction the port serves) ==
+  total bytes   5565911.4 KB -> 5574940.6 KB   (-0% less IO)
+  median per-test: bytes -2% less (trips n/a)
+
+  per-test detail (bytes before -> after):
+    26070.1 -> 22870.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-nodes.spec.ts:64 › Canva
+    16155.5 -> 13820.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-nodes.spec.ts:137 › Canv
+    10397.0 -> 8697.4 KB  ../src/packages/testing/playwright/tests/e2e/capabilities/task-runner.spec.ts:16 › Task Runner › sho
+    8856.3 -> 7166.0 KB  ../src/packages/testing/playwright/tests/e2e/capabilities/task-runner.spec.ts:27 › Task Runner › sho
+    8274.7 -> 6606.5 KB  ../src/packages/testing/playwright/tests/e2e/app-config/demo.spec.ts:24 › Demo › can import template
+    8236.1 -> 6569.2 KB  ../src/packages/testing/playwright/tests/e2e/app-config/demo.spec.ts:47 › Demo › can override theme 
+    13229.4 -> 11572.3 KB  ../src/packages/testing/playwright/tests/e2e/credentials/crud.spec.ts:118 › Credentials › should cor
+    24286.3 -> 22754.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/list/workflows.spec.ts:121 › Workflows › shou
+    19127.0 -> 17599.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:196 › Canva
+    24280.7 -> 22754.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/list/workflows.spec.ts:97 › Workflows › shoul
+    24268.0 -> 22748.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/list/workflows.spec.ts:44 › Workflows › shoul
+    17401.4 -> 15885.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/subworkflows/extraction.spec.ts:85 › S
+    17387.3 -> 15873.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-nodes.spec.ts:23 › Canva
+    17521.3 -> 16013.3 KB  ../src/packages/testing/playwright/tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:404
+    17444.0 -> 15941.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:235 ›
+    17421.1 -> 15922.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-floating-nodes.spec.ts:50 › ND
+    17421.0 -> 15922.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-floating-nodes.spec.ts:13 › ND
+    17363.4 -> 15867.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/subworkflows/workflow-selector.spec.ts
+    17733.5 -> 16238.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:43 › NDV 
+    17705.0 -> 16210.7 KB  ../src/packages/testing/playwright/tests/e2e/nodes/if-node.spec.ts:41 › If Node (filter component) ›
+    17346.5 -> 15852.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/routing.spec.ts:59 › Routing › should 
+    17343.1 -> 15850.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/routing.spec.ts:75 › Routing › should 
+    17711.4 -> 16218.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:109 › NDV
+    17521.9 -> 16029.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:153 ›
+    17439.6 -> 15947.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/inject-previous.spec.ts:42 ›
+    17392.0 -> 15902.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:150 › NDV › shoul
+    17418.7 -> 15929.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:95 › NDV › should
+    17719.3 -> 16230.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:34 › NDV 
+    17359.5 -> 15870.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:157 › NDV
+    17479.3 -> 15991.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/routing.spec.ts:96 › Routing › should 
+    17328.9 -> 15840.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:39 › NDV › should
+    17736.6 -> 16248.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:129 › NDV
+    17305.2 -> 15817.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-floating-nodes.spec.ts:99 › ND
+    17319.6 -> 15833.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/pinning.spec.ts:188 › Data pinning
+    17707.4 -> 16221.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:93 › NDV 
+    17535.0 -> 16055.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/inline.spec.ts:95 › Inline
+    17289.4 -> 15824.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:195 › Canva
+    17256.1 -> 15793.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:391 › Canva
+    17688.5 -> 16230.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:53 › NDV 
+    17227.2 -> 15773.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:86 › NDV › should
+    17337.8 -> 15883.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:14 › NDV Pa
+    17241.8 -> 15788.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/pinning.spec.ts:223 › Data pinning
+    17504.6 -> 16055.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/inline.spec.ts:83 › Inline
+    17504.5 -> 16055.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/inline.spec.ts:69 › Inline
+    17670.9 -> 16229.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/list/workflows.spec.ts:141 › Workflows › shou
+    15491.5 -> 14075.5 KB  ../src/packages/testing/playwright/tests/e2e/auth/signin.spec.ts:10 › Sign In › should login and log
+    13608.7 -> 12252.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/list/workflows.spec.ts:70 › Workflows › shoul
+    10369.2 -> 9116.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:102 › Canva
+    23571.6 -> 22361.3 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/credential-mismatch.spec.ts:105 › HTTP 
+    10397.5 -> 9510.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:75 › Canvas Act
+    10392.1 -> 9519.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:255 › Canvas Ac
+    10521.4 -> 9795.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-nodes.spec.ts:168 › Canv
+    12098.5 -> 11562.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/list/workflows.spec.ts:182 › Workflows › shou
+    18439.9 -> 17912.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/list/workflows.spec.ts:198 › Workflows › shou
+    15061.0 -> 14648.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/code-node.spec.ts:57 › Code node 
+    14796.0 -> 14503.6 KB  ../src/packages/testing/playwright/tests/e2e/regression/SUG-121-fields-reset-after-closing-ndv.spec.
+    12734.2 -> 12451.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-nodes.spec.ts:205 › Canv
+    10521.4 -> 10245.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:24 › Undo/Red
+    10204.7 -> 9972.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:175 › Undo/Re
+    13883.8 -> 13660.7 KB  ../src/packages/testing/playwright/tests/e2e/data-tables/tables.spec.ts:137 › Data Table list view ›
+    9484.3 -> 9332.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:42 › Undo/Red
+    10058.6 -> 9933.4 KB  ../src/packages/testing/playwright/tests/e2e/ai/rag-callout.spec.ts:30 › RAG callout experiment › se
+    10628.9 -> 10569.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-nodes.spec.ts:223 › Canv
+    7458.4 -> 7401.1 KB  ../src/packages/testing/playwright/tests/e2e/data-tables/details.spec.ts:503 › Data Table details vi
+    6586.1 -> 6533.1 KB  ../src/packages/testing/playwright/tests/e2e/credentials/global.spec.ts:110 › Global credentials › o
+    7450.5 -> 7400.0 KB  ../src/packages/testing/playwright/tests/e2e/data-tables/details.spec.ts:219 › Data Table details vi
+    7442.4 -> 7399.3 KB  ../src/packages/testing/playwright/tests/e2e/data-tables/details.spec.ts:198 › Data Table details vi
+    7441.6 -> 7399.1 KB  ../src/packages/testing/playwright/tests/e2e/data-tables/details.spec.ts:177 › Data Table details vi
+    13105.7 -> 13063.8 KB  ../src/packages/testing/playwright/tests/e2e/projects/project-settings.spec.ts:95 › Project Settings
+    7440.6 -> 7399.9 KB  ../src/packages/testing/playwright/tests/e2e/data-tables/details.spec.ts:312 › Data Table details vi
+    19655.9 -> 19617.4 KB  ../src/packages/testing/playwright/tests/e2e/data-tables/tables.spec.ts:78 › Data Table list view › 
+    19656.3 -> 19618.7 KB  ../src/packages/testing/playwright/tests/e2e/data-tables/tables.spec.ts:91 › Data Table list view › 
+    7434.3 -> 7399.3 KB  ../src/packages/testing/playwright/tests/e2e/data-tables/details.spec.ts:240 › Data Table details vi
+    19586.2 -> 19556.2 KB  ../src/packages/testing/playwright/tests/e2e/projects/project-settings.spec.ts:237 › Project Setting
+    7045.8 -> 7019.1 KB  ../src/packages/testing/playwright/tests/e2e/data-tables/details.spec.ts:456 › Data Table details vi
+    7424.7 -> 7398.9 KB  ../src/packages/testing/playwright/tests/e2e/data-tables/details.spec.ts:283 › Data Table details vi
+    17717.3 -> 17694.6 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-advanced.spec.ts:10 › Folders - Advanc
+    7033.9 -> 7018.1 KB  ../src/packages/testing/playwright/tests/e2e/data-tables/details.spec.ts:349 › Data Table details vi
+    7029.5 -> 7017.0 KB  ../src/packages/testing/playwright/tests/e2e/data-tables/details.spec.ts:162 › Data Table details vi
+    13380.9 -> 13370.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/list/workflows.spec.ts:22 › Workflows › shoul
+    6991.9 -> 6982.1 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-operations.spec.ts:10 › Folders - Oper
+    7088.1 -> 7081.9 KB  ../src/packages/testing/playwright/tests/e2e/api/wait-form-resume.spec.ts:65 › Wait Node Form Resume
+    6606.9 -> 6600.9 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-advanced.spec.ts:127 › Folders - Advan
+    17713.2 -> 17707.5 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-advanced.spec.ts:98 › Folders - Advanc
+    6538.0 -> 6534.3 KB  ../src/packages/testing/playwright/tests/e2e/credentials/global.spec.ts:17 › Global credentials › ow
+    7191.2 -> 7188.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/checklist/production-checklist.spec.ts:32 › W
+    6601.4 -> 6600.3 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-advanced.spec.ts:72 › Folders - Advanc
+    6601.5 -> 6600.8 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-basic.spec.ts:43 › Folders - Basic Ope
+    2.6 -> 2.9 KB  ../src/packages/testing/playwright/tests/e2e/sharing/access-control.spec.ts:87 › Access Control Boun
+    7140.2 -> 7140.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/checklist/production-checklist.spec.ts:54 › W
+    6599.7 -> 6600.5 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-basic.spec.ts:19 › Folders - Basic Ope
+    6599.7 -> 6600.8 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-basic.spec.ts:28 › Folders - Basic Ope
+    6600.4 -> 6601.6 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-operations.spec.ts:38 › Folders - Oper
+    31015.1 -> 31017.9 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/user-service.spec.ts:47 › User API Serv
+    7132.9 -> 7137.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/checklist/production-checklist.spec.ts:15 › W
+    13202.9 -> 13207.5 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-operations.spec.ts:184 › Folders - Ope
+    6573.1 -> 6578.3 KB  ../src/packages/testing/playwright/tests/e2e/settings/environments/variables.spec.ts:117 › Variables
+    13200.8 -> 13206.8 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-operations.spec.ts:132 › Folders - Ope
+    6595.1 -> 6601.1 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-basic.spec.ts:169 › Folders - Basic Op
+    6789.8 -> 6796.1 KB  ../src/packages/testing/playwright/tests/e2e/settings/personal/personal.spec.ts:47 › Personal Settin
+    6498.0 -> 6504.5 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-credential-help.spec.ts:48 › AI Assistant:
+    9781.4 -> 9788.2 KB  ../src/packages/testing/playwright/tests/e2e/ai/rag-callout.spec.ts:10 › RAG callout experiment › ND
+    6593.9 -> 6600.9 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-basic.spec.ts:159 › Folders - Basic Op
+    6593.4 -> 6601.2 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-operations.spec.ts:31 › Folders - Oper
+    6810.2 -> 6818.1 KB  ../src/packages/testing/playwright/tests/e2e/settings/users/users.spec.ts:22 › Users Settings › shou
+    6984.9 -> 6993.0 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/canvas-actions.spec.ts:25 › Canvas Node
+    6589.7 -> 6598.0 KB  ../src/packages/testing/playwright/tests/e2e/auth/authenticated.spec.ts:18 › Authentication › defaul
+    6592.6 -> 6601.1 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-operations.spec.ts:21 › Folders - Oper
+    6588.4 -> 6597.0 KB  ../src/packages/testing/playwright/tests/e2e/app-config/security-notifications.spec.ts:169 › Securit
+    6588.5 -> 6597.2 KB  ../src/packages/testing/playwright/tests/e2e/app-config/versions.spec.ts:66 › Versions › should show
+    6588.3 -> 6597.1 KB  ../src/packages/testing/playwright/tests/e2e/app-config/security-notifications.spec.ts:93 › Security
+    6569.2 -> 6578.2 KB  ../src/packages/testing/playwright/tests/e2e/settings/environments/variables.spec.ts:88 › Variables 
+    6592.7 -> 6601.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/templates/templates.spec.ts:145 › Workflow te
+    6569.2 -> 6578.3 KB  ../src/packages/testing/playwright/tests/e2e/settings/environments/variables.spec.ts:48 › Variables 
+    6497.0 -> 6506.3 KB  ../src/packages/testing/playwright/tests/e2e/sharing/access-control.spec.ts:13 › Access Control Boun
+    6986.3 -> 6995.6 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/canvas-actions.spec.ts:34 › Canvas Node
+    6505.5 -> 6515.5 KB  ../src/packages/testing/playwright/tests/e2e/sharing/access-control.spec.ts:41 › Access Control Boun
+    6567.6 -> 6578.1 KB  ../src/packages/testing/playwright/tests/e2e/settings/environments/variables.spec.ts:69 › Variables 
+    13197.2 -> 13208.2 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-operations.spec.ts:241 › Folders - Ope
+    6589.0 -> 6600.0 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-basic.spec.ts:10 › Folders - Basic Ope
+    6986.4 -> 6997.6 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/canvas-actions.spec.ts:41 › Canvas Node
+    6566.7 -> 6578.1 KB  ../src/packages/testing/playwright/tests/e2e/settings/environments/variables.spec.ts:102 › Variables
+    6974.0 -> 6985.6 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/canvas-actions.spec.ts:18 › Canvas Node
+    6941.9 -> 6953.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:52 › Canvas Act
+    6974.0 -> 6985.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:22 › Canvas Act
+    6796.4 -> 6809.0 KB  ../src/packages/testing/playwright/tests/e2e/settings/personal/personal.spec.ts:33 › Personal Settin
+    6588.5 -> 6601.2 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-operations.spec.ts:62 › Folders - Oper
+    6565.3 -> 6578.0 KB  ../src/packages/testing/playwright/tests/e2e/settings/environments/variables.spec.ts:36 › Variables 
+    6587.5 -> 6600.4 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-basic.spec.ts:135 › Folders - Basic Op
+    6584.9 -> 6598.1 KB  ../src/packages/testing/playwright/tests/e2e/auth/authenticated.spec.ts:18 › Authentication › admin 
+    13192.6 -> 13206.2 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-operations.spec.ts:106 › Folders - Ope
+    13154.4 -> 13168.5 KB  ../src/packages/testing/playwright/tests/e2e/app-config/security-notifications.spec.ts:205 › Securit
+    13192.7 -> 13207.4 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-operations.spec.ts:210 › Folders - Ope
+    6514.2 -> 6528.9 KB  ../src/packages/testing/playwright/tests/e2e/credentials/global.spec.ts:52 › Global credentials › me
+    13069.1 -> 13085.0 KB  ../src/packages/testing/playwright/tests/e2e/projects/project-settings.spec.ts:209 › Project Setting
+    6536.2 -> 6552.0 KB  ../src/packages/testing/playwright/tests/e2e/mcp/mcp-oauth.spec.ts:408 › MCP OAuth › Consent screen 
+    13109.9 -> 13125.8 KB  ../src/packages/testing/playwright/tests/e2e/projects/project-settings.spec.ts:185 › Project Setting
+    6475.2 -> 6491.5 KB  ../src/packages/testing/playwright/tests/e2e/settings/environments/variables.spec.ts:19 › Variables 
+    13187.2 -> 13203.8 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-operations.spec.ts:76 › Folders - Oper
+    13107.1 -> 13124.8 KB  ../src/packages/testing/playwright/tests/e2e/projects/project-settings.spec.ts:45 › Project Settings
+    13176.6 -> 13194.4 KB  ../src/packages/testing/playwright/tests/e2e/app-config/security-notifications.spec.ts:129 › Securit
+    6780.2 -> 6798.2 KB  ../src/packages/testing/playwright/tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:89 
+    13044.9 -> 13063.2 KB  ../src/packages/testing/playwright/tests/e2e/projects/project-settings.spec.ts:15 › Project Settings
+    15620.9 -> 15639.5 KB  ../src/packages/testing/playwright/tests/e2e/credentials/crud.spec.ts:29 › Credentials › should sort
+    19713.1 -> 19731.8 KB  ../src/packages/testing/playwright/tests/e2e/data-tables/tables.spec.ts:104 › Data Table list view ›
+    6141.4 -> 6160.5 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/workflow-entry-points.spec.ts:10 › UI T
+    13106.0 -> 13125.2 KB  ../src/packages/testing/playwright/tests/e2e/projects/project-settings.spec.ts:138 › Project Setting
+    13106.0 -> 13125.3 KB  ../src/packages/testing/playwright/tests/e2e/projects/project-settings.spec.ts:166 › Project Setting
+    13105.7 -> 13125.1 KB  ../src/packages/testing/playwright/tests/e2e/projects/project-settings.spec.ts:116 › Project Setting
+    7096.5 -> 7116.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:39 › Canvas Act
+    6448.6 -> 6468.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/templates/templates.spec.ts:273 › Workflow te
+    13043.3 -> 13063.6 KB  ../src/packages/testing/playwright/tests/e2e/projects/project-settings.spec.ts:73 › Project Settings
+    6712.8 -> 6733.8 KB  ../src/packages/testing/playwright/tests/e2e/settings/log-streaming/log-streaming.spec.ts:22 › Log S
+    4533.0 -> 4554.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/demo-diff.spec.ts:225 › Workflow Diff Demo › 
+    4533.0 -> 4554.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/demo-diff.spec.ts:220 › Workflow Diff Demo › 
+    19658.3 -> 19680.8 KB  ../src/packages/testing/playwright/tests/e2e/data-tables/tables.spec.ts:118 › Data Table list view ›
+    6385.8 -> 6408.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/templates/templates.spec.ts:260 › Workflow te
+    11146.3 -> 11170.5 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-basic.spec.ts:55 › Folders - Basic Ope
+    7107.3 -> 7133.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:27 › Canvas Act
+    4529.0 -> 4554.8 KB  ../src/packages/testing/playwright/tests/e2e/credentials/global.spec.ts:138 › Global credentials › m
+    4528.9 -> 4555.0 KB  ../src/packages/testing/playwright/tests/e2e/app-config/security-notifications.spec.ts:193 › Securit
+    4526.0 -> 4554.2 KB  ../src/packages/testing/playwright/tests/e2e/settings/users/users.spec.ts:17 › Users Settings › shou
+    11819.3 -> 11849.4 KB  ../src/packages/testing/playwright/tests/e2e/data-tables/tables.spec.ts:54 › Data Table list view › 
+    11028.5 -> 11064.6 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/credentials.spec.ts:52 › Credentials › 
+    17727.7 -> 17764.0 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-operations.spec.ts:266 › Folders - Ope
+    18057.6 -> 18094.2 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-advanced.spec.ts:49 › Folders - Advanc
+    11529.9 -> 11568.7 KB  ../src/packages/testing/playwright/tests/e2e/credentials/crud.spec.ts:61 › Credentials › should crea
+    11130.0 -> 11170.0 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-basic.spec.ts:88 › Folders - Basic Ope
+    12897.2 -> 12937.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/templates/templates.spec.ts:296 › Workflow te
+    11334.8 -> 11375.5 KB  ../src/packages/testing/playwright/tests/e2e/settings/users/users.spec.ts:45 › Users Settings › shou
+    11521.9 -> 11563.7 KB  ../src/packages/testing/playwright/tests/e2e/credentials/crud.spec.ts:89 › Credentials › should show
+    11331.9 -> 11374.7 KB  ../src/packages/testing/playwright/tests/e2e/settings/users/users.spec.ts:32 › Users Settings › shou
+    39228.9 -> 39275.7 KB  ../src/packages/testing/playwright/tests/e2e/data-tables/tables.spec.ts:21 › Data Table list view › 
+    8974.0 -> 9027.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/executions/list.spec.ts:215 › Workflow Execut
+    15589.9 -> 15643.0 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/credentials.spec.ts:11 › Credentials › 
+    9058.5 -> 9112.0 KB  ../src/packages/testing/playwright/tests/e2e/auth/admin-smoke.spec.ts:9 › Admin user › should see sa
+    15559.8 -> 15628.7 KB  ../src/packages/testing/playwright/tests/e2e/credentials/crud.spec.ts:15 › Credentials › should crea
+    22252.2 -> 22324.2 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-advanced.spec.ts:28 › Folders - Advanc
+    27039.5 -> 27112.8 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/user-service.spec.ts:107 › User API Ser
+    15937.4 -> 16011.6 KB  ../src/packages/testing/playwright/tests/e2e/credentials/crud.spec.ts:324 › Credentials › ADO-2583 s
+    8941.1 -> 9026.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/executions/list.spec.ts:79 › Workflow Executi
+    6516.4 -> 6637.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/templates/templates.spec.ts:254 › Workflow te
+    8879.0 -> 9001.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/executions-list-infinite-scr
+    8879.0 -> 9001.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/executions-list-infinite-scr
+    15191.4 -> 15339.9 KB  ../src/packages/testing/playwright/tests/e2e/credentials/oauth.spec.ts:42 › OAuth Credentials › shou
+    8738.7 -> 8891.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/templates/templates.spec.ts:195 › Workflow te
+    9150.9 -> 9306.8 KB  ../src/packages/testing/playwright/tests/e2e/nodes/webhook.spec.ts:20 › Webhook Trigger node › shoul
+    9154.2 -> 9312.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/executions/filter.spec.ts:50 › Executions Fil
+    8842.7 -> 9002.1 KB  ../src/packages/testing/playwright/tests/e2e/regression/ADO-1338-ndv-missing-input-panel.spec.ts:16 
+    9147.7 -> 9312.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/executions/filter.spec.ts:27 › Executions Fil
+    8762.7 -> 8930.3 KB  ../src/packages/testing/playwright/tests/e2e/regression/ADO-2230-ndv-reset-data-pagination.spec.ts:9
+    6368.2 -> 6537.6 KB  ../src/packages/testing/playwright/tests/e2e/auth/authenticated.spec.ts:18 › Authentication › owner 
+    8721.6 -> 8895.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/subworkflows/extraction.spec.ts:53 › S
+    8749.5 -> 8925.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/executions/preview-isolation.spec.ts:48 › Exe
+    8833.7 -> 9010.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/paired-item.spec.ts:257 › NDV Pair
+    8741.2 -> 8918.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/subworkflows/extraction.spec.ts:31 › S
+    39760.6 -> 39939.2 KB  ../src/packages/testing/playwright/tests/e2e/sharing/credential-visibility.spec.ts:13 › Credential V
+    8802.7 -> 8981.3 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-basic.spec.ts:144 › AI Assistant::enabled 
+    10809.5 -> 10990.8 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-code-help.spec.ts:59 › AI Assistant::enabl
+    8898.6 -> 9080.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-floating-nodes.spec.ts:88 › ND
+    8730.7 -> 8913.8 KB  ../src/packages/testing/playwright/tests/e2e/regression/CAT-726-canvas-node-connectors-not-rendered-
+    9087.0 -> 9270.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:203 › NDV
+    8706.4 -> 8889.7 KB  ../src/packages/testing/playwright/tests/e2e/regression/AI-812-partial-execs-broken-when-using-chat-
+    8974.2 -> 9157.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/modal.spec.ts:94 › Express
+    10385.5 -> 10569.4 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/canvas-actions.spec.ts:73 › Canvas Node
+    8792.0 -> 8976.7 KB  ../src/packages/testing/playwright/tests/e2e/regression/AI-812-partial-execs-broken-when-using-chat-
+    8852.4 -> 9037.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/pinning.spec.ts:155 › Data pinning
+    8743.5 -> 8929.0 KB  ../src/packages/testing/playwright/tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:125
+    8691.0 -> 8876.7 KB  ../src/packages/testing/playwright/tests/e2e/nodes/pdf-node.spec.ts:9 › PDF Test › Can read and writ
+    8970.5 -> 9156.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/inline.spec.ts:125 › Inlin
+    8875.2 -> 9061.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/routing.spec.ts:27 › Routing › should 
+    8664.7 -> 8851.3 KB  ../src/packages/testing/playwright/tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:185
+    8710.8 -> 8897.5 KB  ../src/packages/testing/playwright/tests/e2e/credentials/global.spec.ts:67 › Global credentials › me
+    10420.0 -> 10607.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:232 › NDV › Execu
+    8695.2 -> 8882.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/resource-mapper.spec.ts:95 › Resou
+    8741.0 -> 8928.5 KB  ../src/packages/testing/playwright/tests/e2e/regression/AI-1401-sub-nodes-input-panel.spec.ts:9 › AI
+    9093.9 -> 9281.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:230 › NDV
+    9093.8 -> 9281.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-data-display.spec.ts:242 › NDV
+    8722.5 -> 8910.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/resource-mapper.spec.ts:63 › Resou
+    9176.3 -> 9364.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/io-filter.spec.ts:14 › Node IO Fil
+    8666.9 -> 8855.5 KB  ../src/packages/testing/playwright/tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:242
+    8667.6 -> 8856.5 KB  ../src/packages/testing/playwright/tests/e2e/ai/builder-setup-wizard.spec.ts:91 › Builder Setup Wiza
+    8667.4 -> 8856.3 KB  ../src/packages/testing/playwright/tests/e2e/ai/builder-setup-wizard.spec.ts:232 › Builder Setup Wiz
+    8720.7 -> 8909.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/resource-mapper.spec.ts:40 › Resou
+    8667.1 -> 8856.5 KB  ../src/packages/testing/playwright/tests/e2e/ai/builder-setup-wizard.spec.ts:66 › Builder Setup Wiza
+    8780.4 -> 8969.8 KB  ../src/packages/testing/playwright/tests/e2e/regression/ADO-2372-prevent-clipping-params.spec.ts:9 ›
+    8748.2 -> 8938.0 KB  ../src/packages/testing/playwright/tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:334
+    8780.7 -> 8970.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/mapping.spec.ts:11 › Data 
+    8715.9 -> 8906.0 KB  ../src/packages/testing/playwright/tests/e2e/nodes/webhook.spec.ts:40 › Webhook Trigger node › shoul
+    9092.7 -> 9282.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/partial.spec.ts:26 › Manual 
+    8664.5 -> 8854.7 KB  ../src/packages/testing/playwright/tests/e2e/ai/builder-setup-wizard.spec.ts:115 › Builder Setup Wiz
+    8781.2 -> 8971.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/execution.spec.ts:181 › Exec
+    13345.6 -> 13536.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/debug.spec.ts:74 › Debug mod
+    8664.5 -> 8855.5 KB  ../src/packages/testing/playwright/tests/e2e/ai/builder-setup-wizard.spec.ts:136 › Builder Setup Wiz
+    8748.9 -> 8940.0 KB  ../src/packages/testing/playwright/tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:345
+    8664.5 -> 8855.7 KB  ../src/packages/testing/playwright/tests/e2e/ai/builder-setup-wizard.spec.ts:211 › Builder Setup Wiz
+    8671.9 -> 8863.2 KB  ../src/packages/testing/playwright/tests/e2e/ai/builder-setup-wizard.spec.ts:187 › Builder Setup Wiz
+    8778.8 -> 8970.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/mapping.spec.ts:302 › Data
+    8659.4 -> 8850.7 KB  ../src/packages/testing/playwright/tests/e2e/ai/builder-setup-wizard.spec.ts:54 › Builder Setup Wiza
+    8744.0 -> 8935.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/schema-preview.spec.ts:9 › Schema 
+    8746.4 -> 8937.8 KB  ../src/packages/testing/playwright/tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:269
+    8763.2 -> 8954.7 KB  ../src/packages/testing/playwright/tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:392
+    10870.2 -> 11061.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/code-node.spec.ts:208 › Code node
+    8864.8 -> 9056.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/pinning.spec.ts:40 › Data pinning 
+    10373.4 -> 10565.1 KB  ../src/packages/testing/playwright/tests/e2e/sharing/workflow-sharing.spec.ts:65 › Workflow Sharing 
+    8702.4 -> 8894.2 KB  ../src/packages/testing/playwright/tests/e2e/ai/ai-2505-pdf-embed.spec.ts:18 › AI-2505 — PDF embed r
+    8763.2 -> 8955.1 KB  ../src/packages/testing/playwright/tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:280
+    8840.1 -> 9032.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/checklist/production-checklist.spec.ts:72 › W
+    8661.4 -> 8853.3 KB  ../src/packages/testing/playwright/tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:226
+    8659.5 -> 8851.5 KB  ../src/packages/testing/playwright/tests/e2e/ai/builder-setup-wizard.spec.ts:164 › Builder Setup Wiz
+    8816.1 -> 9008.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/subworkflows/debugging.spec.ts:78 › Su
+    8710.2 -> 8902.6 KB  ../src/packages/testing/playwright/tests/e2e/nodes/webhook.spec.ts:229 › Webhook Trigger node › CAT-
+    8826.8 -> 9019.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/paired-item.spec.ts:180 › NDV Pair
+    8746.5 -> 8939.3 KB  ../src/packages/testing/playwright/tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:381
+    8871.5 -> 9064.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/publish.spec.ts:44 › 
+    9194.0 -> 9387.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/io-filter.spec.ts:50 › Node IO Fil
+    8693.9 -> 8886.9 KB  ../src/packages/testing/playwright/tests/e2e/ai/chat-session.spec.ts:16 › Chat session ID reset › sh
+    8781.0 -> 8974.2 KB  ../src/packages/testing/playwright/tests/e2e/regression/SUG-38-inline-expression-preview.spec.ts:16 
+    8816.3 -> 9009.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/subworkflows/debugging.spec.ts:36 › Su
+    8816.2 -> 9009.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/subworkflows/debugging.spec.ts:47 › Su
+    8682.2 -> 8875.9 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-support-chat.spec.ts:74 › AI Assistant::en
+    8722.8 -> 8916.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/executions/list.spec.ts:163 › Workflow Execut
+    10881.2 -> 11075.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/code-node.spec.ts:41 › Code node 
+    8710.7 -> 8904.4 KB  ../src/packages/testing/playwright/tests/e2e/nodes/webhook.spec.ts:80 › Webhook Trigger node › shoul
+    8692.8 -> 8886.7 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-basic.spec.ts:78 › AI Assistant::enabled ›
+    8692.9 -> 8886.9 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-basic.spec.ts:122 › AI Assistant::enabled 
+    8686.8 -> 8880.8 KB  ../src/packages/testing/playwright/tests/e2e/nodes/community-nodes.spec.ts:75 › Community and custom
+    8684.6 -> 8878.7 KB  ../src/packages/testing/playwright/tests/e2e/nodes/community-nodes.spec.ts:89 › Community and custom
+    8692.9 -> 8887.0 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-basic.spec.ts:172 › AI Assistant::enabled 
+    8757.0 -> 8951.2 KB  ../src/packages/testing/playwright/tests/e2e/regression/ADO-2372-prevent-clipping-params.spec.ts:61 
+    8728.1 -> 8922.4 KB  ../src/packages/testing/playwright/tests/e2e/sharing/credential-sharing.spec.ts:63 › Credential Shar
+    8698.1 -> 8892.4 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-credential-help.spec.ts:115 › AI Assistant
+    8698.8 -> 8893.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/resource-locator.spec.ts:68 › Reso
+    10790.5 -> 10984.9 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-code-help.spec.ts:17 › AI Assistant::enabl
+    8737.6 -> 8932.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/paired-item.spec.ts:9 › NDV Paired
+    8737.5 -> 8932.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/paired-item.spec.ts:119 › NDV Pair
+    8678.8 -> 8873.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/execution.spec.ts:131 › Exec
+    8683.2 -> 8878.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/partial.spec.ts:9 › Manual p
+    8792.8 -> 8987.7 KB  ../src/packages/testing/playwright/tests/e2e/regression/AI-716-correctly-set-up-agent-model-shows-er
+    8918.6 -> 9113.7 KB  ../src/packages/testing/playwright/tests/e2e/node-creator/navigation.spec.ts:20 › Node Creator Navig
+    8659.5 -> 8855.0 KB  ../src/packages/testing/playwright/tests/e2e/redaction-enforcement/redaction-enforcement.spec.ts:313
+    8683.6 -> 8879.1 KB  ../src/packages/testing/playwright/tests/e2e/nodes/community-nodes.spec.ts:58 › Community and custom
+    8925.2 -> 9120.7 KB  ../src/packages/testing/playwright/tests/e2e/sharing/access-control.spec.ts:113 › Access Control Bou
+    8823.8 -> 9019.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/paired-item.spec.ts:81 › NDV Paire
+    8803.8 -> 8999.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/editors.spec.ts:104 › Editors › S
+    8719.9 -> 8915.6 KB  ../src/packages/testing/playwright/tests/e2e/nodes/http-request-node.spec.ts:13 › HTTP Request node 
+    9195.7 -> 9391.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/execution.spec.ts:347 › Exec
+    8841.9 -> 9037.8 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-credential-help.spec.ts:19 › AI Assistant:
+    8832.9 -> 9028.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/checklist/production-checklist.spec.ts:147 › 
+    8803.5 -> 8999.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/paired-item.spec.ts:246 › NDV Pair
+    8829.4 -> 9025.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/editors.spec.ts:188 › Editors › H
+    8833.0 -> 9028.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/checklist/production-checklist.spec.ts:89 › W
+    8956.1 -> 9152.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/transformation.spec.ts:22 
+    8956.0 -> 9152.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/transformation.spec.ts:99 
+    8956.1 -> 9152.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/transformation.spec.ts:61 
+    8813.6 -> 9009.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/subworkflows/debugging.spec.ts:21 › Su
+    8956.0 -> 9152.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/transformation.spec.ts:119
+    8676.7 -> 8872.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/execution.spec.ts:300 › Exec
+    8956.1 -> 9152.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/transformation.spec.ts:80 
+    8666.4 -> 8862.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/focus-panel.spec.ts:17 › Focus 
+    8857.4 -> 9053.6 KB  ../src/packages/testing/playwright/tests/e2e/nodes/schedule-trigger-node.spec.ts:13 › Schedule Trigg
+    8662.0 -> 8858.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:169 › Canva
+    8676.2 -> 8872.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/execution.spec.ts:53 › Execu
+    9166.1 -> 9362.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/subworkflows/workflow-selector.spec.ts
+    8804.1 -> 9000.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/mapping.spec.ts:147 › Data
+    9165.8 -> 9362.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/subworkflows/workflow-selector.spec.ts
+    15428.6 -> 15624.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/list/workflows.spec.ts:221 › Workflows › shou
+    8698.3 -> 8894.7 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-credential-help.spec.ts:73 › AI Assistant:
+    9153.0 -> 9349.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/mapping.spec.ts:102 › Data
+    15455.4 -> 15651.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/list/workflows.spec.ts:30 › Workflows › shoul
+    8772.6 -> 8969.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/resource-locator.spec.ts:127 › Res
+    8683.1 -> 8879.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:115 › Canvas Ac
+    8657.2 -> 8854.0 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/workflow-entry-points.spec.ts:49 › UI T
+    10870.3 -> 11067.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/code-node.spec.ts:208 › Code node
+    10870.3 -> 11067.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/code-node.spec.ts:158 › Code node
+    10870.2 -> 11067.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/code-node.spec.ts:208 › Code node
+    10870.3 -> 11067.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/code-node.spec.ts:208 › Code node
+    8729.4 -> 8926.5 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/credentials.spec.ts:27 › Credentials › 
+    8697.9 -> 8895.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/subworkflows/workflow-selector.spec.ts
+    8729.5 -> 8926.9 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/credentials.spec.ts:64 › Credentials › 
+    8801.5 -> 8998.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/routing.spec.ts:13 › Routing › should 
+    8829.6 -> 9027.0 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-basic.spec.ts:251 › AI Assistant::enabled 
+    8687.5 -> 8885.0 KB  ../src/packages/testing/playwright/tests/e2e/regression/PAY-4367-node-shifting-cyclic.spec.ts:31 › P
+    8948.4 -> 9146.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/pinning.spec.ts:84 › Data pinning 
+    8717.6 -> 8915.3 KB  ../src/packages/testing/playwright/tests/e2e/sharing/credential-visibility.spec.ts:159 › Credential 
+    8949.7 -> 9147.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/modal.spec.ts:88 › Express
+    8696.7 -> 8894.5 KB  ../src/packages/testing/playwright/tests/e2e/nodes/webhook.spec.ts:134 › Webhook Trigger node › shou
+    8702.3 -> 8900.2 KB  ../src/packages/testing/playwright/tests/e2e/nodes/form-trigger-node.spec.ts:28 › Form Trigger › sho
+    8678.5 -> 8876.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/execution.spec.ts:320 › Exec
+    8695.3 -> 8893.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:213 › NDV › Compl
+    8709.2 -> 8907.2 KB  ../src/packages/testing/playwright/tests/e2e/regression/PAY-4367-node-shifting-cyclic.spec.ts:94 › P
+    8824.1 -> 9022.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/editors.spec.ts:122 › Editors › S
+    8954.1 -> 9152.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/transformation.spec.ts:42 
+    8800.3 -> 8998.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/editors.spec.ts:92 › Editors › SQ
+    8864.6 -> 9062.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/publish.spec.ts:36 › 
+    8688.9 -> 8887.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:55 › NDV › should
+    10373.1 -> 10571.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:324 › Canvas Ac
+    10381.0 -> 10579.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:201 › Canvas Ac
+    8713.4 -> 8911.7 KB  ../src/packages/testing/playwright/tests/e2e/nodes/webhook.spec.ts:62 › Webhook Trigger node › shoul
+    10533.9 -> 10732.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:61 › Undo/Red
+    8634.1 -> 8832.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/tags.spec.ts:86 › Workflow tags - Tag 
+    10884.3 -> 11082.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:136 › NDV › shoul
+    8826.0 -> 9024.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/editors.spec.ts:176 › Editors › H
+    8657.8 -> 8856.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:58 › Canvas
+    8657.8 -> 8856.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:45 › Canvas
+    8704.5 -> 8903.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/executions/list.spec.ts:111 › Workflow Execut
+    8698.0 -> 8896.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/executions/list.spec.ts:140 › Workflow Execut
+    8812.8 -> 9011.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/editors.spec.ts:41 › Editors › SQ
+    8652.3 -> 8850.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:185 ›
+    8697.0 -> 8895.6 KB  ../src/packages/testing/playwright/tests/e2e/nodes/webhook.spec.ts:152 › Webhook Trigger node › shou
+    8657.8 -> 8856.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:70 › Canvas
+    8803.0 -> 9001.6 KB  ../src/packages/testing/playwright/tests/e2e/mcp-registry/mcp-registry.spec.ts:12 › MCP Registry › e
+    8802.2 -> 9001.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/editors.spec.ts:19 › Editors › SQ
+    8683.4 -> 8882.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/execution.spec.ts:254 › Exec
+    8657.8 -> 8856.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:84 › Canvas
+    8672.2 -> 8871.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/routing.spec.ts:45 › Routing › should 
+    8657.8 -> 8856.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:101 › Canva
+    8697.0 -> 8895.8 KB  ../src/packages/testing/playwright/tests/e2e/nodes/webhook.spec.ts:190 › Webhook Trigger node › shou
+    8657.6 -> 8856.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:128 › Canva
+    8824.1 -> 9022.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/editors.spec.ts:152 › Editors › H
+    8657.8 -> 8856.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:116 › Canva
+    15420.4 -> 15619.3 KB  ../src/packages/testing/playwright/tests/e2e/projects/folders-basic.spec.ts:122 › Folders - Basic Op
+    8662.3 -> 8861.2 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/workflow-entry-points.spec.ts:31 › UI T
+    8657.8 -> 8856.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:148 › Canva
+    8835.7 -> 9034.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/publish.spec.ts:25 › 
+    8720.8 -> 8919.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/executions/list.spec.ts:320 › Workflow Execut
+    8864.1 -> 9063.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/editors.spec.ts:207 › Editors › H
+    8657.9 -> 8857.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:137 › Canva
+    8657.8 -> 8857.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:159 › Canva
+    8725.1 -> 8924.4 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/credentials.spec.ts:37 › Credentials › 
+    8636.0 -> 8835.3 KB  ../src/packages/testing/playwright/tests/e2e/sharing/access-control.spec.ts:147 › Access Control Bou
+    8929.6 -> 9128.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/modal.spec.ts:21 › Express
+    8725.2 -> 8924.7 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/credentials.spec.ts:80 › Credentials › 
+    8752.8 -> 8952.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/mapping.spec.ts:353 › Data
+    8657.9 -> 8857.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:317 › Canva
+    8665.7 -> 8865.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:268 › Canva
+    8694.1 -> 8893.6 KB  ../src/packages/testing/playwright/tests/e2e/node-creator/vector-stores.spec.ts:38 › Node Creator Ve
+    8666.3 -> 8865.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/mapping.spec.ts:326 › Data
+    8657.9 -> 8857.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:231 › Canva
+    8657.8 -> 8857.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:340 › Canva
+    8753.1 -> 8952.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/mapping.spec.ts:193 › Data
+    8658.0 -> 8857.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:348 › Canva
+    8780.2 -> 8979.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/mapping.spec.ts:53 › Data 
+    8662.1 -> 8861.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/tags.spec.ts:18 › Workflow tags - Tag 
+    8657.6 -> 8857.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:224 › Canva
+    8768.7 -> 8968.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/resource-mapper.spec.ts:29 › Resou
+    8688.0 -> 8887.8 KB  ../src/packages/testing/playwright/tests/e2e/node-creator/actions.spec.ts:58 › Node Creator Actions 
+    8657.8 -> 8857.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:328 › Canva
+    8657.8 -> 8857.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:369 › Canva
+    10369.3 -> 10569.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:101 › Canvas Ac
+    8689.7 -> 8889.8 KB  ../src/packages/testing/playwright/tests/e2e/node-creator/actions.spec.ts:13 › Node Creator Actions 
+    8688.6 -> 8888.8 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/node-details-configuration.spec.ts:67 ›
+    8688.7 -> 8888.9 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/node-details-configuration.spec.ts:58 ›
+    10369.3 -> 10569.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:127 › Canvas Ac
+    8657.6 -> 8857.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/node-groups.spec.ts:298 › Canva
+    8687.8 -> 8888.0 KB  ../src/packages/testing/playwright/tests/e2e/node-creator/special-nodes.spec.ts:14 › Node Creator Sp
+    8687.8 -> 8888.0 KB  ../src/packages/testing/playwright/tests/e2e/node-creator/special-nodes.spec.ts:28 › Node Creator Sp
+    8689.5 -> 8889.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:127 › NDV P
+    8688.2 -> 8888.5 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/node-details-configuration.spec.ts:49 ›
+    8688.2 -> 8888.6 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/node-details-configuration.spec.ts:13 ›
+    8700.4 -> 8900.7 KB  ../src/packages/testing/playwright/tests/e2e/regression/PAY-4367-node-shifting-cyclic.spec.ts:64 › P
+    8688.4 -> 8888.8 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/node-details-configuration.spec.ts:79 ›
+    8704.5 -> 8904.8 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/node-details-configuration.spec.ts:25 ›
+    8688.2 -> 8888.5 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/node-details-configuration.spec.ts:40 ›
+    10369.3 -> 10569.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:144 › Canvas Ac
+    8758.1 -> 8958.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/execution.spec.ts:273 › Exec
+    8696.6 -> 8897.1 KB  ../src/packages/testing/playwright/tests/e2e/nodes/form-trigger-node.spec.ts:16 › Form Trigger › add
+    8698.0 -> 8898.5 KB  ../src/packages/testing/playwright/tests/e2e/node-creator/actions.spec.ts:28 › Node Creator Actions 
+    8935.0 -> 9135.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/pinning.spec.ts:58 › Data pinning 
+    9307.1 -> 9507.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/pinning.spec.ts:107 › Data pinning
+    9307.2 -> 9507.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/pinning.spec.ts:136 › Data pinning
+    10369.4 -> 10570.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:172 › Canva
+    8792.5 -> 8993.1 KB  ../src/packages/testing/playwright/tests/e2e/node-creator/workflows.spec.ts:13 › Node Creator Workfl
+    8722.7 -> 8923.3 KB  ../src/packages/testing/playwright/tests/e2e/node-creator/special-nodes.spec.ts:44 › Node Creator Sp
+    8792.4 -> 8993.0 KB  ../src/packages/testing/playwright/tests/e2e/node-creator/workflows.spec.ts:27 › Node Creator Workfl
+    8826.0 -> 9026.7 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-basic.spec.ts:272 › AI Assistant::enabled 
+    8946.5 -> 9147.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/inline.spec.ts:118 › Inlin
+    10369.2 -> 10570.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:140 › Canva
+    8738.5 -> 8939.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:136 ›
+    10369.2 -> 10570.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:154 › Canva
+    8682.7 -> 8883.8 KB  ../src/packages/testing/playwright/tests/e2e/nodes/http-request-node.spec.ts:26 › HTTP Request node 
+    8827.7 -> 9028.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:257 › Undo/Re
+    8728.5 -> 8930.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:80 › NDV Pa
+    8627.6 -> 8829.2 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/workflow-entry-points.spec.ts:24 › UI T
+    8726.7 -> 8928.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:100 › NDV P
+    8688.0 -> 8889.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/resource-locator.spec.ts:115 › Res
+    8688.9 -> 8890.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:29 › NDV › should
+    8925.2 -> 9127.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/modal.spec.ts:53 › Express
+    8688.4 -> 8890.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:112 › NDV › webho
+    8713.1 -> 8915.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:65 › NDV › should
+    8849.9 -> 9052.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/mapping.spec.ts:223 › Data
+    8925.1 -> 9127.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/modal.spec.ts:65 › Express
+    8673.9 -> 8876.1 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/canvas-actions.spec.ts:83 › Canvas Node
+    8925.1 -> 9127.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/modal.spec.ts:37 › Express
+    8673.8 -> 8876.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:93 › Canvas Act
+    8766.1 -> 8968.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/resource-mapper.spec.ts:15 › Resou
+    8675.5 -> 8877.7 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/canvas-actions.spec.ts:47 › Canvas Node
+    8681.7 -> 8884.1 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/canvas-actions.spec.ts:91 › Canvas Node
+    8764.7 -> 8967.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:58 › Canvas Act
+    8646.5 -> 8849.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/list/import.spec.ts:21 › Import workflow › Fr
+    8686.4 -> 8888.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/resource-locator.spec.ts:49 › Reso
+    8630.3 -> 8832.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:202 ›
+    8691.5 -> 8894.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/subworkflows/workflow-selector.spec.ts
+    8703.4 -> 8905.9 KB  ../src/packages/testing/playwright/tests/e2e/node-creator/actions.spec.ts:44 › Node Creator Actions 
+    10846.4 -> 11048.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/code-node.spec.ts:23 › Code node 
+    8623.0 -> 8825.5 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-basic.spec.ts:28 › AI Assistant::disabled 
+    8622.9 -> 8825.5 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-basic.spec.ts:40 › AI Assistant::enabled ›
+    8622.9 -> 8825.6 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-basic.spec.ts:63 › AI Assistant::enabled ›
+    8668.6 -> 8871.2 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-basic.spec.ts:97 › AI Assistant::enabled ›
+    8623.0 -> 8825.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:48 › Canvas
+    8623.1 -> 8825.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:36 › Canvas
+    10846.2 -> 11049.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/code-node.spec.ts:75 › Code node 
+    8623.0 -> 8825.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:58 › Canvas
+    8657.8 -> 8860.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/tags.spec.ts:53 › Workflow tags - Tag 
+    8825.9 -> 9028.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:274 › Undo/Re
+    8682.9 -> 8885.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:111 › NDV P
+    8731.4 -> 8934.3 KB  ../src/packages/testing/playwright/tests/e2e/sharing/credential-visibility.spec.ts:215 › Credential 
+    8623.0 -> 8826.0 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-basic.spec.ts:193 › AI Assistant::enabled 
+    8650.6 -> 8853.6 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-support-chat.spec.ts:47 › AI Assistant::en
+    8781.9 -> 8985.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/editors.spec.ts:77 › Editors › SQ
+    8709.1 -> 8912.2 KB  ../src/packages/testing/playwright/tests/e2e/ai/assistant-support-chat.spec.ts:25 › AI Assistant::en
+    8789.5 -> 8992.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/editors.spec.ts:59 › Editors › SQ
+    8604.7 -> 8808.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:32 › 
+    8655.6 -> 8859.0 KB  ../src/packages/testing/playwright/tests/e2e/regression/ADO-2929-can-load-old-switch-node-workflows.
+    8687.4 -> 8890.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/pinning.spec.ts:78 › Data pinning 
+    8683.6 -> 8887.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/resource-locator.spec.ts:36 › Reso
+    8683.5 -> 8887.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/resource-locator.spec.ts:22 › Reso
+    8604.7 -> 8808.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:88 › 
+    8744.2 -> 8947.8 KB  ../src/packages/testing/playwright/tests/e2e/node-creator/vector-stores.spec.ts:15 › Node Creator Ve
+    15353.7 -> 15557.3 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/credential-mismatch.spec.ts:11 › HTTP R
+    8645.1 -> 8848.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/list/import.spec.ts:65 › Import workflow › Fr
+    8679.6 -> 8883.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/publish.spec.ts:18 › 
+    8623.4 -> 8827.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/list/import.spec.ts:41 › Import workflow › Fr
+    8664.7 -> 8868.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/list/import.spec.ts:87 › Import workflow › Fr
+    8623.3 -> 8827.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/list/import.spec.ts:53 › Import workflow › Fr
+    8683.5 -> 8887.5 KB  ../src/packages/testing/playwright/tests/e2e/node-creator/vector-stores.spec.ts:45 › Node Creator Ve
+    8674.7 -> 8878.7 KB  ../src/packages/testing/playwright/tests/e2e/node-creator/navigation.spec.ts:67 › Node Creator Navig
+    13322.6 -> 13526.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/debug.spec.ts:55 › Debug mod
+    10853.0 -> 11057.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:172 › NDV › shoul
+    8676.1 -> 8880.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:18 › NDV › should
+    8912.1 -> 9116.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/expressions/inline.spec.ts:24 › Inline
+    8723.2 -> 8927.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:63 › NDV Pa
+    8676.2 -> 8880.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:44 › NDV Pa
+    8690.6 -> 8895.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:206 › Undo/Re
+    8623.0 -> 8827.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/stickies.spec.ts:9 › Canvas Act
+    8623.1 -> 8827.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/stickies.spec.ts:35 › Canvas Ac
+    8674.8 -> 8879.7 KB  ../src/packages/testing/playwright/tests/e2e/node-creator/navigation.spec.ts:14 › Node Creator Navig
+    8768.3 -> 8973.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/templates/templates.spec.ts:213 › Workflow te
+    8689.4 -> 8894.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/resource-locator.spec.ts:104 › Res
+    8759.9 -> 8965.7 KB  ../src/packages/testing/playwright/tests/e2e/nodes/if-node.spec.ts:16 › If Node (filter component) ›
+    8654.1 -> 8860.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/tags.spec.ts:115 › Workflow tags - Tag
+    8623.9 -> 8830.5 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/workflow-entry-points.spec.ts:17 › UI T
+    8654.0 -> 8860.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/tags.spec.ts:193 › Workflow tags - Tag
+    8682.6 -> 8889.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:225 › Undo/Re
+    8654.1 -> 8860.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/tags.spec.ts:142 › Workflow tags - Tag
+    8625.1 -> 8831.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/archive.spec.ts:126 ›
+    8625.1 -> 8831.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/publish.spec.ts:79 › 
+    8625.2 -> 8832.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/publish.spec.ts:91 › 
+    8653.8 -> 8860.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/tags.spec.ts:168 › Workflow tags - Tag
+    10870.2 -> 11081.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/code-node.spec.ts:135 › Code node
+    13635.0 -> 13857.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/execution/partial.spec.ts:61 › Manual 
+    13235.5 -> 13460.6 KB  ../src/packages/testing/playwright/tests/e2e/credentials/crud.spec.ts:137 › Credentials › should cre
+    8164.1 -> 8389.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/demo-diff.spec.ts:175 › Workflow Diff Demo › 
+    13239.1 -> 13464.5 KB  ../src/packages/testing/playwright/tests/e2e/credentials/crud.spec.ts:179 › Credentials › should ren
+    8155.8 -> 8381.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/demo-diff.spec.ts:159 › Workflow Diff Demo › 
+    8164.1 -> 8389.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/demo-diff.spec.ts:124 › Workflow Diff Demo › 
+    13237.0 -> 13462.6 KB  ../src/packages/testing/playwright/tests/e2e/credentials/crud.spec.ts:294 › Credentials › should not
+    8127.3 -> 8352.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/demo-diff.spec.ts:207 › Workflow Diff Demo › 
+    8163.9 -> 8389.6 KB  ../src/packages/testing/playwright/tests/e2e/workflows/demo-diff.spec.ts:143 › Workflow Diff Demo › 
+    8127.3 -> 8353.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/demo-diff.spec.ts:194 › Workflow Diff Demo › 
+    8127.1 -> 8352.9 KB  ../src/packages/testing/playwright/tests/e2e/workflows/demo-diff.spec.ts:118 › Workflow Diff Demo › 
+    13332.6 -> 13559.6 KB  ../src/packages/testing/playwright/tests/e2e/credentials/crud.spec.ts:203 › Credentials › should edi
+    13226.9 -> 13456.5 KB  ../src/packages/testing/playwright/tests/e2e/credentials/crud.spec.ts:273 › Credentials › should set
+    13267.3 -> 13498.1 KB  ../src/packages/testing/playwright/tests/e2e/credentials/crud.spec.ts:155 › Credentials › should del
+    13221.8 -> 13456.0 KB  ../src/packages/testing/playwright/tests/e2e/credentials/crud.spec.ts:250 › Credentials › should set
+    8594.4 -> 8831.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/workflow-actions/publish.spec.ts:103 ›
+    30788.1 -> 31032.6 KB  ../src/packages/testing/playwright/tests/e2e/sharing/credential-visibility.spec.ts:99 › Credential V
+    8875.9 -> 9193.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-parameters.spec.ts:144 › NDV P
+    13255.9 -> 13583.6 KB  ../src/packages/testing/playwright/tests/e2e/credentials/crud.spec.ts:230 › Credentials › should set
+    4485.6 -> 4859.1 KB  ../src/packages/testing/playwright/tests/e2e/auth/authenticated.spec.ts:18 › Authentication › none a
+    10635.9 -> 11024.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/templates/templates.spec.ts:231 › Workflow te
+    10348.8 -> 10739.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-nodes.spec.ts:179 › Canv
+    6162.7 -> 6597.0 KB  ../src/packages/testing/playwright/tests/e2e/auth/authenticated.spec.ts:18 › Authentication › member
+    9308.5 -> 9796.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:129 › Undo/Re
+    10188.7 -> 10741.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:193 › Undo/Re
+    10550.4 -> 11207.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-nodes.spec.ts:189 › Canv
+    10373.9 -> 11048.4 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:154 › Canvas Ac
+    10381.0 -> 11056.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:230 › Canvas Ac
+    10373.0 -> 11048.3 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:290 › Canvas Ac
+    9892.4 -> 10569.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:190 › Canvas Ac
+    10369.2 -> 11046.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:164 › Canvas Ac
+    10369.2 -> 11048.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:100 › Undo/Re
+    10376.0 -> 11056.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/code/code-node.spec.ts:129 › Code node
+    12387.8 -> 13069.2 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/ndv/ndv-core.spec.ts:194 › NDV › shoul
+    9932.6 -> 10738.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:81 › Undo/Red
+    9916.5 -> 10738.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:146 › Undo/Re
+    13117.1 -> 14204.1 KB  ../src/packages/testing/playwright/tests/e2e/settings/community-nodes/community-nodes.spec.ts:26 › C
+    9748.5 -> 11047.0 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:90 › Canvas
+    9284.3 -> 10586.5 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:183 › Canva
+    9404.3 -> 10721.7 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/undo-redo.spec.ts:160 › Undo/Re
+    8948.0 -> 10569.8 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/actions.spec.ts:175 › Canvas Ac
+    8801.6 -> 10535.3 KB  ../src/packages/testing/playwright/tests/e2e/building-blocks/canvas-actions.spec.ts:58 › Canvas Node
+    11954.4 -> 15369.1 KB  ../src/packages/testing/playwright/tests/e2e/workflows/editor/canvas/canvas-zoom.spec.ts:69 › Canvas
+
+=== nodes.json double-fetch, both arms (the confound commonPatches/0006 removes) ===
+dedupe-check ablate            23 full 200s    33.5 MB     0 DOUBLE-FETCH
+dedupe-check baseline          24 full 200s    35.0 MB     0 DOUBLE-FETCH
+dedupe-check ported            24 full 200s    34.9 MB     0 DOUBLE-FETCH
+dedupe-proof/routing ablate    15 full 200s    21.8 MB     6 DOUBLE-FETCH  [154ms after the previous download ended; 205ms after the previous download ended; 129ms after the previous download ended]
+dedupe-proof/routing fixed      9 full 200s    13.1 MB     0 DOUBLE-FETCH
+
+intervals between consecutive fetches (ms) — the threshold is 500ms:
+  dedupe-check ablate         974, 1036, 2347, 2766, 2851, 3449, 3826, 3868, 3985, 4000, 4240, 4822, ...
+  dedupe-check baseline       710, 940, 942, 2657, 2719, 2943, 3497, 3619, 3801, 3882, 4322, 4394, ...
+  dedupe-check ported         1027, 1073, 1399, 2534, 2905, 3033, 3520, 3768, 3786, 3945, 4043, 4545, ...
+  dedupe-proof/routing ablate 85, 129, 154, 178, 205, 238, 4260, 4493, 4513, 4664, 5192, 6428, ...
+  dedupe-proof/routing fixed  4081, 4249, 4719, 5303, 5996, 7123, 7794, 8164
+
+dedupe-check: NO POWER — the reverted arm did not double-fetch either, so this spec set cannot test the fix.
+dedupe-proof/routing: FIX CONFIRMED — 6 double-fetch(es) of 15 fetches without it, 0 with it (8.7 MB of redundant download removed).

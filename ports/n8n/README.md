@@ -421,7 +421,36 @@ log, ports/wire-budget.mts) — built because the +8% was previously attributed
 by aggregate ratios, wrongly. Arm totals this pair (conditional crossings on):
 5,958 MB stock vs 6,214 MB ported TCP-true (+4.3%; baseline had an elevated 46
 failures this run — arm-level totals, not pass-parity-gated). Attribution
-reconciles within 2.2% of TCP on the stock arm. What the table says:
+reconciles within 2.2% of TCP on the stock arm.
+
+**SUPERSEDED for bytes (2026-07-25, `results/remeasure/`).** Re-driven as a
+pass-parity-gated arm pair after (a) the gateway fixes — re-serialization,
+`upstreamIdentity`, raw-body passthrough, ~390 ms/crossing at node-types size —
+and (b) removing the nodes.json double-fetch confound from BOTH arms
+(`commonPatches/0006`). 736 tests per arm, 553 comparable pairs:
+
+    total bytes   5.700 GB stock -> 5.710 GB ported   (+9.9 MB, +0.17%)
+    median per-test                                   (+2.2%; quartiles +0.1% / +2.3%)
+
+So the byte regression is **+4.3% -> +0.17%, essentially parity**, and the
++294 MB nodes.json term is gone by construction (both arms now fetch it once
+per page). The old figure was never all tierless: most of it was an upstream
+race the port amplified.
+
+Two instrument notes, both load-bearing. Five pairs reported ZERO bytes in one
+arm and ~9 MB in the other — a missed counter read, not a measurement, since a
+test cannot load an app page in one arm and use no bytes in the other. Left in,
+four of them carried 34.1 MB of a 35.0 MB delta and turned parity into a +0.6%
+regression; `ports/report.mts` now excludes and lists one-sided zeros on the
+same discipline as pass-parity. And WALL TIME IS NOT RE-MEASURED HERE: a
+wire-truth+budget arm puts two userspace relay hops on the app origin and a
+third on the session socket, which only the ported arm uses for data — an
+asymmetric instrument cost (this run reads +23%, against +8% for the
+uninstrumented floor arms, and the difference is the relay, not the port).
+The +8% floor figure below still stands unrefreshed; re-testing it needs floor
+arms with no counting relay.
+
+What the older budget table says:
 
 - `/rest/community-node-types` is at wire parity now: 832 MB stock HTTP over
   **484 fetches** vs ~840 MB deflated session. (The earlier "197 stock

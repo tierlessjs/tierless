@@ -98,7 +98,22 @@ if (wireDropped.length) console.log(`wire-counter failure EXCLUDED (${wireDroppe
 
 const allPassed = (a: Agg): boolean => a.statuses.every((s) => s === "passed");
 const parityFail = pairs.filter(({ b, p }) => !allPassed(b) || !allPassed(p));
-const counted = pairs.filter(({ b, p }) => allPassed(b) && allPassed(p));
+// ONE-SIDED ZERO: a pair where one arm reports zero wire bytes and the other reports
+// megabytes is not a measurement, it is a missed counter read. wireError does not catch
+// it — a read that silently returns the previous value yields a 0 delta indistinguishable
+// from "no traffic", which is legitimate for the API-only tests in these suites. So the
+// asymmetry is the signal: a test cannot load an app page in one arm and use 0 bytes in
+// the other. Left in the totals these dominate: on n8n (2026-07-25) four such pairs
+// carried 34.1 MB of a 35.0 MB suite-wide delta, turning byte parity into a +0.6%
+// regression. Excluded and listed, on the same discipline as pass-parity.
+const ONE_SIDED_FLOOR = 1e6;
+const oneSidedZero = pairs.filter(({ b, p }) => {
+  if (!allPassed(b) || !allPassed(p)) return false;
+  const bb = med(b, bytesOf), pp = med(p, bytesOf);
+  return (bb === 0 && pp > ONE_SIDED_FLOOR) || (pp === 0 && bb > ONE_SIDED_FLOOR);
+});
+const zeroSkew = new Set(oneSidedZero.map(({ id }) => id));
+const counted = pairs.filter(({ b, p, id }) => allPassed(b) && allPassed(p) && !zeroSkew.has(id));
 // wire-only rows (the NocoDB reporter) carry no CDP request/frame counts: trips are
 // then unknowable, not zero — the trip lines are suppressed instead of printing NaN
 const hasTrips = (a: Agg): boolean => a.recs.every((r) => r.requests !== undefined && r.wsFramesOut !== undefined);
@@ -121,6 +136,10 @@ if (onlyPort.length) console.log(`  only in ported (${onlyPort.length}): ${onlyP
 if (parityFail.length) {
   console.log(`\npass-parity EXCLUDED (${parityFail.length}) — statuses baseline/ported (all runs):`);
   for (const { id, b, p } of parityFail) console.log(`  ${b.statuses.join("|")} / ${p.statuses.join("|")}  ${id}`);
+}
+if (oneSidedZero.length) {
+  console.log(`\none-sided ZERO-BYTE reads EXCLUDED (${oneSidedZero.length}) — a missed counter read, not a measurement:`);
+  for (const { id, b, p } of oneSidedZero) console.log(`  ${(med(b, bytesOf) / 1e6).toFixed(1)} MB / ${(med(p, bytesOf) / 1e6).toFixed(1)} MB  ${id}`);
 }
 
 const sum = (xs: number[]): number => xs.reduce((a, x) => a + x, 0);
