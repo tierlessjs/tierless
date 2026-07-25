@@ -208,6 +208,52 @@ export function httpResources(instance) {
         return { data: r.data, status: r.status, statusText: r.statusText ?? "", headers: r.headers?.toJSON ? r.headers.toJSON() : { ...r.headers } };
     };
 }
+/** Headers that identify the PRINCIPAL. Coalescing keys on these and nothing else: two
+ *  requests from different credentials must never share a response, and per-page noise
+ *  (n8n's push-ref, a browser id) must not defeat sharing between pages of one user. */
+const CRED_HEADERS = ["cookie", "authorization", "x-tierless-session-auth"];
+/** GATEWAY REQUEST COALESCING (nginx proxy_cache_lock / Varnish request coalescing).
+ *  While an `api.get` for the same (path, principal) is in flight, later callers JOIN it
+ *  instead of issuing their own — the one case a cache structurally cannot cover, because
+ *  at the moment the duplicates are issued there is nothing cached yet.
+ *
+ *  Measured on n8n: three page sessions cold-fetch the same 12.4 MB endpoint within one
+ *  response window, and the backend serving them concurrently takes 14-21 s EACH (~50 s
+ *  in one 10-test spec) where a single uncontended fetch is ~200 ms.
+ *
+ *  ASSUMPTION, stated because it is the reason this is opt-in: the response depends on
+ *  the path and the credential only. An endpoint that varies on some OTHER request header
+ *  (a real `Vary:`) must not be coalesced — joiners are chosen before any response, so
+ *  Vary cannot be honored after the fact. Each joiner gets its OWN shallow copy of the
+ *  envelope, so per-session mutation (the cookie-authority rotation field) stays private.
+ *  Wrap the exec that sees the RESOLVED credential (inside cookieAuthority, not above it:
+ *  a sealed blob is re-randomized per session and would never match). */
+export function coalesceGets(inner) {
+    const inflight = new Map();
+    return async (req) => {
+        const r = req;
+        if (r.name !== "api.get")
+            return inner(req); // idempotent, body-less only
+        const [path, , opts] = (r.args ?? []);
+        const h = opts?.headers ?? {};
+        const cred = CRED_HEADERS.map((n) => {
+            const k = Object.keys(h).find((x) => x.toLowerCase() === n);
+            return k ? h[k] : "";
+        }).join("\u0000");
+        const key = String(path) + "\u0000" + cred;
+        const pending = inflight.get(key);
+        if (pending)
+            return { ...await pending }; // joiner: own copy of the shared result
+        const p = Promise.resolve(inner(req));
+        inflight.set(key, p);
+        try {
+            return { ...await p };
+        }
+        finally {
+            inflight.delete(key);
+        } // leader clears the slot, success or failure
+    };
+}
 export function restResources(baseUrl, { token, headers = {}, fetchImpl = fetch, envelopeErrors = false, upstreamIdentity = false } = {}) {
     const base = baseUrl.replace(/\/$/, "");
     return async (req) => {

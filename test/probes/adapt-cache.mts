@@ -131,6 +131,52 @@ check("…and the dead index entry stops attaching validators", again.status ===
   srv.close();
 }
 
+// GATEWAY REQUEST COALESCING: the stampede case a cache structurally cannot cover —
+// duplicates issued while the first response is still in flight, so there is nothing
+// cached yet to hit. Measured on n8n as three page sessions cold-fetching one 12.4 MB
+// endpoint concurrently, 14-21 s each. Joining must key on the CREDENTIAL: never share
+// across principals, and never let per-page noise headers defeat sharing within one.
+{
+  const { createServer } = await import("node:http");
+  const { restResources, coalesceGets } = await import("tierless/adapt");
+  let hits = 0;
+  const srv = createServer((req, res) => {
+    hits++;
+    setTimeout(() => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ who: String(req.headers.cookie ?? "anon"), n: hits })); }, 60);
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const base = "http://127.0.0.1:" + (srv.address() as { port: number }).port;
+  const exec = coalesceGets(restResources(base, { envelopeErrors: true }));
+  const get = (cookie: string, extra: Record<string, string> = {}): Promise<{ body: { who: string } }> =>
+    exec({ op: "res", tier: "server", name: "api.get", args: ["/big", undefined, { headers: { cookie, ...extra } }] } as never) as never;
+
+  hits = 0;
+  const [a, b] = await Promise.all([get("u=1"), get("u=1")]);
+  check("two concurrent identical GETs cost the backend ONE request", hits === 1, String(hits));
+  check("…and both callers get the right data", a.body.who === "u=1" && b.body.who === "u=1");
+  check("…as separate envelopes, so per-session mutation stays private", a !== b);
+
+  hits = 0;
+  const [x, y] = await Promise.all([get("u=1"), get("u=2")]);
+  check("different credentials NEVER coalesce", hits === 2 && x.body.who === "u=1" && y.body.who === "u=2", String(hits));
+
+  hits = 0;
+  await Promise.all([get("u=1", { "push-ref": "p1" }), get("u=1", { "push-ref": "p2" })]);
+  check("per-page noise headers do not defeat sharing within one principal", hits === 1, String(hits));
+
+  hits = 0;
+  await get("u=1"); await get("u=1");
+  check("sequential GETs are not affected (that is the cache's job, not this)", hits === 2, String(hits));
+
+  hits = 0;
+  await Promise.all([
+    exec({ op: "res", tier: "server", name: "api.post", args: ["/big", { a: 1 }, { headers: { cookie: "u=1" } }] } as never),
+    exec({ op: "res", tier: "server", name: "api.post", args: ["/big", { a: 1 }, { headers: { cookie: "u=1" } }] } as never),
+  ]);
+  check("non-GET traffic is never coalesced", hits === 2, String(hits));
+  srv.close();
+}
+
 const { pass, fail } = counts();
 console.log(fail === 0
   ? `\nOK — conditional crossings give session GETs the browser cache's own revalidation: validated replay on 304, full fetch on change, untouched otherwise (${pass} checks)`

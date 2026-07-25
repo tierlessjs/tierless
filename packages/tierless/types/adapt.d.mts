@@ -83,4 +83,21 @@ export declare function crossHttpRequest(instance: {
     };
 } | null | undefined, req: ResourceRequest): ResourceRequest | null | Promise<ResourceRequest | null>;
 export declare function httpResources(instance: Record<string, unknown>): Exec;
+/** GATEWAY REQUEST COALESCING (nginx proxy_cache_lock / Varnish request coalescing).
+ *  While an `api.get` for the same (path, principal) is in flight, later callers JOIN it
+ *  instead of issuing their own — the one case a cache structurally cannot cover, because
+ *  at the moment the duplicates are issued there is nothing cached yet.
+ *
+ *  Measured on n8n: three page sessions cold-fetch the same 12.4 MB endpoint within one
+ *  response window, and the backend serving them concurrently takes 14-21 s EACH (~50 s
+ *  in one 10-test spec) where a single uncontended fetch is ~200 ms.
+ *
+ *  ASSUMPTION, stated because it is the reason this is opt-in: the response depends on
+ *  the path and the credential only. An endpoint that varies on some OTHER request header
+ *  (a real `Vary:`) must not be coalesced — joiners are chosen before any response, so
+ *  Vary cannot be honored after the fact. Each joiner gets its OWN shallow copy of the
+ *  envelope, so per-session mutation (the cookie-authority rotation field) stays private.
+ *  Wrap the exec that sees the RESOLVED credential (inside cookieAuthority, not above it:
+ *  a sealed blob is re-randomized per session and would never match). */
+export declare function coalesceGets(inner: Exec): Exec;
 export declare function restResources(baseUrl: string, { token, headers, fetchImpl, envelopeErrors, upstreamIdentity }?: RestResourcesOpts): Exec;

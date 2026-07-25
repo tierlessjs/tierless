@@ -20,7 +20,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Exec, ResourceRequest } from "./types.mjs";
-import { restResources } from "./adapt.mjs";
+import { restResources, coalesceGets } from "./adapt.mjs";
 import { SESSION_AUTH_HEADER, AUTH_FIELD } from "./adapt-session-auth.mjs";
 
 export interface CookieAuthorityOpts {
@@ -31,6 +31,9 @@ export interface CookieAuthorityOpts {
   allowedOrigins: Iterable<string>;
   /** Claim-ticket lifetime; the ticket replays Set-Cookie, so it stays short. */
   claimTtlMs?: number;
+  /** Join concurrent identical GETs into one upstream request (adapt.mts coalesceGets).
+   *  Opt-in: it assumes responses vary only on path + credential. Default false. */
+  coalesce?: boolean;
   fetchImpl?: typeof fetch;
   /** GET paths to pre-fetch at the ws upgrade (boot preboot): the gateway fetches each with
    *  the upgrade's own cookie and hands the envelopes to the browser in the hello, so the
@@ -68,8 +71,9 @@ export function mergeCookies(header: string, setCookies: string[]): string {
   return [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
 }
 
-export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_000, fetchImpl, prebootPaths = [], now = Date.now }: CookieAuthorityOpts): { exec: Exec; handleHttp(req: IncomingMessage, res: ServerResponse): boolean; hello(cookie: string, opts?: { auth?: boolean; preboot?: boolean }): Promise<{ blob: string | null; sealed: boolean; preboot?: Record<string, unknown> }> } {
+export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_000, fetchImpl, prebootPaths = [], now = Date.now, coalesce = false }: CookieAuthorityOpts): { exec: Exec; handleHttp(req: IncomingMessage, res: ServerResponse): boolean; hello(cookie: string, opts?: { auth?: boolean; preboot?: boolean }): Promise<{ blob: string | null; sealed: boolean; preboot?: Record<string, unknown> }> } {
   const key = randomBytes(32);   // per boot, shared with no one
+  const coalesced = (e: Exec): Exec => (coalesce ? coalesceGets(e) : e);
   const allowed = new Set(allowedOrigins);
   const baseFetch: typeof fetch = fetchImpl ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
 
@@ -110,7 +114,9 @@ export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_00
     };
     // upstreamIdentity: the reply is deflated by the socket anyway — asking the backend
     // for gzip would burn a gzip there and a gunzip here for a hop that is normally local
-    const inner = restResources(backendUrl, { envelopeErrors: true, fetchImpl: capturing, upstreamIdentity: true });
+    // coalescing sits HERE, below the blob->cookie translation: the sealed blob is
+    // re-randomized per session, so keying above this would never match across pages
+    const inner = coalesced(restResources(backendUrl, { envelopeErrors: true, fetchImpl: capturing, upstreamIdentity: true }));
     const env = await inner({ ...r, args: [path, data, { ...(reqOpts ?? {}), headers }] }) as Record<string, unknown>;
     if (captured.length) {
       env[AUTH_FIELD] = {

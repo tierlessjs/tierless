@@ -86,6 +86,10 @@ export async function bootN8n(): Promise<{ close(): void }> {
       "--backend", process.env.TIERLESS_API_URL || APP,
       "--port", "5780",                                // page port (:5680) + 100: the patch needs no gateway config
       "--cookie-authority",
+      // concurrent identical GETs join one upstream request: n8n's page sessions
+      // cold-fetch the same 12.4 MB node-types endpoint within one response window
+      // (measured: 3 overlapping fetches, 14-21 s each). Opt-in per gateway.
+      ...(process.env.TIERLESS_COALESCE_GETS === "0" ? [] : ["--coalesce-gets"]),
       "--allow-origin", process.env.TIERLESS_ALLOWED_ORIGINS ||
         ["5680", "15680", "25680"].flatMap((p) => [`http://localhost:${p}`, `http://127.0.0.1:${p}`]).join(","),
     ], { env, stdio: log("gateway"), detached: true }),

@@ -8,6 +8,9 @@ export interface CookieAuthorityOpts {
     allowedOrigins: Iterable<string>;
     /** Claim-ticket lifetime; the ticket replays Set-Cookie, so it stays short. */
     claimTtlMs?: number;
+    /** Join concurrent identical GETs into one upstream request (adapt.mts coalesceGets).
+     *  Opt-in: it assumes responses vary only on path + credential. Default false. */
+    coalesce?: boolean;
     fetchImpl?: typeof fetch;
     /** GET paths to pre-fetch at the ws upgrade (boot preboot): the gateway fetches each with
      *  the upgrade's own cookie and hands the envelopes to the browser in the hello, so the
@@ -21,7 +24,7 @@ export interface CookieAuthorityOpts {
  *  Max-Age<=0 / a past Expires / an empty value deletes. Attributes beyond liveness
  *  are the browser jar's business (the claim replays the raw lines for that). */
 export declare function mergeCookies(header: string, setCookies: string[]): string;
-export declare function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs, fetchImpl, prebootPaths, now }: CookieAuthorityOpts): {
+export declare function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs, fetchImpl, prebootPaths, now, coalesce }: CookieAuthorityOpts): {
     exec: Exec;
     handleHttp(req: IncomingMessage, res: ServerResponse): boolean;
     hello(cookie: string, opts?: {

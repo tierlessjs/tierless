@@ -18,7 +18,7 @@
 // A gateway restart self-heals: blobs die with the key, sockets reconnect, and the
 // page reseals from the jar.
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { restResources } from "./adapt.mjs";
+import { restResources, coalesceGets } from "./adapt.mjs";
 import { SESSION_AUTH_HEADER, AUTH_FIELD } from "./adapt-session-auth.mjs";
 /** Apply set-cookie lines to a cookie request-header string: name=value pairs win,
  *  Max-Age<=0 / a past Expires / an empty value deletes. Attributes beyond liveness
@@ -48,8 +48,9 @@ export function mergeCookies(header, setCookies) {
     }
     return [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
 }
-export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_000, fetchImpl, prebootPaths = [], now = Date.now }) {
+export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_000, fetchImpl, prebootPaths = [], now = Date.now, coalesce = false }) {
     const key = randomBytes(32); // per boot, shared with no one
+    const coalesced = (e) => (coalesce ? coalesceGets(e) : e);
     const allowed = new Set(allowedOrigins);
     const baseFetch = fetchImpl ?? ((...a) => fetch(...a));
     const seal = (payload) => {
@@ -93,7 +94,9 @@ export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_00
         };
         // upstreamIdentity: the reply is deflated by the socket anyway — asking the backend
         // for gzip would burn a gzip there and a gunzip here for a hop that is normally local
-        const inner = restResources(backendUrl, { envelopeErrors: true, fetchImpl: capturing, upstreamIdentity: true });
+        // coalescing sits HERE, below the blob->cookie translation: the sealed blob is
+        // re-randomized per session, so keying above this would never match across pages
+        const inner = coalesced(restResources(backendUrl, { envelopeErrors: true, fetchImpl: capturing, upstreamIdentity: true }));
         const env = await inner({ ...r, args: [path, data, { ...(reqOpts ?? {}), headers }] });
         if (captured.length) {
             env[AUTH_FIELD] = {
