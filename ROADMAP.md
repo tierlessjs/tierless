@@ -179,6 +179,27 @@ proven (the executable proofs behind `npm test`).
   route: undici stamps no-cache onto conditional requests (Express fresh()
   then never 304s) — restResources forwards validators with max-age=0.
 
+- **Gateway GET coalescing — SHIPPED, and NEUTRAL on n8n (2026-07-25).**
+  Concurrent identical GETs on an allow-listed path join ONE upstream request
+  (`tierless gateway --coalesce-get <path>`, repeatable; nginx `proxy_cache_lock`
+  shape). Keyed on (path, resolved credential) and built once per authority —
+  an earlier cut built it inside the per-request exec, so every request got a
+  fresh in-flight map and nothing ever joined; a module-scope unit probe missed
+  that entirely, and the n8n run that "measured" the feature was measuring a
+  no-op. Both are now covered (test/probes/session-auth.mts, two real sessions
+  with distinct sealed blobs).
+  MEASURED on n8n's workflows-list spec, the intended beneficiary: NEUTRAL,
+  2.1 min both arms. The three overlapping cold fetches of the 12.4 MB
+  `/rest/community-node-types` (16.4 / 18.6 / 13.1 s) belong to three
+  different USERS — distinct personal projectIds — so only the two sharing a
+  user joined (10 crossings -> 9 upstream fetches). The keying is right and
+  cannot do better. The joinable version of this win requires asserting the
+  endpoint's body does NOT vary by credential (true for a node-type catalog,
+  false in general): a strictly stronger, separately-named opt-in, because
+  getting it wrong serves one user's response to another. Not built —
+  decide it on a port where a credential-independent endpoint actually
+  dominates, not on this one.
+
 - **n8n's remaining +6.8% — preboot over-delivery suspect.** The hello
   pre-fetches all 18 boot GETs per upgrade regardless of what the page
   consumes; stock pays only for actual fetches. Price it with the existing

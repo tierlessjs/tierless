@@ -222,10 +222,18 @@ decode + the gateway hop + a backend whose editor endpoints already cost
 mount storm EARLIER, so the editor fetches land inside it, where stock's
 slower boot staggered them apart. Burst coalescing was A/B-tested here and is
 neutral (the expensive crossings are sequential dependents, not coalescible
-bursts — n8n confirms the vikunja default-off verdict). Remaining candidates
-are scheduling-shaped (off-main-thread decode, crossing priority) and live on
-the roadmap; the harness pays this per test, a real session pays it once per
-page. The RTT-80 arms exist (results/rtt80-*.jsonl) but span a restart; their
+bursts — n8n confirms the vikunja default-off verdict). Gateway GET coalescing
+(`--coalesce-get /rest/community-node-types`) is likewise NEUTRAL on this spec,
+for a reason worth recording: the workflows-list spec's three cold fetches of
+that 12.4 MB payload (16.4 s / 18.6 s / 13.1 s, overlapping) belong to three
+different n8n USERS — visible as distinct personal projectIds — so only the two
+that shared a user joined, and the third could not. 10 crossings on the path,
+9 upstream fetches, 2.1 min wall in both arms. Coalescing keys on (path,
+credential) and cannot do better; a cross-credential join is a different and
+stronger claim about the endpoint (that its body does not vary by user) and is
+not what this flag asserts. Remaining candidates are scheduling-shaped
+(off-main-thread decode, crossing priority) and live on the roadmap; the
+harness pays this per test, a real session pays it once per page. The RTT-80 arms exist (results/rtt80-*.jsonl) but span a restart; their
 decomposition is not quoted.
 
 Structural notes that survive the retraction: the harness pays every per-session
