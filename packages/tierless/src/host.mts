@@ -386,7 +386,8 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
         // frame's binary slot — the exec skips a parse and the encoder skips a
         // stringify of the whole body (transport.mts RawJsonBody). Only here: the
         // pump's own execHere makes continuation state and must get real values.
-        const value = await exec({ op: "resource", tier: payload.tier || tier, name, args: rargs, raw: true });
+        // only when the caller advertised it can take a raw body (execOver rawOk)
+        const value = await exec({ op: "resource", tier: payload.tier || tier, name, args: rargs, raw: payload?.rawOk === true });
         const raw = (value as { body?: unknown } | null)?.body;
         if (raw instanceof RawJsonBody) {
           const { body: _raw, ...rest } = value as { body?: unknown };   // drop the key outright, not to undefined
@@ -418,7 +419,11 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
 // them either way). This is exactly the exchange runLocal's fetch arm performs at a
 // park; exposed so an I/O-bottom adapter can cross the session without a machine.
 export async function execOver(peer: Peer, req: ResourceRequest, meta: Record<string, unknown> = {}): Promise<unknown> {
-  const { obj, bin } = await peer.request({ type: "exec", tier: req.tier, ...meta }, encodeArgs([req.name, req.args]));
+  // rawOk advertises THIS client can reassemble a body shipped in the binary slot.
+  // Capability travels with the request so a new gateway never starves an older browser
+  // bundle (which would otherwise receive envelopes with no body at all) — no version
+  // negotiation, and the fallback is simply the older, parse-both-ends path.
+  const { obj, bin } = await peer.request({ type: "exec", tier: req.tier, rawOk: true, ...meta }, encodeArgs([req.name, req.args]));
   // a body that rode the binary slot: parse it back in — ONE parse at this edge, the
   // same one the caller's data always cost when the body travelled inside the header
   if (obj.type === "done" && obj.rawBody && bin) {

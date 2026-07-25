@@ -51,22 +51,30 @@ const loopback = (reply: { obj: unknown; bin?: Uint8Array }): Peer => ({
 }) as unknown as Peer;
 
 const { encodeArgs } = await import("tierless/wire");
-const replied = await host.handleExec({ type: "exec", tier: "server" }, encodeArgs(["api.get", ["/x"]]));
-check("handleExec asks the exec for raw", seen[0]?.raw === true);
+const replied = await host.handleExec({ type: "exec", tier: "server", rawOk: true }, encodeArgs(["api.get", ["/x"]]));
+check("handleExec asks the exec for raw when the caller advertised rawOk", seen[0]?.raw === true);
 check("the reply's JSON header carries NO body (it is not re-serialized there)", !/"body"/.test(JSON.stringify(replied.obj)) && (replied.obj as { rawBody?: boolean }).rawBody === true, JSON.stringify(replied.obj).slice(0, 120));
 check("the body rides the frame's binary slot as the original text", !!replied.bin && new TextDecoder().decode(replied.bin) === payloadText);
 check("the header stays small — the whole point (bytes: header vs body)", JSON.stringify(replied.obj).length < 200 && replied.bin!.length > 10_000, JSON.stringify({ header: JSON.stringify(replied.obj).length, bin: replied.bin!.length }));
 
 const roundTripped = await execOver(loopback(replied), { op: "resource", tier: "server", name: "api.get", args: ["/x"] }) as { body: { rows: unknown[]; }; status: number };
 check("execOver reassembles it into exactly the value the caller always got", roundTripped.status === 200 && JSON.stringify(roundTripped.body) === payloadText);
+
+// ---- an OLDER client (no rawOk) must still get a normal, complete envelope -----------
+// Capability travels with the request precisely so a new gateway cannot starve a browser
+// bundle built before this change — which would silently deliver bodyless envelopes.
+const legacy = await host.handleExec({ type: "exec", tier: "server" }, encodeArgs(["api.get", ["/x"]]));
+check("no rawOk (older browser bundle): the exec is NOT asked for raw", seen[1]?.raw === false);
+check("…and the body comes back inside the JSON header, complete, with no binary slot", !legacy.bin && JSON.stringify((legacy.obj as { value: { body: unknown } }).value.body) === payloadText);
 srv.close();
 
 // ---- a malformed upstream body fails at the edge, and says where ---------------------
+// (raw clients only: a non-raw client still parses in the gateway and fails there, as before)
 const bad = createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end("{not json"); });
 await new Promise<void>((r) => bad.listen(0, "127.0.0.1", r));
 const badBase = "http://127.0.0.1:" + (bad.address() as { port: number }).port;
 const badHost = makeHost({ bundle: { PROGRAMS: {}, __unwind: () => false } as never, tier: "server", exec: restResources(badBase, { envelopeErrors: true }) });
-const badReply = await badHost.handleExec({ type: "exec", tier: "server" }, encodeArgs(["api.get", ["/broken"]]));
+const badReply = await badHost.handleExec({ type: "exec", tier: "server", rawOk: true }, encodeArgs(["api.get", ["/broken"]]));
 let msg = "";
 try { await execOver(loopback(badReply), { op: "resource", tier: "server", name: "api.get", args: ["/broken"] }); }
 catch (e) { msg = String((e as Error).message); }
