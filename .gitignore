@@ -16,3 +16,6 @@ ports/work/
 # lefthook's install hook inside ports/work/n8n escapes to this repo root (it walks up
 # to the nearest .git) and drops its example config on every install — not our file
 /lefthook.yml
+
+# arm-run stdout from the port drivers: the .jsonl artifacts beside them are the record
+ports/*/results/**/*.log
