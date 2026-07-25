@@ -1,0 +1,15 @@
+dedupe-check ablate            23 full 200s    33.5 MB     0 DOUBLE-FETCH
+dedupe-check baseline          24 full 200s    35.0 MB     0 DOUBLE-FETCH
+dedupe-check ported            24 full 200s    34.9 MB     0 DOUBLE-FETCH
+dedupe-proof/routing ablate    15 full 200s    21.8 MB     6 DOUBLE-FETCH  [154ms after the previous download ended; 205ms after the previous download ended; 129ms after the previous download ended]
+dedupe-proof/routing fixed      9 full 200s    13.1 MB     0 DOUBLE-FETCH
+
+intervals between consecutive fetches (ms) — the threshold is 500ms:
+  dedupe-check ablate         974, 1036, 2347, 2766, 2851, 3449, 3826, 3868, 3985, 4000, 4240, 4822, ...
+  dedupe-check baseline       710, 940, 942, 2657, 2719, 2943, 3497, 3619, 3801, 3882, 4322, 4394, ...
+  dedupe-check ported         1027, 1073, 1399, 2534, 2905, 3033, 3520, 3768, 3786, 3945, 4043, 4545, ...
+  dedupe-proof/routing ablate 85, 129, 154, 178, 205, 238, 4260, 4493, 4513, 4664, 5192, 6428, ...
+  dedupe-proof/routing fixed  4081, 4249, 4719, 5303, 5996, 7123, 7794, 8164
+
+dedupe-check: NO POWER — the reverted arm did not double-fetch either, so this spec set cannot test the fix.
+dedupe-proof/routing: FIX CONFIRMED — 6 double-fetch(es) of 15 fetches without it, 0 with it (8.7 MB of redundant download removed).
