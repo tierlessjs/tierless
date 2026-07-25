@@ -19,3 +19,4 @@ ports/work/
 
 # arm-run stdout from the port drivers: the .jsonl artifacts beside them are the record
 ports/*/results/**/*.log
+ports/results-recheck/*.log
