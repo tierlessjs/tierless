@@ -11,6 +11,11 @@
 // preboot rides a JSON message — a marker object on either path would serialize as
 // data instead of the body (the trap that killed the earlier JsonText attempt).
 //
+// There is ONE wire protocol, not a negotiated pair: the frame carries a version and a
+// skewed peer fails immediately (transport.mts PROTOCOL_VERSION). This shipped after a
+// stale n8n bundle silently received bodyless envelopes from a newer gateway — the
+// failure mode a compatibility branch would have preserved rather than removed.
+//
 // Run:  node test/probes/raw-body.mts
 import { makeHost, execOver } from "tierless";
 import { RawJsonBody } from "tierless/transport";
@@ -51,8 +56,8 @@ const loopback = (reply: { obj: unknown; bin?: Uint8Array }): Peer => ({
 }) as unknown as Peer;
 
 const { encodeArgs } = await import("tierless/wire");
-const replied = await host.handleExec({ type: "exec", tier: "server", rawOk: true }, encodeArgs(["api.get", ["/x"]]));
-check("handleExec asks the exec for raw when the caller advertised rawOk", seen[0]?.raw === true);
+const replied = await host.handleExec({ type: "exec", tier: "server" }, encodeArgs(["api.get", ["/x"]]));
+check("handleExec asks the exec for a raw body", seen[0]?.raw === true);
 check("the reply's JSON header carries NO body (it is not re-serialized there)", !/"body"/.test(JSON.stringify(replied.obj)) && (replied.obj as { rawBody?: boolean }).rawBody === true, JSON.stringify(replied.obj).slice(0, 120));
 check("the body rides the frame's binary slot as the original text", !!replied.bin && new TextDecoder().decode(replied.bin) === payloadText);
 check("the header stays small — the whole point (bytes: header vs body)", JSON.stringify(replied.obj).length < 200 && replied.bin!.length > 10_000, JSON.stringify({ header: JSON.stringify(replied.obj).length, bin: replied.bin!.length }));
@@ -60,21 +65,32 @@ check("the header stays small — the whole point (bytes: header vs body)", JSON
 const roundTripped = await execOver(loopback(replied), { op: "resource", tier: "server", name: "api.get", args: ["/x"] }) as { body: { rows: unknown[]; }; status: number };
 check("execOver reassembles it into exactly the value the caller always got", roundTripped.status === 200 && JSON.stringify(roundTripped.body) === payloadText);
 
-// ---- an OLDER client (no rawOk) must still get a normal, complete envelope -----------
-// Capability travels with the request precisely so a new gateway cannot starve a browser
-// bundle built before this change — which would silently deliver bodyless envelopes.
-const legacy = await host.handleExec({ type: "exec", tier: "server" }, encodeArgs(["api.get", ["/x"]]));
-check("no rawOk (older browser bundle): the exec is NOT asked for raw", seen[1]?.raw === false);
-check("…and the body comes back inside the JSON header, complete, with no binary slot", !legacy.bin && JSON.stringify((legacy.obj as { value: { body: unknown } }).value.body) === payloadText);
 srv.close();
 
+// ---- version skew FAILS, loudly and immediately --------------------------------------
+// The only defence a single-protocol design needs: a peer built against another version
+// cannot exchange a frame at all, and the error names the fault instead of reading as a
+// codec bug. (A stale bundle silently receiving bodyless envelopes is what this replaced.)
+{
+  const { encodeMessage, decodeMessage, PROTOCOL_VERSION } = await import("tierless/transport");
+  const good = encodeMessage({ kind: "reply", id: 1, payload: { ok: true } });
+  check("a same-version frame round-trips", (decodeMessage(good).obj as { payload: { ok: boolean } }).payload.ok === true);
+  const skewed = good.slice();
+  skewed[3] = (skewed[3] + 1) & 0xff;                       // the version byte of the frame magic
+  let err = "";
+  try { decodeMessage(skewed); } catch (e) { err = String((e as Error).message); }
+  check("a version-skewed frame is refused, naming both versions and the fix", /wire protocol mismatch/.test(err) && err.includes("v" + PROTOCOL_VERSION) && /rebuild the client/.test(err), err);
+  let err2 = "";
+  try { decodeMessage(new Uint8Array([1, 2, 3, 4, 0, 0, 0, 1, 0, 0, 0, 0, 123])); } catch (e) { err2 = String((e as Error).message); }
+  check("a non-tierless frame is refused too", /wire protocol mismatch/.test(err2));
+}
+
 // ---- a malformed upstream body fails at the edge, and says where ---------------------
-// (raw clients only: a non-raw client still parses in the gateway and fails there, as before)
 const bad = createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end("{not json"); });
 await new Promise<void>((r) => bad.listen(0, "127.0.0.1", r));
 const badBase = "http://127.0.0.1:" + (bad.address() as { port: number }).port;
 const badHost = makeHost({ bundle: { PROGRAMS: {}, __unwind: () => false } as never, tier: "server", exec: restResources(badBase, { envelopeErrors: true }) });
-const badReply = await badHost.handleExec({ type: "exec", tier: "server", rawOk: true }, encodeArgs(["api.get", ["/broken"]]));
+const badReply = await badHost.handleExec({ type: "exec", tier: "server" }, encodeArgs(["api.get", ["/broken"]]));
 let msg = "";
 try { await execOver(loopback(badReply), { op: "resource", tier: "server", name: "api.get", args: ["/broken"] }); }
 catch (e) { msg = String((e as Error).message); }

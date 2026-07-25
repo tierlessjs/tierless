@@ -19,23 +19,48 @@ const te = new TextEncoder();
 const td = new TextDecoder();
 const EMPTY = new Uint8Array(0);
 
-// One protocol message -> one binary ws frame: [u32 jsonLen][u32 binLen][json][bin].
+// One protocol message -> one binary ws frame: [u32 magic|version][u32 jsonLen][u32 binLen][json][bin].
+// PROTOCOL VERSION, carried on every frame. There is exactly ONE wire protocol at a
+// time: no capability negotiation, no compatibility branches, no client that gets a
+// quietly different behavior. A peer built against a different version fails the frame
+// check immediately and says so — the same posture the binary codec takes with its own
+// magic (wire-binary.mts SMW2), for the same reason: a version-skewed peer that keeps
+// talking corrupts data instead of stopping.
+//
+// BUMP THIS whenever the meaning of a frame changes (reply shape, field semantics,
+// slot usage). Skew is a deployment error to surface loudly, not a case to support:
+// rebuild the client bundle against the gateway it talks to.
+//   v1  base { kind, id, payload } + optional binary slot
+//   v2  exec replies may carry the response body in the binary slot (RawJsonBody)
+export const PROTOCOL_VERSION = 2;
+const MAGIC = 0x544c5700 | PROTOCOL_VERSION;   // "TLW" + version byte
+/** magic+version, jsonLen, binLen — every reader of the raw frame uses this. */
+export const HEADER_BYTES = 12;
+
 export function encodeMessage(obj: object, bin: Uint8Array | ArrayBufferLike = EMPTY): Uint8Array {
   const json = te.encode(JSON.stringify(obj));
   const b = bin instanceof Uint8Array ? bin : new Uint8Array(bin);
-  const out = new Uint8Array(8 + json.length + b.length);
+  const out = new Uint8Array(HEADER_BYTES + json.length + b.length);
   const dv = new DataView(out.buffer);
-  dv.setUint32(0, json.length); dv.setUint32(4, b.length);          // big-endian, like frame.mjs
-  out.set(json, 8); if (b.length) out.set(b, 8 + json.length);
+  dv.setUint32(0, MAGIC);                                           // version first: a skewed peer stops here
+  dv.setUint32(4, json.length); dv.setUint32(8, b.length);          // big-endian, like frame.mjs
+  out.set(json, HEADER_BYTES); if (b.length) out.set(b, HEADER_BYTES + json.length);
   return out;
 }
 
 export function decodeMessage(data: ArrayBuffer | Uint8Array): { obj: any; bin: Uint8Array | null } {
   const u8 = data instanceof Uint8Array ? data : new Uint8Array(data); // ArrayBuffer (browser) or Buffer/Uint8Array (ws)
   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
-  const jsonLen = dv.getUint32(0), binLen = dv.getUint32(4);
-  const obj = JSON.parse(td.decode(u8.subarray(8, 8 + jsonLen)));
-  const bin = binLen ? u8.subarray(8 + jsonLen, 8 + jsonLen + binLen) : null;
+  const magic = dv.getUint32(0);
+  if (magic !== MAGIC) {
+    // named explicitly: "malformed frame" would send whoever hits this hunting a codec
+    // bug, when the actual fault is a stale bundle talking to a newer gateway
+    const peer = (magic & 0xffffff00) === 0x544c5700 ? String(magic & 0xff) : "pre-versioned or not tierless";
+    throw new RangeError(`tierless: wire protocol mismatch — peer speaks v${peer}, this build speaks v${PROTOCOL_VERSION}; rebuild the client against this gateway`);
+  }
+  const jsonLen = dv.getUint32(4), binLen = dv.getUint32(8);
+  const obj = JSON.parse(td.decode(u8.subarray(HEADER_BYTES, HEADER_BYTES + jsonLen)));
+  const bin = binLen ? u8.subarray(HEADER_BYTES + jsonLen, HEADER_BYTES + jsonLen + binLen) : null;
   return { obj, bin };
 }
 
@@ -98,8 +123,13 @@ export function wsPort(ws: any): Port {
         const trace = !!g.__TIERLESS_EXEC_LOG__ && typeof performance !== "undefined";
         const t0 = trace ? performance.now() : 0;
         let msg;
-        try { msg = decodeMessage(data); }                              // a truncated/garbage frame throws in the decoder…
-        catch { try { ws.close(1003, "malformed frame"); } catch { /* already gone */ } return; }  // …drop the peer, never the host
+        try { msg = decodeMessage(data); }                              // a truncated/garbage frame — or a version-skewed peer — throws in the decoder…
+        catch (e) {                                                     // …drop the peer, never the host. The reason is SURFACED, not swallowed:
+          const why = String((e as Error)?.message || "malformed frame");   // a protocol mismatch must name itself, or it reads as a codec bug
+          try { console.error("[tierless] closing session: " + why); } catch { /* no console */ }
+          try { ws.close(1003, why.slice(0, 120)); } catch { /* already gone */ }
+          return;
+        }
         const t1 = trace ? performance.now() : 0;
         cb(msg.obj, msg.bin);
         if (trace) {
@@ -117,7 +147,7 @@ export function wsPort(ws: any): Port {
 }
 
 // A WebTransport (HTTP/3 / QUIC) bidirectional stream is a WHATWG byte duplex, not a message
-// transport — but tierless's own frame ([u32 jsonLen][u32 binLen][json][bin], encodeMessage)
+// transport — but tierless's own frame ([u32 magic|version][u32 jsonLen][u32 binLen][json][bin])
 // is self-delimiting, so we length-frame straight over the stream: no RFC 6455, no ws upgrade.
 // Browser-safe (ReadableStream/WritableStream only), symmetric on both tiers: the browser
 // passes a `WebTransport.createBidirectionalStream()` result; the server passes an incoming
@@ -143,9 +173,9 @@ export function wtPort(stream: { readable: { getReader(): ByteReader }; writable
         if (done) break;
         if (value && value.length) { const next = new Uint8Array(buf.length + value.length); next.set(buf); next.set(value, buf.length); buf = next; }
         for (;;) {                                                  // drain every whole frame the buffer now holds
-          if (buf.length < 8) break;
+          if (buf.length < HEADER_BYTES) break;                     // magic+version, jsonLen, binLen
           const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-          const total = 8 + dv.getUint32(0) + dv.getUint32(4);
+          const total = HEADER_BYTES + dv.getUint32(4) + dv.getUint32(8);
           if (buf.length < total) break;
           const frame = buf.subarray(0, total); buf = buf.subarray(total);
           if (cbs.msg) { let m; try { m = decodeMessage(frame); } catch { continue; } cbs.msg(m.obj, m.bin); }

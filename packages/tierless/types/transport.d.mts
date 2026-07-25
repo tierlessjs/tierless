@@ -1,5 +1,8 @@
 import type { Peer } from "./types.mjs";
 export type { Peer } from "./types.mjs";
+export declare const PROTOCOL_VERSION = 2;
+/** magic+version, jsonLen, binLen — every reader of the raw frame uses this. */
+export declare const HEADER_BYTES = 12;
 export declare function encodeMessage(obj: object, bin?: Uint8Array | ArrayBufferLike): Uint8Array;
 export declare function decodeMessage(data: ArrayBuffer | Uint8Array): {
     obj: any;
