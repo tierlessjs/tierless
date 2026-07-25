@@ -1,0 +1,43 @@
+--- a/packages/frontend/editor-ui/src/app/stores/nodeTypes.store.ts	2026-07-25 10:25:30.301261237 +0000
++++ b/packages/frontend/editor-ui/src/app/stores/nodeTypes.store.ts	2026-07-25 10:25:47.903310652 +0000
+@@ -417,14 +417,34 @@
+ 		}
+ 	};
+ 
++	// tierless corpus harness (common patch, applied to BOTH arms; docs/corpus.md
++	// run protocol): dedupe concurrent loads behind one in-flight promise.
++	// Two callers guard this fetch with an emptiness check and share no in-flight
++	// promise -- loadNodeTypesIfNotLoaded below at app boot, and initializeData's
++	// `allNodeTypes.length === 0` at canvas init (useWorkflowInitialization.ts).
++	// Any page where the second check lands before the first fetch's ~12 MB
++	// parse+ingest completes downloads the payload TWICE. Measured on n8n's own
++	// e2e suite: 25% of nodes.json page loads double-fetch on stock, 54% under a
++	// slower boot -- so it is both an upstream cost (+294 MB per suite run) and a
++	// confound for any transport comparison, since the rate moves with boot speed.
++	// The promise is released on settle, so a later refresh still refetches.
++	let nodeTypesInFlight: Promise<void> | null = null;
+ 	const getNodeTypes = async () => {
+-		const fetchedNodeTypes = isDataWorkerEnabled() ? await loadNodeTypesFromLocalDb() : [];
+-		const nodeTypes = fetchedNodeTypes.length
+-			? fetchedNodeTypes
+-			: await nodeTypesApi.getNodeTypes(rootStore.baseUrl);
++		if (nodeTypesInFlight) return await nodeTypesInFlight;
++		nodeTypesInFlight = (async () => {
++			const fetchedNodeTypes = isDataWorkerEnabled() ? await loadNodeTypesFromLocalDb() : [];
++			const nodeTypes = fetchedNodeTypes.length
++				? fetchedNodeTypes
++				: await nodeTypesApi.getNodeTypes(rootStore.baseUrl);
+ 
+-		if (nodeTypes.length) {
+-			setNodeTypes(nodeTypes);
++			if (nodeTypes.length) {
++				setNodeTypes(nodeTypes);
++			}
++		})();
++		try {
++			return await nodeTypesInFlight;
++		} finally {
++			nodeTypesInFlight = null;
+ 		}
+ 	};
+ 

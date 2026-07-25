@@ -34,6 +34,12 @@ interface Recipe {
   sources: Source[];                  // tried in order; first reachable wins
   treeHash: Record<string, string | null>;   // per transport kind; null = print-and-pin mode
   patches: string[];                  // the port itself, recipe-dir-relative, in order
+  commonPatches?: string[];           // APP-side, applied to BOTH variants: upstream defects
+                                      // that confound the comparison because their cost moves
+                                      // with the thing under test. Both arms then run the same
+                                      // fixed app, so the delta is the transport again. Kept
+                                      // separate from testPatches because this DOES change app
+                                      // behavior — a reader must be able to see that.
   testPatches?: string[];             // test-side only, applied to BOTH variants: the
                                       // measurement fixture + transport-agnostic wait
                                       // accommodations (docs/corpus.md, run protocol)
@@ -123,7 +129,9 @@ if (pinned === undefined || pinned === null) {
   console.log(`tree verified (${transport}): ${hash.slice(0, 16)}… matches the recipe`);
 }
 
-const toApply = [...(baseline ? [] : recipe.patches), ...(recipe.testPatches ?? [])];
+// common patches FIRST: they are upstream fixes both arms stand on, so the port patch
+// and the test patches layer onto an already-corrected tree.
+const toApply = [...(recipe.commonPatches ?? []), ...(baseline ? [] : recipe.patches), ...(recipe.testPatches ?? [])];
 const appliedFile = path.join(work, "APPLIED");
 // name + content digest per line: a committed patch EDITED under the same filename must
 // not cache-hit — the tree would run old code while the recipe claims the new patch.

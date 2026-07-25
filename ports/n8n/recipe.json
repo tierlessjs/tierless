@@ -17,6 +17,9 @@
     "git": "c98889539842d751e7d17acdbf4886199ea1913b0595484fb09c483e758ab771",
     "codeload": null
   },
+  "commonPatches": [
+    "patches/0006-node-types-inflight-dedupe.patch"
+  ],
   "patches": [
     "patches/0001-tierless-auto-session.patch"
   ],
