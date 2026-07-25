@@ -237,19 +237,26 @@ const CRED_HEADERS = ["cookie", "authorization", "x-tierless-session-auth"];
  *  response window, and the backend serving them concurrently takes 14-21 s EACH (~50 s
  *  in one 10-test spec) where a single uncontended fetch is ~200 ms.
  *
- *  ASSUMPTION, stated because it is the reason this is opt-in: the response depends on
- *  the path and the credential only. An endpoint that varies on some OTHER request header
- *  (a real `Vary:`) must not be coalesced — joiners are chosen before any response, so
- *  Vary cannot be honored after the fact. Each joiner gets its OWN shallow copy of the
- *  envelope, so per-session mutation (the cookie-authority rotation field) stays private.
- *  Wrap the exec that sees the RESOLVED credential (inside cookieAuthority, not above it:
- *  a sealed blob is re-randomized per session and would never match). */
-export function coalesceGets(inner: Exec): Exec {
+ *  `paths` is an ALLOW-LIST, not a switch, because the safety condition is per endpoint:
+ *  the response must depend on the path and the credential ONLY. An endpoint that varies
+ *  on some other request header (a real `Vary:`) must never be coalesced, and joiners are
+ *  chosen before any response exists, so Vary cannot be honored after the fact. Naming the
+ *  endpoints keeps that judgement explicit and auditable per deployment — the same shape
+ *  as the gateway's preboot path list. Query strings distinguish resources, so matching is
+ *  on the path before `?` while the join key keeps the full path.
+ *
+ *  Each joiner gets its OWN shallow copy of the envelope, so per-session mutation (the
+ *  cookie-authority rotation field) stays private. Wrap the exec that sees the RESOLVED
+ *  credential (inside cookieAuthority, not above it: a sealed blob is re-randomized per
+ *  session and would never match). */
+export function coalesceGets(inner: Exec, paths: Iterable<string>): Exec {
+  const allow = new Set([...paths].map((p) => p.split("?")[0]));
   const inflight = new Map<string, Promise<unknown>>();
   return async (req) => {
     const r = req as ResourceRequest;
     if (r.name !== "api.get") return inner(req);                       // idempotent, body-less only
     const [path, , opts] = (r.args ?? []) as [unknown, unknown, { headers?: Record<string, string> }?];
+    if (!allow.has(String(path).split("?")[0])) return inner(req);     // not a verified endpoint: never joined
     const h = opts?.headers ?? {};
     const cred = CRED_HEADERS.map((n) => {
       const k = Object.keys(h).find((x) => x.toLowerCase() === n);

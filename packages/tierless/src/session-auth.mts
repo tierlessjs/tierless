@@ -31,9 +31,10 @@ export interface CookieAuthorityOpts {
   allowedOrigins: Iterable<string>;
   /** Claim-ticket lifetime; the ticket replays Set-Cookie, so it stays short. */
   claimTtlMs?: number;
-  /** Join concurrent identical GETs into one upstream request (adapt.mts coalesceGets).
-   *  Opt-in: it assumes responses vary only on path + credential. Default false. */
-  coalesce?: boolean;
+  /** GET paths whose concurrent duplicates may join ONE upstream request (adapt.mts
+   *  coalesceGets). An allow-list, not a switch: the assumption (response varies only on
+   *  path + credential) holds per endpoint. Empty = no coalescing. */
+  coalescePaths?: string[];
   fetchImpl?: typeof fetch;
   /** GET paths to pre-fetch at the ws upgrade (boot preboot): the gateway fetches each with
    *  the upgrade's own cookie and hands the envelopes to the browser in the hello, so the
@@ -71,9 +72,9 @@ export function mergeCookies(header: string, setCookies: string[]): string {
   return [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
 }
 
-export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_000, fetchImpl, prebootPaths = [], now = Date.now, coalesce = false }: CookieAuthorityOpts): { exec: Exec; handleHttp(req: IncomingMessage, res: ServerResponse): boolean; hello(cookie: string, opts?: { auth?: boolean; preboot?: boolean }): Promise<{ blob: string | null; sealed: boolean; preboot?: Record<string, unknown> }> } {
+export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_000, fetchImpl, prebootPaths = [], now = Date.now, coalescePaths = [] }: CookieAuthorityOpts): { exec: Exec; handleHttp(req: IncomingMessage, res: ServerResponse): boolean; hello(cookie: string, opts?: { auth?: boolean; preboot?: boolean }): Promise<{ blob: string | null; sealed: boolean; preboot?: Record<string, unknown> }> } {
   const key = randomBytes(32);   // per boot, shared with no one
-  const coalesced = (e: Exec): Exec => (coalesce ? coalesceGets(e) : e);
+  const coalesced = (e: Exec): Exec => (coalescePaths.length ? coalesceGets(e, coalescePaths) : e);
   const allowed = new Set(allowedOrigins);
   const baseFetch: typeof fetch = fetchImpl ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
 

@@ -58,7 +58,7 @@ const usage = `usage:
   tierless build   <in.js> <out.mjs> [--bare] [--head=<file>] [--auto-deref] [--auto-writeback] [--track-writes] [--source-map] [--resource=ns:tier]
   tierless explain <file.js> [--json] [--resource=ns:tier ...]
   tierless api     <service.mjs>
-  tierless gateway --backend <url> [--port 8180] [--host 127.0.0.1] [--allow-origin o1,o2] [--cookie-authority] [--preboot /path ...] [--preboot-file <f>] [--log-gets <f>] [--no-upgrade-seal] [--wire-truth] [--machines <dist-tierless>] [--coalesce-gets]
+  tierless gateway --backend <url> [--port 8180] [--host 127.0.0.1] [--allow-origin o1,o2] [--cookie-authority] [--preboot /path ...] [--preboot-file <f>] [--log-gets <f>] [--no-upgrade-seal] [--wire-truth] [--machines <dist-tierless>] [--coalesce-get /path ...]
   tierless types   <service.mjs> [out.d.ts]`;
 
 const parseResources = (flags: string[]): Record<string, string> => {
@@ -246,11 +246,11 @@ if (cmd === "build") {
   // reseal/claim endpoints trade credentials, so --cookie-authority REQUIRES the origin
   // gate. Without it, hello declares sealed:false (attachTierless's default) and
   // adapt-auto's auth:"auto" no-ops.
-  // while an identical GET is in flight, later sessions join it instead of piling a
-  // duplicate onto the backend (adapt.mts coalesceGets — opt-in, see its doc)
-  const coalesce = rest.includes("--coalesce-gets") || process.env.TIERLESS_COALESCE_GETS === "1";
+  // GET paths whose concurrent duplicates join one upstream request (adapt.mts
+  // coalesceGets). A path SET, not a switch: the safety condition is per endpoint.
+  const coalescePaths = [...multi("--coalesce-get"), ...(process.env.TIERLESS_COALESCE_GETS || "").split(",").map((s) => s.trim()).filter(Boolean)];
   const authority = rest.includes("--cookie-authority")
-    ? (await import("tierless/session-auth")).cookieAuthority({ backendUrl: backend, allowedOrigins: origins.length ? origins : (die("tierless gateway: --cookie-authority requires --allow-origin (reseal/claim trade credentials)") as never), prebootPaths , coalesce })
+    ? (await import("tierless/session-auth")).cookieAuthority({ backendUrl: backend, allowedOrigins: origins.length ? origins : (die("tierless gateway: --cookie-authority requires --allow-origin (reseal/claim trade credentials)") as never), prebootPaths , coalescePaths })
     : undefined;
   const server = createServer((req, res) => {
     if (wire && req.url === "/__tierless/wire") { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(wire.read())); return; }
@@ -258,7 +258,7 @@ if (cmd === "build") {
     res.statusCode = 200; res.end("tierless gateway");              // the suite's boot readiness wait
   });
   const plainExec = restResources(backend, { envelopeErrors: true, upstreamIdentity: true });
-  const baseExec = authority ? authority.exec : (coalesce ? coalesceGets(plainExec) : plainExec);
+  const baseExec = authority ? authority.exec : (coalescePaths.length ? coalesceGets(plainExec, coalescePaths) : plainExec);
   // --log-gets: profiling for the preboot manifest — append each distinct 2xx GET path,
   // so one boot capture becomes the --preboot-file of the frozen arm. Zero cost unset.
   const seenGets = new Set<string>();

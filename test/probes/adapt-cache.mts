@@ -146,9 +146,10 @@ check("…and the dead index entry stops attaching validators", again.status ===
   });
   await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
   const base = "http://127.0.0.1:" + (srv.address() as { port: number }).port;
-  const exec = coalesceGets(restResources(base, { envelopeErrors: true }));
-  const get = (cookie: string, extra: Record<string, string> = {}): Promise<{ body: { who: string } }> =>
-    exec({ op: "res", tier: "server", name: "api.get", args: ["/big", undefined, { headers: { cookie, ...extra } }] } as never) as never;
+  const exec = coalesceGets(restResources(base, { envelopeErrors: true }), ["/big"]);
+  const get2 = (path: string, cookie: string, extra: Record<string, string> = {}): Promise<{ body: { who: string } }> =>
+    exec({ op: "res", tier: "server", name: "api.get", args: [path, undefined, { headers: { cookie, ...extra } }] } as never) as never;
+  const get = (cookie: string, extra: Record<string, string> = {}): Promise<{ body: { who: string } }> => get2("/big", cookie, extra);
 
   hits = 0;
   const [a, b] = await Promise.all([get("u=1"), get("u=1")]);
@@ -174,6 +175,18 @@ check("…and the dead index entry stops attaching validators", again.status ===
     exec({ op: "res", tier: "server", name: "api.post", args: ["/big", { a: 1 }, { headers: { cookie: "u=1" } }] } as never),
   ]);
   check("non-GET traffic is never coalesced", hits === 2, String(hits));
+
+  hits = 0;
+  await Promise.all([get2("/other", "u=1"), get2("/other", "u=1")]);
+  check("a path NOT on the allow-list is never joined (the assumption is per endpoint)", hits === 2, String(hits));
+
+  hits = 0;
+  await Promise.all([get2("/big?page=1", "u=1"), get2("/big?page=2", "u=1")]);
+  check("different query strings are different resources — not joined", hits === 2, String(hits));
+
+  hits = 0;
+  await Promise.all([get2("/big?page=1", "u=1"), get2("/big?page=1", "u=1")]);
+  check("…while the SAME query on an allow-listed path still joins", hits === 1, String(hits));
   srv.close();
 }
 

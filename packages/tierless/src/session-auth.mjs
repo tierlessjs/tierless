@@ -48,9 +48,9 @@ export function mergeCookies(header, setCookies) {
     }
     return [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
 }
-export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_000, fetchImpl, prebootPaths = [], now = Date.now, coalesce = false }) {
+export function cookieAuthority({ backendUrl, allowedOrigins, claimTtlMs = 30_000, fetchImpl, prebootPaths = [], now = Date.now, coalescePaths = [] }) {
     const key = randomBytes(32); // per boot, shared with no one
-    const coalesced = (e) => (coalesce ? coalesceGets(e) : e);
+    const coalesced = (e) => (coalescePaths.length ? coalesceGets(e, coalescePaths) : e);
     const allowed = new Set(allowedOrigins);
     const baseFetch = fetchImpl ?? ((...a) => fetch(...a));
     const seal = (payload) => {
