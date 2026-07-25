@@ -39,7 +39,10 @@ Claude-Session: https://claude.ai/code/session_011JsGFUBBubsTp15Gf6Fi3j" \
     && git push -q -u origin "$BRANCH" || echo "!! commit/push failed for $port/$arm"
 }
 
-for port in vikunja strapi nocodb; do
+# vikunja is NOT in this loop: its suite writes measure.jsonl for the wire-truth arm too,
+# where strapi and nocodb write measure-truth.jsonl. Assuming the suffix here reported
+# "no artifact" for a vikunja run that had completed. It has its own driver.
+for port in strapi nocodb; do
   run "$port" baseline
   run "$port" ported
 done
