@@ -43,13 +43,23 @@ console.log(`pass-parity set: ${passedEverywhere.size}/${total} tests compared\n
 const armTotals = (fs: string[], key: keyof Row): number[] =>
   fs.map((f) => load(f).filter((r) => passedEverywhere.has(r.id)).reduce((a, r) => a + ((r[key] as number) ?? 0), 0));
 
-const field = (key: keyof Row, label: string, fmt: (n: number) => string): { on: number; off: number } => {
-  const on = median(armTotals(arms.on, key));
-  const off = median(armTotals(arms.off, key));
+// A one-run sign test is not a result: the arm-to-arm delta only means something if it
+// clears the run-to-run spread WITHIN an arm. Report both, and refuse to call a delta
+// that does not clear its own noise floor.
+interface Delta { on: number; off: number; d: number; pct: number; noise: number; clears: boolean }
+const field = (key: keyof Row, label: string, fmt: (n: number) => string): Delta => {
+  const onRuns = armTotals(arms.on, key), offRuns = armTotals(arms.off, key);
+  const on = median(onRuns), off = median(offRuns);
   const d = on - off;
-  const pct = off ? ((d / off) * 100).toFixed(1) : "n/a";
-  console.log(`${label.padEnd(22)} ON ${fmt(on).padStart(12)}   OFF ${fmt(off).padStart(12)}   ON-OFF ${fmt(d).padStart(12)}  (${pct}%)`);
-  return { on, off };
+  const spread = (xs: number[]): number => (xs.length > 1 ? Math.max(...xs) - Math.min(...xs) : NaN);
+  const noise = Math.max(spread(onRuns), spread(offRuns));
+  const clears = Number.isFinite(noise) && Math.abs(d) > noise;
+  const pct = off ? (d / off) * 100 : NaN;
+  console.log(
+    `${label.padEnd(22)} ON ${fmt(on).padStart(12)}   OFF ${fmt(off).padStart(12)}   ON-OFF ${fmt(d).padStart(12)}` +
+    `  (${pct.toFixed(1)}%)   within-arm spread ${Number.isFinite(noise) ? fmt(noise) : "n/a (1 run)"}${clears ? "" : "  <- does NOT clear noise"}`,
+  );
+  return { on, off, d, pct, noise, clears };
 };
 
 const ws = field("wireWsOut", "ws bytes gateway->page", mb);
@@ -58,8 +68,16 @@ field("wireApiIn", "http bytes in (+assets)", mb);
 field("wireApiOut", "http bytes out", mb);
 const time = field("durationMs", "wall (sum of tests)", (n) => (n / 1000).toFixed(1) + " s");
 
-console.log();
+// This arm injects NO latency (wire-truth and RTT shaping are mutually exclusive —
+// a counting relay inflates request-heavy tests). Preboot's benefit is round trips
+// SAVED, which is worth ~0 at RTT0 while its cost — 18 upstream GETs at every upgrade,
+// inside the boot window — is paid in full. So a wall loss here is expected and is NOT
+// evidence against the RTT80 result that motivated preboot; only the bytes transfer.
+console.log(`\n(RTT0 arm: preboot's round-trip saving is worth ~0 here by construction; the BYTE line is what this run decides.)`);
 const sessions = passedEverywhere.size;   // one fresh context per test in this harness
-console.log(ws.on > ws.off
-  ? `SUSPECT CONFIRMED: preboot ships ${mb(ws.on - ws.off)} the page never used across ${sessions} sessions (${mb((ws.on - ws.off) / sessions)}/session), buying ${((time.off - time.on) / 1000).toFixed(1)} s of wall.`
-  : `SUSPECT CLEARED: preboot is not shipping unused cargo here (ON is ${mb(ws.off - ws.on)} CHEAPER than OFF), and costs ${((time.off - time.on) / 1000).toFixed(1)} s of wall.`);
+console.log(!ws.clears
+  ? `BYTES: NO EFFECT that clears noise — ON-OFF ${mb(ws.d)} (${ws.pct.toFixed(1)}%) against a ${Number.isFinite(ws.noise) ? mb(ws.noise) : "not-yet-measured (1 run/arm)"} within-arm spread. Preboot over-delivery does NOT explain n8n's byte regression.`
+  : ws.d > 0
+    ? `BYTES: over-delivery REAL — preboot ships ${mb(ws.d)} the page never used across ${sessions} sessions (${mb(ws.d / sessions)}/session).`
+    : `BYTES: preboot is CHEAPER by ${mb(-ws.d)} — it displaces more crossing overhead than its unused envelopes cost.`);
+console.log(`WALL: preboot ${time.d > 0 ? "COSTS" : "saves"} ${Math.abs(time.d / 1000).toFixed(1)} s (${Math.abs(time.pct).toFixed(1)}%) at RTT0${time.clears ? "" : " — inside noise"}.`);
