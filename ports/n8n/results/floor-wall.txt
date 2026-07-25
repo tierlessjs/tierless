@@ -1,0 +1,19 @@
+n8n FLOOR WALL (no counting relay, no budget proxy) — 2026-07-25
+chunked arms, pass-parity gated, single run per arm
+
+  suite total (sum of per-test)   70.2 min stock -> 79.6 min ported  (+13.3%)
+
+  subset                        n     median       q25       q75     total
+  all pass-parity pairs       672  +947 ms        +59  +1361  562 s
+  touch the session           552  +1095 ms       +520  +1459  558 s
+  NEVER touch the session     120  +2 ms          -14  +17  4 s
+
+The last row is the CONTROL: tests the port does not serve sit at +2 ms, so there is
+no machine-level bias and the regression is specific to served tests, ~1.1 s each.
+
+Published before this run: +8% floor wall, median per-test +778 ms (2026-07-20).
+UNCHANGED by the gateway fixes (re-serialization, upstreamIdentity, raw-body
+passthrough) that removed ~390 ms/crossing at node-types size in a microbenchmark,
+and unchanged by removing the nodes.json double-fetch from both arms. The most
+likely reading: that gateway CPU was never on the critical path — it overlapped
+browser rendering, so deleting it shortened nothing.

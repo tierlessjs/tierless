@@ -203,6 +203,26 @@ too long for a medians-of-3 matrix between restarts):
     RTT-0 floor wall   88.5 min stock -> 95.9 min ported   (8% SLOWER)
     per-test median    +778 ms ported (quartiles +2 / +778 / +1333)
 
+**RE-TESTED 2026-07-25 and it STANDS** (`results/floor-wall.txt`; chunked arms, no
+counting relay, pass-parity gated, 672 pairs, single run per arm):
+
+    floor wall (sum of per-test)  70.2 min stock -> 79.6 min ported  (+13.3%)
+    touch the session    552 tests  median +1095 ms  (q25 +520 / q75 +1459)
+    NEVER touch it       120 tests  median    +2 ms  (q25  -14 / q75   +17)   <- CONTROL
+
+The control is what makes this readable: tests the port does not serve sit at +2 ms, so
+there is no machine-level bias and the whole regression is specific to served tests at
+~1.1 s each — the same per-session figure as the original diagnosis.
+
+It is UNCHANGED by everything landed since: the gateway fixes (re-serialization,
+`upstreamIdentity`, raw-body passthrough) that a microbenchmark priced at ~390 ms per
+crossing on an 8.9 MB payload, and the removal of the nodes.json double-fetch from both
+arms. The honest reading is that the gateway CPU was never on the CRITICAL PATH — it
+overlapped browser rendering, so deleting it shortened nothing. A microbenchmark showing
+a component is expensive does not show it is what you are waiting for; only the arm pair
+does. Whatever costs the ~1.1 s is still unidentified, and the earlier phase work
+narrowed the search without closing it.
+
 The slowdown is entirely SESSION BOOT, measured by correlation: grouping the
 same tests by their session count (from the truth arm's ws quantum), the floor
 delta is −5 ms at zero sessions, +1.1 s at one, +2.8 s at two, +3.4 s at
