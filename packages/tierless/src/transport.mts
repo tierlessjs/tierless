@@ -99,6 +99,32 @@ export class RawJsonBody {
  *  deferred one that lost races to page navigation (adapt-cache.mts). */
 export const RAW_TEXT: unique symbol = Symbol("tierless.rawText");
 
+/** Marks a ResourceRequest as a WIRE-LAYER request another layer will re-present: the
+ *  exec log (pushExecLog) skips it, and the presenting layer logs the app-visible
+ *  crossing itself. Exists because harness waits consume log entries EXACTLY ONCE
+ *  (playwright.mts firstCrossing advances a cursor), so an entry that is wrong when
+ *  pushed cannot be fixed up later — a revalidating 304 logged at the wire layer was
+ *  judged by status-checking waits before the cache wrap could replace it with the 200
+ *  the app actually received. The wrong entry must never be pushed at all. */
+export const SKIP_EXEC_LOG: unique symbol = Symbol("tierless.skipExecLog");
+
+/** THE exec-log entry writer — the one owner of the entry shape (browser.mts logs the
+ *  plain session path through it; adapt-cache logs re-presented conditional crossings).
+ *  The log is the harness-waits contract (tierless/playwright): entries must show what
+ *  STOCK fetch would have shown the page, which is why a marked wire request is skipped
+ *  rather than logged as-is. */
+export function pushExecLog(req: { name?: unknown; args?: unknown[] } & { [SKIP_EXEC_LOG]?: boolean }, status: number | undefined, body: unknown, hasBody: boolean, headers?: Record<string, string>): void {
+  const g = globalThis as { __TIERLESS_EXEC_LOG__?: boolean; __tierlessExecLog?: unknown[] };
+  if (!g.__TIERLESS_EXEC_LOG__ || req[SKIP_EXEC_LOG]) return;
+  const log = (g.__tierlessExecLog ||= []);
+  // reqBody too: harness waits shaped as `resp.request().postDataJSON()` need the
+  // request side of the crossing — and both sides' headers, so a facade over an entry
+  // answers header reads truthfully instead of not at all
+  const reqHeaders = (req.args?.[2] as { headers?: Record<string, string> } | undefined)?.headers;
+  log.push({ t: Date.now(), name: req.name, url: String(req.args?.[0] ?? ""), status, ...(headers ? { headers } : {}), ...(req.args?.[1] !== undefined ? { reqBody: req.args[1] } : {}), ...(reqHeaders ? { reqHeaders } : {}), ...(hasBody ? { body } : {}) });
+  if (log.length > 500) log.splice(0, log.length - 500);
+}
+
 export interface Port {
   send(obj: object, bin?: Uint8Array): void;
   onMessage(cb: (obj: any, bin: Uint8Array | null) => void): void;

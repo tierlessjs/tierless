@@ -45,7 +45,7 @@
 // are SYNCHRONOUS against a small path->etag index (one localStorage getItem at
 // construction), and the body read for a hit runs CONCURRENT with the crossing (its
 // latency hides under the RTT).
-import { RAW_TEXT } from "./transport.mjs";
+import { RAW_TEXT, SKIP_EXEC_LOG, pushExecLog } from "./transport.mjs";
 import type { Exec, ResourceRequest } from "./types.mjs";
 
 /** How long a 304 waits for its cached body before falling back to one unconditional
@@ -141,30 +141,24 @@ const dbg = (ev: string, path: string): void => {
 };
 
 // OBSERVABILITY MUST SHOW BROWSER-CACHE SEMANTICS. A page never sees a revalidating
-// 304 — stock fetch() reports a transparent 200 with the cached body. The exec log
-// (browser.mts record(), the contract tierless/playwright's transport-agnostic waits
-// read) records at the wire layer BELOW this wrap, so a replayed revalidation lands
-// there as {status: 304, reqHeaders: {"if-none-match": …}} — a status the app never saw
-// carrying a header the app never sent. A stock-shaped harness predicate
-// (`resp.status() === 200`, nocodb's whole wait vocabulary) then never matches, and the
-// wait times out on the ported arm only — 32 tests' worth, measured. So the replay
-// branch rewrites its own wire entry into the envelope the app actually received: the
-// wrap already presents the replay as a 200 to the APP, and the log is just the same
-// presentation for the HARNESS. (The drift path — 304 with an evicted body — leaves its
-// stray 304 entry in place: the refetch logs its own 200, which is what waits match.)
-const presentReplay = (path: string, env: unknown, appReqHeaders?: Record<string, string>): void => {
-  const g = globalThis as { __TIERLESS_EXEC_LOG__?: boolean; __tierlessExecLog?: Array<Record<string, unknown>> };
-  if (!g.__TIERLESS_EXEC_LOG__ || !g.__tierlessExecLog) return;
-  const log = g.__tierlessExecLog;
-  for (let i = log.length - 1; i >= 0 && i >= log.length - 8; i--) {   // its own inner call pushed the 304 moments ago
-    const e = log[i];
-    if (e.url !== path || e.status !== 304) continue;
-    const v = env as { status?: number; body?: unknown; headers?: Record<string, string> } | null;
-    e.status = v?.status; e.body = v?.body;
-    if (v?.headers) e.headers = v.headers;
-    if (appReqHeaders) e.reqHeaders = appReqHeaders; else delete e.reqHeaders;   // the injected if-none-match was never the app's
-    return;
-  }
+// 304 — stock fetch() reports a transparent 200 with the cached body — and the exec log
+// is the harness-waits contract (tierless/playwright), so it must show what the app saw.
+// The wire layer (browser.mts) logs BELOW this wrap; left alone, a replayed revalidation
+// lands there as {status: 304, reqHeaders: {"if-none-match": …}} — a status the app never
+// saw carrying a header the app never sent — and a stock-shaped predicate
+// (`resp.status() === 200`, nocodb's whole wait vocabulary) never matches: 32 tests'
+// worth of timed-out waits, measured, on the ported arm only.
+//
+// The wrong entry must never be PUSHED, not fixed up after: harness waits consume
+// entries exactly once (firstCrossing advances a cursor on the push's own wake-up), so a
+// rewrite always loses the race — a first cut shipped exactly that and reproduced the 32
+// failures with the "fix" in place. So the conditional wire request is marked
+// SKIP_EXEC_LOG (the wire layer stays silent) and THIS wrap logs the one app-visible
+// entry: the envelope it returned, against the app's own request. The drift path
+// (evicted body) refetches with the UNMARKED original request, which logs itself.
+const presentAs = (req: ResourceRequest, env: unknown): void => {
+  const v = env as { status?: number; body?: unknown; headers?: Record<string, string> } | null;
+  pushExecLog(req, v && typeof v.status === "number" ? v.status : undefined, v?.body, !!v && "body" in (v as object), v?.headers);
 };
 
 export function conditionalCrossings({ store, fence }: { store?: EnvelopeStore; fence?: Fence } = {}): { wrap(inner: Exec): Exec } {
@@ -221,10 +215,13 @@ export function conditionalCrossings({ store, fence }: { store?: EnvelopeStore; 
       }
       const bodyRead = s.body(path).catch(() => undefined);   // CONCURRENT with the crossing — hides under the RTT
       const [p0, p1, opts] = (r.args ?? []) as [unknown, unknown, { headers?: Record<string, string> }?];
-      const env = await inner({ ...r, args: [p0, p1, { ...(opts ?? {}), headers: { ...(opts?.headers ?? {}), "if-none-match": etag } }] }) as { status?: number; headers?: Record<string, string> } | null;
+      // the WIRE request: carries the validator, and is marked so the wire layer does
+      // not log it — whatever this branch RETURNS is logged below as the app's crossing
+      const env = await inner({ ...r, [SKIP_EXEC_LOG]: true, args: [p0, p1, { ...(opts ?? {}), headers: { ...(opts?.headers ?? {}), "if-none-match": etag } }] } as ResourceRequest) as { status?: number; headers?: Record<string, string> } | null;
       if (env?.status !== 304) {
         const fresh = env?.headers?.etag;
         if (env?.status === 200 && fresh && fresh !== etag) persist("changed", path, fresh, env, (env as Record<symbol, unknown>)[RAW_TEXT] as string | undefined);
+        presentAs(r, env);
         return env;
       }
       // 304: the body read must answer or lose to the refetch deadline (invariant 2)
@@ -235,12 +232,12 @@ export function conditionalCrossings({ store, fence }: { store?: EnvelopeStore; 
       ]);
       clearTimeout(timer);
       if (cached !== undefined && cached !== READ_MISS) {                // validated THIS crossing — replay
-        presentReplay(path, cached, opts?.headers);
+        presentAs(r, cached);
         return cached;
       }
       if (cached === READ_MISS) dbg("read-timeout", path);
       etags.delete(path);                                     // drift (evicted/wedged body): full price once, and stop attaching
-      return inner(req);
+      return inner(req);                                      // UNMARKED: the refetch logs itself at the wire layer
     },
   };
 }

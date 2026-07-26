@@ -15,7 +15,7 @@
 import { makeHost, answerWith, batchExec, execOver } from "./host.mjs";
 import { makeCoherence } from "./coherence.mjs";
 import { methodMigrate, loadProfile, type Profile } from "./trace.mjs";
-import { makePeer, wsPort, onEvent } from "./transport.mjs";
+import { makePeer, wsPort, onEvent, pushExecLog } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
 import { httpResources, httpPins, crossHttpRequest } from "./adapt.mjs";
 import type { Bundle, Exec, Host } from "./types.mjs";
@@ -207,18 +207,11 @@ export function connect({ url, protocols, exec, bundle, tier = "browser", heap =
       // t (wall clock) rather than an index cursor: navigations reset the page world
       // and restart the log, but time stays comparable — a harness wait armed before
       // a goto() still recognizes the new document's crossings.
-      const g = globalThis as { __TIERLESS_EXEC_LOG__?: boolean; __tierlessExecLog?: unknown[] };
-      const record = (status: number | undefined, body: unknown, hasBody: boolean, headers?: Record<string, string>): void => {
-        if (!g.__TIERLESS_EXEC_LOG__) return;
-        const log = (g.__tierlessExecLog ||= []);
-        // reqBody too: harness waits shaped as `resp.request().postDataJSON()` need the
-        // request side of the crossing (opt-in log; entry count is bounded above) — and
-        // both sides' headers, so a facade over an entry (tierless/playwright) answers
-        // header reads truthfully instead of not at all
-        const reqHeaders = (req.args?.[2] as { headers?: Record<string, string> } | undefined)?.headers;
-        log.push({ t: Date.now(), name: req.name, url: String(req.args?.[0] ?? ""), status, ...(headers ? { headers } : {}), ...(req.args?.[1] !== undefined ? { reqBody: req.args[1] } : {}), ...(reqHeaders ? { reqHeaders } : {}), ...(hasBody ? { body } : {}) });
-        if (log.length > 500) log.splice(0, log.length - 500);
-      };
+      // the shape and the skip-marker contract live in transport.mts pushExecLog: a
+      // request marked SKIP_EXEC_LOG (adapt-cache's conditional wire request) is logged
+      // by the layer that re-presents it, not here
+      const record = (status: number | undefined, body: unknown, hasBody: boolean, headers?: Record<string, string>): void =>
+        pushExecLog(req, status, body, hasBody, headers);
       let value: unknown;
       try {
         value = await execOver(peer, req);

@@ -15,7 +15,7 @@
 import { makeHost, answerWith, batchExec, execOver } from "./host.mjs";
 import { makeCoherence } from "./coherence.mjs";
 import { methodMigrate, loadProfile } from "./trace.mjs";
-import { makePeer, wsPort, onEvent } from "./transport.mjs";
+import { makePeer, wsPort, onEvent, pushExecLog } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
 import { httpResources, httpPins, crossHttpRequest } from "./adapt.mjs";
 const defaultUrl = () => {
@@ -177,20 +177,10 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
             // t (wall clock) rather than an index cursor: navigations reset the page world
             // and restart the log, but time stays comparable — a harness wait armed before
             // a goto() still recognizes the new document's crossings.
-            const g = globalThis;
-            const record = (status, body, hasBody, headers) => {
-                if (!g.__TIERLESS_EXEC_LOG__)
-                    return;
-                const log = (g.__tierlessExecLog ||= []);
-                // reqBody too: harness waits shaped as `resp.request().postDataJSON()` need the
-                // request side of the crossing (opt-in log; entry count is bounded above) — and
-                // both sides' headers, so a facade over an entry (tierless/playwright) answers
-                // header reads truthfully instead of not at all
-                const reqHeaders = req.args?.[2]?.headers;
-                log.push({ t: Date.now(), name: req.name, url: String(req.args?.[0] ?? ""), status, ...(headers ? { headers } : {}), ...(req.args?.[1] !== undefined ? { reqBody: req.args[1] } : {}), ...(reqHeaders ? { reqHeaders } : {}), ...(hasBody ? { body } : {}) });
-                if (log.length > 500)
-                    log.splice(0, log.length - 500);
-            };
+            // the shape and the skip-marker contract live in transport.mts pushExecLog: a
+            // request marked SKIP_EXEC_LOG (adapt-cache's conditional wire request) is logged
+            // by the layer that re-presents it, not here
+            const record = (status, body, hasBody, headers) => pushExecLog(req, status, body, hasBody, headers);
             let value;
             try {
                 value = await execOver(peer, req);

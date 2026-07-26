@@ -34,6 +34,25 @@ export declare class RawJsonBody {
  *  which is what let the envelope store become a cheap, synchronous write instead of a
  *  deferred one that lost races to page navigation (adapt-cache.mts). */
 export declare const RAW_TEXT: unique symbol;
+/** Marks a ResourceRequest as a WIRE-LAYER request another layer will re-present: the
+ *  exec log (pushExecLog) skips it, and the presenting layer logs the app-visible
+ *  crossing itself. Exists because harness waits consume log entries EXACTLY ONCE
+ *  (playwright.mts firstCrossing advances a cursor), so an entry that is wrong when
+ *  pushed cannot be fixed up later — a revalidating 304 logged at the wire layer was
+ *  judged by status-checking waits before the cache wrap could replace it with the 200
+ *  the app actually received. The wrong entry must never be pushed at all. */
+export declare const SKIP_EXEC_LOG: unique symbol;
+/** THE exec-log entry writer — the one owner of the entry shape (browser.mts logs the
+ *  plain session path through it; adapt-cache logs re-presented conditional crossings).
+ *  The log is the harness-waits contract (tierless/playwright): entries must show what
+ *  STOCK fetch would have shown the page, which is why a marked wire request is skipped
+ *  rather than logged as-is. */
+export declare function pushExecLog(req: {
+    name?: unknown;
+    args?: unknown[];
+} & {
+    [SKIP_EXEC_LOG]?: boolean;
+}, status: number | undefined, body: unknown, hasBody: boolean, headers?: Record<string, string>): void;
 export interface Port {
     send(obj: object, bin?: Uint8Array): void;
     onMessage(cb: (obj: any, bin: Uint8Array | null) => void): void;

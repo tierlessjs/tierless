@@ -8,6 +8,7 @@
 //
 // Run:  node test/probes/adapt-cache.mts
 import { conditionalCrossings, memoryStore } from "tierless/adapt-cache";
+import { SKIP_EXEC_LOG } from "tierless/transport";
 import type { ResourceRequest } from "../../packages/tierless/src/types.mjs";
 import { makeCounter } from "../lib/check.mts";
 
@@ -305,36 +306,72 @@ check("…and the dead index entry stops attaching validators", again.status ===
 }
 
 // OBSERVABILITY SHOWS BROWSER-CACHE SEMANTICS. Stock pages never see a revalidating
-// 304 — fetch() reports a transparent 200 — so the exec log (what tierless/playwright's
-// waits read) must show the envelope the app received, not the wire's 304. The wire
-// layer (browser.mts) logs BELOW the wrap; this is the regression test for nocodb's 32
-// waitForResponse timeouts, whose predicates check `resp.status() === 200`.
+// 304 — fetch() reports a transparent 200 — and harness waits consume log entries
+// EXACTLY ONCE, so the wire's 304 must never be pushed at all (a rewrite-after-push
+// "fix" was shipped and lost the race to the poller: nocodb's 32 waitForResponse
+// timeouts survived it). The wrap marks its wire request SKIP_EXEC_LOG and logs the one
+// app-visible entry itself. The inner exec here emulates the wire layer's contract:
+// log the crossing UNLESS the request is marked — exactly what browser.mts does now.
 {
   const g = globalThis as { __TIERLESS_EXEC_LOG__?: boolean; __tierlessExecLog?: Array<Record<string, unknown>> };
   g.__TIERLESS_EXEC_LOG__ = true; g.__tierlessExecLog = [];
-  const cachedEnv = { status: 200, headers: { etag: 'W/"p1"', "content-type": "application/json" }, body: { rows: [7] } };
-  const store = {
-    index: () => new Map([["/present", 'W/"p1"']]),
-    body: async () => cachedEnv,
-    set: async () => { /* not exercised */ },
+  const wireLog = (rq: unknown, env: { status?: number; body?: unknown }): void => {
+    if ((rq as { [SKIP_EXEC_LOG]?: boolean })[SKIP_EXEC_LOG]) return;   // the wire layer's side of the contract
+    g.__tierlessExecLog!.push({ t: Date.now(), name: "api.get", url: String((rq as { args?: unknown[] }).args?.[0] ?? ""), status: env.status, reqHeaders: ((rq as { args?: unknown[] }).args?.[2] as { headers?: Record<string, string> })?.headers, body: env.body });
   };
-  // the inner exec emulates the WIRE layer: it logs what browser.mts record() logs —
-  // the raw 304, with the injected if-none-match in reqHeaders
+
+  // replay: the marked 304 is never logged; the wrap logs the 200 the app received
+  const cachedEnv = { status: 200, headers: { etag: 'W/"p1"' }, body: { rows: [7] } };
+  const store = { index: () => new Map([["/present", 'W/"p1"']]), body: async () => cachedEnv, set: async () => { /* not exercised */ } };
+  let sawMarker = false;
   const inner = async (rq: unknown) => {
-    const hdrs = ((rq as { args?: unknown[] }).args?.[2] as { headers?: Record<string, string> })?.headers ?? {};
-    g.__tierlessExecLog!.push({ t: Date.now(), name: "api.get", url: "/present", status: 304, reqHeaders: hdrs });
-    return { status: 304, headers: {}, body: "" };
+    sawMarker = (rq as { [SKIP_EXEC_LOG]?: boolean })[SKIP_EXEC_LOG] === true;
+    const env = { status: 304, headers: {}, body: "" };
+    wireLog(rq, env);
+    return env;
   };
   const env = await conditionalCrossings({ store }).wrap(inner as never)(
     { op: "res", tier: "server", name: "api.get", args: ["/present", undefined, { headers: { "x-app": "1" } }] } as never,
   ) as { status?: number };
+  check("the wire request carries SKIP_EXEC_LOG (the wire layer stays silent)", sawMarker);
   check("the app receives the replayed 200", env?.status === 200, JSON.stringify(env));
   const entries = g.__tierlessExecLog!.filter((e) => e.url === "/present");
-  check("ONE log entry for the crossing (rewritten, not duplicated)", entries.length === 1, String(entries.length));
-  const e = entries[0] ?? {};
-  check("the log shows the 200 the app saw, never the wire's 304", e.status === 200, JSON.stringify(e.status));
-  check("…with the replayed body, so body-matching waits work too", JSON.stringify(e.body) === JSON.stringify(cachedEnv.body), JSON.stringify(e.body));
-  check("…and the app's OWN request headers — the injected if-none-match is gone", JSON.stringify(e.reqHeaders) === JSON.stringify({ "x-app": "1" }), JSON.stringify(e.reqHeaders));
+  check("exactly ONE entry, pushed by the wrap — no 304 ever existed to race a poller", entries.length === 1 && entries[0].status === 200, JSON.stringify(entries));
+  check("…with the replayed body and the app's OWN headers (no injected if-none-match)", JSON.stringify(entries[0]?.body) === JSON.stringify(cachedEnv.body) && JSON.stringify(entries[0]?.reqHeaders) === JSON.stringify({ "x-app": "1" }), JSON.stringify(entries[0]));
+
+  // changed resource: fresh 200 over the marked wire request — the wrap logs the fresh env
+  g.__tierlessExecLog = [];
+  const store2 = { index: () => new Map([["/changed", 'W/"old"']]), body: async () => undefined, set: async () => { /* eager, untracked */ } };
+  const fresh = { status: 200, headers: { etag: 'W/"new"' }, body: { v: 2 } };
+  const env2 = await conditionalCrossings({ store: store2 }).wrap((async (rq: unknown) => { wireLog(rq, fresh); return fresh; }) as never)(
+    { op: "res", tier: "server", name: "api.get", args: ["/changed"] } as never,
+  ) as { status?: number };
+  const e2 = g.__tierlessExecLog!.filter((e) => e.url === "/changed");
+  check("a changed resource logs one fresh 200 (wrap-owned), app sees it too", env2?.status === 200 && e2.length === 1 && e2[0].status === 200, JSON.stringify(e2));
+
+  // drift: evicted body on a 304 — the marked 304 is silent, the UNMARKED refetch logs itself
+  g.__tierlessExecLog = [];
+  const store3 = { index: () => new Map([["/drift", 'W/"d"']]), body: async () => undefined, set: async () => { /* not exercised */ } };
+  let calls3 = 0;
+  const inner3 = async (rq: unknown) => {
+    calls3++;
+    const env3 = calls3 === 1 ? { status: 304, headers: {}, body: "" } : { status: 200, headers: {}, body: { re: 1 } };
+    wireLog(rq, env3);
+    return env3;
+  };
+  await conditionalCrossings({ store: store3 }).wrap(inner3 as never)({ op: "res", tier: "server", name: "api.get", args: ["/drift"] } as never);
+  const e3 = g.__tierlessExecLog!.filter((e) => e.url === "/drift");
+  check("drift: one entry — the unmarked refetch's own 200, never the wire 304", e3.length === 1 && e3[0].status === 200, JSON.stringify(e3));
+
+  // cold path: unmarked, wire layer logs as always, the wrap adds nothing
+  g.__tierlessExecLog = [];
+  const store4 = memoryStore();
+  await conditionalCrossings({ store: store4 }).wrap((async (rq: unknown) => { const env4 = { status: 200, headers: { etag: 'W/"c"' }, body: { c: 1 } }; wireLog(rq, env4); return env4; }) as never)(
+    { op: "res", tier: "server", name: "api.get", args: ["/cold"] } as never,
+  );
+  const e4 = g.__tierlessExecLog!.filter((e) => e.url === "/cold");
+  check("cold path unchanged: one wire-layer entry, none from the wrap", e4.length === 1 && e4[0].status === 200, JSON.stringify(e4));
+
   delete g.__TIERLESS_EXEC_LOG__; delete g.__tierlessExecLog;
 }
 
