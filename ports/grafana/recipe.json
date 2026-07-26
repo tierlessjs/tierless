@@ -1,0 +1,21 @@
+{
+	"name": "grafana",
+	"repo": "grafana/grafana",
+	"sha": "593cfcf13df7f1bb3f6d349838ca0e3194e71c51",
+	"sources": [
+		{
+			"kind": "git",
+			"url": "https://github.com/grafana/grafana.git",
+			"ref": "v13.1.1"
+		},
+		{
+			"kind": "codeload",
+			"zip": "https://codeload.github.com/grafana/grafana/zip/593cfcf13df7f1bb3f6d349838ca0e3194e71c51"
+		}
+	],
+	"treeHash": {
+		"git": null,
+		"codeload": null
+	},
+	"patches": []
+}
