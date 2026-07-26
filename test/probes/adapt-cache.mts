@@ -190,32 +190,122 @@ check("…and the dead index entry stops attaching validators", again.status ===
   srv.close();
 }
 
-// A WEDGED STORE MUST NOT WEDGE THE APP. The envelope write is awaited on the crossing's
-// critical path (read-your-writes across page loads), and a rejected write is caught —
-// but a write that NEVER SETTLES is not an error and no catch sees it. Before the budget,
-// that hung the crossing forever, and with it whatever the app was doing: a deadlock no
-// application code could defend against. Past the budget the crossing proceeds and the
-// stored copy is simply missing next time, which is what a quota failure already costs.
+// THE TWO INVARIANTS (adapt-cache.mts header). These are the regression tests for a
+// shipped deadlock: an earlier version AWAITED the envelope write on the crossing path,
+// and a write that never settles is not an error — no catch sees it, the crossing hangs,
+// the app hangs. Storage is now advisory: no crossing waits on a write at all, and a
+// read may wait only where a fallback exists.
+
+// 1a. A wedged WRITE cannot even delay a crossing — there is no await to hang.
+//     (Discriminates all three designs: the awaited version hangs forever, the
+//     2s-budget version takes ~2000ms, this one is immediate.)
 {
   const wedged = {
     index: () => new Map<string, string>(),
     body: async () => undefined,
     set: () => new Promise<void>(() => { /* never settles, on purpose */ }),
   };
-  const w = conditionalCrossings({ store: wedged }).wrap((async () => ({ status: 200, headers: { etag: "W/\"x\"" }, body: { ok: 1 } })) as never);
+  const w = conditionalCrossings({ store: wedged }).wrap((async () => ({ status: 200, headers: { etag: 'W/"x"' }, body: { ok: 1 } })) as never);
   const t0 = Date.now();
   const env = await Promise.race([
     w({ op: "res", tier: "server", name: "api.get", args: ["/wedge"] } as never),
-    new Promise((r) => setTimeout(() => r("HUNG"), 8000)),
+    new Promise((r) => setTimeout(() => r("HUNG"), 3000)),
   ]) as { status?: number } | string;
   const ms = Date.now() - t0;
-  check("a store whose write never settles does not hang the crossing", env !== "HUNG", "crossing never resolved (" + ms + "ms)");
-  check("the crossing still returns the real envelope", typeof env === "object" && env?.status === 200, JSON.stringify(env));
-  check("and it gives up in about the budget, not instantly (the write is still awaited when healthy)", ms >= 1500 && ms < 6000, ms + "ms");
+  check("a wedged write cannot hang a crossing", env !== "HUNG", "crossing never resolved");
+  check("…or even delay it: there is no await on the write path at all", ms < 500, ms + "ms");
+  check("the crossing returns the real envelope", typeof env === "object" && env?.status === 200, JSON.stringify(env));
+}
+
+// 1b. The write is EAGER, not deferred — deferral is the measured failure mode
+//     (requestIdleCallback starved for the page's whole life under n8n's render storm).
+{
+  const stored: string[] = [];
+  const store = {
+    index: () => new Map<string, string>(),
+    body: async () => undefined,
+    set: async (p: string) => { await new Promise((r) => setTimeout(r, 40)); stored.push(p); },
+  };
+  const w = conditionalCrossings({ store }).wrap((async () => ({ status: 200, headers: { etag: 'W/"e"' }, body: { v: 1 } })) as never);
+  await w({ op: "res", tier: "server", name: "api.get", args: ["/eager"] } as never);
+  check("the crossing resolves before the write lands (advisory)", stored.length === 0, JSON.stringify(stored));
+  await new Promise((r) => setTimeout(r, 80));
+  check("…and the write still lands on its own (eager, not idle-deferred)", stored.includes("/eager"), JSON.stringify(stored));
+}
+
+// 2. A wedged READ costs one refetch, not a hang: a 304 needs the cached body, so the
+//    body read races a deadline whose loser is the always-available unconditional
+//    refetch. This deadline is semantically required; the write path has none.
+{
+  const store = {
+    index: () => new Map([["/wedge-read", 'W/"1"']]),
+    body: () => new Promise<unknown>(() => { /* never settles */ }),
+    set: async () => { /* not exercised */ },
+  };
+  let calls = 0;
+  const inner = async (rq: unknown) => {
+    calls++;
+    if (calls === 1) {
+      const hdrs = ((rq as { args?: unknown[] }).args?.[2] as { headers?: Record<string, string> })?.headers ?? {};
+      check("the conditional request still carried the validator", hdrs["if-none-match"] === 'W/"1"', JSON.stringify(hdrs));
+      return { status: 304, headers: {}, body: "" };
+    }
+    return { status: 200, headers: {}, body: { fresh: 1 } };
+  };
+  const t0 = Date.now();
+  const env = await Promise.race([
+    conditionalCrossings({ store }).wrap(inner as never)({ op: "res", tier: "server", name: "api.get", args: ["/wedge-read"] } as never),
+    new Promise((r) => setTimeout(() => r("HUNG"), 6000)),
+  ]) as { body?: { fresh?: number } } | string;
+  const ms = Date.now() - t0;
+  check("a 304 whose body read never answers falls back to one unconditional refetch", typeof env === "object" && env?.body?.fresh === 1, JSON.stringify(env));
+  check("…after the read budget, not a hang", ms >= 800 && ms < 5000, ms + "ms");
+  check("exactly one refetch", calls === 2, String(calls));
+}
+
+// FENCE: cross-page read-your-writes without any crossing waiting. Two "pages" share a
+// durable backing; page A's crossing resolves while its write is still in flight, page
+// B constructs with a stale index, and B's queued refresh fires when A's writes drain —
+// so B's crossing revalidates and replays a 304 instead of paying full price.
+{
+  const backing = { index: new Map<string, string>(), bodies: new Map<string, unknown>() };
+  const realmStore = (writeMs: number) => {
+    const idx = new Map(backing.index);   // construction-time snapshot, like localStorage at page load
+    return {
+      index: () => idx,
+      body: async (p: string) => backing.bodies.get(p),
+      set: async (p: string, etag: string, env: unknown) => {
+        await new Promise((r) => setTimeout(r, writeMs));
+        backing.bodies.set(p, env); backing.index.set(p, etag);   // body first, then index
+      },
+      refresh: () => { for (const [k, v] of backing.index) idx.set(k, v); },
+    };
+  };
+  // FIFO grants over one name — Web Locks semantics, in-process
+  const fifo = (() => { let q: Promise<unknown> = Promise.resolve(); return { request: (_n: string, cb: () => unknown): Promise<unknown> => (q = q.then(() => cb())) }; })();
+
+  const bodyA = { rows: [1, 2, 3] };
+  const a = conditionalCrossings({ store: realmStore(50), fence: fifo })
+    .wrap((async () => ({ status: 200, headers: { etag: 'W/"f1"' }, body: bodyA })) as never);
+  await a({ op: "res", tier: "server", name: "api.get", args: ["/fence"] } as never);
+  check("page A's crossing resolved while its write was still in flight", backing.index.size === 0, "index already written");
+
+  const storeB = realmStore(0);           // page B: constructed mid-write, so its snapshot is stale
+  const seenB: Record<string, string>[] = [];
+  const b = conditionalCrossings({ store: storeB, fence: fifo }).wrap((async (rq: unknown) => {
+    seenB.push(((rq as { args?: unknown[] }).args?.[2] as { headers?: Record<string, string> })?.headers ?? {});
+    return { status: 304, headers: {}, body: "" };
+  }) as never);
+  check("page B's snapshot is stale at construction (the write had not landed)", storeB.index().size === 0, String(storeB.index().size));
+
+  await new Promise((r) => setTimeout(r, 120));   // A's write drains; the fence releases; B's queued refresh runs
+  const envB = await b({ op: "res", tier: "server", name: "api.get", args: ["/fence"] } as never) as { body?: unknown };
+  check("the fence delivered A's etag to B without B ever waiting on a crossing", seenB[0]?.["if-none-match"] === 'W/"f1"', JSON.stringify(seenB));
+  check("and B replays A's envelope from the shared backing on the 304", JSON.stringify((envB as { body?: unknown })?.body) === JSON.stringify(bodyA), JSON.stringify(envB));
 }
 
 const { pass, fail } = counts();
 console.log(fail === 0
-  ? `\nOK — conditional crossings give session GETs the browser cache's own revalidation: validated replay on 304, full fetch on change, untouched otherwise, and a wedged store cannot hang a crossing (${pass} checks)`
+  ? `\nOK — conditional crossings give session GETs the browser cache's own revalidation: validated replay on 304, full fetch on change, untouched otherwise — and storage is advisory: no crossing ever waits on a write, a wedged read costs one refetch, and cross-page read-your-writes rides the write fence (${pass} checks)`
   : `\nFAIL (${pass} passed, ${fail} failed)`);
 process.exit(fail === 0 ? 0 : 1);

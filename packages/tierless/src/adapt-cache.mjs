@@ -11,26 +11,49 @@
 //     never a staleness heuristic, every use revalidates);
 //   - a 200 reply whose envelope carries an etag is cached for next time.
 //
-// The COST DISCIPLINE is load-bearing (measured on n8n, whose canvas boot already
-// runs 2-5x contended): a cold GET must add NO async work — an awaited
-// caches.open/match per crossing queues behind the render storm and flipped that
-// suite's marginal waits. So validator lookups are SYNCHRONOUS against a small
-// path->etag index (one localStorage getItem at construction — an ASYNC hydration
-// loses the race to a contended page's first crossings), and the body read for a hit
-// runs CONCURRENT with the crossing (its latency hides under the RTT).
+// TWO INVARIANTS govern this file, both learned the expensive way:
 //
-// The WRITE is synchronous — awaited before the crossing resolves — because its reader
-// is the next page load, a realm that cannot wait on anything this one is still doing.
-// It is affordable because it no longer serializes: the body arrives as text (the frame
-// carries it in the binary slot) and is stored as those same bytes. An earlier version
-// deferred the write to idle to dodge a re-serialization cost that no longer exists,
-// and lost the race on every fast navigation — measured on n8n as three concurrent cold
-// re-fetches of the same 12.4 MB payload, ~50 s of backend stall in one spec.
+// 1. STORAGE IS ADVISORY, NEVER LOAD-BEARING: no crossing ever AWAITS a write. An
+//    awaited write puts browser storage on the request path, and a write that never
+//    SETTLES is not an error — no catch sees it, the crossing hangs, and the app hangs
+//    with it: a deadlock no application code can defend against (an earlier version
+//    shipped exactly that). Writes start EAGERLY at reply time and settle on their own.
+//    Eager, because the one measured failure of deferral was requestIdleCallback
+//    starving under a render storm for the page's whole life (n8n: every fast
+//    navigation lost the race — three concurrent cold re-fetches of the same 12.4 MB
+//    payload, ~50 s of backend stall in one spec). Advisory is SAFE because of
+//    ORDERING: the body lands first and the index (synchronous localStorage) is written
+//    only after it, so a page dying mid-write leaves the old index pointing at the old,
+//    still-present body — every lost race is a clean miss, never a hole.
+//
+// 2. A READ MAY WAIT ONLY WHERE A FALLBACK EXISTS, AND ONLY BRIEFLY. A 304 reply needs
+//    the cached body; if the store never answers, the only exit is one unconditional
+//    refetch. So the body read races a deadline whose loser is that refetch — the price
+//    of a miss, never a hang. This deadline is semantically REQUIRED (the crossing
+//    cannot complete without either the body or the refetch decision); the write path
+//    needs none, because nothing downstream ever depends on a write.
+//
+// Cross-page READ-YOUR-WRITES — what the removed await was for — rides a Web-Locks
+// FENCE instead: while writes are in flight this page holds "tierless-envelopes"; the
+// next page queues a no-op acquisition behind it and re-reads the index when it clears.
+// Locks release on realm death, so a dying writer can never strand a reader. Crossings
+// still never wait on the fence: one that fires before it clears sees the older index
+// and at worst revalidates an older etag — one 200 instead of a 304.
+//
+// The read-side COST DISCIPLINE is unchanged and load-bearing (measured on n8n, whose
+// canvas boot runs 2-5x contended): a cold GET adds NO async work — validator lookups
+// are SYNCHRONOUS against a small path->etag index (one localStorage getItem at
+// construction), and the body read for a hit runs CONCURRENT with the crossing (its
+// latency hides under the RTT).
 import { RAW_TEXT } from "./transport.mjs";
-/** How long a crossing will wait for its envelope write before giving up on it. Long
- *  enough that a healthy CacheStorage put always wins (they run in single-digit ms),
- *  short enough that a wedged one is a blip rather than a hang. */
-const PERSIST_BUDGET_MS = 2000;
+/** How long a 304 waits for its cached body before falling back to one unconditional
+ *  refetch. Healthy CacheStorage matches run in single-digit ms and the read has already
+ *  had the crossing's whole RTT to finish; a store that misses this window costs a
+ *  cache miss, not a hang. (The WRITE path has no such budget — it has no await.) */
+const READ_BUDGET_MS = 1000;
+/** The write fence (Web Locks). Held while envelope writes are in flight; the next page
+ *  queues its index refresh behind it. */
+const LOCK = "tierless-envelopes";
 export const memoryStore = () => {
     const idx = new Map();
     const bodies = new Map();
@@ -51,13 +74,17 @@ export const cacheStorageStore = (cacheName = "tierless-envelopes") => {
     const key = (p) => "https://tierless.invalid" + (p.startsWith("/") ? p : "/" + p);
     const LS_KEY = "tierlessEnvelopeIndex";
     const idx = new Map();
-    try {
-        for (const [p, e] of Object.entries(JSON.parse(localStorage.getItem(LS_KEY) || "{}")))
-            idx.set(p, e);
-    }
-    catch { /* no index yet, or storage denied: stay cold */ }
+    const load = () => {
+        try {
+            for (const [p, e] of Object.entries(JSON.parse(localStorage.getItem(LS_KEY) || "{}")))
+                idx.set(p, e);
+        }
+        catch { /* no index yet, or storage denied: stay cold */ }
+    };
+    load();
     return {
         index: () => idx,
+        refresh: load,
         async body(p) {
             try {
                 const hit = await (await caches.open(cacheName)).match(key(p));
@@ -70,7 +97,7 @@ export const cacheStorageStore = (cacheName = "tierless-envelopes") => {
         async set(p, etag, env, bodyText) {
             // Build the stored JSON by CONCATENATION when we have the body's original text: a
             // memcpy instead of a full re-serialization of a body the edge was just handed as
-            // bytes. That is what makes this write cheap enough to do immediately (below).
+            // bytes.
             const e = env;
             const json = bodyText !== undefined
                 ? '{"status":' + JSON.stringify(e.status ?? 200) + ',"headers":' + JSON.stringify(e.headers ?? {}) + ',"body":' + bodyText + "}"
@@ -84,7 +111,7 @@ export const cacheStorageStore = (cacheName = "tierless-envelopes") => {
     };
 };
 // The cache's own trace, next to __tierlessExecLog and under the same debug gate: a
-// store that silently never happens (starved idle callback, quota, a navigation) is
+// store that silently never happens (an abandoned write, quota, a navigation) is
 // indistinguishable from a working cold cache without it.
 const dbg = (ev, path) => {
     const g = globalThis;
@@ -94,35 +121,53 @@ const dbg = (ev, path) => {
     if (g.__tierlessCacheLog.length > 200)
         g.__tierlessCacheLog.splice(0, 100);
 };
-export function conditionalCrossings({ store } = {}) {
+export function conditionalCrossings({ store, fence } = {}) {
     const s = store ?? (typeof caches === "undefined" || typeof localStorage === "undefined" ? memoryStore() : cacheStorageStore());
     const etags = s.index(); // sync — no crossing ever waits on hydration
-    // READ-YOUR-WRITES, across page loads. The reader of this cache is the NEXT page in
-    // the same context — a different JS realm, so there is no pending write to coordinate
-    // with and no version token to wait on: the write must simply have landed. It is
-    // therefore awaited before the crossing resolves. That is affordable only because the
-    // write no longer serializes the body (see set()'s bodyText path); the earlier
-    // deferred-to-idle version existed to dodge that cost and lost the race on every fast
-    // navigation, so each page re-fetched the same megabytes.
-    //
-    // BOUNDED, because this await is on the crossing's critical path and the thing it waits
-    // for is browser storage. A rejected write is caught below; a write that NEVER SETTLES
-    // is not an error and no catch sees it — the crossing would hang forever, and with it
-    // whatever the app was doing. That is a deadlock an app cannot defend against, so the
-    // wait gets a budget: past it the crossing proceeds and the write finishes (or does not)
-    // on its own. Cost when it fires is one cache miss on the next page — the same price as
-    // a quota failure — against an unbounded hang.
-    const persist = async (when, path, etag, env, bodyText) => {
-        dbg("store:" + when, path);
-        let timer;
-        const write = s.set(path, etag, env, bodyText).then(() => dbg("ok", path), (e) => dbg("fail:" + String(e).slice(0, 80), path));
+    const f = fence ?? globalThis.navigator?.locks;
+    // READER side of the fence: queue a no-op acquisition behind any in-flight writer and
+    // re-read the index when it clears. Unawaited BY DESIGN — crossings that fire first
+    // simply use the construction-time index (at worst one 200 instead of a 304).
+    if (f && s.refresh) {
         try {
-            await Promise.race([write, new Promise((r) => { timer = setTimeout(() => { dbg("slow", path); r(); }, PERSIST_BUDGET_MS); })]);
+            void Promise.resolve(f.request(LOCK, () => { s.refresh(); dbg("fence:refresh", ""); })).catch(() => { });
         }
-        finally {
-            clearTimeout(timer);
+        catch { /* same */ }
+    }
+    // WRITER side: hold the lock while any write is in flight. The hold is what the next
+    // page's refresh queues behind; realm death releases it, so a wedged store degrades
+    // the FENCE (readers use their construction-time index) and never execution.
+    let pendingWrites = 0;
+    let releaseHold = null;
+    const writeStarted = () => {
+        if (++pendingWrites > 1 || !f)
+            return;
+        try {
+            void Promise.resolve(f.request(LOCK, () => new Promise((r) => {
+                if (pendingWrites === 0)
+                    r();
+                else
+                    releaseHold = r; // drained before the grant arrived: release immediately
+            }))).catch(() => { });
+        }
+        catch { /* no fence */ }
+    };
+    const writeEnded = () => {
+        if (--pendingWrites === 0 && releaseHold) {
+            releaseHold();
+            releaseHold = null;
         }
     };
+    // THE WRITE IS NOT AWAITED, ANYWHERE. Returns void so no caller can reintroduce the
+    // coupling without changing this signature — the invariant is the shape of the code.
+    const persist = (when, path, etag, env, bodyText) => {
+        dbg("store:" + when, path);
+        writeStarted();
+        void s.set(path, etag, env, bodyText)
+            .then(() => dbg("ok", path), (e) => dbg("fail:" + String(e).slice(0, 80), path)) // over quota etc: next use pays full price
+            .finally(writeEnded);
+    };
+    const READ_MISS = Symbol("tierless-read-miss");
     return {
         wrap: (inner) => async (req) => {
             const r = req;
@@ -132,7 +177,7 @@ export function conditionalCrossings({ store } = {}) {
                 const env = await inner(req);
                 const fresh = r.name === "api.get" ? env?.headers?.etag : undefined;
                 if (env?.status === 200 && fresh)
-                    await persist("cold", path, fresh, env, env[RAW_TEXT]);
+                    persist("cold", path, fresh, env, env[RAW_TEXT]);
                 return env;
             }
             const bodyRead = s.body(path).catch(() => undefined); // CONCURRENT with the crossing — hides under the RTT
@@ -141,13 +186,21 @@ export function conditionalCrossings({ store } = {}) {
             if (env?.status !== 304) {
                 const fresh = env?.headers?.etag;
                 if (env?.status === 200 && fresh && fresh !== etag)
-                    await persist("changed", path, fresh, env, env[RAW_TEXT]);
+                    persist("changed", path, fresh, env, env[RAW_TEXT]);
                 return env;
             }
-            const cached = await bodyRead;
-            if (cached !== undefined)
+            // 304: the body read must answer or lose to the refetch deadline (invariant 2)
+            let timer;
+            const cached = await Promise.race([
+                bodyRead,
+                new Promise((res) => { timer = setTimeout(() => res(READ_MISS), READ_BUDGET_MS); }),
+            ]);
+            clearTimeout(timer);
+            if (cached !== undefined && cached !== READ_MISS)
                 return cached; // validated THIS crossing — replay
-            etags.delete(path); // index drift (evicted body): full price once, and stop attaching
+            if (cached === READ_MISS)
+                dbg("read-timeout", path);
+            etags.delete(path); // drift (evicted/wedged body): full price once, and stop attaching
             return inner(req);
         },
     };

@@ -171,9 +171,10 @@ proven (the executable proofs behind `npm test`).
 
 - **Conditional crossings — SHIPPED (2026-07-23, tierless/adapt-cache).**
   Session GETs now carry the browser cache's own revalidation: path+ETag
-  envelope cache (sync localStorage index + CacheStorage bodies, idle-capped
-  stores, body reads concurrent with the crossing), default-on in
-  autoSession. On n8n it revalidates the whole multi-session pool (49 tests
+  envelope cache (sync localStorage index + CacheStorage bodies; STORAGE IS
+  ADVISORY — writes are eager but never awaited by a crossing, cross-page
+  read-your-writes rides a Web-Locks fence, a 304's body read is bounded by
+  its refetch fallback), default-on in autoSession. On n8n it revalidates the whole multi-session pool (49 tests
   drop >=1.5 MB) and took the byte delta +8.5% -> +6.8% — a fifth of the
   regression, not all of it as the diagnosis first claimed. Also fixed en
   route: undici stamps no-cache onto conditional requests (Express fresh()

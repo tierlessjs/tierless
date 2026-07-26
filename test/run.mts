@@ -55,7 +55,7 @@ const cases: Case[] = [
   { file: "test/e2e/preboot-live.mts",   needs: ["the ws-upgrade hello folded the reseal round trip into the handshake and pre-delivered a boot GET the first crossing joined"] },
   { file: "test/e2e/pw-waits-live.mts",  needs: ["installTransportWaits made UNMODIFIED upstream waits transport-agnostic"] },
   { file: "test/probes/adapt-fetch.mts", needs: ["the fetch adapter's crossability policy is framework-owned"] },
-  { file: "test/probes/adapt-cache.mts", needs: ["a wedged store cannot hang a crossing"] },
+  { file: "test/probes/adapt-cache.mts", needs: ["storage is advisory: no crossing ever waits on a write, a wedged read costs one refetch, and cross-page read-your-writes rides the write fence"] },
   { file: "test/probes/raw-body.mts", needs: ["the fetch arm does no redundant serde"] },
   { file: "test/probes/playwright-reporter.mts", needs: ["CONSERVING per-attempt wire deltas (nothing lost between tests)"] },
   { file: "test/probes/playwright-register.mts", needs: ["playwright-register delivers the waits through NODE_OPTIONS"] },
