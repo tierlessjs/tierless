@@ -123,7 +123,9 @@ addressable traffic is the opposite: **96.9% of its 918 MB sits in 511 responses
 the overhead a socket removes outright — are **1.57%** of addressable traffic there.
 There is simply little for the transport to win on a few huge, already-compressed
 bodies. Vikunja's addressable traffic is small-and-many, and its per-slice win is
-several times larger on a similar addressable share.
+several times larger on a similar addressable share (re-derived 2026-07-26 under the
+conserving reporter: 8-10% suite IO, 30-32% median per-test — the originally published
+13%/35% carried the biased reporter).
 
 Two consequences for the study:
 

@@ -228,9 +228,13 @@ proven (the executable proofs behind `npm test`).
   "median X× less network wait, Y% less IO across N apps' own e2e journeys."
   Rungs 1–3 are built (harness verified against socket ground truth; REST-proxy
   adapter + route-workflow shim; Vikunja ported at a 2-line diff, 196/196 pass
-  parity, 13% less suite IO / 16% fewer round trips — median per test 35%
-  fewer bytes, 22% fewer trips). Open: the 10–20-app study reporting medians
-  and full distributions, losers included.
+  parity — re-derived 2026-07-26 under the conserving reporter and current
+  runtime at **8–10% less suite IO, 30–32% fewer median per-test bytes**
+  (single runs each; the originally published 13%/35% was measured with the
+  two-independent-reads reporter whose between-test loss was asymmetric).
+  Trip counts (16% fewer round trips, 22% median) are from the original
+  CDP-level runs and not re-derived. Open: the 10–20-app study reporting
+  medians and full distributions, losers included.
 
 - **The session socket's network-wait loss — FIXED to the websocket floor.**
   RESOLUTION (n8n, results/report-time-rtt80-p2.txt): two fixes — the reseal folded
