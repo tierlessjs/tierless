@@ -131,20 +131,19 @@ check("a BARE await (no call to dispatch on) still rejects with the reason", met
 // ---- optional member access whose property name collides with a frame local -------------
 // The frame rewrite (locals -> F.x) must skip the non-computed property position of an
 // OPTIONAL member too: `r.data?.type` with a local `type` corrupted the AST before the
-// An optional-chain property shadowing a frame local is REFUSED, not compiled. The
-// pre-guard compiler CRASHED here (babel builder error) and fell back safely; a cut
-// that let it compile shipped a program that misbehaved at runtime (vikunja
-// auth$refreshUserInfo — its first-ever compilation, 16 e2e failures, convicted by
-// ablation). Refusal keeps the crash's fallback semantics, loudly; re-enabling
-// requires a compiled-vs-oracle probe passing on the REAL shape (task record in
-// ROADMAP/#29): computed-ref captures and dynamic-import-bearing captured fns, not
-// just the minimal pattern.
-const { meta: metaOpt } = compile(`"use tierless";
+// Optional-chain property shadowing a frame local COMPILES (property position is
+// excluded from the frame rewrite, both member forms). History, because it is a
+// cautionary tale: the pre-guard compiler CRASHED here (babel builder error, safe
+// fallback); the guard fix let it compile and vikunja's auth boot broke — but ablation
+// plus a twin-auth audit showed the compiled program was INNOCENT: the chain migrated
+// to a session twin constructed with token: null (gateway never plumbed the upgrade
+// bearer), so getToken() returned null and the method silently early-returned. The
+// transport fix lives in bin/tierless.mts (bearerFromUpgrade -> makeTwins).
+const { code: codeOpt, meta: metaOpt } = compile(`"use tierless";
 export class O { async m(id) { const type = "x"; const r = this.http.get("/a/" + id); const t2 = r.data?.type; return t2 + type; } }`,
 { resources: { "this.http": "server" }, filename: "o.js" });
-check("optional-chain property shadowing a local is refused with the reason (fallback, never a crash or a wrong compile)",
-  metaOpt.methods.length === 1 && metaOpt.methods[0].program === null && /optional-chain property 'type' shadows a frame local/.test(metaOpt.methods[0].error || ""),
-  JSON.stringify(metaOpt.methods));
+check("optional member property colliding with a local compiles", metaOpt.methods.length === 1 && metaOpt.methods[0].program === "O$m", JSON.stringify(metaOpt.methods));
+check("the property stayed a plain name; the local reads rewrote to the frame", /\?\.type/.test(codeOpt) && /F\.type/.test(codeOpt));
 
 // ---- super use stays uncompiled with a reason -------------------------------------------
 const { meta: meta3 } = compile(`"use tierless";

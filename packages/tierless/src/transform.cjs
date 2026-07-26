@@ -1167,19 +1167,16 @@ function lower(p) {
             if (name === "F" || !(params.includes(name) || locals.has(name)))
                 return;
             const par = ip.parent;
-            if (t.isMemberExpression(par) && par.property === ip.node && !par.computed)
+            // Property position excludes the rewrite for BOTH member forms. The optional form
+            // (`e?.response` with a local `response`) was briefly REFUSED here: its first-ever
+            // compilation broke vikunja's auth boot, and the compiled program was suspected.
+            // Root cause landed elsewhere — the chain MIGRATED to a session twin whose
+            // makeTwins() had token: null (the gateway never plumbed the upgrade bearer), so
+            // getToken() returned null on the twin and refreshUserInfo silently early-returned.
+            // The shape itself compiles correctly (compiled-vs-oracle probes, fetch and shapes
+            // alike); the twin-auth plumb is the fix (bin/tierless.mts bearerFromUpgrade).
+            if ((t.isMemberExpression(par) || t.isOptionalMemberExpression(par)) && par.property === ip.node && !par.computed)
                 return;
-            // OPTIONAL-chain property shadowing a frame local (`e?.response` with a local
-            // `response`): REFUSED, not compiled. Pre-fix this crashed the builder (safe: the
-            // method fell back to its original); a first cut that let it compile shipped a
-            // program that misbehaved at runtime (vikunja auth$refreshUserInfo, 16 e2e failures
-            // — the shape's first-ever compilation exposed an unproven path). A loud refusal
-            // keeps the fallback semantics without the crash; re-enabling requires the
-            // compiled-vs-oracle probe to pass on the REAL shape (computed refs, dynamic-import
-            // captures), not just the minimal one.
-            if (t.isOptionalMemberExpression(par) && par.property === ip.node && !par.computed) {
-                throw new Error(`optional-chain property '${name}' shadows a frame local; this shape is refused (it never compiled before either) until its compiled output is proven correct`);
-            }
             if (t.isObjectProperty(par) && par.key === ip.node && !par.computed)
                 return;
             if (t.isVariableDeclarator(par) && par.id === ip.node)

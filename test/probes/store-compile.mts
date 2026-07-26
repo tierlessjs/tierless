@@ -83,8 +83,8 @@ check("toggleAndReload compiled; bad kept original with the capture-write reason
   && storeEntries.some((m: any) => m.method === "bad" && m.program === null && /assigns to captured binding 'counter'/.test(m.error || "")),
   JSON.stringify(storeEntries));
 check("plain stays out entirely (no tier-reaching awaits)", !storeEntries.some((m: any) => m.method === "plain"), JSON.stringify(storeEntries));
-check("optional-chain property shadowing a frame local is REFUSED with the reason (fallback, not a crash, not a wrong compile)",
-  storeEntries.some((m: any) => m.method === "shadowed" && m.program === null && /optional-chain property 'response' shadows a frame local/.test(m.error || "")),
+check("optional-chain property shadowing a frame local compiles (the shape was convicted then acquitted — the real bug was twin auth, see transform.cts)",
+  storeEntries.some((m: any) => m.method === "shadowed" && m.program === "things$shadowed"),
   JSON.stringify(storeEntries.find((m: any) => m.method === "shadowed")));
 check("machine rewrites captures through the caps frame slot", code.includes("F.args[0].state") && code.includes("F.args[0].svc"), "");
 

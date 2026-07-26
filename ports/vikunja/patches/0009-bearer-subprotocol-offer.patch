@@ -1,0 +1,25 @@
+--- a/frontend/src/main.ts	2026-07-26 16:28:33.874098331 +0000
++++ b/frontend/src/main.ts	2026-07-26 16:28:33.885987423 +0000
+@@ -2,8 +2,20 @@
+ import {configureTierless} from 'tierless/browser'
+ 
+ // open the session socket during app bootstrap: the TCP + upgrade handshake overlaps
+-// asset loading instead of landing on the first service call's critical path
+-configureTierless({preconnect: true})
++// asset loading instead of landing on the first service call's critical path.
++// protocols: the session's JWT rides the ws upgrade as a bearer subprotocol (browsers
++// cannot set handshake headers; a query param would land in access logs). The gateway
++// reads it (bearerFromUpgrade) and hands it to makeTwins, so a session TWIN running
++// this app's own client code sees the SAME credential the page holds — without it,
++// getToken() on a twin returns null and auth-reading methods silently no-op there.
++// A thunk, so reconnects read the CURRENT token, not a page-load-stale one.
++configureTierless({
++	preconnect: true,
++	protocols: () => {
++		const t = localStorage.getItem('token')
++		return t ? ['tierless', 'bearer.' + btoa(t).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')] : ['tierless']
++	},
++})
+ 
+ import pinia from './pinia'
+ import router from './router'

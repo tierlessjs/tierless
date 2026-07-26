@@ -238,7 +238,7 @@ if (cmd === "build") {
   const { createServer } = await import("node:http");
   // package self-reference: the bin's tsconfig compiles only bin/, so src modules are
   // reached the way any consumer reaches them — through the exports map
-  const { attachTierless, makeWireStats } = await import("tierless/server");
+  const { attachTierless, makeWireStats, bearerFromUpgrade } = await import("tierless/server");
   const { restResources, coalesceGets } = await import("tierless/adapt");
   const wire = rest.includes("--wire-truth") || process.env.TIERLESS_WIRE_TRUTH ? makeWireStats() : undefined;
   // sealed cookie authority (session-auth.mts): crossings carry a sealed jar blob, the
@@ -326,7 +326,14 @@ if (cmd === "build") {
       // machine-hosting sessions: compiled class methods park http.* against a twin of
       // the app's client; api.* stays the gateway exec (authority-mediated when on)
       const sessionExec: typeof exec = !machinesDir ? exec : (r) => (String(r.name).startsWith("http.") ? httpResources(twinHttp(backend, {}))(r as never) : exec(r));
-      const twins = makeTwinsFn ? makeTwinsFn({ token: null, apiUrl: backend }) : undefined;
+      // Twins run the app's OWN client code server-side; anything that reads auth at
+      // call time (a localStorage token behind a shim) needs THIS session's credential.
+      // The browser offers it as the bearer subprotocol (it cannot set headers), so the
+      // upgrade is where it lives. token: null here silently de-authenticated every
+      // twin: vikunja's first-compiled refreshUserInfo migrated, getToken() returned
+      // null on the twin, and the method early-returned — user settings never loaded,
+      // 16 e2e failures that were first blamed on the compiler.
+      const twins = makeTwinsFn ? makeTwinsFn({ token: bearerFromUpgrade(req) ?? null, apiUrl: backend }) : undefined;
       return authority
         // TIERLESS_PREBOOT=0: the ablation arm — manifest configured, pre-fetch off
         ? { exec: sessionExec, ...(twins ? { twins } : {}), hello: await authority.hello(String(req.headers.cookie || ""), { auth: upgradeSeal, preboot: prebootPaths.length > 0 && process.env.TIERLESS_PREBOOT !== "0" }) }
