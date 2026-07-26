@@ -68,7 +68,12 @@ export const useThings = defineStore("things", () => {
     try { const n = await inner(); return created.id + ":n=" + n; }   // ({Svc, inner} vs {svc, state}):
     catch (e) { return "err:" + (e && e.message); }                   // the caller's caps must never
   }                                                                   // stand in for the sibling's
-  return { state, svc, toggleAndReload, viaCaptured, plain, bad, inner, outer };
+  async function shadowed(e) {                 // optional-chain property shadowing a local:
+    const response = await svc.reload();        // 'response' is a frame local AND appears as
+    if (e?.response?.status >= 400) { return null; }   // ?.response — REFUSED (transform.cts);
+    return response.length;                     // pre-fix this crashed; a compiled cut misbehaved
+  }                                             // at runtime (vikunja auth$refreshUserInfo)
+  return { state, svc, toggleAndReload, viaCaptured, plain, bad, inner, outer, shadowed };
 });`;
 
 const { code, meta } = compile(SRC, { resources: { "this.http": "server" }, filename: "store.js" });
@@ -78,6 +83,9 @@ check("toggleAndReload compiled; bad kept original with the capture-write reason
   && storeEntries.some((m: any) => m.method === "bad" && m.program === null && /assigns to captured binding 'counter'/.test(m.error || "")),
   JSON.stringify(storeEntries));
 check("plain stays out entirely (no tier-reaching awaits)", !storeEntries.some((m: any) => m.method === "plain"), JSON.stringify(storeEntries));
+check("optional-chain property shadowing a frame local is REFUSED with the reason (fallback, not a crash, not a wrong compile)",
+  storeEntries.some((m: any) => m.method === "shadowed" && m.program === null && /optional-chain property 'response' shadows a frame local/.test(m.error || "")),
+  JSON.stringify(storeEntries.find((m: any) => m.method === "shadowed")));
 check("machine rewrites captures through the caps frame slot", code.includes("F.args[0].state") && code.includes("F.args[0].svc"), "");
 
 const dir = mkdtempSync(join(tmpdir(), "tlstore-"));
