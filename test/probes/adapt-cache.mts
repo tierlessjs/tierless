@@ -190,8 +190,32 @@ check("…and the dead index entry stops attaching validators", again.status ===
   srv.close();
 }
 
+// A WEDGED STORE MUST NOT WEDGE THE APP. The envelope write is awaited on the crossing's
+// critical path (read-your-writes across page loads), and a rejected write is caught —
+// but a write that NEVER SETTLES is not an error and no catch sees it. Before the budget,
+// that hung the crossing forever, and with it whatever the app was doing: a deadlock no
+// application code could defend against. Past the budget the crossing proceeds and the
+// stored copy is simply missing next time, which is what a quota failure already costs.
+{
+  const wedged = {
+    index: () => new Map<string, string>(),
+    body: async () => undefined,
+    set: () => new Promise<void>(() => { /* never settles, on purpose */ }),
+  };
+  const w = conditionalCrossings({ store: wedged }).wrap((async () => ({ status: 200, headers: { etag: "W/\"x\"" }, body: { ok: 1 } })) as never);
+  const t0 = Date.now();
+  const env = await Promise.race([
+    w({ op: "res", tier: "server", name: "api.get", args: ["/wedge"] } as never),
+    new Promise((r) => setTimeout(() => r("HUNG"), 8000)),
+  ]) as { status?: number } | string;
+  const ms = Date.now() - t0;
+  check("a store whose write never settles does not hang the crossing", env !== "HUNG", "crossing never resolved (" + ms + "ms)");
+  check("the crossing still returns the real envelope", typeof env === "object" && env?.status === 200, JSON.stringify(env));
+  check("and it gives up in about the budget, not instantly (the write is still awaited when healthy)", ms >= 1500 && ms < 6000, ms + "ms");
+}
+
 const { pass, fail } = counts();
 console.log(fail === 0
-  ? `\nOK — conditional crossings give session GETs the browser cache's own revalidation: validated replay on 304, full fetch on change, untouched otherwise (${pass} checks)`
+  ? `\nOK — conditional crossings give session GETs the browser cache's own revalidation: validated replay on 304, full fetch on change, untouched otherwise, and a wedged store cannot hang a crossing (${pass} checks)`
   : `\nFAIL (${pass} passed, ${fail} failed)`);
 process.exit(fail === 0 ? 0 : 1);

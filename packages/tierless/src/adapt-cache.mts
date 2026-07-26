@@ -29,6 +29,11 @@
 import { RAW_TEXT } from "./transport.mjs";
 import type { Exec, ResourceRequest } from "./types.mjs";
 
+/** How long a crossing will wait for its envelope write before giving up on it. Long
+ *  enough that a healthy CacheStorage put always wins (they run in single-digit ms),
+ *  short enough that a wedged one is a blip rather than a hang. */
+const PERSIST_BUDGET_MS = 2000;
+
 export interface EnvelopeStore {
   /** The path->etag index, SYNCHRONOUS — read once at construction, mutated by set().
    *  Sync is load-bearing: an async hydration loses the race to a contended page's
@@ -110,10 +115,24 @@ export function conditionalCrossings({ store }: { store?: EnvelopeStore } = {}):
   // write no longer serializes the body (see set()'s bodyText path); the earlier
   // deferred-to-idle version existed to dodge that cost and lost the race on every fast
   // navigation, so each page re-fetched the same megabytes.
+  //
+  // BOUNDED, because this await is on the crossing's critical path and the thing it waits
+  // for is browser storage. A rejected write is caught below; a write that NEVER SETTLES
+  // is not an error and no catch sees it — the crossing would hang forever, and with it
+  // whatever the app was doing. That is a deadlock an app cannot defend against, so the
+  // wait gets a budget: past it the crossing proceeds and the write finishes (or does not)
+  // on its own. Cost when it fires is one cache miss on the next page — the same price as
+  // a quota failure — against an unbounded hang.
   const persist = async (when: string, path: string, etag: string, env: unknown, bodyText?: string): Promise<void> => {
     dbg("store:" + when, path);
-    try { await s.set(path, etag, env, bodyText); dbg("ok", path); }
-    catch (e) { dbg("fail:" + String(e).slice(0, 80), path); }   // over quota etc: next use pays full price, correctness unchanged
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const write = s.set(path, etag, env, bodyText).then(
+      () => dbg("ok", path),
+      (e: unknown) => dbg("fail:" + String(e).slice(0, 80), path),   // over quota etc: next use pays full price, correctness unchanged
+    );
+    try {
+      await Promise.race([write, new Promise<void>((r) => { timer = setTimeout(() => { dbg("slow", path); r(); }, PERSIST_BUDGET_MS); })]);
+    } finally { clearTimeout(timer); }
   };
   return {
     wrap: (inner) => async (req) => {
