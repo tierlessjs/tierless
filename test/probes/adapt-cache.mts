@@ -304,8 +304,42 @@ check("…and the dead index entry stops attaching validators", again.status ===
   check("and B replays A's envelope from the shared backing on the 304", JSON.stringify((envB as { body?: unknown })?.body) === JSON.stringify(bodyA), JSON.stringify(envB));
 }
 
+// OBSERVABILITY SHOWS BROWSER-CACHE SEMANTICS. Stock pages never see a revalidating
+// 304 — fetch() reports a transparent 200 — so the exec log (what tierless/playwright's
+// waits read) must show the envelope the app received, not the wire's 304. The wire
+// layer (browser.mts) logs BELOW the wrap; this is the regression test for nocodb's 32
+// waitForResponse timeouts, whose predicates check `resp.status() === 200`.
+{
+  const g = globalThis as { __TIERLESS_EXEC_LOG__?: boolean; __tierlessExecLog?: Array<Record<string, unknown>> };
+  g.__TIERLESS_EXEC_LOG__ = true; g.__tierlessExecLog = [];
+  const cachedEnv = { status: 200, headers: { etag: 'W/"p1"', "content-type": "application/json" }, body: { rows: [7] } };
+  const store = {
+    index: () => new Map([["/present", 'W/"p1"']]),
+    body: async () => cachedEnv,
+    set: async () => { /* not exercised */ },
+  };
+  // the inner exec emulates the WIRE layer: it logs what browser.mts record() logs —
+  // the raw 304, with the injected if-none-match in reqHeaders
+  const inner = async (rq: unknown) => {
+    const hdrs = ((rq as { args?: unknown[] }).args?.[2] as { headers?: Record<string, string> })?.headers ?? {};
+    g.__tierlessExecLog!.push({ t: Date.now(), name: "api.get", url: "/present", status: 304, reqHeaders: hdrs });
+    return { status: 304, headers: {}, body: "" };
+  };
+  const env = await conditionalCrossings({ store }).wrap(inner as never)(
+    { op: "res", tier: "server", name: "api.get", args: ["/present", undefined, { headers: { "x-app": "1" } }] } as never,
+  ) as { status?: number };
+  check("the app receives the replayed 200", env?.status === 200, JSON.stringify(env));
+  const entries = g.__tierlessExecLog!.filter((e) => e.url === "/present");
+  check("ONE log entry for the crossing (rewritten, not duplicated)", entries.length === 1, String(entries.length));
+  const e = entries[0] ?? {};
+  check("the log shows the 200 the app saw, never the wire's 304", e.status === 200, JSON.stringify(e.status));
+  check("…with the replayed body, so body-matching waits work too", JSON.stringify(e.body) === JSON.stringify(cachedEnv.body), JSON.stringify(e.body));
+  check("…and the app's OWN request headers — the injected if-none-match is gone", JSON.stringify(e.reqHeaders) === JSON.stringify({ "x-app": "1" }), JSON.stringify(e.reqHeaders));
+  delete g.__TIERLESS_EXEC_LOG__; delete g.__tierlessExecLog;
+}
+
 const { pass, fail } = counts();
 console.log(fail === 0
-  ? `\nOK — conditional crossings give session GETs the browser cache's own revalidation: validated replay on 304, full fetch on change, untouched otherwise — and storage is advisory: no crossing ever waits on a write, a wedged read costs one refetch, and cross-page read-your-writes rides the write fence (${pass} checks)`
+  ? `\nOK — conditional crossings give session GETs the browser cache's own revalidation: validated replay on 304, full fetch on change, untouched otherwise — and storage is advisory: no crossing ever waits on a write, a wedged read costs one refetch, cross-page read-your-writes rides the write fence, and replays present to harnesses as the 200 the app saw (${pass} checks)`
   : `\nFAIL (${pass} passed, ${fail} failed)`);
 process.exit(fail === 0 ? 0 : 1);

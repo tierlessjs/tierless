@@ -121,6 +121,39 @@ const dbg = (ev, path) => {
     if (g.__tierlessCacheLog.length > 200)
         g.__tierlessCacheLog.splice(0, 100);
 };
+// OBSERVABILITY MUST SHOW BROWSER-CACHE SEMANTICS. A page never sees a revalidating
+// 304 — stock fetch() reports a transparent 200 with the cached body. The exec log
+// (browser.mts record(), the contract tierless/playwright's transport-agnostic waits
+// read) records at the wire layer BELOW this wrap, so a replayed revalidation lands
+// there as {status: 304, reqHeaders: {"if-none-match": …}} — a status the app never saw
+// carrying a header the app never sent. A stock-shaped harness predicate
+// (`resp.status() === 200`, nocodb's whole wait vocabulary) then never matches, and the
+// wait times out on the ported arm only — 32 tests' worth, measured. So the replay
+// branch rewrites its own wire entry into the envelope the app actually received: the
+// wrap already presents the replay as a 200 to the APP, and the log is just the same
+// presentation for the HARNESS. (The drift path — 304 with an evicted body — leaves its
+// stray 304 entry in place: the refetch logs its own 200, which is what waits match.)
+const presentReplay = (path, env, appReqHeaders) => {
+    const g = globalThis;
+    if (!g.__TIERLESS_EXEC_LOG__ || !g.__tierlessExecLog)
+        return;
+    const log = g.__tierlessExecLog;
+    for (let i = log.length - 1; i >= 0 && i >= log.length - 8; i--) { // its own inner call pushed the 304 moments ago
+        const e = log[i];
+        if (e.url !== path || e.status !== 304)
+            continue;
+        const v = env;
+        e.status = v?.status;
+        e.body = v?.body;
+        if (v?.headers)
+            e.headers = v.headers;
+        if (appReqHeaders)
+            e.reqHeaders = appReqHeaders;
+        else
+            delete e.reqHeaders; // the injected if-none-match was never the app's
+        return;
+    }
+};
 export function conditionalCrossings({ store, fence } = {}) {
     const s = store ?? (typeof caches === "undefined" || typeof localStorage === "undefined" ? memoryStore() : cacheStorageStore());
     const etags = s.index(); // sync — no crossing ever waits on hydration
@@ -196,8 +229,10 @@ export function conditionalCrossings({ store, fence } = {}) {
                 new Promise((res) => { timer = setTimeout(() => res(READ_MISS), READ_BUDGET_MS); }),
             ]);
             clearTimeout(timer);
-            if (cached !== undefined && cached !== READ_MISS)
-                return cached; // validated THIS crossing — replay
+            if (cached !== undefined && cached !== READ_MISS) { // validated THIS crossing — replay
+                presentReplay(path, cached, opts?.headers);
+                return cached;
+            }
             if (cached === READ_MISS)
                 dbg("read-timeout", path);
             etags.delete(path); // drift (evicted/wedged body): full price once, and stop attaching
