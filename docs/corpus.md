@@ -167,6 +167,22 @@ touches). Estimate 15–35% addressable × >30% per-slice, so a **5–10% suite 
 If Grafana instead lands at parity, the model is wrong and the corpus needs a better
 predictor than request shape.
 
+## Fresh floors, 2026-07-26 (current runtime, no relay, pass-parity gated)
+
+Wall re-derived after the week's runtime changes (conditional crossings, raw-body
+passthrough, storage-advisory cache, twin bearer). Single run per arm:
+
+    vikunja   195 pairs   total -1%,  median -2%   (parity — matches published)
+    strapi    225 pairs   total -18%, median -9%, -882 ms/test   (published -13%/-7%: WIDER now)
+    nocodb     84 pairs   total +1%,  median 0%,  -125 ms median delta   (parity — matches)
+    n8n       672 pairs   total +13%, median +1.1 s on served tests, control +2 ms
+              (re-tested 2026-07-25; the one open wall regression)
+
+Incident worth recording: nocodb's stock BASELINE arm wedged at 17/282 for 2.4 h once
+(no tierless in the page; no live browser worker; RAM/disk healthy) and passed cleanly
+on retry — wall drivers now carry a hard per-arm timeout and a completeness gate so a
+wedge costs 95 minutes and a killed run can never checkpoint as an arm.
+
 ## Honesty constraints (bind all rungs)
 
 - **Bytes, trips, and latency are all measured — never via CDP throttling.** CDP's
