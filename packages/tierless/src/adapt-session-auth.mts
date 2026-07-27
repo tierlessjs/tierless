@@ -33,7 +33,7 @@ export const AUTH_FIELD = "__tierlessAuth";
  *  reseal round trip INTO the upgrade — the gateway seals the upgrade's own cookie and hands
  *  it back, so no startup HTTP reseal is needed. `preboot` is a map of GET path -> envelope
  *  the gateway pre-fetched at upgrade (docs boot preboot): the first crossings JOIN it. */
-export interface SessionHello { blob: string | null; sealed?: boolean; preboot?: Record<string, unknown> | null }
+export interface SessionHello { blob: string | null; sealed?: boolean; preboot?: Record<string, unknown> | null; forceBrowser?: string[] }
 
 export interface CookieSessionAuthOpts {
   /** The gateway's http(s) origin, e.g. `http://localhost:5780`. */

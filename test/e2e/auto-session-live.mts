@@ -98,6 +98,14 @@ const pages = createServer((req, res) => {
     res.setHeader("content-type", "text/html"); res.end(PAGE_HTML);
   } else if (path === "/api/forced") { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ forced: true })); }
   else if (path === "/direct.json") { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ direct: true })); }
+  else if (path === "/api/heavy") {
+    // same-origin passthrough to the backend — the shape real apps have. A path the
+    // browse advisory returns to browser fetch is fetched on the PAGE origin, so the
+    // advisory arm needs it servable here; pageHits then proves which lane carried it.
+    fetch(backendUrl + (req.url ?? ""), { headers: req.headers["if-none-match"] ? { "if-none-match": String(req.headers["if-none-match"]) } : {} })
+      .then(async (r) => { res.statusCode = r.status; const et = r.headers.get("etag"); if (et) res.setHeader("etag", et); res.setHeader("content-type", "application/json"); res.end(Buffer.from(await r.arrayBuffer())); })
+      .catch(() => { res.statusCode = 502; res.end(); });
+  }
   else { res.statusCode = 404; res.end(); }
 });
 await new Promise<void>((r) => pages.listen(0, r));
@@ -105,8 +113,8 @@ const pageUrl = "http://127.0.0.1:" + (pages.address() as { port: number }).port
 
 // ---- gateways: spawned through the CLI, the way a port's boot would ----------------------
 const children: ChildProcess[] = [];
-async function spawnGateway(extra: string[]): Promise<string> {
-  const child = spawn(process.execPath, [ROOT + "packages/tierless/bin/tierless.mjs", "gateway", "--backend", backendUrl, "--port", "0", "--allow-origin", pageUrl, ...extra], { stdio: ["ignore", "pipe", "inherit"] });
+async function spawnGateway(extra: string[], env: Record<string, string> = {}): Promise<string> {
+  const child = spawn(process.execPath, [ROOT + "packages/tierless/bin/tierless.mjs", "gateway", "--backend", backendUrl, "--port", "0", "--allow-origin", pageUrl, ...extra], { stdio: ["ignore", "pipe", "inherit"], env: { ...process.env, ...env } });
   children.push(child);
   const line = await new Promise<string>((resolve, reject) => {
     let buf = "";
@@ -184,6 +192,28 @@ const page = await context.newPage();
   check("fresh page session: the envelope survived the page load — 304, never a re-ship", third.status === 200 && third.body.nodes.length === 2000 && heavyFull === 1 && heavyRevalidated === 2, JSON.stringify({ heavyFull, heavyRevalidated }));
 }
 
+// 5c. the browse advisory: a gateway that measured an oversize reply declares the path
+// in later hellos, and autoSession returns it to stock browser fetch (huge bodies
+// stream better over HTTP than as one main-thread ws frame). pageHits names the lane:
+// the page origin only sees /api/heavy when the BROWSER fetched it.
+{
+  const wsBrowse = await spawnGateway([], { TIERLESS_BROWSE_OVER: "1000" });   // /api/heavy is ~60KB
+  // fresh context: 5b left the /api/heavy envelope in this one's CacheStorage, and a
+  // revalidating 304 carries no body — the size is only learnable from a full 200
+  const ctx2 = await browser.newContext();
+  const page2 = await ctx2.newPage();
+  await page2.goto(pageUrl + "/?ws=" + encodeURIComponent(wsBrowse));
+  const first = await page2.evaluate("window.cross('get', '/api/heavy')") as { status: number; body: { nodes: unknown[] } };
+  check("first session: the heavy GET still crosses (that request is how the size is learned)", first.status === 200 && first.body.nodes.length === 2000 && (pageHits["/api/heavy"] ?? 0) === 0);
+  await page2.goto(pageUrl + "/?ws=" + encodeURIComponent(wsBrowse));         // next session: hello carries the advisory
+  await page2.waitForFunction("(window.__tierlessForceBrowser || []).some(d => d.glob === '**/api/heavy')");
+  const declared = await page2.evaluate("window.__tierlessForceBrowser") as { glob?: string }[];
+  check("the hello's advisory landed in the page's force-browser list", declared.some((d) => d.glob === "**/api/heavy"), JSON.stringify(declared));
+  const second = await page2.evaluate("window.cross('get', '/api/heavy')") as { status: number; body: { nodes: unknown[] } };
+  check("later sessions fetch it browser-side, stock semantics intact", second.status === 200 && second.body.nodes.length === 2000 && (pageHits["/api/heavy"] ?? 0) === 1, JSON.stringify({ pageHeavyHits: pageHits["/api/heavy"] }));
+  await ctx2.close();
+}
+
 // 6. the cookie arm: sealed authority from the ws upgrade, no app configuration
 {
   await page.goto(pageUrl + "/?ws=" + encodeURIComponent(wsCookie));
@@ -216,6 +246,6 @@ await browser.close();
 for (const c of children) c.kill();
 backend.close(); pages.close();
 console.log(ok()
-  ? "PASS — one-call port surface, live: the CLI gateway served both arms, autoSession crossed same-origin REST with auto cookie authority (free for header-auth, sealed-blob for cookie-auth), the force-browser seam and recorded route mocks stayed interceptable, fetchAdapter split JSON/stock correctly, and the shaped-run override rerouted the socket"
+  ? "PASS — one-call port surface, live: the CLI gateway served both arms, autoSession crossed same-origin REST with auto cookie authority (free for header-auth, sealed-blob for cookie-auth), the force-browser seam and recorded route mocks stayed interceptable, the browse advisory returned an oversize path to browser fetch, fetchAdapter split JSON/stock correctly, and the shaped-run override rerouted the socket"
   : "FAIL");
 process.exit(ok() ? 0 : 1);

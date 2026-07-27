@@ -262,12 +262,35 @@ if (cmd === "build") {
   // --log-gets: profiling for the preboot manifest — append each distinct 2xx GET path,
   // so one boot capture becomes the --preboot-file of the frozen arm. Zero cost unset.
   const seenGets = new Set<string>();
-  const exec: typeof baseExec = !logGets ? baseExec : async (req) => {
+  const logged: typeof baseExec = !logGets ? baseExec : async (req) => {
     const v = await baseExec(req);
     const status = (v as { status?: number } | null)?.status ?? 0;
     if (req.name === "api.get" && status >= 200 && status < 400) {
       const p = String((req.args ?? [])[0] ?? "");
       if (p && !seenGets.has(p)) { seenGets.add(p); try { appendF(logGets, p + "\n"); } catch { /* best effort */ } }
+    }
+    return v;
+  };
+  // Oversize replies don't belong on the socket. A session wins on many-small traffic
+  // (per-request overhead, cross-call compression); a body this large gains ~nothing
+  // and costs real renderer main-thread time as ONE ws frame (n8n's 12.66 MB
+  // node-types reply crossed mid-mount-storm — decode, deliver, persist all on the
+  // main thread — where stock HTTP streams it off-thread, compressed, through the
+  // browser's own cache). So the gateway LEARNS: each api.get whose JSON body text
+  // exceeds TIERLESS_BROWSE_OVER bytes (default 1 MB plaintext, 0 disables) is
+  // declared in every later hello, and autoSession returns those paths to stock
+  // browser fetch. Advisory, not load-bearing: the first request still crosses (that
+  // is how the size is learned), a raced hello just costs one more full crossing.
+  const browseOver = Number(process.env.TIERLESS_BROWSE_OVER ?? 1_000_000);
+  const browsePaths = new Set<string>();
+  const exec: typeof logged = !(browseOver > 0) ? logged : async (req) => {
+    const v = await logged(req);
+    if (req.name === "api.get") {
+      const t = (v as { body?: { text?: unknown } } | null)?.body?.text;
+      if (typeof t === "string" && t.length > browseOver) {
+        const p = String((req.args ?? [])[0] ?? "").split("?")[0];
+        if (p && !browsePaths.has(p)) { browsePaths.add(p); console.log(`tierless gateway: ${p} reply is ${(t.length / 1e6).toFixed(1)} MB plaintext — declaring browser-side (TIERLESS_BROWSE_OVER=${browseOver})`); }
+      }
     }
     return v;
   };
@@ -334,10 +357,13 @@ if (cmd === "build") {
       // null on the twin, and the method early-returned — user settings never loaded,
       // 16 e2e failures that were first blamed on the compiler.
       const twins = makeTwinsFn ? makeTwinsFn({ token: bearerFromUpgrade(req) ?? null, apiUrl: backend }) : undefined;
+      // browse advisory rides every hello (authority or not): paths learned oversize
+      // since the gateway booted return to stock browser HTTP on later sessions
+      const browse = browsePaths.size ? { forceBrowser: [...browsePaths] } : {};
       return authority
         // TIERLESS_PREBOOT=0: the ablation arm — manifest configured, pre-fetch off
-        ? { exec: sessionExec, ...(twins ? { twins } : {}), hello: await authority.hello(String(req.headers.cookie || ""), { auth: upgradeSeal, preboot: prebootPaths.length > 0 && process.env.TIERLESS_PREBOOT !== "0" }) }
-        : { exec: sessionExec, ...(twins ? { twins } : {}) };
+        ? { exec: sessionExec, ...(twins ? { twins } : {}), hello: { ...await authority.hello(String(req.headers.cookie || ""), { auth: upgradeSeal, preboot: prebootPaths.length > 0 && process.env.TIERLESS_PREBOOT !== "0" }), ...browse } }
+        : { exec: sessionExec, ...(twins ? { twins } : {}), ...(browsePaths.size ? { hello: browse } : {}) };
     },
   });
   // print the BOUND port (--port 0 lets a harness pick a free one and parse it back)

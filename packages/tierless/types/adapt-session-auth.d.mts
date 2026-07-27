@@ -13,6 +13,7 @@ export interface SessionHello {
     blob: string | null;
     sealed?: boolean;
     preboot?: Record<string, unknown> | null;
+    forceBrowser?: string[];
 }
 export interface CookieSessionAuthOpts {
     /** The gateway's http(s) origin, e.g. `http://localhost:5780`. */

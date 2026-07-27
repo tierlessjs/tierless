@@ -45,6 +45,27 @@ export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "ti
     configureTierless({ url: wsUrl, preconnect });
     const staticList = forceBrowser.map((p) => (typeof p === "string" ? { glob: p } : { re: [p.source, p.flags] }));
     const pageList = () => window.__tierlessForceBrowser ?? [];
+    // The gateway's hello may DECLARE oversize paths — GETs whose measured reply body
+    // exceeds its browse threshold. Those go into the page's force-browser list: a few
+    // huge responses gain nothing from the socket (per-request overhead is negligible at
+    // that size) and cost real main-thread time as single frames (n8n hauled a 12.66 MB
+    // node-types reply through the renderer mid-mount, +1.4-1.9 s/test), while stock HTTP
+    // streams them off-thread, compressed, through the browser's own cache. ADVISORY:
+    // merged whenever the hello lands; a request racing it crosses once at full price.
+    // Gated so it never materializes a connection nothing else opens.
+    if (auth !== "none" || preconnect) {
+        void sessionHello().then((h) => {
+            if (!h.forceBrowser?.length)
+                return;
+            const g = window;
+            const list = (g.__tierlessForceBrowser ||= []);
+            for (const p of h.forceBrowser) {
+                const glob = "**" + p;
+                if (!list.some((d) => "glob" in d && d.glob === glob))
+                    list.push({ glob });
+            }
+        }).catch(() => { });
+    }
     const forced = (req, origin) => {
         const list = [...staticList, ...pageList()];
         if (!list.length)

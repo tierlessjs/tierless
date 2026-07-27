@@ -30,6 +30,10 @@ export interface SessionSetup {
         blob?: string | null;
         sealed?: boolean;
         preboot?: Record<string, unknown>;
+        /** Paths the gateway measured oversize (TIERLESS_BROWSE_OVER): adapt-auto returns
+         *  them to stock browser fetch — huge bodies stream better over HTTP than as one
+         *  main-thread ws frame. */
+        forceBrowser?: string[];
     };
 }
 export interface AttachOptions {

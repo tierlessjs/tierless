@@ -53,7 +53,11 @@ export interface SessionSetup {
    *  hello says true even blob-less — pre-login); a session that returns NO hello gets a
    *  default `{ blob: null, sealed: false }` sent for it, so adapt-auto's auth:"auto"
    *  resolves at socket-open instead of a safety-net timeout. */
-  hello?: { blob?: string | null; sealed?: boolean; preboot?: Record<string, unknown> };
+  hello?: { blob?: string | null; sealed?: boolean; preboot?: Record<string, unknown>;
+    /** Paths the gateway measured oversize (TIERLESS_BROWSE_OVER): adapt-auto returns
+     *  them to stock browser fetch — huge bodies stream better over HTTP than as one
+     *  main-thread ws frame. */
+    forceBrowser?: string[] };
 }
 export interface AttachOptions {
   /** The compiled bundle, or an async resolver by module id (multi-module endpoints). */
