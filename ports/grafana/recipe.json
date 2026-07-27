@@ -1,7 +1,7 @@
 {
 	"name": "grafana",
 	"repo": "grafana/grafana",
-	"sha": "593cfcf13df7f1bb3f6d349838ca0e3194e71c51",
+	"sha": "a9cee6e1724a455676bb6c05eef7fc54aa4b19f4",
 	"sources": [
 		{
 			"kind": "git",
@@ -10,7 +10,7 @@
 		},
 		{
 			"kind": "codeload",
-			"zip": "https://codeload.github.com/grafana/grafana/zip/593cfcf13df7f1bb3f6d349838ca0e3194e71c51"
+			"zip": "https://codeload.github.com/grafana/grafana/zip/a9cee6e1724a455676bb6c05eef7fc54aa4b19f4"
 		}
 	],
 	"treeHash": {
