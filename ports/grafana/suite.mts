@@ -65,6 +65,12 @@ const suite = spawn("corepack", ["yarn", "playwright", "test", "--config", CONFI
   env: {
     ...process.env,
     COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
+    // this box has LANG unset + LC_CTYPE=POSIX; Chromium maps that to the INVALID
+    // Intl tag "en-US@posix" and grafana's bootstrap throws before rendering anything
+    // (RangeError in NumberFormat -> "failed to load its application files"). Their CI
+    // runs C.UTF-8. Both arms get the same normalization.
+    LANG: process.env.LANG || "en_US.UTF-8",
+    LC_ALL: process.env.LC_ALL || "en_US.UTF-8",
     GRAFANA_URL: pageUrl,                               // their config: no webServer when set
     TIERLESS_MEASURE_OUT: OUT,
     ...(wireUrls.length ? { TIERLESS_WIRE_URLS: wireUrls.join(",") } : {}),
