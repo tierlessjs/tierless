@@ -156,6 +156,28 @@ So n8n is not "parity" — it is a **3.3% byte win on the traffic a real session
 still fetch**, reported as 0.6% because the harness re-downloads 4.1 GB of bundles.
 Every port's byte headline carries this bias, and the marginal row is the one to quote.
 
+**What that 2 GB of marginal actually is, though, is three endpoints.** Decomposing it
+kills any reading of n8n as a many-small-requests win:
+
+    /types/nodes.json          x694   1011 MB   50.9%   static file, HTTP in BOTH arms
+    /rest/community-node-types x510    888 MB   44.7%   the only addressable slice
+    /types/credentials.json    x692     43 MB    2.2%   static file, HTTP in both arms
+    everything else (real small-JSON API)  ~44 MB  2.2%
+
+Both `/types/*` are byte-identical across arms (1011 MB each), so n8n's whole measured
+delta is the compression difference on ONE 12.66 MB catalogue fetched 510 times: 888 MB
+over HTTP against 850 MB over the socket, plus ~30 MB of small calls — 917 -> 850, the
+7.4% "per-slice win". There were also ZERO 304s in either arm: fresh contexts hold no
+cached copy to revalidate, so the harness cannot exercise caching at all.
+
+Consequence worth stating plainly: the **browse advisory** (ports/n8n/README.md, the fix
+for the wall regression) returns >1 MB replies to browser HTTP, and this catalogue is
+12.66 MB. Post-advisory the session carries only the ~30 MB of small calls, ~1.5% of
+marginal, so a 7% per-slice win lands near 0.1% — the byte win is traded away to remove
+a 12-14% wall regression. That is the right trade for a transport that must not cost
+time, and it is the honest reason n8n's byte headline should not be quoted as a win.
+PENDING: a post-advisory truth pair to measure it rather than infer it.
+
 Two consequences for the study:
 
 - Report the decomposition, not just the headline. "Parity" on an app whose bytes are
