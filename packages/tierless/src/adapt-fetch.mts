@@ -67,7 +67,12 @@ export function fetchAdapter({ exec, origin, pins, crossable, fetchImpl }: Fetch
     if (typeof input !== "string" && !(input instanceof URL)) return f(input as never, init);
     if (typeof window === "undefined" || typeof location === "undefined") return f(input, init);
 
-    const target = new URL(String(input), location.href);
+    // Resolve EXACTLY like fetch does — against document.baseURI, not location.href.
+    // The two differ whenever the page sets <base href>: grafana ships relative paths
+    // ("api/plugins/x/settings") plus <base href="/">, so on an SPA route /d/<uid>
+    // location.href resolution manufactured /d/api/... — every crossing 404'd while
+    // stock fetch worked (found live on the grafana port; zero panels rendered).
+    const target = new URL(String(input), typeof document !== "undefined" ? document.baseURI : location.href);
     const headers = new Headers(init.headers);
     const method = String(init.method || "GET").toLowerCase();
 

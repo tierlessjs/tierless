@@ -88,6 +88,22 @@ await fallsThrough("Request-object input → host fetch (consumed-once body stre
   settle({ status: 200, body: {} });                                 // the crossing settles after — no unhandled rejection
 }
 
+// ---- <base href> resolution ----------------------------------------------------------
+// fetch resolves relative inputs against document.baseURI, which a <base href> detaches
+// from the page URL. grafana ships relative paths ("api/x") + <base href="/">: resolving
+// against location.href on an SPA route /d/<uid> manufactured /d/api/x and every
+// crossing 404'd. The adapter must bind to baseURI exactly like fetch.
+{
+  (globalThis as { location?: unknown }).location = new URL("http://app.local:3000/d/O6f11TZWk");
+  (globalThis as { document?: unknown }).document = { baseURI: "http://app.local:3000/" };
+  await tfetch("api/plugins/x/settings", { headers: JSON_HDRS });
+  check("relative input resolves against document.baseURI (a <base href> page), not location.href", crossed.at(-1)!.args[0] === "/api/plugins/x/settings");
+  delete (globalThis as { document?: unknown }).document;
+  await tfetch("api/no-base", { headers: JSON_HDRS });
+  check("no document (worker realm): location.href resolution stands", crossed.at(-1)!.args[0] === "/d/api/no-base");
+  (globalThis as { location?: unknown }).location = new URL("http://app.local:3000/page");
+}
+
 // ---- SSR / twin bundles -------------------------------------------------------------
 {
   const w = (globalThis as { window?: unknown }).window;
