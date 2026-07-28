@@ -1,0 +1,4 @@
+{"id":"../src/node_modules/@grafana/plugin-e2e/dist/auth/auth.setup.js:5 › ","status":"passed","retry":0,"durationMs":163,"wireApiOut":1566,"wireApiIn":4383,"wireWsIn":0,"wireWsOut":0}
+{"id":"../src/node_modules/@grafana/plugin-e2e/dist/auth/auth.setup.js:5 › ","status":"passed","retry":0,"durationMs":85,"wireApiOut":668,"wireApiIn":2382,"wireWsIn":0,"wireWsOut":0}
+{"id":"../src/e2e-playwright/plugin-e2e/plugin-e2e-api-tests/as-viewer-user/permissions.spec.ts:9 › plugin-e2e-api-test viewer › should redirect to start page when permissions to navigate to page is missing","status":"passed","retry":0,"durationMs":17716,"wireApiOut":136447,"wireApiIn":13296395,"wireWsIn":0,"wireWsOut":0}
+{"id":"../src/e2e-playwright/plugin-e2e/plugin-e2e-api-tests/as-viewer-user/permissions.spec.ts:17 › plugin-e2e-api-test viewer › current user should have viewer role","status":"passed","retry":0,"durationMs":2590,"wireApiOut":70783,"wireApiIn":9659169,"wireWsIn":0,"wireWsOut":0}
