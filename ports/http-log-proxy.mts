@@ -26,6 +26,14 @@ export interface HttpLogLine {
   reqBytes: number;    // request line + headers + body, as forwarded
   respBytes: number;   // status line + headers + body, as transferred
   enc?: string;        // response content-encoding, when present
+  cc?: string;         // response cache-control, and…
+  etag?: string;       // …etag. WHOSE ABSENCE COST US: without them a warm-cache model
+                       // has to guess which repeats a real browser would serve for free,
+                       // and the only available proxy — "the body was byte-identical every
+                       // time" — conflates a file served off disk with an API response
+                       // that merely happens to be stable. That misclassified 10 MB of
+                       // n8n's small API as cacheable (ports/report-marginal.mts). The
+                       // server already declares the answer; record it.
 }
 
 const headerBlockSize = (firstLine: string, raw: string[]): number => {
@@ -50,6 +58,8 @@ export function httpLogProxy(listen: number, target: number, file: string): http
           ts: Date.now(), startedAt, method: req.method ?? "", path: req.url ?? "", status: ur.statusCode ?? 0,
           reqBytes, respBytes,
           ...(ur.headers["content-encoding"] ? { enc: String(ur.headers["content-encoding"]) } : {}),
+          ...(ur.headers["cache-control"] ? { cc: String(ur.headers["cache-control"]) } : {}),
+          ...(ur.headers["etag"] ? { etag: String(ur.headers["etag"]) } : {}),
         };
         try { appendFileSync(file, JSON.stringify(line) + "\n"); } catch { /* full disk: the totals reconciliation will show the gap */ }
       });

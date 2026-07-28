@@ -45,7 +45,7 @@ const DIR = process.argv[2];
 if (!DIR) { console.error("usage: node ports/report-marginal.mts <results-dir>"); process.exit(2); }
 const dir = DIR.endsWith("/") ? DIR : DIR + "/";
 
-interface Hit { method: string; path: string; status: number; respBytes: number; reqBytes: number }
+interface Hit { method: string; path: string; status: number; respBytes: number; reqBytes: number; cc?: string; etag?: string }
 interface Row { status: string; retry: number; wireWsIn?: number; wireWsOut?: number; wireError?: boolean }
 
 // Content-hashed bundle names differ BETWEEN BUILDS (baseline's
@@ -163,15 +163,27 @@ for (const [p, v] of B.byPath) {
   movedStatic += v; movedPaths.push([p, v]);
 }
 if (movedStatic > 0) {
+  // Split by SIZE, not by the byte-stability heuristic. "Byte-identical every time"
+  // proves a file is unchanging; it does NOT prove a browser may reuse it. An API
+  // response that happens to be stable (/rest/module-settings) is still re-fetched on
+  // every page load in production. Folding those into "static" understated n8n's
+  // many-small slice as 36 MB when it is 46 MB. Only a bulk payload is worth calling a
+  // catalogue; the small stable endpoints stay counted as API traffic.
+  const BULK = 50e6;                                  // suite-wide volume, not per response
+  const bulk = movedPaths.filter(([, v]) => v >= BULK), small = movedPaths.filter(([, v]) => v < BULK);
+  const bulkBytes = bulk.reduce((a, [, v]) => a + v, 0), smallBytes = smallSum(small);
   console.log(`\n  STATIC BUT MOVED TO THE SESSION — repeats NOT elided (see header):`);
-  for (const [p, v] of movedPaths.sort((a, b) => b[1] - a[1]).slice(0, 4)) console.log(`    ${MB(v)}  ${(100 * v / bMarg).toFixed(1).padStart(5)}% of baseline marginal  ${p.slice(0, 52)}`);
-  console.log(`    a warm cache would fetch these ONCE in BOTH arms. Excluding them entirely:`);
-  console.log(`      baseline marginal without them  ${MB(bMarg - movedStatic)}`);
-  console.log(`      ported equivalent               NOT DERIVABLE — session bytes are a single`);
-  console.log(`      counter; per-path session logs (TIERLESS_WIRE_LOG) are needed to split them.`);
-  console.log(`    That residual is the many-small-requests slice, i.e. the number that would`);
-  console.log(`    actually test the request-shape model. It is not measured yet.`);
+  for (const [p, v] of bulk.sort((a, b) => b[1] - a[1])) console.log(`    ${MB(v)}  ${(100 * v / bMarg).toFixed(1).padStart(5)}% of baseline marginal  ${p.slice(0, 52)}`);
+  console.log(`    a warm cache would fetch these ONCE in BOTH arms; the session counter cannot`);
+  console.log(`    be split per path, so eliding them on the baseline alone would flatter the port.`);
+  console.log(`\n  baseline marginal, non-bulk (the many-small slice):  ${MB(bMarg - bulkBytes)}`);
+  console.log(`    of which byte-stable small API kept as traffic:    ${MB(smallBytes)}  (cacheability unproven`);
+  console.log(`    without cache-control; http-log-proxy now records it, these logs predate that)`);
+  console.log(`  ported equivalent:  NOT DERIVABLE — session bytes are a single counter. Per-path`);
+  console.log(`    session logs (TIERLESS_WIRE_LOG) are needed; drive-remeasure-chunks now keeps them.`);
+  console.log(`  => the request-shape predictor is UNTESTED on this app.`);
 }
+function smallSum(xs: [string, number][]): number { return xs.reduce((a, [, v]) => a + v, 0); }
 
 // auditability: what survived the elision, and what was thrown away
 const top = (m: Map<string, number>, n: number) => [...m].sort((a, b) => b[1] - a[1]).slice(0, n);

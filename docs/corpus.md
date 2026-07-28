@@ -165,15 +165,27 @@ It escapes elision only through rule 2, because it moved onto the session where 
 a SINGLE COUNTER rather than a per-path log — eliding its repeats on the baseline side
 alone would flatter the port. That is an instrument limitation, not a principle. A warm
 cache fetches this payload ONCE in BOTH arms, so excluding it from both is what the model
-demands:
+demands, and the baseline then splits:
 
-    baseline marginal without moved-static content     36 MB
-    ported equivalent                                  NOT DERIVABLE from the artifacts
+    baseline marginal                                934 MB
+      the catalogue (/rest/community-node-types)     888 MB
+      byte-stable small API                           10 MB
+      genuinely varying                               36 MB
+      -> non-catalogue remainder (many-small slice)   46 MB
+    ported equivalent                                NOT DERIVABLE from the artifacts
 
-Those 36 MB are the many-small-requests slice — the number that would actually test the
-request-shape predictor — and it is **unmeasured**: the remeasure driver kept the per-path
-HTTP log but not the per-path SESSION log. `drive-remeasure-chunks.sh` now keeps both.
-Until a run produces them, no claim about n8n's small-JSON traffic is supported by data.
+Note the 10 MB: "byte-identical on every fetch" proves a file never changes, it does NOT
+prove a browser may reuse it. `/rest/module-settings` is stable and still re-fetched on
+every page load in production, so folding it into "static" understated the many-small
+slice as 36 MB when it is 46 MB. The fix is to stop guessing — `http-log-proxy.mts` now
+records `cache-control` and `etag`, so cacheability comes from the server's own
+declaration; logs written before that change carry the size heuristic and its caveat.
+
+Those 46 MB are the many-small-requests slice — the number that would actually test the
+request-shape predictor — and the ported side is **unmeasured**: the remeasure driver kept
+the per-path HTTP log but not the per-path SESSION log. `drive-remeasure-chunks.sh` now
+keeps both. Until a run produces them, no claim about n8n's small-JSON traffic is
+supported by data.
 
 Two further facts finish n8n off as a byte story. There were **zero 304s in either arm** —
 fresh contexts hold no cached copy to revalidate, so the harness cannot exercise caching
