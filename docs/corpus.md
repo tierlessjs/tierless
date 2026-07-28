@@ -154,31 +154,36 @@ n8n serves `/types/nodes.json` (1.46 MB compressed, 694 fetches) and
 `/types/credentials.json` from disk; both are byte-identical in both arms and together
 were 53% of the first marginal figure.
 
-**The corrected picture: n8n is a 6.6% byte win on the traffic a real session would still
-fetch, published as 0.6%.** And the decomposition then checks out against an independent
-instrument — 97.4% addressable × 6.7% per-slice — where `report-anatomy.mts` derived that
-per-slice win as 7.0% from request shape alone. The model was right; the denominator was
-wrong.
+**The corrected picture is not a headline — it is a dead end, and that is the finding.**
+Marginal comes out at 934 MB -> 873 MB (-6.6%), decomposing as 97.4% addressable x 6.7%
+per-slice, which matches the 7.0% `report-anatomy.mts` derived from request shape alone.
+But **95.1% of that 934 MB is ONE endpoint**: `/rest/community-node-types`, 888 MB — and
+that endpoint is static by the very evidence used to elide everything else, **1 distinct
+body size across all 510 fetches**, across different test users.
 
-**But 95.1% of that marginal is ONE endpoint.** `/rest/community-node-types` is 888 MB of
-the 934 MB, and the measured "6.6% win" is the compression difference on that single
-payload. It is not a many-small-requests win: the real small-JSON API is ~46 MB, 5% of
-marginal. Two facts make this worse as a production claim:
+It escapes elision only through rule 2, because it moved onto the session where bytes are
+a SINGLE COUNTER rather than a per-path log — eliding its repeats on the baseline side
+alone would flatter the port. That is an instrument limitation, not a principle. A warm
+cache fetches this payload ONCE in BOTH arms, so excluding it from both is what the model
+demands:
 
-- The catalogue is **not dynamic**: 1 distinct body size across all 510 fetches, across
-  different test users. It is static content served from `/rest/`, and it is on the socket
-  only because `autoSession` routes the app's whole REST client there — no per-endpoint
-  decision was ever made about it.
-- There were **zero 304s in either arm**. Fresh contexts hold no cached copy to
-  revalidate, so the harness cannot exercise caching at all. In production this payload
-  would be cached or revalidated to a 0-byte 304 and never re-fetched 510 times.
+    baseline marginal without moved-static content     36 MB
+    ported equivalent                                  NOT DERIVABLE from the artifacts
 
-So n8n's byte headline measures compression on something a real deployment would not
-send twice. The **browse advisory** (the wall-regression fix) now returns >1 MB replies
-to browser HTTP, which removes this endpoint from the session and with it essentially the
-whole byte win — trading it to remove a 12-14% wall regression. That is the right trade
-for a transport that must not cost time, and it is the honest reason n8n should not be
-quoted as a byte win at all.
+Those 36 MB are the many-small-requests slice — the number that would actually test the
+request-shape predictor — and it is **unmeasured**: the remeasure driver kept the per-path
+HTTP log but not the per-path SESSION log. `drive-remeasure-chunks.sh` now keeps both.
+Until a run produces them, no claim about n8n's small-JSON traffic is supported by data.
+
+Two further facts finish n8n off as a byte story. There were **zero 304s in either arm** —
+fresh contexts hold no cached copy to revalidate, so the harness cannot exercise caching
+at all, and in production this payload would be fetched once rather than 510 times. And it
+is on the socket only because `autoSession` routes the app's whole REST client there; no
+per-endpoint decision was ever made about it. The **browse advisory** (the wall-regression
+fix) now returns >1 MB replies to browser HTTP, removing it from the session and with it
+essentially the whole measured delta — traded to remove a 12-14% wall regression. That is
+the right trade for a transport that must not cost time, and n8n should not be quoted as a
+byte win at all.
 PENDING: a post-advisory truth pair to measure that collapse rather than infer it.
 
 Two consequences for the study:
