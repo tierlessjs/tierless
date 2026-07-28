@@ -27,9 +27,15 @@ if (TRUTH && RTT) { console.error("pick one: TIERLESS_WIRE_TRUTH (bytes) or TIER
 const SRC = fileURLToPath(new URL(`../work/${VARIANT}/src/`, import.meta.url));
 const OUT = fileURLToPath(new URL(`../work/${VARIANT}/measure${TRUTH ? "-truth" : ""}${RTT ? `-rtt${RTT}` : ""}.jsonl`, import.meta.url));
 
-// no-external-service projects: their own e2e lane minus datasource containers.
-// authenticate is the storageState setup project the rest depend on.
-const PROJECTS = (process.env.TIERLESS_PROJECTS || "various panels dashboards").split(/\s+/).filter(Boolean);
+// THE FIXED WORKLOAD RULE (docs/corpus.md: chosen before measurement): every project
+// in their config EXCEPT the external-datasource ones (mysql, mssql, cloudwatch,
+// azuremonitor, cloudmonitoring, graphite, influxdb, opentsdb, jaeger, postgres,
+// loki, cloud-plugins — services this box does not run; they'd fail identically in
+// both arms). Setup projects (authenticate, cujs-setup/teardown) ride along as
+// Playwright dependencies of the ones that need them.
+const PROJECTS = (process.env.TIERLESS_PROJECTS ||
+  "admin viewer extensions-test-app grafana-e2etest-datasource canvas unauthenticated various panels smoke dashboards alerting dashboard-new-layouts dashboard-cujs grafana-e2etest-panel"
+).split(/\s+/).filter(Boolean);
 
 let pageUrl = "http://localhost:3001";
 const wireUrls: string[] = [];
