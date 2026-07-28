@@ -193,7 +193,32 @@ Reproduce:
     TIERLESS_WIRE_TRUTH=1 node ports/n8n/suite.mts
     node ports/report.mts ports/work/n8n-baseline/measure-truth.jsonl ports/work/n8n/measure-truth.jsonl
 
-### Wall time and network wait (2026-07-20; floors same-epoch, RTT arms caveated)
+### Wall time and network wait — FIXED 2026-07-28 (history below for the method)
+
+The regression below is CLOSED by the gateway browse advisory (TIERLESS_BROWSE_OVER,
+default 1 MB): the gateway learns any GET whose JSON reply exceeds the threshold and
+declares it in later hellos; autoSession returns those paths to stock browser fetch.
+On n8n the sole such path is `/rest/community-node-types` — 12.66 MB of plaintext per
+session hauled through the renderer main thread as ONE ws frame (decode + deliver +
+persist mid-mount-storm), where stock streams 1.74 MB compressed off-thread. That was
+the whole "~1.1 s per session" boot tax. Full floor pair with the advisory
+(`results/floor-adv/`, chunk-major so both arms of each chunk share box state):
+
+    673 pairs   wall 65.6 -> 65.6 min (-0.0%)   median 0 ms     (was +12.4%, +1033 ms)
+    editor chunk alone: -0.8% to -1.8%, median -25 to -112 ms across two same-box pairs
+
+How it was found: per-test request timelines (report-timeline.mts) showed dDur~0 on
+every path (nothing served slower) but a 1.4-1.9 s ISSUE-TIME shift opening between
+nodes.json-end and workflows/new; the only >100 KB session frames were
+community-node-types; per-process CPU accounting acquitted box saturation and put
++0.8 s/test in the renderer bucket. Two measurement retractions from the same hunt:
+an editor-only rebuild silently ships the stale @n8n/rest-api-client dist (ablations
+must rebuild the dep and VERIFY the bundle), which voided the conditional:false
+ablation's "+18.7% without cache" reading; and a container restart splitting a pair
+across box states (~17% suite-wide drift) manufactured +20% until both arms re-ran on
+one box.
+
+### The regression as it stood (2026-07-20/25; kept for the diagnostic method)
 
 The one defensible timing comparison on this rig is a back-to-back same-epoch
 floor pair (single runs of this 1.5 h suite swing by minutes across container

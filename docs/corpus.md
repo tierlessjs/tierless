@@ -175,8 +175,13 @@ passthrough, storage-advisory cache, twin bearer). Single run per arm:
     vikunja   195 pairs   total -1%,  median -2%   (parity — matches published)
     strapi    225 pairs   total -18%, median -9%, -882 ms/test   (published -13%/-7%: WIDER now)
     nocodb     84 pairs   total +1%,  median 0%,  -125 ms median delta   (parity — matches)
-    n8n       672 pairs   total +13%, median +1.1 s on served tests, control +2 ms
-              (re-tested 2026-07-25; the one open wall regression)
+    n8n       673 pairs   total -0.0%, median 0 ms   (2026-07-28, with the browse advisory)
+
+n8n's former +13%/+1.1s-per-session wall regression closed 2026-07-28: it was one
+endpoint's 12.66 MB reply crossing the session as a single main-thread ws frame every
+session. The general fix is the byte decomposition above turned into a routing rule —
+the gateway learns oversize GET replies (TIERLESS_BROWSE_OVER, default 1 MB plaintext)
+and later hellos return those paths to stock browser fetch (ports/n8n/README.md).
 
 Incident worth recording: nocodb's stock BASELINE arm wedged at 17/282 for 2.4 h once
 (no tierless in the page; no live browser worker; RAM/disk healthy) and passed cleanly
