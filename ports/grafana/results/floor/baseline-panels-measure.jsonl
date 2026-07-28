@@ -1,0 +1,196 @@
+{"id":"../src/node_modules/@grafana/plugin-e2e/dist/auth/auth.setup.js:5 › ","status":"passed","retry":0,"durationMs":144}
+{"id":"../src/e2e-playwright/panels-suite/annotations-clustering.spec.ts:70 › Panels test: Clustering › width: 1000 › Clustering status","status":"passed","retry":0,"durationMs":4459}
+{"id":"../src/e2e-playwright/panels-suite/annotations-clustering.spec.ts:141 › Panels test: Clustering › width: 2600 › Clustering status","status":"passed","retry":0,"durationMs":4356}
+{"id":"../src/e2e-playwright/panels-suite/annotations-clustering.spec.ts:211 › Panels test: Clustering › tooltips › should contain original tooltip content","status":"passed","retry":0,"durationMs":4312}
+{"id":"../src/e2e-playwright/panels-suite/annotations-clustering.spec.ts:253 › Panels test: Clustering › wip › other tooltips are not hoverable when clustered tooltip is pinned","status":"passed","retry":0,"durationMs":4825}
+{"id":"../src/e2e-playwright/panels-suite/annotations-clustering.spec.ts:299 › Panels test: Clustering › wip › wip annotations › can edit locally created (wip) annotations from the clustered tooltip","status":"passed","retry":0,"durationMs":7463}
+{"id":"../src/e2e-playwright/panels-suite/annotations-clustering.spec.ts:430 › Panels test: Clustering › wip › wip annotations › annotations that return after panel query are rendered in correct position on x-axis","status":"passed","retry":0,"durationMs":4780}
+{"id":"../src/e2e-playwright/panels-suite/annotations-deprecated.spec.ts:10 › Panels test: Annotations - deprecated › Annotations should split into multiple rows if multi-lane panel option is set","status":"passed","retry":0,"durationMs":4663}
+{"id":"../src/e2e-playwright/panels-suite/annotations.spec.ts:10 › Panels test: Annotations › Annotations should split into multiple rows if multi-lane panel option is set","status":"passed","retry":0,"durationMs":4765}
+{"id":"../src/e2e-playwright/panels-suite/barchart-datalinks.spec.ts:12 › Panels test: BarChart data links › shows data links in pinned tooltip","status":"passed","retry":0,"durationMs":4772}
+{"id":"../src/e2e-playwright/panels-suite/barchart-legend.spec.ts:10 › Panels test: BarChart legend › legend visibility toggle","status":"passed","retry":0,"durationMs":5138}
+{"id":"../src/e2e-playwright/panels-suite/barchart-legend.spec.ts:32 › Panels test: BarChart legend › legend mode and placement toggles","status":"passed","retry":0,"durationMs":5365}
+{"id":"../src/e2e-playwright/panels-suite/barchart-nodata.spec.ts:10 › Panels test: BarChart no data › handles no data","status":"passed","retry":0,"durationMs":4936}
+{"id":"../src/e2e-playwright/panels-suite/barchart-options.spec.ts:12 › Panels test: BarChart options › show values - toggle always/never/auto","status":"passed","retry":0,"durationMs":4895}
+{"id":"../src/e2e-playwright/panels-suite/barchart-options.spec.ts:38 › Panels test: BarChart options › stacking 100 percent - renders and shows tooltip","status":"passed","retry":0,"durationMs":6051}
+{"id":"../src/e2e-playwright/panels-suite/barchart-options.spec.ts:74 › Panels test: BarChart options › full highlight - tooltip appears across bar column","status":"passed","retry":0,"durationMs":5371}
+{"id":"../src/e2e-playwright/panels-suite/barchart-options.spec.ts:99 › Panels test: BarChart options › orientation - toggle vertical and horizontal","status":"passed","retry":0,"durationMs":5551}
+{"id":"../src/e2e-playwright/panels-suite/barchart-render.spec.ts:10 › Panels test: BarChart render › renders successfully","status":"passed","retry":0,"durationMs":4628}
+{"id":"../src/e2e-playwright/panels-suite/barchart-tooltips.spec.ts:12 › Panels test: BarChart tooltips › tooltip interactions","status":"passed","retry":0,"durationMs":6318}
+{"id":"../src/e2e-playwright/panels-suite/candlestick-datalinks.spec.ts:10 › Panels test: Candlestick data links › shows data links in pinned tooltip","status":"passed","retry":0,"durationMs":4908}
+{"id":"../src/e2e-playwright/panels-suite/candlestick-editor.spec.ts:10 › Panels test: Candlestick editor › panel options in edit mode","status":"passed","retry":0,"durationMs":4565}
+{"id":"../src/e2e-playwright/panels-suite/candlestick-editor.spec.ts:42 › Panels test: Candlestick editor › switching mode re-renders without error","status":"passed","retry":0,"durationMs":5197}
+{"id":"../src/e2e-playwright/panels-suite/candlestick-editor.spec.ts:74 › Panels test: Candlestick editor › switching candle style re-renders without error","status":"passed","retry":0,"durationMs":4748}
+{"id":"../src/e2e-playwright/panels-suite/candlestick-editor.spec.ts:102 › Panels test: Candlestick editor › switching color strategy re-renders without error","status":"passed","retry":0,"durationMs":4766}
+{"id":"../src/e2e-playwright/panels-suite/candlestick-legend.spec.ts:10 › Panels test: Candlestick legend › legend visibility toggle","status":"passed","retry":0,"durationMs":5144}
+{"id":"../src/e2e-playwright/panels-suite/candlestick-legend.spec.ts:32 › Panels test: Candlestick legend › legend mode and placement toggles","status":"passed","retry":0,"durationMs":5329}
+{"id":"../src/e2e-playwright/panels-suite/candlestick-nodata.spec.ts:10 › Panels test: Candlestick no data › handles no data","status":"passed","retry":0,"durationMs":4983}
+{"id":"../src/e2e-playwright/panels-suite/candlestick-render.spec.ts:10 › Panels test: Candlestick render › renders successfully","status":"passed","retry":0,"durationMs":4663}
+{"id":"../src/e2e-playwright/panels-suite/candlestick-tooltips.spec.ts:10 › Panels test: Candlestick tooltips › tooltip interactions","status":"passed","retry":0,"durationMs":5663}
+{"id":"../src/e2e-playwright/panels-suite/candlestick.spec.ts:6 › Panels test: Candlestick X-axis panning › x-axis panning functionality","status":"passed","retry":0,"durationMs":7087}
+{"id":"../src/e2e-playwright/panels-suite/canvas-icon-mappings.spec.ts:7 › Canvas Panel - Icon Mappings › should render field-based icons from value mappings correctly","status":"passed","retry":0,"durationMs":3719}
+{"id":"../src/e2e-playwright/panels-suite/canvas-icon-mappings.spec.ts:25 › Canvas Panel - Icon Mappings › should render fixed path icons correctly","status":"passed","retry":0,"durationMs":4423}
+{"id":"../src/e2e-playwright/panels-suite/canvas-icon-mappings.spec.ts:65 › Canvas Panel - Icon Mappings › should not make invalid requests for unmapped numeric values","status":"passed","retry":0,"durationMs":4597}
+{"id":"../src/e2e-playwright/panels-suite/canvas-icon-mappings.spec.ts:87 › Canvas Panel - Icon Mappings › should display text values from value mappings correctly","status":"passed","retry":0,"durationMs":4029}
+{"id":"../src/e2e-playwright/panels-suite/dashlist.spec.ts:12 › Panels test: DashList panel › should pass current variable values correctly when `Include current template variable values` is set","status":"passed","retry":0,"durationMs":3853}
+{"id":"../src/e2e-playwright/panels-suite/frontend-sandbox-panel.spec.ts:25 › Panels test: Panel sandbox › Does not add iframes to body","status":"passed","retry":0,"durationMs":3772}
+{"id":"../src/e2e-playwright/panels-suite/frontend-sandbox-panel.spec.ts:51 › Panels test: Panel sandbox › Does not reaches out of panel div","status":"passed","retry":0,"durationMs":4120}
+{"id":"../src/e2e-playwright/panels-suite/frontend-sandbox-panel.spec.ts:61 › Panels test: Panel sandbox › Does not Reaches out of the panel editor","status":"passed","retry":0,"durationMs":4650}
+{"id":"../src/e2e-playwright/panels-suite/frontend-sandbox-panel.spec.ts:74 › Panels test: Panel sandbox › Can access specific window global variables","status":"passed","retry":0,"durationMs":4156}
+{"id":"../src/e2e-playwright/panels-suite/gauge.spec.ts:21 › Gauge Panel › a11y","status":"passed","retry":0,"durationMs":7008}
+{"id":"../src/e2e-playwright/panels-suite/gauge.spec.ts:31 › Gauge Panel › successfully migrates all gauge panels","status":"passed","retry":0,"durationMs":4673}
+{"id":"../src/e2e-playwright/panels-suite/gauge.spec.ts:45 › Gauge Panel › renders new gauge panels","status":"passed","retry":0,"durationMs":4635}
+{"id":"../src/e2e-playwright/panels-suite/gauge.spec.ts:60 › Gauge Panel › renders sparklines in gauge panels","status":"passed","retry":0,"durationMs":4637}
+{"id":"../src/e2e-playwright/panels-suite/gauge.spec.ts:71 › Gauge Panel › data links","status":"passed","retry":0,"durationMs":7228}
+{"id":"../src/e2e-playwright/panels-suite/gauge.spec.ts:101 › Gauge Panel › \"no data\"","status":"passed","retry":0,"durationMs":7513}
+{"id":"../src/e2e-playwright/panels-suite/gauge.spec.ts:156 › Gauge Panel › handles percentage units","status":"passed","retry":0,"durationMs":4720}
+{"id":"../src/e2e-playwright/panels-suite/geomap-layer-types.spec.ts:51 › Panels test: Geomap layer types › Tests changing the layer type","status":"passed","retry":0,"durationMs":5745}
+{"id":"../src/e2e-playwright/panels-suite/geomap-layer-types.spec.ts:173 › Panels test: Geomap layer types › ResourcePicker in GeoJSON Default style - select icon from marker set","status":"passed","retry":0,"durationMs":6635}
+{"id":"../src/e2e-playwright/panels-suite/geomap-layer-types.spec.ts:213 › Panels test: Geomap layer types › ResourcePicker in GeoJSON Default style - switching icon folder","status":"passed","retry":0,"durationMs":6365}
+{"id":"../src/e2e-playwright/panels-suite/geomap-map-controls.spec.ts:11 › Panels test: Geomap layer controls options › Tests map controls options","status":"passed","retry":0,"durationMs":4922}
+{"id":"../src/e2e-playwright/panels-suite/geomap-spatial-operations-transform.spec.ts:11 › Panels test: Geomap spatial operations › Tests location auto option","status":"passed","retry":0,"durationMs":6122}
+{"id":"../src/e2e-playwright/panels-suite/geomap-spatial-operations-transform.spec.ts:48 › Panels test: Geomap spatial operations › Tests location coords option","status":"passed","retry":0,"durationMs":7037}
+{"id":"../src/e2e-playwright/panels-suite/geomap-spatial-operations-transform.spec.ts:98 › Panels test: Geomap spatial operations › Tests geoshash field column appears in table view","status":"passed","retry":0,"durationMs":7006}
+{"id":"../src/e2e-playwright/panels-suite/geomap-spatial-operations-transform.spec.ts:145 › Panels test: Geomap spatial operations › Tests location lookup option","status":"passed","retry":0,"durationMs":6792}
+{"id":"../src/e2e-playwright/panels-suite/histogram.spec.ts:9 › Panels test: Histogram › renders successfully","status":"passed","retry":0,"durationMs":3818}
+{"id":"../src/e2e-playwright/panels-suite/histogram.spec.ts:29 › Panels test: Histogram › panel options › legend","status":"passed","retry":0,"durationMs":14065}
+{"id":"../src/e2e-playwright/panels-suite/histogram.spec.ts:56 › Panels test: Histogram › a11y › run a11y report","status":"passed","retry":0,"durationMs":4875}
+{"id":"../src/e2e-playwright/panels-suite/logstable.spec.ts:8 › Panels test: LogsTable › Defaults › Should render logs table panel","status":"passed","retry":0,"durationMs":7623}
+{"id":"../src/e2e-playwright/panels-suite/logstable.spec.ts:115 › Panels test: LogsTable › Defaults › Show details button","status":"passed","retry":0,"durationMs":5352}
+{"id":"../src/e2e-playwright/panels-suite/logstable.spec.ts:152 › Panels test: LogsTable › Options › Log details","status":"passed","retry":0,"durationMs":4231}
+{"id":"../src/e2e-playwright/panels-suite/logstable.spec.ts:169 › Panels test: LogsTable › Options › Copy log line button","status":"passed","retry":0,"durationMs":7758}
+{"id":"../src/e2e-playwright/panels-suite/logstable.spec.ts:203 › Panels test: LogsTable › Options › Show controls","status":"passed","retry":0,"durationMs":5628}
+{"id":"../src/e2e-playwright/panels-suite/logstable.spec.ts:248 › Panels test: LogsTable › No data › Invalid logs frame","status":"passed","retry":0,"durationMs":4204}
+{"id":"../src/e2e-playwright/panels-suite/logstable.spec.ts:267 › Panels test: LogsTable › No data › Empty logs frame","status":"passed","retry":0,"durationMs":4378}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_base.spec.ts:13 › Panels test: Panel edit base › Tests various Panel edit scenarios","status":"passed","retry":0,"durationMs":9865}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queries.spec.ts:11 › Panels test: Queries › Tests various Panel edit queries scenarios","status":"passed","retry":0,"durationMs":8222}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_transforms.spec.ts:12 › Panels test: Transformations › Tests transformations editor","status":"passed","retry":0,"durationMs":5209}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_transforms.spec.ts:28 › Panels test: Transformations › Tests case where transformations can be disabled and not clear out panel data","status":"passed","retry":0,"durationMs":5350}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_transforms.spec.ts:47 › Panels test: Transformations › Group by editor mounts in the legacy panel edit flow","status":"passed","retry":0,"durationMs":4849}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_transforms.spec.ts:64 › Panels test: Transformations › Merge series/tables is flagged as not applicable in the legacy picker","status":"passed","retry":0,"durationMs":4405}
+{"id":"../src/e2e-playwright/panels-suite/stat.spec.ts:10 › Panels test: Stat › renders successfully","status":"passed","retry":0,"durationMs":4083}
+{"id":"../src/e2e-playwright/panels-suite/stat.spec.ts:27 › Panels test: Stat › \"no data\"","status":"passed","retry":0,"durationMs":4734}
+{"id":"../src/e2e-playwright/panels-suite/stat.spec.ts:45 › Panels test: Stat › sparkline: area mode renders a chart per series","status":"passed","retry":0,"durationMs":4493}
+{"id":"../src/e2e-playwright/panels-suite/stat.spec.ts:58 › Panels test: Stat › sparkline: line mode renders a chart per series","status":"passed","retry":0,"durationMs":4916}
+{"id":"../src/e2e-playwright/panels-suite/stat.spec.ts:71 › Panels test: Stat › sparkline: no chart when graphMode is none","status":"passed","retry":0,"durationMs":4975}
+{"id":"../src/e2e-playwright/panels-suite/stat.spec.ts:86 › Panels test: Stat › text mode: name displays series names","status":"passed","retry":0,"durationMs":4773}
+{"id":"../src/e2e-playwright/panels-suite/stat.spec.ts:99 › Panels test: Stat › text mode: value with 45 series renders without errors","status":"passed","retry":0,"durationMs":5054}
+{"id":"../src/e2e-playwright/panels-suite/stat.spec.ts:113 › Panels test: Stat › text mode: none with 200 series renders without errors","status":"passed","retry":0,"durationMs":3986}
+{"id":"../src/e2e-playwright/panels-suite/stat.spec.ts:128 › Panels test: Stat › color mode: background renders without errors","status":"passed","retry":0,"durationMs":4935}
+{"id":"../src/e2e-playwright/panels-suite/stat.spec.ts:142 › Panels test: Stat › color mode: value renders without errors","status":"passed","retry":0,"durationMs":4617}
+{"id":"../src/e2e-playwright/panels-suite/stat.spec.ts:156 › Panels test: Stat › percent change: positive value shows upward arrow","status":"passed","retry":0,"durationMs":4588}
+{"id":"../src/e2e-playwright/panels-suite/stat.spec.ts:166 › Panels test: Stat › percent change: zero shows no directional arrow","status":"passed","retry":0,"durationMs":4573}
+{"id":"../src/e2e-playwright/panels-suite/stat.spec.ts:182 › Panels test: Stat › percent change: NaN is not displayed","status":"passed","retry":0,"durationMs":4596}
+{"id":"../src/e2e-playwright/panels-suite/stat.spec.ts:198 › Panels test: Stat › data link: single link wraps each stat cell as anchor","status":"passed","retry":0,"durationMs":4645}
+{"id":"../src/e2e-playwright/panels-suite/state-timeline.spec.ts:10 › Panels test: StateTimeine › renders successfully","status":"passed","retry":0,"durationMs":4539}
+{"id":"../src/e2e-playwright/panels-suite/state-timeline.spec.ts:24 › Panels test: StateTimeine › \"no data\"","status":"passed","retry":0,"durationMs":4629}
+{"id":"../src/e2e-playwright/panels-suite/state-timeline.spec.ts:46 › Panels test: StateTimeine › tooltip interactions","status":"passed","retry":0,"durationMs":5619}
+{"id":"../src/e2e-playwright/panels-suite/state-timeline.spec.ts:102 › Panels test: State Timeline X-axis panning › x-axis panning functionality","status":"passed","retry":0,"durationMs":7018}
+{"id":"../src/e2e-playwright/panels-suite/status-history.spec.ts:10 › Panels test: StatusHistory › renders successfully","status":"passed","retry":0,"durationMs":4544}
+{"id":"../src/e2e-playwright/panels-suite/status-history.spec.ts:24 › Panels test: StatusHistory › \"no data\"","status":"passed","retry":0,"durationMs":4744}
+{"id":"../src/e2e-playwright/panels-suite/status-history.spec.ts:46 › Panels test: StatusHistory › tooltip interactions","status":"passed","retry":0,"durationMs":5420}
+{"id":"../src/e2e-playwright/panels-suite/status-history.spec.ts:100 › Panels test: Status History X-axis panning › x-axis panning functionality","status":"passed","retry":0,"durationMs":7131}
+{"id":"../src/e2e-playwright/panels-suite/table-footer.spec.ts:10 › Panels test: Table - Footer › Footer affected by filtering","status":"passed","retry":0,"durationMs":4834}
+{"id":"../src/e2e-playwright/panels-suite/table-footer.spec.ts:55 › Panels test: Table - Footer › Footer unaffected by sorting","status":"passed","retry":0,"durationMs":4760}
+{"id":"../src/e2e-playwright/panels-suite/table-footer.spec.ts:105 › Panels test: Table - Footer › Count rows for normal case","status":"passed","retry":0,"durationMs":4050}
+{"id":"../src/e2e-playwright/panels-suite/table-footer.spec.ts:125 › Panels test: Table - Footer › Count rows with a few hidden columns","status":"passed","retry":0,"durationMs":4244}
+{"id":"../src/e2e-playwright/panels-suite/table-kitchenSink.spec.ts:35 › Panels test: Table - Kitchen Sink › a11y","status":"passed","retry":0,"durationMs":6905}
+{"id":"../src/e2e-playwright/panels-suite/table-kitchenSink.spec.ts:47 › Panels test: Table - Kitchen Sink › Tests word wrap, hover overflow, max cell height, and cell inspect","status":"passed","retry":0,"durationMs":7952}
+{"id":"../src/e2e-playwright/panels-suite/table-kitchenSink.spec.ts:109 › Panels test: Table - Kitchen Sink › Tests visibility and display name via overrides","status":"passed","retry":0,"durationMs":6329}
+{"id":"../src/e2e-playwright/panels-suite/table-kitchenSink.spec.ts:150 › Panels test: Table - Kitchen Sink › Tests sorting by column","status":"passed","retry":0,"durationMs":6032}
+{"id":"../src/e2e-playwright/panels-suite/table-kitchenSink.spec.ts:176 › Panels test: Table - Kitchen Sink › Tests filtering within a column","status":"passed","retry":0,"durationMs":5854}
+{"id":"../src/e2e-playwright/panels-suite/table-kitchenSink.spec.ts:215 › Panels test: Table - Kitchen Sink › Tests pagination, row height adjustment","status":"passed","retry":0,"durationMs":6922}
+{"id":"../src/e2e-playwright/panels-suite/table-kitchenSink.spec.ts:277 › Panels test: Table - Kitchen Sink › Tests DataLinks (single and multi) and actions","status":"skipped","retry":0,"durationMs":0}
+{"id":"../src/e2e-playwright/panels-suite/table-kitchenSink.spec.ts:368 › Panels test: Table - Kitchen Sink › Cross-filter: second filter popup only shows values reachable after first filter","status":"passed","retry":0,"durationMs":6364}
+{"id":"../src/e2e-playwright/panels-suite/table-kitchenSink.spec.ts:448 › Panels test: Table - Kitchen Sink › Tests tooltip interactions","status":"passed","retry":0,"durationMs":5620}
+{"id":"../src/e2e-playwright/panels-suite/table-kitchenSink.spec.ts:511 › Panels test: Table - Kitchen Sink › Styling overrides with styling from field","status":"passed","retry":0,"durationMs":6061}
+{"id":"../src/e2e-playwright/panels-suite/table-kitchenSink.spec.ts:557 › Panels test: Table - Kitchen Sink › Empty Table panel","status":"passed","retry":0,"durationMs":4464}
+{"id":"../src/e2e-playwright/panels-suite/table-kitchenSink.spec.ts:571 › Panels test: Table - Kitchen Sink › Multi-frame table: frame selector combobox switches active frame","status":"passed","retry":0,"durationMs":5134}
+{"id":"../src/e2e-playwright/panels-suite/table-markdown.spec.ts:17 › Panels test: Table - Markdown › Tests Markdown tables are successfully rendered","status":"passed","retry":0,"durationMs":4517}
+{"id":"../src/e2e-playwright/panels-suite/table-markdown.spec.ts:26 › Panels test: Table - Markdown › Tests dynamic height and max row height","status":"timedOut","retry":0,"durationMs":30061}
+{"id":"../src/e2e-playwright/panels-suite/table-nested.spec.ts:11 › Panels test: Table - Nested › a11y","status":"failed","retry":0,"durationMs":12472}
+{"id":"../src/e2e-playwright/panels-suite/table-nested.spec.ts:42 › Panels test: Table - Nested › expand and collapse","status":"failed","retry":0,"durationMs":12741}
+{"id":"../src/e2e-playwright/panels-suite/table-nested.spec.ts:67 › Panels test: Table - Nested › sorting","status":"failed","retry":0,"durationMs":12592}
+{"id":"../src/e2e-playwright/panels-suite/table-nested.spec.ts:116 › Panels test: Table - Nested › filtering in a nested table","status":"failed","retry":0,"durationMs":12687}
+{"id":"../src/e2e-playwright/panels-suite/table-nested.spec.ts:199 › Panels test: Table - Nested › cross-filter in nested table: second filter popup shows only values from filtered rows","status":"failed","retry":0,"durationMs":12536}
+{"id":"../src/e2e-playwright/panels-suite/table-nested.spec.ts:322 › Panels test: Table - Nested › word wrap, hover overflow, max cell height, and cell inspect","status":"timedOut","retry":0,"durationMs":90056}
+{"id":"../src/e2e-playwright/panels-suite/table-nested.spec.ts:388 › Panels test: Table - Nested › renamed field appears as column in nested table","status":"timedOut","retry":0,"durationMs":30070}
+{"id":"../src/e2e-playwright/panels-suite/table-nested.spec.ts:409 › Panels test: Table - Nested › datalinks resolve field variables in nested table context","status":"failed","retry":0,"durationMs":12560}
+{"id":"../src/e2e-playwright/panels-suite/table-nested.spec.ts:476 › Panels test: Table - Nested › expand nested rows by default","status":"failed","retry":0,"durationMs":12584}
+{"id":"../src/e2e-playwright/panels-suite/table-nested.spec.ts:504 › Panels test: Table - Nested › tooltip from field","status":"timedOut","retry":0,"durationMs":30051}
+{"id":"../src/e2e-playwright/panels-suite/table-sparkline.spec.ts:6 › Panels test: Table - Sparkline › Tests sparkline tables are successfully rendered","status":"failed","retry":0,"durationMs":12624}
+{"id":"../src/e2e-playwright/panels-suite/text.spec.ts:6 › Panels test: Text › renders all panels on dashboard without errors","status":"failed","retry":0,"durationMs":12599}
+{"id":"../src/e2e-playwright/panels-suite/text.spec.ts:23 › Panels test: Text › markdown mode renders and interpolates variables","status":"failed","retry":0,"durationMs":12542}
+{"id":"../src/e2e-playwright/panels-suite/text.spec.ts:37 › Panels test: Text › html mode renders content correctly","status":"failed","retry":0,"durationMs":12482}
+{"id":"../src/e2e-playwright/panels-suite/text.spec.ts:49 › Panels test: Text › code mode renders monaco editor with line numbers and minimap","status":"failed","retry":0,"durationMs":12474}
+{"id":"../src/e2e-playwright/panels-suite/text.spec.ts:62 › Panels test: Text › can switch between modes in panel editor","status":"failed","retry":0,"durationMs":12567}
+{"id":"../src/e2e-playwright/panels-suite/timeseries-mouse-zoom-interaction.spec.ts:6 › Panels test: Timeseries zoom interaction › shows zoom cursor during x-axis drag-to-zoom interaction","status":"failed","retry":0,"durationMs":12626}
+{"id":"../src/e2e-playwright/panels-suite/timeseries-mouse-zoom-interaction.spec.ts:33 › Panels test: Timeseries zoom interaction › shows zoom cursor during y-axis drag-to-zoom interaction with Shift key","status":"failed","retry":0,"durationMs":12654}
+{"id":"../src/e2e-playwright/panels-suite/timeseries-mouse-zoom-interaction.spec.ts:65 › Panels test: Timeseries zoom interaction › does not show zoom cursor when modifier keys are pressed","status":"failed","retry":0,"durationMs":12667}
+{"id":"../src/e2e-playwright/panels-suite/timeseries.spec.ts:7 › Panels test: TimeSeries › renders successfully","status":"failed","retry":0,"durationMs":12492}
+{"id":"../src/e2e-playwright/panels-suite/timeseries.spec.ts:20 › Panels test: TimeSeries › tooltip interactions","status":"skipped","retry":0,"durationMs":0}
+{"id":"../src/e2e-playwright/panels-suite/timeseries.spec.ts:65 › Panels test: TimeSeries › timeseries options are accessible in edit mode","status":"failed","retry":0,"durationMs":12508}
+{"id":"../src/e2e-playwright/panels-suite/timeseries.spec.ts:82 › Panels test: TimeSeries › draw style change updates available options","status":"failed","retry":0,"durationMs":12420}
+{"id":"../src/e2e-playwright/panels-suite/timeseries.spec.ts:106 › Panels test: TimeSeries › legend toggle shows legend items","status":"timedOut","retry":0,"durationMs":30045}
+{"id":"../src/e2e-playwright/panels-suite/timeseries.spec.ts:125 › Panels test: TimeSeries X-axis panning › x-axis panning functionality","status":"failed","retry":0,"durationMs":12520}
+{"id":"../src/e2e-playwright/panels-suite/trend.spec.ts:6 › Panels test: Trend › renders successfully","status":"failed","retry":0,"durationMs":12448}
+{"id":"../src/e2e-playwright/panels-suite/trend.spec.ts:21 › Panels test: Trend › legend","status":"failed","retry":0,"durationMs":12450}
+{"id":"../src/e2e-playwright/panels-suite/trend.spec.ts:46 › Panels test: Trend › no data","status":"failed","retry":0,"durationMs":12457}
+{"id":"../src/e2e-playwright/panels-suite/trend.spec.ts:58 › Panels test: Trend › a11y","status":"failed","retry":0,"durationMs":12504}
+{"id":"../src/e2e-playwright/panels-suite/xychart.spec.ts:10 › Panels test: XYChart › renders successfully","status":"failed","retry":0,"durationMs":12396}
+{"id":"../src/e2e-playwright/panels-suite/xychart.spec.ts:25 › Panels test: XYChart › is accessible","status":"failed","retry":0,"durationMs":12587}
+{"id":"../src/e2e-playwright/panels-suite/xychart.spec.ts:37 › Panels test: XYChart › \"no data\" shows panel error message","status":"failed","retry":0,"durationMs":12674}
+{"id":"../src/e2e-playwright/panels-suite/xychart.spec.ts:50 › Panels test: XYChart › legend items are visible","status":"failed","retry":0,"durationMs":12627}
+{"id":"../src/e2e-playwright/panels-suite/xychart.spec.ts:61 › Panels test: XYChart › series mapping options are accessible in edit mode","status":"failed","retry":0,"durationMs":12513}
+{"id":"../src/e2e-playwright/panels-suite/xychart.spec.ts:74 › Panels test: XYChart › point options are accessible in edit mode","status":"failed","retry":0,"durationMs":12638}
+{"id":"../src/e2e-playwright/panels-suite/xychart.spec.ts:99 › Panels test: XYChart › renders points colored by field value (Color by field (threshold))","status":"failed","retry":0,"durationMs":12453}
+{"id":"../src/e2e-playwright/panels-suite/xychart.spec.ts:99 › Panels test: XYChart › renders points colored by field value (Color by field (value mappings))","status":"failed","retry":0,"durationMs":12490}
+{"id":"../src/e2e-playwright/panels-suite/xychart.spec.ts:113 › Panels test: XYChart › tooltip interactions","status":"timedOut","retry":0,"durationMs":30055}
+{"id":"../src/e2e-playwright/panels-suite/canvas-scene.spec.ts:21 › Canvas Panel - Scene Tests › should create and render canvas panel with scene elements","status":"timedOut","retry":0,"durationMs":30046}
+{"id":"../src/e2e-playwright/panels-suite/canvas-scene.spec.ts:26 › Canvas Panel - Scene Tests › should handle scene pan and zoom when enabled","status":"timedOut","retry":0,"durationMs":30046}
+{"id":"../src/e2e-playwright/panels-suite/heatmap.spec.ts:11 › Panels test: Heatmap › renders dashboard with row and cells heatmaps","status":"failed","retry":0,"durationMs":12556}
+{"id":"../src/e2e-playwright/panels-suite/heatmap.spec.ts:29 › Panels test: Heatmap › \"no data\"","status":"failed","retry":0,"durationMs":12645}
+{"id":"../src/e2e-playwright/panels-suite/heatmap.spec.ts:42 › Panels test: Heatmap › tooltip: hover, pin, dismiss with Escape; Hidden mode hides tooltip","status":"failed","retry":0,"durationMs":12494}
+{"id":"../src/e2e-playwright/panels-suite/heatmap.spec.ts:90 › Panels test: Heatmap › data links in pinned tooltip; field actions are not offered (heatmap)","status":"failed","retry":0,"durationMs":12544}
+{"id":"../src/e2e-playwright/panels-suite/heatmap.spec.ts:128 › Panels test: Heatmap › legend: toggling Show legend hides and shows color scale","status":"failed","retry":0,"durationMs":12487}
+{"id":"../src/e2e-playwright/panels-suite/heatmap.spec.ts:156 › Panels test: Heatmap › panel options: Y axis reverse and tooltip histogram toggle","status":"timedOut","retry":0,"durationMs":90060}
+{"id":"../src/e2e-playwright/panels-suite/heatmap.spec.ts:190 › Panels test: Heatmap X-axis panning › x-axis panning functionality","status":"failed","retry":0,"durationMs":12460}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:75 › Query Editor Next: Layout & Navigation › renders the new editor layout with sidebar instead of classic tabs","status":"failed","retry":0,"durationMs":12552}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:97 › Query Editor Next: Layout & Navigation › sidebar can toggle between mini and full size","status":"failed","retry":0,"durationMs":12350}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:113 › Query Editor Next: Layout & Navigation › can toggle between Data and Alerts views","status":"failed","retry":0,"durationMs":12409}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:131 › Query Editor Next: Sidebar Query Management › initial query card is visible and selected","status":"failed","retry":0,"durationMs":12407}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:139 › Query Editor Next: Sidebar Query Management › can add a new query via the sidebar","status":"timedOut","retry":0,"durationMs":30043}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:148 › Query Editor Next: Sidebar Query Management › can select different queries by clicking sidebar cards","status":"timedOut","retry":0,"durationMs":30045}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:166 › Query Editor Next: Sidebar Query Management › can delete a query from the sidebar","status":"timedOut","retry":0,"durationMs":30048}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:186 › Query Editor Next: Sidebar Query Management › can hide and show a query","status":"timedOut","retry":0,"durationMs":30044}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:205 › Query Editor Next: Sidebar Query Management › can rename a query via the content header","status":"timedOut","retry":0,"durationMs":30038}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:225 › Query Editor Next: Datasource Switching › switching datasource updates query editor content","status":"failed","retry":0,"durationMs":12564}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:238 › Query Editor Next: Datasource Switching › queries and expressions survive datasource switching","status":"failed","retry":0,"durationMs":12686}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:272 › Query Editor Next: Transformations › can add a transformation via the sidebar","status":"timedOut","retry":0,"durationMs":30044}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:282 › Query Editor Next: Transformations › selecting a transformation card renders its editor","status":"timedOut","retry":0,"durationMs":30045}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:297 › Query Editor Next: Transformations › can delete a transformation from the sidebar","status":"timedOut","retry":0,"durationMs":30049}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:323 › Query Editor Next: Expression Flows › expression type picker shows all types","status":"timedOut","retry":0,"durationMs":30042}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:339 › Query Editor Next: Expression Flows › can add a Reduce expression and see its editor","status":"timedOut","retry":0,"durationMs":30048}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:349 › Query Editor Next: Expression Flows › SQL expression type is available with sqlExpressions toggle","status":"timedOut","retry":0,"durationMs":30048}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:370 › Query Editor Next: Query State Preservation › switching between SQL expressions preserves each expression's content","status":"timedOut","retry":0,"durationMs":30049}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:408 › Query Editor Next: Query State Preservation › preserves pending Prometheus query edits when switching cards without blurring","status":"failed","retry":0,"durationMs":12580}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:451 › Query Editor Next: Query Options › can open the query options sidebar from the footer","status":"timedOut","retry":0,"durationMs":30051}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:460 › Query Editor Next: Query Options › can edit max data points","status":"timedOut","retry":0,"durationMs":30047}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:474 › Query Editor Next: Query Options › can set relative time override","status":"timedOut","retry":0,"durationMs":30043}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_queryEditorNext.spec.ts:488 › Query Editor Next: Query Options › clicking outside closes the query options sidebar","status":"timedOut","retry":0,"durationMs":30047}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_transformsSmoke.spec.ts:113 › Query Editor Next: Transformation editor mount smoke › Reduce editor mounts with default options","status":"failed","retry":0,"durationMs":12365}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_transformsSmoke.spec.ts:113 › Query Editor Next: Transformation editor mount smoke › Convert field type editor mounts with default options","status":"failed","retry":0,"durationMs":12335}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_transformsSmoke.spec.ts:113 › Query Editor Next: Transformation editor mount smoke › Group by editor mounts with default options","status":"failed","retry":0,"durationMs":12405}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_transformsSmoke.spec.ts:113 › Query Editor Next: Transformation editor mount smoke › Group to nested tables editor mounts with default options","status":"failed","retry":0,"durationMs":12398}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_transformsSmoke.spec.ts:113 › Query Editor Next: Transformation editor mount smoke › Format time editor mounts with default options","status":"failed","retry":0,"durationMs":12381}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_transformsSmoke.spec.ts:113 › Query Editor Next: Transformation editor mount smoke › Grouping to matrix editor mounts with default options","status":"failed","retry":0,"durationMs":12382}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_transformsSmoke.spec.ts:166 › Query Editor Next: Transformation picker applicability › Merge series/tables is flagged as not applicable for a single-series input","status":"failed","retry":0,"durationMs":12336}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_transformsSmoke.spec.ts:166 › Query Editor Next: Transformation picker applicability › Format time is flagged as not applicable for an input without a time field","status":"failed","retry":0,"durationMs":12390}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_transformsSmoke.spec.ts:166 › Query Editor Next: Transformation picker applicability › Grouping to matrix is flagged as not applicable for an input with fewer than three fields","status":"failed","retry":0,"durationMs":12409}
+{"id":"../src/e2e-playwright/panels-suite/panelEdit_transformsSmoke.spec.ts:166 › Query Editor Next: Transformation picker applicability › Group to nested tables is flagged as not applicable for an input with a single field","status":"failed","retry":0,"durationMs":12343}
+{"id":"../src/e2e-playwright/panels-suite/timeseries-faceted-labels-filter.spec.ts:11 › TimeSeries faceted labels filter › filter toggle appears and opens popover with label sections","status":"failed","retry":0,"durationMs":12400}
+{"id":"../src/e2e-playwright/panels-suite/timeseries-faceted-labels-filter.spec.ts:33 › TimeSeries faceted labels filter › selecting a name filters legend series","status":"failed","retry":0,"durationMs":12314}
+{"id":"../src/e2e-playwright/panels-suite/timeseries-faceted-labels-filter.spec.ts:45 › TimeSeries faceted labels filter › clear all resets filter","status":"failed","retry":0,"durationMs":12322}
+{"id":"../src/e2e-playwright/panels-suite/timeseries-faceted-labels-filter.spec.ts:61 › TimeSeries faceted labels filter › select all selects all values for a key","status":"failed","retry":0,"durationMs":12336}
+{"id":"../src/e2e-playwright/panels-suite/timeseries-faceted-labels-filter.spec.ts:74 › TimeSeries faceted labels filter › filter becomes dimmed when legend item is clicked","status":"timedOut","retry":0,"durationMs":30045}
+{"id":"../src/e2e-playwright/panels-suite/timeseries-faceted-labels-filter.spec.ts:94 › TimeSeries faceted labels filter › pin to sidebar docks the filter","status":"failed","retry":0,"durationMs":12379}
