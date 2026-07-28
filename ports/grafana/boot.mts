@@ -64,6 +64,9 @@ export async function bootGrafana(): Promise<{ close(): void }> {
   ];
   const close = (): void => procs.forEach((p) => { try { process.kill(-p.pid!, "SIGTERM"); } catch { p.kill(); } });
   process.on("exit", close);
+  // 'exit' does not fire on signal death (timeout(1) sends SIGTERM): without these, a
+  // killed boot strands the DETACHED server group on :3001 for every later run
+  for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => { close(); process.exit(1); });
   try {
     await Promise.all([
       waitFor(FRONT + "/api/health", 180_000),
