@@ -127,6 +127,35 @@ several times larger on a similar addressable share (re-derived 2026-07-26 under
 conserving reporter: 8-10% suite IO, 30-32% median per-test — the originally published
 13%/35% carried the biased reporter).
 
+### The harness inflates the denominator (marginal bytes, 2026-07-28)
+
+The addressable share above is measured over SUITE bytes, and a Playwright suite gives
+every test a fresh context — so each test re-downloads the app's bundles, fonts and icons
+from cold. A real user pays that once and then talks API for hours. Suite totals therefore
+understate what any transport can reach, and the effect is large:
+
+    n8n, same arms, ports/report-marginal.mts        baseline    ported    delta
+      suite total (what we published)                6132 MB    6095 MB    -0.6%
+      marginal (warm asset cache)                    1987 MB    1922 MB    -3.3%
+      session carried                                            850 MB
+        = 13.9% of suite total, but 44.2% of marginal
+
+`marginal = total − repeat fetches of identical static assets` — a response is elided only
+when the same (method, path, status, byte count) was already seen AND the path is a static
+asset by shape. ONLY assets, deliberately: the ported arm's addressable traffic left HTTP
+for the socket where the per-path log cannot see it, so eliding repeated API responses
+would subtract from the baseline what the ported arm still pays in full. Assets never
+cross the session, so eliding them treats both arms alike.
+
+The corrected numbers make the decomposition check out against an independent instrument:
+44.2% addressable × 7.4% per-slice = the −3.3% measured, and `report-anatomy.mts` derived
+that per-slice win as 7.0% from request-shape data alone. The model was right; the
+denominator was wrong.
+
+So n8n is not "parity" — it is a **3.3% byte win on the traffic a real session would
+still fetch**, reported as 0.6% because the harness re-downloads 4.1 GB of bundles.
+Every port's byte headline carries this bias, and the marginal row is the one to quote.
+
 Two consequences for the study:
 
 - Report the decomposition, not just the headline. "Parity" on an app whose bytes are
