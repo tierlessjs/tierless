@@ -1,0 +1,15 @@
+{"id":"../src/node_modules/@grafana/plugin-e2e/dist/auth/auth.setup.js:5 › ","status":"passed","retry":0,"durationMs":112}
+{"id":"../src/e2e-playwright/dashboard-cujs/global-setup.spec.ts:16 › Dashboard CUJS Global Setup › import test dashboards","status":"passed","retry":0,"durationMs":167}
+{"id":"../src/e2e-playwright/dashboard-cujs/adhoc-filters-cujs.spec.ts:35 › AdHoc Filters CUJs › Filter data on a dashboard","status":"passed","retry":0,"durationMs":16415}
+{"id":"../src/e2e-playwright/dashboard-cujs/dashboard-navigation.spec.ts:38 › Dashboard navigation CUJs › Navigate between dashboards","status":"passed","retry":0,"durationMs":16614}
+{"id":"../src/e2e-playwright/dashboard-cujs/dashboard-view.spec.ts:22 › Dashboard view CUJs › View a dashboard","status":"skipped","retry":0,"durationMs":0}
+{"id":"../src/e2e-playwright/dashboard-cujs/group-by-cujs.spec.ts:29 › GroupBy CUJs › Groupby data on a dashboard","status":"passed","retry":0,"durationMs":10620}
+{"id":"../src/e2e-playwright/dashboard-cujs/scope-cujs.spec.ts:36 › Scope CUJs › Choose a scope","status":"passed","retry":0,"durationMs":18359}
+{"id":"../src/e2e-playwright/dashboard-cujs/scope-redirect.spec.ts:17 › Scope Redirect Functionality › should redirect to custom URL when scope has redirectUrl","status":"passed","retry":0,"durationMs":4917}
+{"id":"../src/e2e-playwright/dashboard-cujs/scope-redirect.spec.ts:46 › Scope Redirect Functionality › should prioritize redirectUrl over scope navigation fallback","status":"passed","retry":0,"durationMs":5198}
+{"id":"../src/e2e-playwright/dashboard-cujs/scope-redirect.spec.ts:75 › Scope Redirect Functionality › should not redirect when reloading page on dashboard not in dashboard list","status":"passed","retry":0,"durationMs":8390}
+{"id":"../src/e2e-playwright/dashboard-cujs/scope-redirect.spec.ts:123 › Scope Redirect Functionality › should not redirect when deselecting scopes on dashboard not in dashboard list","status":"passed","retry":0,"durationMs":7039}
+{"id":"../src/e2e-playwright/dashboard-cujs/scope-redirect.spec.ts:169 › Scope Redirect Functionality › should not redirect to redirectPath when on active scope navigation","status":"passed","retry":0,"durationMs":7789}
+{"id":"../src/e2e-playwright/dashboard-cujs/scope-redirect.spec.ts:216 › Scope Redirect Functionality › should redirect to related dashboard when changing scopes (NOT in edit mode)","status":"passed","retry":0,"durationMs":4926}
+{"id":"../src/e2e-playwright/dashboard-cujs/scope-redirect.spec.ts:238 › Scope Redirect Functionality › should not redirect when changing scopes while editing a dashboard","status":"passed","retry":0,"durationMs":4889}
+{"id":"../src/e2e-playwright/dashboard-cujs/scope-redirect.spec.ts:279 › Scope Redirect Functionality › should redirect again after exiting edit mode","status":"passed","retry":0,"durationMs":5783}
