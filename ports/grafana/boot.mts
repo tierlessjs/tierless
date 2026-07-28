@@ -40,7 +40,7 @@ export async function bootGrafana(): Promise<{ close(): void }> {
   // added to connect-src via grafana's standard GF_ env override. Applied to BOTH
   // variants — a baseline build never connects, so the extra entries are inert there.
   // $NONCE/$ROOT_PATH stay literal: grafana substitutes them per request.
-  const gwOrigins = ["3101", "13101"].flatMap((p) => [`ws://localhost:${p}`, `ws://127.0.0.1:${p}`, `http://localhost:${p}`, `http://127.0.0.1:${p}`]).join(" ");
+  const gwOrigins = ["3101", "13101", "23101"].flatMap((p) => [`ws://localhost:${p}`, `ws://127.0.0.1:${p}`, `http://localhost:${p}`, `http://127.0.0.1:${p}`]).join(" ");   // 23101: the truth arm's ws passthrough (page relay port + 100)
   const serverEnv = {
     ...env,
     GF_SECURITY_CONTENT_SECURITY_POLICY_TEMPLATE:

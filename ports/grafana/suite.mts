@@ -45,6 +45,11 @@ if (TRUTH) {
   delayProxy(23001, 3001, 0, app).unref();
   createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ apiOut: app.toServer, apiIn: app.toClient })); }).listen(14992, "127.0.0.1").unref();
   pageUrl = "http://127.0.0.1:23001";
+  // the page now derives ws as page-port+100 = 23101 (the autoSession convention):
+  // a plain ws passthrough lands it on the real gateway, whose own counter stays the
+  // session-byte source of truth. Without this the ported arm has NO session at all
+  // (found as 47/56 truth-arm failures while floors were clean).
+  delayProxy(23101, 3101, 0).unref();
   wireUrls.push("http://127.0.0.1:14992", "http://127.0.0.1:3101/__tierless/wire");
   console.log("wire truth: app origin via counting relay :23001 -> :3001, counters :14992, ws bytes :3101/__tierless/wire");
 }
