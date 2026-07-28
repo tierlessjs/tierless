@@ -17,6 +17,7 @@
 //   node ports/n8n/report-anatomy.mts
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { readJsonl, jsonlNames } from "../read-jsonl.mts";
 
 interface Hit { path: string; status: number; reqBytes: number; respBytes: number }
 const DIR = fileURLToPath(new URL("./results/remeasure/", import.meta.url));
@@ -24,10 +25,8 @@ const mb = (n: number): string => (n / 1e6).toFixed(0).padStart(6) + " MB";
 const pctOf = (n: number, d: number): string => ((n / d) * 100).toFixed(1).padStart(5) + "%";
 
 const load = (arm: string): Hit[] =>
-  readdirSync(DIR).filter((f) => f.startsWith(arm + "-") && f.endsWith("-http.jsonl"))
-    .flatMap((f) => readFileSync(DIR + f, "utf8").trim().split("\n").filter(Boolean)
-      .map((l) => { try { return JSON.parse(l) as Hit; } catch { return null; } })
-      .filter((r): r is Hit => !!r));
+  jsonlNames(readdirSync(DIR), "-http.jsonl").filter((f) => f.startsWith(arm + "-"))
+    .flatMap((f) => readJsonl<Hit>(DIR + f));
 
 const BANDS: Array<[string, number, number]> = [
   ["< 10 KB", 0, 10e3], ["10-100 KB", 10e3, 100e3], ["100 KB-1 MB", 100e3, 1e6], ["> 1 MB", 1e6, Infinity],

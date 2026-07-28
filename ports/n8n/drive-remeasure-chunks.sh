@@ -49,9 +49,12 @@ for arm in ported baseline; do
     rows=$(wc -l < "ports/work/$work/measure-truth.jsonl" 2>/dev/null || echo 0)
     if [ "$rows" -eq 0 ]; then echo "!! $arm/$name produced 0 rows — not checkpointed"; continue; fi
     cp "ports/work/$work/measure-truth.jsonl" "$out"
-    cp "ports/work/$work/wire-http.jsonl" "$OUT/$arm-$name-http.jsonl" 2>/dev/null || true
+    # raw per-request logs commit GZIPPED (artifact policy, docs/corpus.md);
+    # analyzers read either form via ports/read-jsonl.mts
+    cp "ports/work/$work/wire-http.jsonl" "$OUT/$arm-$name-http.jsonl" 2>/dev/null \
+      && gzip -9f "$OUT/$arm-$name-http.jsonl" || true
     grep -oE "[0-9]+ (passed|failed)" "$OUT/$arm-$name.log" | tail -2 | tr '\n' ' '; echo "($rows rows)"
-    git add "$OUT/$arm-$name-measure.jsonl" "$OUT/$arm-$name-http.jsonl" 2>/dev/null
+    git add "$OUT/$arm-$name-measure.jsonl" "$OUT/$arm-$name-http.jsonl.gz" 2>/dev/null
     git commit -q -m "n8n remeasure chunk: $arm/$name ($rows rows)
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

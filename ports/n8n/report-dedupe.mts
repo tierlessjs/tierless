@@ -22,8 +22,9 @@
 // meaningless confirmation (results/dedupe-check: 24/0 fixed vs 23/0 reverted).
 //
 //   node ports/n8n/report-dedupe.mts
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { readJsonl, jsonlNames } from "../read-jsonl.mts";
 
 interface Hit { ts: number; startedAt?: number; path: string; status: number; respBytes: number }
 const TARGET = "/types/nodes.json";
@@ -32,9 +33,7 @@ const RESULTS = fileURLToPath(new URL("./results/", import.meta.url));
 
 interface Row { group: string; arm: string; fetches: number; mb: number; overlaps: number; detail: string[]; intervals: number[] }
 const measure = (file: string): Omit<Row, "group" | "arm"> | string => {
-  const rows = readFileSync(file, "utf8").trim().split("\n").filter(Boolean)
-    .map((l) => { try { return JSON.parse(l) as Hit; } catch { return null; } })
-    .filter((r): r is Hit => !!r);
+  const rows = readJsonl<Hit>(file);
   const full = rows.filter((r) => r.path === TARGET && r.status === 200 && r.respBytes > 1e6)
     .sort((a, b) => (a.startedAt ?? a.ts) - (b.startedAt ?? b.ts));
   if (full.some((r) => r.startedAt === undefined)) return "log predates startedAt — re-run (the interval is not derivable from completion times alone)";
@@ -53,7 +52,7 @@ const out: Row[] = [];
 for (const dir of readdirSync(RESULTS).filter((d) => d.startsWith("dedupe-"))) {
   const base = RESULTS + dir + "/";
   if (!existsSync(base)) continue;
-  for (const f of readdirSync(base).filter((f) => f.endsWith("-http.jsonl")).sort()) {
+  for (const f of jsonlNames(readdirSync(base), "-http.jsonl")) {
     const stem = f.replace(/-http\.jsonl$/, "");            // "<arm>" or "<label>-<arm>"
     const i = stem.lastIndexOf("-");
     const [group, arm] = i < 0 ? [dir, stem] : [`${dir}/${stem.slice(0, i)}`, stem.slice(i + 1)];

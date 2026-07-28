@@ -12,11 +12,11 @@
 // canvas-nodes. Relay cost is symmetric within an arm, so timeline SHAPE is comparable;
 // absolute wall is not quoted from this instrument.
 //   node ports/n8n/report-timeline.mts
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { readJsonl } from "../read-jsonl.mts";
 
 const DIR = fileURLToPath(new URL("./results/timeline/", import.meta.url));
-const load = (f: string) => readFileSync(DIR + f, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+const load = (f: string) => readJsonl(DIR + f);
 
 interface Http { ts: number; startedAt: number; method: string; path: string; status: number }
 interface Ev { rel: number; dur: number; path: string; kind: "http" | "crossing" }

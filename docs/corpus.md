@@ -188,6 +188,13 @@ Incident worth recording: nocodb's stock BASELINE arm wedged at 17/282 for 2.4 h
 on retry — wall drivers now carry a hard per-arm timeout and a completeness gate so a
 wedge costs 95 minutes and a killed run can never checkpoint as an arm.
 
+## Artifact policy
+
+Derived summaries (per-test measure rows, report outputs) commit PLAIN — they are the
+numbers quoted. Raw per-request wire logs commit GZIPPED (~10x; they were 505k of a
+513k-line branch diff) — they are evidence, re-derivable by re-running a driver.
+Analyzers read either form through `ports/read-jsonl.mts`.
+
 ## Honesty constraints (bind all rungs)
 
 - **Bytes, trips, and latency are all measured — never via CDP throttling.** CDP's

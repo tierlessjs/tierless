@@ -12,7 +12,7 @@
 // labeled as such; preboot cargo appears per path via the hello decomposition, marked
 // [preboot]); optional TCP totals from the counting relay / --wire-truth endpoint for
 // the reconciliation rows.
-import { readFileSync } from "node:fs";
+import { readJsonl } from "./read-jsonl.mts";
 
 interface Row { http0: number; http1: number; sess: number; preboot: number; n0: number; n1: number }
 
@@ -21,7 +21,7 @@ const arg = (name: string): string | undefined => {
   return i >= 0 ? process.argv[i + 1] : undefined;
 };
 const has = (name: string): boolean => process.argv.includes(name);
-const jsonl = (f: string): Array<Record<string, unknown>> => readFileSync(f, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+const jsonl = (f: string): Array<Record<string, unknown>> => readJsonl(f);
 
 // One key per endpoint: ids and uuids collapse so "the same endpoint across runs" is
 // one row (--group also collapses query strings; ungrouped keeps them — pagination
