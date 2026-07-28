@@ -1,0 +1,5 @@
+{"id":"../src/node_modules/@grafana/plugin-e2e/dist/auth/auth.setup.js:5 › ","status":"passed","retry":0,"durationMs":183,"wireApiOut":668,"wireApiIn":2382,"wireWsIn":0,"wireWsOut":0}
+{"id":"../src/e2e-playwright/unauthenticated/login.spec.ts:4 › Login › a11y","status":"passed","retry":0,"durationMs":3674,"wireApiOut":37398,"wireApiIn":9498630,"wireWsIn":0,"wireWsOut":0}
+{"id":"../src/e2e-playwright/unauthenticated/login.spec.ts:11 › Login › a11y - password change prompt","status":"passed","retry":0,"durationMs":4051,"wireApiOut":39527,"wireApiIn":9500048,"wireWsIn":793,"wireWsOut":909}
+{"id":"../src/e2e-playwright/unauthenticated/login.spec.ts:28 › Login › Can login successfully","status":"skipped","retry":0,"durationMs":1643,"wireApiOut":22866,"wireApiIn":6253359,"wireWsIn":0,"wireWsOut":0}
+{"id":"../src/e2e-playwright/unauthenticated/login.spec.ts:45 › Login › Can login successfully and skip password change","status":"passed","retry":0,"durationMs":4867,"wireApiOut":72158,"wireApiIn":13060722,"wireWsIn":2307,"wireWsOut":6238}
