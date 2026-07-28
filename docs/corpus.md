@@ -129,54 +129,57 @@ conserving reporter: 8-10% suite IO, 30-32% median per-test — the originally p
 
 ### The harness inflates the denominator (marginal bytes, 2026-07-28)
 
-The addressable share above is measured over SUITE bytes, and a Playwright suite gives
-every test a fresh context — so each test re-downloads the app's bundles, fonts and icons
-from cold. A real user pays that once and then talks API for hours. Suite totals therefore
-understate what any transport can reach, and the effect is large:
+A Playwright suite gives every test a fresh context, so each test re-downloads from cold
+everything a real browser would already hold: bundles, fonts, icons — and static DATA.
+Suite totals therefore understate what a transport can reach. `ports/report-marginal.mts`
+re-derives the comparison over the bytes a warm cache would still have to fetch:
 
-    n8n, same arms, ports/report-marginal.mts        baseline    ported    delta
+    n8n, same committed arms                         baseline    ported    delta
       suite total (what we published)                6132 MB    6095 MB    -0.6%
-      marginal (warm asset cache)                    1987 MB    1922 MB    -3.3%
-      session carried                                            850 MB
-        = 13.9% of suite total, but 44.2% of marginal
+      marginal (warm cache)                           934 MB     873 MB    -6.6%
+      elided as static repeats                       5198 MB    5223 MB
+      session carried                                            850 MB  = 97.4% of marginal
 
-`marginal = total − repeat fetches of identical static assets` — a response is elided only
-when the same (method, path, status, byte count) was already seen AND the path is a static
-asset by shape. ONLY assets, deliberately: the ported arm's addressable traffic left HTTP
-for the socket where the per-path log cannot see it, so eliding repeated API responses
-would subtract from the baseline what the ported arm still pays in full. Assets never
-cross the session, so eliding them treats both arms alike.
+A repeat is elided only when BOTH hold: (1) STATIC BY EVIDENCE — every 2xx fetch of that
+exact path returned the same size within 1% (an on-the-fly compressor is not
+byte-deterministic: nodes.json came back 1456264 B on 677 of 694 fetches and 1456842 B on
+16); and (2) ON HTTP IN BOTH ARMS — compared on the hash-stripped filename, since a chunk
+is renamed between builds. Rule 2 is what keeps the delta honest: a path the port moved
+onto the socket is invisible to the HTTP log, so eliding it would subtract from one arm
+what the other still pays. n8n's `/rest/community-node-types` is exactly that case and
+keeps its full price on both sides.
 
-The corrected numbers make the decomposition check out against an independent instrument:
-44.2% addressable × 7.4% per-slice = the −3.3% measured, and `report-anatomy.mts` derived
-that per-slice win as 7.0% from request-shape data alone. The model was right; the
-denominator was wrong.
+Rule 1 deliberately catches static DATA as well as assets — the point of the exercise.
+n8n serves `/types/nodes.json` (1.46 MB compressed, 694 fetches) and
+`/types/credentials.json` from disk; both are byte-identical in both arms and together
+were 53% of the first marginal figure.
 
-So n8n is not "parity" — it is a **3.3% byte win on the traffic a real session would
-still fetch**, reported as 0.6% because the harness re-downloads 4.1 GB of bundles.
-Every port's byte headline carries this bias, and the marginal row is the one to quote.
+**The corrected picture: n8n is a 6.6% byte win on the traffic a real session would still
+fetch, published as 0.6%.** And the decomposition then checks out against an independent
+instrument — 97.4% addressable × 6.7% per-slice — where `report-anatomy.mts` derived that
+per-slice win as 7.0% from request shape alone. The model was right; the denominator was
+wrong.
 
-**What that 2 GB of marginal actually is, though, is three endpoints.** Decomposing it
-kills any reading of n8n as a many-small-requests win:
+**But 95.1% of that marginal is ONE endpoint.** `/rest/community-node-types` is 888 MB of
+the 934 MB, and the measured "6.6% win" is the compression difference on that single
+payload. It is not a many-small-requests win: the real small-JSON API is ~46 MB, 5% of
+marginal. Two facts make this worse as a production claim:
 
-    /types/nodes.json          x694   1011 MB   50.9%   static file, HTTP in BOTH arms
-    /rest/community-node-types x510    888 MB   44.7%   the only addressable slice
-    /types/credentials.json    x692     43 MB    2.2%   static file, HTTP in both arms
-    everything else (real small-JSON API)  ~44 MB  2.2%
+- The catalogue is **not dynamic**: 1 distinct body size across all 510 fetches, across
+  different test users. It is static content served from `/rest/`, and it is on the socket
+  only because `autoSession` routes the app's whole REST client there — no per-endpoint
+  decision was ever made about it.
+- There were **zero 304s in either arm**. Fresh contexts hold no cached copy to
+  revalidate, so the harness cannot exercise caching at all. In production this payload
+  would be cached or revalidated to a 0-byte 304 and never re-fetched 510 times.
 
-Both `/types/*` are byte-identical across arms (1011 MB each), so n8n's whole measured
-delta is the compression difference on ONE 12.66 MB catalogue fetched 510 times: 888 MB
-over HTTP against 850 MB over the socket, plus ~30 MB of small calls — 917 -> 850, the
-7.4% "per-slice win". There were also ZERO 304s in either arm: fresh contexts hold no
-cached copy to revalidate, so the harness cannot exercise caching at all.
-
-Consequence worth stating plainly: the **browse advisory** (ports/n8n/README.md, the fix
-for the wall regression) returns >1 MB replies to browser HTTP, and this catalogue is
-12.66 MB. Post-advisory the session carries only the ~30 MB of small calls, ~1.5% of
-marginal, so a 7% per-slice win lands near 0.1% — the byte win is traded away to remove
-a 12-14% wall regression. That is the right trade for a transport that must not cost
-time, and it is the honest reason n8n's byte headline should not be quoted as a win.
-PENDING: a post-advisory truth pair to measure it rather than infer it.
+So n8n's byte headline measures compression on something a real deployment would not
+send twice. The **browse advisory** (the wall-regression fix) now returns >1 MB replies
+to browser HTTP, which removes this endpoint from the session and with it essentially the
+whole byte win — trading it to remove a 12-14% wall regression. That is the right trade
+for a transport that must not cost time, and it is the honest reason n8n should not be
+quoted as a byte win at all.
+PENDING: a post-advisory truth pair to measure that collapse rather than infer it.
 
 Two consequences for the study:
 
