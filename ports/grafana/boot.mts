@@ -34,9 +34,21 @@ export async function bootGrafana(): Promise<{ close(): void }> {
   }
   const env = { ...process.env, COREPACK_ENABLE_DOWNLOAD_PROMPT: "0" };
   const log = (name: string): ["ignore", number, number] => { const fd = openSync(path.join(WORK, name + ".log"), "w"); return ["ignore", fd, fd]; };
+  // Their e2e ini enables CSP with connect-src 'self' only — which silently blocks the
+  // session socket (no session, first crossing waits, every test times out; found the
+  // hard way). Same template, with the gateway origins (plain + shaped-relay ports)
+  // added to connect-src via grafana's standard GF_ env override. Applied to BOTH
+  // variants — a baseline build never connects, so the extra entries are inert there.
+  // $NONCE/$ROOT_PATH stay literal: grafana substitutes them per request.
+  const gwOrigins = ["3101", "13101"].flatMap((p) => [`ws://localhost:${p}`, `ws://127.0.0.1:${p}`, `http://localhost:${p}`, `http://127.0.0.1:${p}`]).join(" ");
+  const serverEnv = {
+    ...env,
+    GF_SECURITY_CONTENT_SECURITY_POLICY_TEMPLATE:
+      `require-trusted-types-for 'script'; script-src 'self' 'unsafe-eval' 'unsafe-inline' 'strict-dynamic' $NONCE;object-src 'none';font-src 'self';style-src 'self' 'unsafe-inline' blob:;img-src * data:;base-uri 'self';connect-src 'self' grafana.com ws://$ROOT_PATH wss://$ROOT_PATH ${gwOrigins};manifest-src 'self';media-src 'none';form-action 'self';`,
+  };
   const procs: ChildProcess[] = [
     // their script verbatim: e2e ini (sqlite, admin/admin, provisioned test plugins)
-    spawn("bash", ["e2e-playwright/start-server"], { cwd: SRC, env, stdio: log("server"), detached: true }),
+    spawn("bash", ["e2e-playwright/start-server"], { cwd: SRC, env: serverEnv, stdio: log("server"), detached: true }),
     // the session gateway, both variants (env symmetry; a baseline build never
     // connects). Grafana is a cookie-auth app (grafana_session, httpOnly), so the
     // gateway mediates cookie authority: the ws upgrade carries the cookie (cookies
