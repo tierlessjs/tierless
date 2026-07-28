@@ -1,4 +1,21 @@
-# Grafana — corpus app #5 (in progress)
+# Grafana — corpus app #5 (ported; arms pending)
+
+Status 2026-07-28: the ported arm runs the `various` project CLEAN — 99 passed,
+6 skipped, 0 failed — through the generic config wrapper (tree pristine: the 34-line
+fromFetch patch is the whole port diff). Getting there surfaced two framework bugs,
+both fixed with probes, and two environment traps, both handled in the drivers:
+
+- adapt-fetch resolved relative inputs against location.href, not document.baseURI —
+  grafana ships relative api paths + `<base href="/">`, so every crossing on an SPA
+  route became /d/api/... and 404'd (zero panels).
+- relative `page.route()` globs ("api/foo?x=1*") never matched the force-browser
+  descriptors (Playwright resolves them against baseURL; the matcher saw full URLs) —
+  migrate-to-cloud's mocked requests crossed the session past the mock.
+- their e2e ini enables CSP with connect-src 'self': the session socket was silently
+  blocked (boot.mts adds the gateway origins via the GF_ env override, both arms).
+- this box's POSIX locale makes Chromium report the invalid Intl tag en-US@posix and
+  grafana's bootstrap throws before rendering (suite.mts normalizes LANG, both arms).
+
 
 Pinned: `grafana/grafana` v13.1.1 (`593cfcf13df7f1bb`), 2026-07-21 stable. Go backend
 (SQLite by default), React frontend, Playwright suite at the repo root — no Docker,
