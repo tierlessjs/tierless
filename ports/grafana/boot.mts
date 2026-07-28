@@ -59,7 +59,9 @@ export async function bootGrafana(): Promise<{ close(): void }> {
       "--port", "3101",
       "--cookie-authority",
       "--allow-origin", process.env.TIERLESS_ALLOWED_ORIGINS ||
-        ["3001", "13001"].flatMap((p) => [`http://localhost:${p}`, `http://127.0.0.1:${p}`]).join(","),
+        // 23001: the truth arm serves the page through the counting relay — its origin
+        // must pass the ws gate or the ported arm silently measures no session
+        ["3001", "13001", "23001"].flatMap((p) => [`http://localhost:${p}`, `http://127.0.0.1:${p}`]).join(","),
     ], { env, stdio: log("gateway"), detached: true }),
   ];
   const close = (): void => procs.forEach((p) => { try { process.kill(-p.pid!, "SIGTERM"); } catch { p.kill(); } });
