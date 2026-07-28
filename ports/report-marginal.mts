@@ -151,6 +151,28 @@ console.log(`\n  session carried (ported):       ${MB(pWs)}  = ${(100 * pWs / pT
 const addressable = pWs / pMarg, measured = (pMarg - bMarg) / bMarg;
 console.log(`  decomposition: addressable ${(100 * addressable).toFixed(1)}% x per-slice ${(100 * -measured / addressable).toFixed(1)}% = ${(100 * measured).toFixed(1)}% measured`);
 
+// A path that is static BY THE SAME EVIDENCE but was moved onto the session keeps its
+// repeats above only because the session counter is one number, not a per-path log:
+// eliding them on the baseline side alone would flatter the port. Size the effect so
+// the marginal row cannot be read as if it were free of it.
+let movedStatic = 0; const movedPaths: [string, number][] = [];
+for (const [p, v] of B.byPath) {
+  const sizes = bS.exact.get(p);
+  if (!sizes || !tight(sizes)) continue;            // genuinely varying: not cacheable
+  if (pS.seenUnhashed.has(unhashed(p))) continue;   // still on HTTP in both arms
+  movedStatic += v; movedPaths.push([p, v]);
+}
+if (movedStatic > 0) {
+  console.log(`\n  STATIC BUT MOVED TO THE SESSION — repeats NOT elided (see header):`);
+  for (const [p, v] of movedPaths.sort((a, b) => b[1] - a[1]).slice(0, 4)) console.log(`    ${MB(v)}  ${(100 * v / bMarg).toFixed(1).padStart(5)}% of baseline marginal  ${p.slice(0, 52)}`);
+  console.log(`    a warm cache would fetch these ONCE in BOTH arms. Excluding them entirely:`);
+  console.log(`      baseline marginal without them  ${MB(bMarg - movedStatic)}`);
+  console.log(`      ported equivalent               NOT DERIVABLE — session bytes are a single`);
+  console.log(`      counter; per-path session logs (TIERLESS_WIRE_LOG) are needed to split them.`);
+  console.log(`    That residual is the many-small-requests slice, i.e. the number that would`);
+  console.log(`    actually test the request-shape model. It is not measured yet.`);
+}
+
 // auditability: what survived the elision, and what was thrown away
 const top = (m: Map<string, number>, n: number) => [...m].sort((a, b) => b[1] - a[1]).slice(0, n);
 console.log("\n  what remains in baseline marginal (top paths):");

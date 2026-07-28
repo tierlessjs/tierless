@@ -53,8 +53,14 @@ for arm in ported baseline; do
     # analyzers read either form via ports/read-jsonl.mts
     cp "ports/work/$work/wire-http.jsonl" "$OUT/$arm-$name-http.jsonl" 2>/dev/null \
       && gzip -9f "$OUT/$arm-$name-http.jsonl" || true
+    # the SESSION log too: without per-path session bytes the ported arm's traffic is a
+    # single counter, and any path the port moved onto the socket cannot be compared
+    # per-path against its HTTP twin (ports/report-marginal.mts hits exactly this wall
+    # on /rest/community-node-types). Ported arm only — the baseline has no session.
+    cp "ports/work/$work/wire-session.jsonl" "$OUT/$arm-$name-session.jsonl" 2>/dev/null \
+      && gzip -9f "$OUT/$arm-$name-session.jsonl" || true
     grep -oE "[0-9]+ (passed|failed)" "$OUT/$arm-$name.log" | tail -2 | tr '\n' ' '; echo "($rows rows)"
-    git add "$OUT/$arm-$name-measure.jsonl" "$OUT/$arm-$name-http.jsonl.gz" 2>/dev/null
+    git add "$OUT/$arm-$name-measure.jsonl" "$OUT/$arm-$name-http.jsonl.gz" "$OUT/$arm-$name-session.jsonl.gz" 2>/dev/null
     git commit -q -m "n8n remeasure chunk: $arm/$name ($rows rows)
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
