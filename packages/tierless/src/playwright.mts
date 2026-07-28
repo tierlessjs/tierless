@@ -187,7 +187,7 @@ function responseFacade(c: Crossing): Record<string, unknown> {
 // Playwright-faithful glob → regex, shared with the force-browser seam (url-glob.mts;
 // the live proof differentially verifies it against the installed playwright-core).
 import { globToRegexPattern } from "./url-glob.mjs";
-export { globToRegexPattern } from "./url-glob.mjs";
+export { globToRegexPattern, matchesForceBrowser } from "./url-glob.mjs";
 
 // Playwright resolves a non-`*`-leading string pattern against the context baseURL,
 // which a Page doesn't expose; the crossing's own absolute URL is the closest truthful

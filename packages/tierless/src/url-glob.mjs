@@ -54,7 +54,13 @@ export function matchesForceBrowser(list, url) {
         return false;
     const candidates = [url, url.split("?")[0]];
     return list.some((d) => {
-        const re = "re" in d ? new RegExp(d.re[0], d.re[1]) : new RegExp(globToRegexPattern(d.glob));
+        const re = "re" in d ? new RegExp(d.re[0], d.re[1]) : new RegExp(globToRegexPattern(absGlob(d.glob)));
         return candidates.some((c) => re.test(c));
     });
 }
+// Playwright resolves a RELATIVE route glob ("api/foo?x=1*", "/api/bar") against the
+// context's baseURL before matching; these descriptors match FULL URLs, so a relative
+// glob as-is could never fire (grafana's migrate-to-cloud mocks — crossings bypassed
+// the mock). Any-origin ** is the loosest faithful reading, and looser is the safe
+// direction here: a request forced to the browser needlessly still behaves stock.
+const absGlob = (g) => /^[a-z]+:\/\//i.test(g) || g.startsWith("*") ? g : "**" + (g.startsWith("/") ? g : "/" + g);

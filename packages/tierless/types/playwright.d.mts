@@ -18,7 +18,7 @@ export interface ContextLike extends Bindable {
     pages(): PageLike[];
     on(event: "page", cb: (page: PageLike) => void): unknown;
 }
-export { globToRegexPattern } from "./url-glob.mjs";
+export { globToRegexPattern, matchesForceBrowser } from "./url-glob.mjs";
 /** Patch `waitForResponse`/`waitForRequest` on a Page — or on a BrowserContext and every
  *  page it ever creates (popups included) — to also accept tierless session crossings.
  *  Idempotent. Call it once from the suite's fixture/setup; upstream spec files need no
