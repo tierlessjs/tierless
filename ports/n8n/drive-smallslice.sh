@@ -24,17 +24,12 @@ BRANCH=claude/tierless-port-generality-uwm1f9
 export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 mkdir -p "$OUT"
 
-# 1. don't contend with a running sweep — its byte arms are in flight
-while pgrep -f "drive-truth-chunks|drive-floor-chunks" >/dev/null; do echo "waiting for grafana sweep..."; sleep 120; done
-echo "SWEEP_CLEAR"
-
-# 2. disk: n8n needs ~8 GB of trees and only ~4 GB is free with grafana's checked out.
-# Grafana's measured arms are committed and its trees rebuild from the recipe.
-if [ ! -d ports/work/n8n/src ] || [ ! -d ports/work/n8n-baseline/src ]; then
-  rm -rf ports/work/grafana ports/work/grafana-baseline
-  rm -rf /root/.cache/go-build
-  echo "PRUNED  $(df -h / | tail -1)"
-fi
+# NOTE: an earlier version of this script waited on `pgrep -f drive-truth-chunks` and
+# then deleted the grafana work trees to free disk. The guard did not fire and the trees
+# were removed WHILE the grafana sweep was still running, killing it mid-chunk (its 19
+# committed chunks survived — they are in git — but the remainder needs a tree rebuild).
+# Lesson kept in the file: never let one measurement driver delete another's inputs.
+# Disk is now managed by hand between runs instead.
 
 # 3. rebuild both n8n trees (setup.sh owns fetch + install + build)
 for arm in ported baseline; do
