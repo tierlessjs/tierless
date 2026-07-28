@@ -1,0 +1,34 @@
+--- a/public/app/core/services/backend_srv.ts
++++ b/public/app/core/services/backend_srv.ts
+@@ -12,6 +12,10 @@
+   throwError,
+ } from 'rxjs';
+ import { fromFetch } from 'rxjs/fetch';
++import { autoSession } from 'tierless/adapt-auto';
++import { fetchAdapter } from 'tierless/adapt-fetch';
++
++let tierlessFetch: ((input: string | URL, init?: RequestInit) => Promise<Response>) | undefined;
+ import {
+   catchError,
+   filter,
+@@ -83,7 +87,19 @@
+   private deviceID?: string | null = null;
+ 
+   private dependencies: BackendSrvDependencies = {
+-    fromFetch: fromFetch,
++    // The tierless port — the whole thing (docs/corpus.md rung 3). BackendSrv invokes
++    // the network at exactly this one dependency-injected point; the wrapper below
++    // supplies a tierless-backed fetch there. Same-origin JSON requests cross one ws
++    // session to the gateway on <page-port>+100 as an exec crossing each; everything
++    // else (Request-shaped inputs, blobs, non-JSON accepts, force-browser globs) falls
++    // through to the browser's own fetch. Auth headers, retries and queues live
++    // upstream of this seam and run untouched. Lazy so SSR/tests never open a socket;
++    // injected deps (their tests mock fromFetch here) override it as before.
++    fromFetch: (input, init) => {
++      if (typeof location === 'undefined') return fromFetch(input, init);
++      tierlessFetch ??= fetchAdapter({ exec: autoSession().exec });
++      return from(tierlessFetch(input as string | URL, init));
++    },
+     appEvents: appEvents,
+     contextSrv: contextSrv,
+     logout: () => {

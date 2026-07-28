@@ -17,5 +17,7 @@
 		"git": "90da89245941ff8ad903bda13be98b01980a983d13d60acd4d895a57e92e7a25",
 		"codeload": null
 	},
-	"patches": []
+	"patches": [
+		"patches/0001-tierless-fromfetch.patch"
+	]
 }
