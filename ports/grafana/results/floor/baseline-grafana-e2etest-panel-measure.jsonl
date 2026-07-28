@@ -1,0 +1,7 @@
+{"id":"../src/node_modules/@grafana/plugin-e2e/dist/auth/auth.setup.js:5 › ","status":"passed","retry":0,"durationMs":108}
+{"id":"../src/e2e-playwright/test-plugins/grafana-test-panel/tests/panelIcons.spec.ts:11 › grafana-test-panel › all panel type icons load in the visualization picker","status":"passed","retry":0,"durationMs":5647}
+{"id":"../src/e2e-playwright/test-plugins/grafana-test-panel/tests/panelLoading.spec.ts:6 › grafana-test-panel › all panels load on the dashboard without errors","status":"passed","retry":0,"durationMs":8398}
+{"id":"../src/e2e-playwright/test-plugins/grafana-test-panel/tests/translations/french.spec.ts:6 › should display default translation (en-US)","status":"passed","retry":0,"durationMs":6371}
+{"id":"../src/e2e-playwright/test-plugins/grafana-test-panel/tests/translations/swedish.spec.ts:6 › should display correct translation","status":"passed","retry":0,"durationMs":5647}
+{"id":"../src/e2e-playwright/test-plugins/grafana-test-panel/tests/useMTPlugins/panelIcons.spec.ts:13 › grafana-test-panel › all panel type icons load in the visualization picker","status":"passed","retry":0,"durationMs":5166}
+{"id":"../src/e2e-playwright/test-plugins/grafana-test-panel/tests/useMTPlugins/panelLoading.spec.ts:8 › grafana-test-panel › all panels load on the dashboard without errors","status":"passed","retry":0,"durationMs":8509}
