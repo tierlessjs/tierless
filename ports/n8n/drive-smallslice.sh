@@ -35,7 +35,10 @@ mkdir -p "$OUT"
 for arm in ported baseline; do
   flag=""; work=n8n
   [ "$arm" = baseline ] && { flag=--baseline; work=n8n-baseline; }
-  if [ -d "ports/work/$work/src/packages/frontend/editor-ui/dist" ]; then echo "== $arm tree present"; continue; fi
+  # a FAILED build leaves a tree that looks present: require the frontend bundle AND the
+  # backend, or a half-built tree is silently accepted and the measurement runs on it
+  if [ -d "ports/work/$work/src/packages/frontend/editor-ui/dist" ] \
+     && [ -d "ports/work/$work/src/packages/cli/dist" ]; then echo "== $arm tree built"; continue; fi
   echo "== build $arm"
   bash ports/n8n/setup.sh $flag > "$SP/ss-setup-$arm.log" 2>&1 \
     && echo "BUILD_OK $arm" || { echo "BUILD_FAIL $arm"; tail -15 "$SP/ss-setup-$arm.log"; exit 1; }
