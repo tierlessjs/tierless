@@ -6,7 +6,7 @@
 //
 //   node ports/grafana/boot.mts [--baseline]
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, openSync } from "node:fs";
+import { existsSync, openSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -32,6 +32,13 @@ export async function bootGrafana(): Promise<{ close(): void }> {
   for (const url of [FRONT, GATEWAY]) {
     if (await serving(url)) throw new Error(`${url} is already serving — a stale stack owns the port; kill it before booting`);
   }
+  // THEIR start-server DOES NOT RESET THE DATABASE. scripts/grafana-server/tmp/data
+  // survives between runs, so an arm inherits whatever dashboards the previous arm's
+  // tests created — measured as 97 passed on a first arm and 82 on a repeat of the
+  // SAME arm, and it silently made run 1's baseline (which ran second) the dirty one.
+  // docs/corpus.md already forbids sharing a stack between measurement runs; this
+  // enforces it, identically for both variants, so every arm starts from a clean DB.
+  rmSync(path.join(SRC, "scripts/grafana-server/tmp/data"), { recursive: true, force: true });
   const env = { ...process.env, COREPACK_ENABLE_DOWNLOAD_PROMPT: "0" };
   const log = (name: string): ["ignore", number, number] => { const fd = openSync(path.join(WORK, name + ".log"), "w"); return ["ignore", fd, fd]; };
   // Their e2e ini enables CSP with connect-src 'self' only — which silently blocks the
