@@ -124,6 +124,7 @@ if (!bS.exact.size || !pS.exact.size) { console.error(`no -http.jsonl logs for b
 // 16 (0.04%), which is brotli variance on one unchanging file, not changing content.
 // A genuinely dynamic endpoint moves far more than 1% across 694 calls.
 const STATIC_SPREAD = 0.01;
+const BULKY = 1e6;                 // a response over 1 MB is not "many small"
 const tight = (sizes: Set<number>): boolean => {
   const a = [...sizes];
   if (a.length === 1) return true;
@@ -170,16 +171,38 @@ console.log(`\n  session carried (ported):       ${MB(pWs)}  = ${(100 * pWs / pT
 // cost. Deriving the addressable share from the PORTED side instead (pWs/pMarg) is
 // wrong and prints absurdities — it read 261% per-slice on grafana, where the session
 // carries 4 MB but displaces ~20 MB of baseline HTTP.
-let movedBytes = 0, movedReqs = 0;
-for (const [p, v] of B.byPath) if (!pS.seenUnhashed.has(unhashed(p))) { movedBytes += v; movedReqs++; }
+// Split the moved traffic by PAYLOAD SIZE before naming it. The two shapes behave
+// oppositely — a session wins on many small responses (per-request overhead vanishes,
+// bodies compress against a shared window) and barely moves a few huge ones — so a
+// blended figure over a bulk-dominated mixture says nothing about either. n8n's moved
+// slice is 97.7% one 12 MB catalogue: calling its -6.7% a "many-small" result was
+// wrong, and it is what prompted this split.
+let bulkBytes = 0, smallBytes = 0, smallReqs = 0;
+for (const [p, v] of B.byPath) {
+  if (pS.seenUnhashed.has(unhashed(p))) continue;                  // still on HTTP: not moved
+  const sizes = bS.exact.get(p);
+  if (sizes && Math.max(...sizes) > BULKY) bulkBytes += v;
+  else { smallBytes += v; smallReqs++; }
+}
+const movedBytes = bulkBytes + smallBytes;
 const measured = (pMarg - bMarg) / bMarg;
 console.log(`  suite-wide marginal delta: ${(100 * measured).toFixed(1)}%`);
 if (movedBytes > 0) {
-  const slice = (pWs - movedBytes) / movedBytes;
-  console.log(`\n  MANY-SMALL SLICE (paths the port moves onto the session):`);
-  console.log(`    baseline over HTTP   ${MB(movedBytes)}  across ${movedReqs} paths`);
-  console.log(`    ported on the session ${MB(pWs)}  (TCP-true)`);
-  console.log(`    -> ${(100 * slice).toFixed(1)}%  ${slice < 0 ? "cheaper" : "dearer"} on the session`);
+  const bulkShare = bulkBytes / movedBytes;
+  console.log(`\n  MOVED ONTO THE SESSION (baseline cost):  ${MB(movedBytes)}`);
+  console.log(`    bulk (>1 MB responses)                 ${MB(bulkBytes)}  ${(100 * bulkShare).toFixed(1)}%`);
+  console.log(`    small responses                        ${MB(smallBytes)}  across ${smallReqs} paths`);
+  console.log(`    ported paid on the session             ${MB(pWs)}  (TCP-true)`);
+  if (bulkShare > 0.2) {
+    console.log(`\n  -> ${(100 * (pWs - movedBytes) / movedBytes).toFixed(1)}% on the MIXTURE, which is ${(100 * bulkShare).toFixed(0)}% bulk.`);
+    console.log(`     NOT a many-small result: a session barely moves a few huge payloads, so this`);
+    console.log(`     is dominated by their compression delta. The small part cannot be separated`);
+    console.log(`     here (session bytes are one counter) — measure it with bulk kept OFF the`);
+    console.log(`     socket instead (n8n: ports/n8n/report-smallslice.mts, -51%).`);
+  } else {
+    console.log(`\n  -> MANY-SMALL RESULT: ${(100 * (pWs - movedBytes) / movedBytes).toFixed(1)}% cheaper on the session`);
+    console.log(`     (moved traffic is ${(100 * (1 - bulkShare)).toFixed(0)}% small responses, so this measures request shape)`);
+  }
 }
 
 // A path that is static BY THE SAME EVIDENCE but was moved onto the session keeps its
