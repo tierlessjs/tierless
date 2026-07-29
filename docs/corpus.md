@@ -289,19 +289,25 @@ learned by checking rather than guessing:
   talks to a server at all. These are not failures of the transport, they are
   out-of-scope workloads, and saying so up front beats discovering it after a port.
 
-**Next: Grafana.** Go backend on SQLite by default, React frontend, Playwright at the
-repo root (`yarn e2e:playwright`), no Docker. Its frontend routes every call through one
-fetch-based `backendSrv`, so the adapter has a single seam instead of a scatter of call
-sites.
+**Ported: vikunja, strapi, nocodb, n8n, grafana.** Grafana was chosen to TEST THE MODEL
+and did: its session traffic is 100% small responses (21.5 MB across 4186 requests) and
+came in at **-81%**, against n8n's small slice at -51% and n8n's bulk catalogue at -6.7%.
+Request shape predicts the win; the suite-total headline hides it.
 
-It is chosen to TEST THE MODEL, not just to add a row. The decomposition above predicts,
-in advance and falsifiably: a **high per-slice win** (dashboard/datasource/search traffic
-is many small JSON responses, where per-request overhead is a large fraction — the
-opposite of n8n's 511 responses carrying 96.9% of its addressable bytes), against a
-**modest addressable share** (Grafana ships large JS bundles that no transport choice
-touches). Estimate 15–35% addressable × >30% per-slice, so a **5–10% suite byte win**.
-If Grafana instead lands at parity, the model is wrong and the corpus needs a better
-predictor than request shape.
+**Next: InvenTree** (`inventree/InvenTree`, Django+DRF / React+Mantine). Chosen on the
+same constraint list: SQLite via `INVENTREE_DB_ENGINE=sqlite3` (their own backend CI runs
+that way, no daemon), a ~30-spec Playwright suite at `src/frontend/tests/` covering
+tables, forms, settings, permissions and importing, and a client seam that is one line —
+`export const api = axios.create({})` in `src/frontend/src/App.tsx`. Its fixtures do no
+`page.route()` mocking, and CI serves the frontend from Django on :8000, so the API is
+same-origin and the gateway convention applies unchanged. Traffic is paginated tables and
+settings panels: many small JSON, the shape grafana showed pays best. Queued after it:
+Keycloak admin-ui (69 specs, embedded H2, no DB container) once we settle how a ported
+bundle is served by `kc.sh` rather than Vite.
+
+Also checked and rejected, recorded so the search is not repeated: **nocobase** dropped
+SQLite (`DB_DIALECT=postgres`), **metabase** needs a docker container set plus Cypress and
+is 2.1 GB before deps, **mealie** has exactly one e2e spec.
 
 ## Fresh floors, 2026-07-26 (current runtime, no relay, pass-parity gated)
 
