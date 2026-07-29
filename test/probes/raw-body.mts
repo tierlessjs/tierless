@@ -40,6 +40,12 @@ check("raw hint: the body comes back UNPARSED, as the original text", rawEnv.bod
 const plainEnv = await rest({ op: "resource", tier: "server", name: "api.get", args: ["/x"] } as ResourceRequest) as { body: { rows: unknown[] } };
 check("no hint (pump path, preboot): the body is parsed as always", !(plainEnv.body instanceof RawJsonBody) && plainEnv.body.rows.length === 500);
 
+// A GET carrying `data` is normal for an axios caller — XHR just drops the body — but
+// fetch REJECTS such a Request. InvenTree's form layer sends `data` on every submit,
+// its exports included, so the crossing threw where the stock adapter shrugged.
+const getWithBody = await rest({ op: "resource", tier: "server", name: "api.get", args: ["/x", { export_format: "CSV" }] } as ResourceRequest) as { status: number };
+check("a GET with a body drops it instead of throwing (XHR's own behavior)", getWithBody.status === 200);
+
 // ---- handleExec splits it to the binary slot; execOver puts it back ------------------
 const seen: ResourceRequest[] = [];
 const host = makeHost({

@@ -303,10 +303,15 @@ export function restResources(baseUrl: string, { token, headers = {}, fetchImpl 
     if (Object.keys(merged).some((k) => k.toLowerCase() === "if-none-match") && !Object.keys(merged).some((k) => k.toLowerCase() === "cache-control")) {
       merged["cache-control"] = "max-age=0";
     }
+    // GET/HEAD never carry one: fetch REJECTS such a Request outright, while the browser
+    // paths a crossing replaces just ignore it (XHR drops the body on a GET, so axios
+    // callers routinely pass one — InvenTree's form layer sends `data` on every submit,
+    // GET exports included, and the crossing threw where the stock adapter shrugged).
+    const sendBody = body !== undefined && method !== "GET" && method !== "HEAD";
     const r = await fetchImpl(url, {
       method,
       headers: merged,
-      ...(body !== undefined ? { body: typeof body === "string" ? body : JSON.stringify(body) } : {}),
+      ...(sendBody ? { body: typeof body === "string" ? body : JSON.stringify(body) } : {}),
     });
     const text = await r.text();
     const isJson = (r.headers.get("content-type") || "").includes("json");
