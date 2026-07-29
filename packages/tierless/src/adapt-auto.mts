@@ -138,7 +138,10 @@ export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "ti
 // ------------------------------------------------------------- the 2-line port ----
 // Structural slices of axios — no axios dependency; the app hands its own module in
 // (it is also where the stock XHR fallback for browser-pinned configs comes from).
-interface AxiosModuleLike { getAdapter?: (names: unknown) => (config: AxiosishConfig) => Promise<unknown> }
+// `any` on both sides, deliberately: a structural slice narrower than axios's own
+// signature is unassignable under strictFunctionTypes (parameters are contravariant),
+// which rejects the real `axios` module at the call site.
+interface AxiosModuleLike { getAdapter?: (names: any) => (config: any) => Promise<any> }
 interface AxiosInstanceLike { defaults: { adapter?: unknown; baseURL?: string } }
 
 let sharedAuto: AutoSession | undefined;

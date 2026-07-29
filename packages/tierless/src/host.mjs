@@ -460,9 +460,10 @@ export async function execOver(peer, req, meta = {}) {
     }
     if (obj.type === "error") {
         const err = new Error(obj.message);
-        if (obj.response) { // HTTP-semantics failure: app code reads error.response.data
+        if (obj.response) { // HTTP-semantics failure: app code reads error.response.data (and .status since axios 1.8)
             err.response = obj.response;
             err.isAxiosError = true;
+            err.status = obj.response.status;
             err.code = obj.response.status >= 500 ? "ERR_BAD_RESPONSE" : "ERR_BAD_REQUEST";
         }
         throw err;

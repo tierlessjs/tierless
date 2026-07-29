@@ -428,9 +428,9 @@ export async function execOver(peer: Peer, req: ResourceRequest, meta: Record<st
     (obj.value as Record<symbol, unknown>)[RAW_TEXT] = text;   // free: a cache can store bytes instead of re-serializing
   }
   if (obj.type === "error") {
-    const err = new Error(obj.message) as Error & { response?: unknown; isAxiosError?: boolean; code?: string };
-    if (obj.response) {                                      // HTTP-semantics failure: app code reads error.response.data
-      err.response = obj.response; err.isAxiosError = true;
+    const err = new Error(obj.message) as Error & { response?: unknown; isAxiosError?: boolean; code?: string; status?: number };
+    if (obj.response) {                                      // HTTP-semantics failure: app code reads error.response.data (and .status since axios 1.8)
+      err.response = obj.response; err.isAxiosError = true; err.status = (obj.response as { status: number }).status;
       err.code = (obj.response as { status: number }).status >= 500 ? "ERR_BAD_RESPONSE" : "ERR_BAD_REQUEST";
     }
     throw err;

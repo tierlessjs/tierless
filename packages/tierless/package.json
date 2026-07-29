@@ -31,6 +31,16 @@
     "bin",
     "types"
   ],
+  "//typesVersions": "Legacy (moduleResolution:'node') consumers cannot read the exports map, so `import 'tierless/adapt-auto'` type-checks as an untyped module. InvenTree's frontend tsconfig is one; this maps the same subpaths to their declarations for it. Runtime resolution is unaffected — bundlers read exports.",
+  "typesVersions": {
+    "*": {
+      "*": [
+        "types/*.d.mts",
+        "types/*.d.cts",
+        "types/*/index.d.mts"
+      ]
+    }
+  },
   "exports": {
     ".": {
       "types": "./types/host.d.mts",

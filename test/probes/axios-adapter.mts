@@ -47,6 +47,9 @@ let caught: Caught | null = null;
 try { await adapter({ method: "get", baseURL: "http://x.test/api/v1", url: "/nope", headers: {} }); } catch (e) { caught = e as Caught; }
 check("non-2xx rejects", !!caught);
 check("error carries .response like axios", caught?.isAxiosError === true && caught?.response?.status === 412 && caught?.response?.data.message === "precondition");
+// axios ≥1.8 also puts the status on the error itself; InvenTree's password-change flow
+// keys its ENTIRE success path off `err.status === 401` and hung without it
+check("error carries .status like axios ≥1.8", (caught as { status?: number } | null)?.status === 412);
 
 // --- browser-pinned configs fall through -------------------------------------------------
 let fell = false;
@@ -197,7 +200,7 @@ const p = await twin.put("/tasks/1", { title: "t" });
 check("twin PUT sends body", p.data.m === "PUT");
 let terr: Caught | null = null;
 try { await twin.get("/miss"); } catch (e) { terr = e as Caught; }
-check("twin non-2xx rejects AxiosError-shaped", terr?.isAxiosError === true && terr?.response?.status === 404 && terr?.response?.data.message === "nope");
+check("twin non-2xx rejects AxiosError-shaped", terr?.isAxiosError === true && terr?.response?.status === 404 && (terr as { status?: number })?.status === 404 && terr?.response?.data.message === "nope");
 srv.close();
 
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }

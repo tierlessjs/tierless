@@ -58,6 +58,7 @@ export function twinHttp(baseUrl, { token, headers = {}, fetchImpl = fetch } = {
             const err = new Error("Request failed with status code " + r.status);
             err.response = res;
             err.isAxiosError = true;
+            err.status = r.status;
             err.code = r.status >= 500 ? "ERR_BAD_RESPONSE" : "ERR_BAD_REQUEST";
             throw err;
         }

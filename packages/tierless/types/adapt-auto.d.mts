@@ -1,4 +1,4 @@
-import { type AxiosAdapterOpts, type AxiosishConfig } from "./adapt-axios.mjs";
+import { type AxiosAdapterOpts } from "./adapt-axios.mjs";
 import type { Exec } from "./types.mjs";
 export interface AutoSessionOpts {
     /** Explicit ws URL (overrides the page-derived convention; the localStorage override
@@ -41,7 +41,7 @@ export interface AutoSession {
 }
 export declare function autoSession({ url, gatewayPort, path, storageKey, forceBrowser, auth, cross, awaitClaims, preconnect, conditional }?: AutoSessionOpts): AutoSession;
 interface AxiosModuleLike {
-    getAdapter?: (names: unknown) => (config: AxiosishConfig) => Promise<unknown>;
+    getAdapter?: (names: any) => (config: any) => Promise<any>;
 }
 interface AxiosInstanceLike {
     defaults: {

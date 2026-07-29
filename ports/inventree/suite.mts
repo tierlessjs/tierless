@@ -82,7 +82,9 @@ const suite = spawn("npx", ["playwright", "test", "--config", CONFIG, "--workers
   env: {
     ...invenTreeEnv(),
     CI: "1",                                            // their config: forbidOnly + retries=1, as in their lane
-    PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH || "/root/pw-browsers",
+    // NOT process.env.PLAYWRIGHT_BROWSERS_PATH: this box exports /opt/pw-browsers, which
+    // holds chromium 1194 — their playwright pins 1223, and only ~/pw-browsers has it.
+    PLAYWRIGHT_BROWSERS_PATH: process.env.TIERLESS_PW_BROWSERS || path.join(process.env.HOME || "", "pw-browsers"),
     PLAYWRIGHT_BASE_URL: pageUrl,
     TIERLESS_MEASURE_OUT: OUT,
     ...(process.env.TIERLESS_WS_URL ? { TIERLESS_WS_URL: process.env.TIERLESS_WS_URL } : {}),

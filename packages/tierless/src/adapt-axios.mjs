@@ -160,11 +160,14 @@ export function axiosAdapter({ exec, fallback, crossCredentialed, crossTimeouts 
         };
         const validate = config.validateStatus === undefined ? (s) => s >= 200 && s < 300 : config.validateStatus;
         if (validate && !validate(envelope.status)) {
-            // shaped like AxiosError without depending on axios: their code reads .response/.isAxiosError
+            // shaped like AxiosError without depending on axios: their code reads .response/.isAxiosError,
+            // and since axios 1.8 also err.status directly (InvenTree's password-change flow keys its
+            // whole success path off `err.status === 401`, and hung without it)
             const err = new Error("Request failed with status code " + envelope.status);
             err.response = response;
             err.config = config;
             err.isAxiosError = true;
+            err.status = envelope.status;
             err.code = envelope.status >= 500 ? "ERR_BAD_RESPONSE" : "ERR_BAD_REQUEST";
             throw err;
         }

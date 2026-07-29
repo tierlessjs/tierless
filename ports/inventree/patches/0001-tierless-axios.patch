@@ -7,7 +7,7 @@
 
  import { ApiEndpoints, apiUrl } from '@lib/index';
  import { frontendID, serviceName } from './defaults/defaults';
-@@ -25,6 +26,20 @@
+@@ -25,6 +26,32 @@
    axios.defaults.withXSRFToken = true;
    axios.defaults.xsrfHeaderName = 'X-CSRFToken';
    axios.defaults.xsrfCookieName = 'csrftoken';
@@ -24,7 +24,17 @@
 +  // `withCredentials` and a 5000 ms `timeout` on EVERY request, and each is pinned by
 +  // default. The gateway runs with --cookie-authority, which is what makes the session
 +  // cookie reproducible on the other tier; the deadline is enforced in the adapter.
-+  tierlessAxios(axios, api, { crossCredentialed: true, crossTimeouts: true });
++  //
++  // awaitClaims: their login path is `clearCsrfCookie(); await ensureCsrf();` — one GET
++  // whose Set-Cookie has to be in document.cookie by the time the call RESOLVES, because
++  // the very next line posts the credentials. Stock fetch writes the jar synchronously
++  // with the response; the default fire-and-forget claim replants it a beat later, so the
++  // login POST went out with no CSRF token at all and Django answered 403.
++  tierlessAxios(axios, api, {
++    crossCredentialed: true,
++    crossTimeouts: true,
++    awaitClaims: true
++  });
  }
 
  export const queryClient = new QueryClient({
