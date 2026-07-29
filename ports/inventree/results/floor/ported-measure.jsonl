@@ -1,0 +1,164 @@
+{"id":"pages/pui_build.spec.ts:18 › Build - Index","status":"passed","retry":0,"durationMs":4499}
+{"id":"pages/pui_build.spec.ts:30 › Build Order - Basic Tests","status":"passed","retry":0,"durationMs":19648}
+{"id":"pages/pui_build.spec.ts:124 › Build Order - Tags","status":"passed","retry":0,"durationMs":9711}
+{"id":"pages/pui_build.spec.ts:169 › Build Order - Reference","status":"timedOut","retry":0,"durationMs":90003}
+{"id":"pages/pui_build.spec.ts:169 › Build Order - Reference","status":"passed","retry":1,"durationMs":10085}
+{"id":"pages/pui_build.spec.ts:212 › Build Order - Calendar","status":"passed","retry":0,"durationMs":10677}
+{"id":"pages/pui_build.spec.ts:237 › Build Order - Edit","status":"passed","retry":0,"durationMs":7917}
+{"id":"pages/pui_build.spec.ts:264 › Build Order - Build Outputs","status":"passed","retry":0,"durationMs":19677}
+{"id":"pages/pui_build.spec.ts:403 › Build Order - Allocation","status":"passed","retry":0,"durationMs":14040}
+{"id":"pages/pui_build.spec.ts:521 › Build Order - Auto Allocate Tracked","status":"passed","retry":0,"durationMs":9341}
+{"id":"pages/pui_build.spec.ts:562 › Build Order - Consume Stock","status":"passed","retry":0,"durationMs":15403}
+{"id":"pages/pui_build.spec.ts:633 › Build Order - Tracked Outputs","status":"passed","retry":0,"durationMs":14699}
+{"id":"pages/pui_build.spec.ts:734 › Build Order - Filters","status":"passed","retry":0,"durationMs":16119}
+{"id":"pages/pui_build.spec.ts:771 › Build Order - Duplicate","status":"passed","retry":0,"durationMs":11695}
+{"id":"pages/pui_build.spec.ts:827 › Build Order - External","status":"passed","retry":0,"durationMs":15886}
+{"id":"pages/pui_build.spec.ts:878 › Build Order - BOM Quantity","status":"passed","retry":0,"durationMs":10613}
+{"id":"pages/pui_company.spec.ts:14 › Company - Basic Tests","status":"passed","retry":0,"durationMs":10545}
+{"id":"pages/pui_company.spec.ts:59 › Company - Parameters","status":"passed","retry":0,"durationMs":4322}
+{"id":"pages/pui_company.spec.ts:76 › Company - Supplier Parts","status":"passed","retry":0,"durationMs":9463}
+{"id":"pages/pui_core.spec.ts:5 › Core User/Group/Contact","status":"passed","retry":0,"durationMs":8638}
+{"id":"pages/pui_dashboard.spec.ts:14 › Dashboard - Basic","status":"passed","retry":0,"durationMs":4927}
+{"id":"pages/pui_dashboard.spec.ts:50 › Dashboard - Stocktake","status":"passed","retry":0,"durationMs":4063}
+{"id":"pages/pui_dashboard.spec.ts:72 › Dashboard - Plugins","status":"passed","retry":0,"durationMs":5720}
+{"id":"pages/pui_dashboard.spec.ts:101 › Dashboard - Preserve widget sizes","status":"passed","retry":0,"durationMs":8877}
+{"id":"pages/pui_part.spec.ts:23 › Parts - Tabs","status":"passed","retry":0,"durationMs":17037}
+{"id":"pages/pui_part.spec.ts:70 › Parts - Image Selection","status":"passed","retry":0,"durationMs":6263}
+{"id":"pages/pui_part.spec.ts:108 › Parts - Subscriptions","status":"passed","retry":0,"durationMs":6463}
+{"id":"pages/pui_part.spec.ts:139 › Parts - Manufacturer Parts","status":"passed","retry":0,"durationMs":5990}
+{"id":"pages/pui_part.spec.ts:152 › Parts - Supplier Parts","status":"passed","retry":0,"durationMs":6402}
+{"id":"pages/pui_part.spec.ts:163 › Parts - BOM","status":"passed","retry":0,"durationMs":23225}
+{"id":"pages/pui_part.spec.ts:287 › Parts - BOM Validation","status":"passed","retry":0,"durationMs":9911}
+{"id":"pages/pui_part.spec.ts:331 › Parts - BOM Comparison","status":"passed","retry":0,"durationMs":10077}
+{"id":"pages/pui_part.spec.ts:364 › Parts - Used In","status":"passed","retry":0,"durationMs":6481}
+{"id":"pages/pui_part.spec.ts:392 › Parts - Editing","status":"passed","retry":0,"durationMs":5911}
+{"id":"pages/pui_part.spec.ts:431 › Parts - Locking","status":"passed","retry":0,"durationMs":9427}
+{"id":"pages/pui_part.spec.ts:472 › Parts - Details","status":"passed","retry":0,"durationMs":4184}
+{"id":"pages/pui_part.spec.ts:498 › Parts - Requirements","status":"passed","retry":0,"durationMs":13842}
+{"id":"pages/pui_part.spec.ts:543 › Parts - Allocations","status":"passed","retry":0,"durationMs":11088}
+{"id":"pages/pui_part.spec.ts:606 › Parts - Pricing (Nothing, BOM)","status":"passed","retry":0,"durationMs":8774}
+{"id":"pages/pui_part.spec.ts:661 › Parts - Pricing (Supplier)","status":"passed","retry":0,"durationMs":5448}
+{"id":"pages/pui_part.spec.ts:684 › Parts - Pricing (Variant)","status":"passed","retry":0,"durationMs":6032}
+{"id":"pages/pui_part.spec.ts:706 › Parts - Pricing (Internal)","status":"passed","retry":0,"durationMs":6232}
+{"id":"pages/pui_part.spec.ts:729 › Parts - Pricing (Purchase)","status":"passed","retry":0,"durationMs":4671}
+{"id":"pages/pui_part.spec.ts:749 › Parts - Attachments","status":"passed","retry":0,"durationMs":6126}
+{"id":"pages/pui_part.spec.ts:775 › Parts - Parameters by Category","status":"passed","retry":0,"durationMs":10841}
+{"id":"pages/pui_part.spec.ts:827 › Parts - Parameters","status":"passed","retry":0,"durationMs":9862}
+{"id":"pages/pui_part.spec.ts:927 › Parts - Parameter Filtering","status":"passed","retry":0,"durationMs":6659}
+{"id":"pages/pui_part.spec.ts:957 › Parts - Test Results","status":"passed","retry":0,"durationMs":5710}
+{"id":"pages/pui_part.spec.ts:966 › Parts - Notes","status":"passed","retry":0,"durationMs":19172}
+{"id":"pages/pui_part.spec.ts:986 › Parts - 404","status":"passed","retry":0,"durationMs":3857}
+{"id":"pages/pui_part.spec.ts:994 › Parts - Revisions","status":"passed","retry":0,"durationMs":5621}
+{"id":"pages/pui_part.spec.ts:1016 › Parts - Bulk Edit","status":"passed","retry":0,"durationMs":6722}
+{"id":"pages/pui_part.spec.ts:1035 › Parts - Duplicate","status":"passed","retry":0,"durationMs":5599}
+{"id":"pages/pui_part.spec.ts:1050 › Parts - Import supplier part","status":"passed","retry":0,"durationMs":20247}
+{"id":"pages/pui_purchasing.spec.ts:21 › Purchasing - Index","status":"passed","retry":0,"durationMs":15040}
+{"id":"pages/pui_purchasing.spec.ts:86 › Purchasing - Parameters","status":"passed","retry":0,"durationMs":7770}
+{"id":"pages/pui_purchasing.spec.ts:151 › Purchasing - Manufacturer Parts","status":"passed","retry":0,"durationMs":7746}
+{"id":"pages/pui_purchasing.spec.ts:175 › Purchase Orders - General","status":"passed","retry":0,"durationMs":10983}
+{"id":"pages/pui_purchasing.spec.ts:232 › Purchase Orders - Table","status":"passed","retry":0,"durationMs":7308}
+{"id":"pages/pui_purchasing.spec.ts:263 › Purchase Orders - Calendar","status":"passed","retry":0,"durationMs":5926}
+{"id":"pages/pui_purchasing.spec.ts:288 › Purchase Orders - Barcodes","status":"passed","retry":0,"durationMs":13364}
+{"id":"pages/pui_purchasing.spec.ts:348 › Purchase Orders - Filters","status":"passed","retry":0,"durationMs":5768}
+{"id":"pages/pui_purchasing.spec.ts:377 › Purchase Orders - Price Breaks","status":"passed","retry":0,"durationMs":6563}
+{"id":"pages/pui_purchasing.spec.ts:415 › Purchase Orders - Order Parts","status":"passed","retry":0,"durationMs":18351}
+{"id":"pages/pui_purchasing.spec.ts:496 › Purchase Orders - Receive Items","status":"passed","retry":0,"durationMs":19718}
+{"id":"pages/pui_purchasing.spec.ts:590 › Purchase Orders - Receive Virtual Items","status":"passed","retry":0,"durationMs":8438}
+{"id":"pages/pui_purchasing.spec.ts:625 › Purchase Orders - Duplicate","status":"passed","retry":0,"durationMs":6156}
+{"id":"pages/pui_return.spec.ts:5 › Return Orders - Receive Items","status":"passed","retry":0,"durationMs":9306}
+{"id":"pages/pui_sales.spec.ts:16 › Sales Orders - Tabs","status":"passed","retry":0,"durationMs":18400}
+{"id":"pages/pui_sales.spec.ts:90 › Sales Orders - Basic Tests","status":"passed","retry":0,"durationMs":9151}
+{"id":"pages/pui_sales.spec.ts:131 › Sales Orders - Auto Allocate","status":"passed","retry":0,"durationMs":7924}
+{"id":"pages/pui_sales.spec.ts:167 › Sales Orders - Shipments","status":"passed","retry":0,"durationMs":16977}
+{"id":"pages/pui_sales.spec.ts:280 › Sales Orders - Shipments - Tags","status":"passed","retry":0,"durationMs":7580}
+{"id":"pages/pui_sales.spec.ts:303 › Sales Orders - Complete Shipment","status":"passed","retry":0,"durationMs":14505}
+{"id":"pages/pui_sales.spec.ts:373 › Sales Orders - Duplicate","status":"passed","retry":0,"durationMs":10870}
+{"id":"pages/pui_sales.spec.ts:433 › Sales Orders - Price Breaks","status":"passed","retry":0,"durationMs":6134}
+{"id":"pages/pui_scan.spec.ts:13 › Barcode Scanning - Dialog","status":"passed","retry":0,"durationMs":6091}
+{"id":"pages/pui_scan.spec.ts:36 › Barcode Scanning - Basic","status":"passed","retry":0,"durationMs":4634}
+{"id":"pages/pui_scan.spec.ts:57 › Barcode Scanning - Part","status":"passed","retry":0,"durationMs":4185}
+{"id":"pages/pui_scan.spec.ts:67 › Barcode Scanning - Stockitem","status":"passed","retry":0,"durationMs":3506}
+{"id":"pages/pui_scan.spec.ts:77 › Barcode Scanning - StockLocation","status":"passed","retry":0,"durationMs":3563}
+{"id":"pages/pui_scan.spec.ts:90 › Barcode Scanning - SupplierPart","status":"passed","retry":0,"durationMs":3530}
+{"id":"pages/pui_scan.spec.ts:100 › Barcode Scanning - PurchaseOrder","status":"passed","retry":0,"durationMs":3384}
+{"id":"pages/pui_scan.spec.ts:113 › Barcode Scanning - SalesOrder","status":"passed","retry":0,"durationMs":3613}
+{"id":"pages/pui_scan.spec.ts:124 › Barcode Scanning - Build","status":"passed","retry":0,"durationMs":3480}
+{"id":"pages/pui_scan.spec.ts:135 › Barcode Scanning - Forms","status":"passed","retry":0,"durationMs":10023}
+{"id":"pages/pui_stock.spec.ts:15 › Stock - Basic Tests","status":"passed","retry":0,"durationMs":16214}
+{"id":"pages/pui_stock.spec.ts:60 › Stock - Location Tree","status":"timedOut","retry":0,"durationMs":90003}
+{"id":"pages/pui_stock.spec.ts:60 › Stock - Location Tree","status":"passed","retry":1,"durationMs":8723}
+{"id":"pages/pui_stock.spec.ts:93 › Stock - Location Delete","status":"passed","retry":0,"durationMs":6992}
+{"id":"pages/pui_stock.spec.ts:150 › Stock - Filters","status":"passed","retry":0,"durationMs":9396}
+{"id":"pages/pui_stock.spec.ts:202 › Stock - Serial Numbers","status":"passed","retry":0,"durationMs":9425}
+{"id":"pages/pui_stock.spec.ts:268 › Stock - Serial Navigation","status":"passed","retry":0,"durationMs":8175}
+{"id":"pages/pui_stock.spec.ts:294 › Stock - Serialize","status":"passed","retry":0,"durationMs":5066}
+{"id":"pages/pui_stock.spec.ts:335 › Stock - Stock Actions","status":"timedOut","retry":0,"durationMs":90003}
+{"id":"pages/pui_stock.spec.ts:335 › Stock - Stock Actions","status":"timedOut","retry":1,"durationMs":90003}
+{"id":"pages/pui_stock.spec.ts:429 › Stock - Convert","status":"passed","retry":0,"durationMs":5289}
+{"id":"pages/pui_stock.spec.ts:461 › Stock - Return Items","status":"timedOut","retry":0,"durationMs":90002}
+{"id":"pages/pui_stock.spec.ts:461 › Stock - Return Items","status":"passed","retry":1,"durationMs":9448}
+{"id":"pages/pui_stock.spec.ts:495 › Stock - Tracking","status":"passed","retry":0,"durationMs":9170}
+{"id":"pages/pui_stock.spec.ts:556 › Stock - Location","status":"passed","retry":0,"durationMs":4960}
+{"id":"pages/pui_stock.spec.ts:587 › Transfer Orders - General","status":"passed","retry":0,"durationMs":8101}
+{"id":"pages/pui_stock.spec.ts:632 › Transfer Order - Reference","status":"failed","retry":0,"durationMs":4692}
+{"id":"pages/pui_stock.spec.ts:632 › Transfer Order - Reference","status":"failed","retry":1,"durationMs":4712}
+{"id":"pages/pui_stock.spec.ts:681 › Transfer Order - Calendar","status":"passed","retry":0,"durationMs":9011}
+{"id":"pages/pui_stock.spec.ts:696 › Transfer Order - Edit","status":"passed","retry":0,"durationMs":6713}
+{"id":"pages/pui_stock.spec.ts:723 › Transfer Order - Allocate and Transfer","status":"timedOut","retry":0,"durationMs":90002}
+{"id":"pages/pui_stock.spec.ts:723 › Transfer Order - Allocate and Transfer","status":"passed","retry":1,"durationMs":13135}
+{"id":"pages/pui_stock.spec.ts:771 › Transfer Orders - Duplicate","status":"passed","retry":0,"durationMs":4473}
+{"id":"pui_exporting.spec.ts:16 › Exporting - Orders","status":"passed","retry":0,"durationMs":17706}
+{"id":"pui_exporting.spec.ts:74 › Exporting - BOM","status":"passed","retry":0,"durationMs":16152}
+{"id":"pui_forms.spec.ts:9 › Forms - Hover","status":"timedOut","retry":0,"durationMs":90002}
+{"id":"pui_forms.spec.ts:9 › Forms - Hover","status":"passed","retry":1,"durationMs":6516}
+{"id":"pui_forms.spec.ts:42 › Forms - Stock Item Validation","status":"passed","retry":0,"durationMs":10761}
+{"id":"pui_forms.spec.ts:117 › Forms - Supplier Validation","status":"passed","retry":0,"durationMs":9212}
+{"id":"pui_forms.spec.ts:172 › Forms - Keep form open option","status":"passed","retry":0,"durationMs":4878}
+{"id":"pui_general.spec.ts:9 › General - Admin Button","status":"passed","retry":0,"durationMs":4214}
+{"id":"pui_general.spec.ts:24 › General - Search","status":"passed","retry":0,"durationMs":7838}
+{"id":"pui_importing.spec.ts:5 › Importing - Admin Center","status":"passed","retry":0,"durationMs":10120}
+{"id":"pui_importing.spec.ts:73 › Importing - BOM","status":"passed","retry":0,"durationMs":10958}
+{"id":"pui_importing.spec.ts:159 › Importing - Purchase Order","status":"passed","retry":0,"durationMs":4812}
+{"id":"pui_importing.spec.ts:177 › Importing - Natural Keys","status":"passed","retry":0,"durationMs":7558}
+{"id":"pui_login.spec.ts:11 › Login - Failures","status":"passed","retry":0,"durationMs":11996}
+{"id":"pui_login.spec.ts:50 › Login - Change Password","status":"passed","retry":0,"durationMs":10970}
+{"id":"pui_login.spec.ts:91 › Login - MFA - TOTP","status":"passed","retry":0,"durationMs":9158}
+{"id":"pui_machines.spec.ts:7 › Machines - Admin Panel","status":"passed","retry":0,"durationMs":4322}
+{"id":"pui_machines.spec.ts:21 › Machines - Activation","status":"passed","retry":0,"durationMs":25799}
+{"id":"pui_modals.spec.ts:6 › Modals - Admin","status":"timedOut","retry":0,"durationMs":90002}
+{"id":"pui_modals.spec.ts:6 › Modals - Admin","status":"timedOut","retry":1,"durationMs":90003}
+{"id":"pui_modals.spec.ts:56 › Spotlight - Check Actions","status":"passed","retry":0,"durationMs":4540}
+{"id":"pui_modals.spec.ts:84 › Spotlight - No Keys","status":"timedOut","retry":0,"durationMs":90002}
+{"id":"pui_modals.spec.ts:84 › Spotlight - No Keys","status":"timedOut","retry":1,"durationMs":90002}
+{"id":"pui_permissions.spec.ts:14 › Permissions - Admin","status":"passed","retry":0,"durationMs":7732}
+{"id":"pui_permissions.spec.ts:61 › Permissions - Reader","status":"passed","retry":0,"durationMs":8585}
+{"id":"pui_plugins.spec.ts:15 › Plugins - Settings","status":"passed","retry":0,"durationMs":10837}
+{"id":"pui_plugins.spec.ts:65 › Plugins - User Settings","status":"passed","retry":0,"durationMs":7857}
+{"id":"pui_plugins.spec.ts:106 › Plugins - Functionality","status":"passed","retry":0,"durationMs":14332}
+{"id":"pui_plugins.spec.ts:149 › Plugins - Panels","status":"passed","retry":0,"durationMs":9842}
+{"id":"pui_plugins.spec.ts:197 › Plugins - Custom Admin","status":"passed","retry":0,"durationMs":8482}
+{"id":"pui_plugins.spec.ts:229 › Plugins - Locate Item","status":"timedOut","retry":0,"durationMs":90002}
+{"id":"pui_plugins.spec.ts:229 › Plugins - Locate Item","status":"passed","retry":1,"durationMs":9449}
+{"id":"pui_plugins.spec.ts:270 › Plugins - Creator","status":"failed","retry":0,"durationMs":3791}
+{"id":"pui_plugins.spec.ts:270 › Plugins - Creator","status":"failed","retry":1,"durationMs":3821}
+{"id":"pui_printing.spec.ts:9 › Printing - Label Editing","status":"passed","retry":0,"durationMs":7410}
+{"id":"pui_printing.spec.ts:33 › Printing - Label Printing","status":"passed","retry":0,"durationMs":11779}
+{"id":"pui_printing.spec.ts:112 › Printing - Report Printing","status":"passed","retry":0,"durationMs":6514}
+{"id":"pui_printing.spec.ts:137 › Printing - Report Editing","status":"passed","retry":0,"durationMs":10649}
+{"id":"pui_printing.spec.ts:212 › Printing - Broken Template","status":"passed","retry":0,"durationMs":11496}
+{"id":"pui_settings.spec.ts:37 › Settings - User theme","status":"passed","retry":0,"durationMs":5300}
+{"id":"pui_settings.spec.ts:84 › Settings - User","status":"passed","retry":0,"durationMs":4329}
+{"id":"pui_settings.spec.ts:137 › Settings - Global","status":"passed","retry":0,"durationMs":7195}
+{"id":"pui_settings.spec.ts:212 › Settings - Admin","status":"passed","retry":0,"durationMs":11424}
+{"id":"pui_settings.spec.ts:316 › Settings - Admin - Background Tasks","status":"passed","retry":0,"durationMs":3377}
+{"id":"pui_settings.spec.ts:339 › Settings - Admin - Barcode History","status":"timedOut","retry":0,"durationMs":90002}
+{"id":"pui_settings.spec.ts:339 › Settings - Admin - Barcode History","status":"passed","retry":1,"durationMs":20000}
+{"id":"pui_settings.spec.ts:404 › Settings - Admin - Parameter","status":"passed","retry":0,"durationMs":15588}
+{"id":"pui_settings.spec.ts:541 › Settings - Admin - Unauthorized","status":"passed","retry":0,"durationMs":8681}
+{"id":"pui_settings.spec.ts:574 › Settings - Auth - Email","status":"passed","retry":0,"durationMs":4109}
+{"id":"pui_settings.spec.ts:603 › Settings - Auth - Tokens","status":"passed","retry":0,"durationMs":4220}
+{"id":"pui_tables.spec.ts:13 › Tables - Quick Filters","status":"passed","retry":0,"durationMs":5989}
+{"id":"pui_tables.spec.ts:47 › Tables - Filters","status":"passed","retry":0,"durationMs":26722}
+{"id":"pui_tables.spec.ts:108 › Tables - Pagination","status":"passed","retry":0,"durationMs":5767}
+{"id":"pui_tables.spec.ts:139 › Tables - Columns","status":"passed","retry":0,"durationMs":7705}
+{"id":"pui_tables.spec.ts:166 › Tables - Sorting","status":"passed","retry":0,"durationMs":7777}
