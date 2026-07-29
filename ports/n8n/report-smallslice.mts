@@ -28,9 +28,20 @@ const bh = readJsonl<Hit>(DIR + "baseline-http.jsonl");
 let bBytes = 0, bReq = 0, bHdr = 0, bBody = 0;
 for (const r of bh) if (small(r)) { bBytes += (r.respBytes || 0) + (r.reqBytes || 0); bReq++; bHdr += r.reqBytes || 0; bBody += r.respBytes || 0; }
 
-// ported: the session counter, now uncontaminated by the catalogue
+// ported: the session counter PLUS the small calls that stayed on browser HTTP.
+// Counting only the session compares baseline's whole small-API against a fraction of
+// the ported one — 592 of n8n's small /rest/* calls never cross (force-browser seam,
+// mocked routes), worth 1.74 MB, and omitting them overstated the win by 14 points.
 const pm = readJsonl<Row>(DIR + "ported-measure.jsonl").filter((r) => r.retry === 0 && !r.wireError);
 const pWs = pm.reduce((a, r) => a + (r.wireWsIn || 0) + (r.wireWsOut || 0), 0);
+const phits = readJsonl<Hit>(DIR + "ported-http.jsonl");
+let pHttp = 0, pHttpN = 0;
+for (const r of phits) if (small(r)) { pHttp += (r.respBytes || 0) + (r.reqBytes || 0); pHttpN++; }
+const pTotal = pWs + pHttp;
+// crossings + browser-HTTP small calls: the ported arm's total small-API call count
+const sess = existsSync(DIR + "ported-session.jsonl.gz") || existsSync(DIR + "ported-session.jsonl")
+  ? readJsonl<{ d?: string; t?: string; ph?: string }>(DIR + "ported-session.jsonl") : [];
+const pCalls = sess.filter((r) => !r.ph && r.d === "in" && r.t === "exec").length + pHttpN;
 
 // guard: if a >1 MB payload still crossed, the counter is contaminated and the number is void
 let bulkFrames = 0;
@@ -43,8 +54,13 @@ console.log("n8n many-small slice — editor chunk, budget mode, advisory ON\n")
 console.log(`  baseline, small /rest/* over HTTP   ${MB(bBytes)}  in ${bReq} requests`);
 console.log(`    of which request headers          ${MB(bHdr)}  (${(100 * bHdr / bBytes).toFixed(1)}% — the overhead a socket removes outright)`);
 console.log(`    of which response bodies          ${MB(bBody)}`);
-console.log(`  ported, same traffic over the session ${MB(pWs)}  (TCP-true, deflate included)`);
-const delta = (pWs - bBytes) / bBytes;
+console.log(`  ported, same traffic:                 ${MB(pTotal)}`);
+console.log(`    over the session                    ${MB(pWs)}  (TCP-true, deflate included)`);
+console.log(`    still on browser HTTP               ${MB(pHttp)}  in ${pHttpN} requests`);
+console.log(`\n  CALL COUNTS: baseline ${bReq}, ported ${pCalls} — the ported arm makes ${(100 * (1 - pCalls / bReq)).toFixed(0)}% FEWER`);
+console.log(`  small-API calls (conditional crossings serve repeats from the session's own`);
+console.log(`  cache). So this delta is call ELIMINATION plus per-call cost, not per-call alone.`);
+const delta = (pTotal - bBytes) / bBytes;
 if (bulkFrames > 0) {
   // The advisory is LEARNED: it is declared in hellos AFTER the first oversize reply,
   // so sessions opening inside that window still carry the payload. Measured here as 5

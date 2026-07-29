@@ -190,14 +190,26 @@ small calls.
     baseline, small /rest/* over HTTP     12.17 MB  in 6605 requests
       of which request headers             6.10 MB  (50.2%)
       of which response bodies             6.07 MB
-    ported, same traffic on the session     4.19 MB  (TCP-true, deflate included)
-    -> AT LEAST 65.5% cheaper on the session
+    ported, same traffic                    5.94 MB
+      over the session                      4.19 MB  (TCP-true, deflate included)
+      still on browser HTTP                 1.74 MB  in 592 requests
+    -> AT LEAST 51.2% cheaper
 
-A BOUND rather than a point estimate: 5 crossings of the catalogue still occurred in the
-run's first 13 seconds, because the advisory is learned and only declared in hellos
-issued after the first oversize reply completes — sessions opening inside that window
-miss it. Those frames inflate the ported side only, so the true win is larger. Closing
-that window would make the figure exact.
+Two corrections are baked into that figure, both found by challenging it rather than
+publishing the first number. Counting only the session's counter compares baseline's
+WHOLE small-API against a fraction of the ported one — 592 small calls never cross (the
+force-browser seam, mocked routes) and omitting their 1.74 MB overstated the win by 14
+points, 65.5% -> 51.2%. And the delta is not a pure per-call comparison: the ported arm
+makes **3078 small-API calls against the baseline's 6605, 53% fewer**, because
+conditional crossings serve repeats from the session's own cache. So the result is call
+ELIMINATION plus cheaper calls, and quoting it as evidence for per-request overhead
+alone would be wrong.
+
+It is a BOUND rather than a point estimate: 5 crossings of the catalogue still occurred
+in the run's first 13 seconds, because the advisory is learned and only declared in
+hellos issued after the first oversize reply completes — sessions opening inside that
+window miss it. Those frames inflate the ported side only, so the true win is larger.
+That window is a real product gap on a cold gateway, not just a measurement nuisance.
 
 The mechanism is visible in the split: **half the baseline's small-API bytes are request
 headers** — cookies, UA, accept, repeated across 6605 requests — which a persistent
