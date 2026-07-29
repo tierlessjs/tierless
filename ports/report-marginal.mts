@@ -53,7 +53,12 @@ interface Row { status: string; retry: number; wireWsIn?: number; wireWsOut?: nu
 // two arms must be compared on the hash-stripped name or rule 2 rejects every bundle —
 // exactly the traffic it is meant to elide.
 const stem = (p: string): string => p.split("?")[0];
-const unhashed = (p: string): string => stem(p).replace(/-[A-Za-z0-9_-]{8,}(\.[a-z0-9]+)$/i, "-*$1");
+// the separator before a content hash differs by bundler: n8n ships
+// `useRootStore-Cls9JR4X.js` (dash), grafana ships `841-react19.bebc231a7a32c059836f.js`
+// (dot). Matching only the dash form left every grafana bundle unmatched across arms, so
+// 457 MB of JS was reported as "static but moved to the session" — a bundle cannot cross
+// the session, and the nonsense per-slice figure (217.9%) is what exposed it.
+const unhashed = (p: string): string => stem(p).replace(/[-.][A-Za-z0-9_-]{8,}(\.[a-z0-9]+)$/i, ".*$1");
 
 /** Per-path evidence for one arm: distinct 2xx body sizes. Non-2xx is ignored — one
  *  stray 401 on n8n's /types/nodes.json otherwise gave the path "two sizes" and
@@ -135,21 +140,47 @@ const elidable = (exact: string): boolean => {
 const B = analyze(httpFiles("baseline"), elidable), P = analyze(httpFiles("ported"), elidable);
 const bWs = sessionBytes(measureFiles("baseline")), pWs = sessionBytes(measureFiles("ported"));
 
+// The byte totals sum every request in the logs, so they silently assume both arms ran
+// the SAME work. Wall reports gate on pass-parity; this one could not, and grafana's
+// arms differed (93 passed vs 97). Surface it rather than let the reader assume parity.
+const passed = (files: string[]): number => {
+  let n = 0;
+  for (const f of files) for (const r of readJsonl<Row>(dir + f)) if (r.retry === 0 && r.status === "passed") n++;
+  return n;
+};
+const bPass = passed(measureFiles("baseline")), pPass = passed(measureFiles("ported"));
+
 const MB = (n: number): string => (n / 1e6).toFixed(0).padStart(6) + " MB";
 const pct = (b: number, p: number): string => ((p - b) / b * 100).toFixed(1).padStart(6) + "%";
 
 const bTotal = B.total + bWs, pTotal = P.total + pWs;
 const bMarg = B.total - B.repeat + bWs, pMarg = P.total - P.repeat + pWs;
 
-console.log(`${dir}   ${B.n} baseline requests, ${P.n} ported\n`);
+console.log(`${dir}   ${B.n} baseline requests, ${P.n} ported`);
+if (bPass !== pPass) console.log(`  !! PASS MISMATCH: baseline ${bPass} passed, ported ${pPass} — the arms did not run the same work, so these byte totals are not strictly comparable`);
+console.log("");
 console.log("                                   baseline      ported     delta");
 console.log(`  suite total (what we publish)   ${MB(bTotal)}   ${MB(pTotal)}   ${pct(bTotal, pTotal)}`);
 console.log(`  marginal (warm cache)           ${MB(bMarg)}   ${MB(pMarg)}   ${pct(bMarg, pMarg)}`);
 console.log(`  elided as static repeats        ${MB(B.repeat)}   ${MB(P.repeat)}`);
 console.log(`\n  session carried (ported):       ${MB(pWs)}  = ${(100 * pWs / pTotal).toFixed(2)}% of suite total, ${(100 * pWs / pMarg).toFixed(2)}% of MARGINAL`);
 
-const addressable = pWs / pMarg, measured = (pMarg - bMarg) / bMarg;
-console.log(`  decomposition: addressable ${(100 * addressable).toFixed(1)}% x per-slice ${(100 * -measured / addressable).toFixed(1)}% = ${(100 * measured).toFixed(1)}% measured`);
+// THE MANY-SMALL SLICE, measured directly: baseline marginal bytes on paths the port
+// moves onto the session (absent from ported HTTP) against what the session actually
+// cost. Deriving the addressable share from the PORTED side instead (pWs/pMarg) is
+// wrong and prints absurdities — it read 261% per-slice on grafana, where the session
+// carries 4 MB but displaces ~20 MB of baseline HTTP.
+let movedBytes = 0, movedReqs = 0;
+for (const [p, v] of B.byPath) if (!pS.seenUnhashed.has(unhashed(p))) { movedBytes += v; movedReqs++; }
+const measured = (pMarg - bMarg) / bMarg;
+console.log(`  suite-wide marginal delta: ${(100 * measured).toFixed(1)}%`);
+if (movedBytes > 0) {
+  const slice = (pWs - movedBytes) / movedBytes;
+  console.log(`\n  MANY-SMALL SLICE (paths the port moves onto the session):`);
+  console.log(`    baseline over HTTP   ${MB(movedBytes)}  across ${movedReqs} paths`);
+  console.log(`    ported on the session ${MB(pWs)}  (TCP-true)`);
+  console.log(`    -> ${(100 * slice).toFixed(1)}%  ${slice < 0 ? "cheaper" : "dearer"} on the session`);
+}
 
 // A path that is static BY THE SAME EVIDENCE but was moved onto the session keeps its
 // repeats above only because the session counter is one number, not a per-path log:
