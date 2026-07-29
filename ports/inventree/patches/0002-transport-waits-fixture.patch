@@ -1,0 +1,48 @@
+--- a/src/frontend/tests/baseFixtures.ts
++++ b/src/frontend/tests/baseFixtures.ts
+@@ -4,6 +4,7 @@
+ import * as path from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ import { type BrowserContext, test as baseTest } from '@playwright/test';
++import { installTransportWaits, recordForceBrowserRoutes } from 'tierless/playwright';
+ 
+ const frontendDir = path.resolve(
+   path.dirname(fileURLToPath(import.meta.url)),
+@@ -76,6 +77,21 @@
+   );
+ }
+ 
++// Transport-agnostic waits (tierless corpus run protocol, test patch — applied to BOTH
++// arms; docs/corpus.md test accommodations): the ported build carries /api over a session
++// socket, so no HTTP response fires for it and pui_printing's
++// `page.waitForResponse(r => r.url().includes('/api/label/print/'))` waits forever.
++// installTransportWaits patches waitForResponse/waitForRequest on this context's pages in
++// place — the suite's own predicate runs unchanged against a truthful crossing facade; on
++// the stock build every wait reduces to the original exactly. recordForceBrowserRoutes
++// keeps route() mocks interceptable. Their playwright (1.60) seals the client classes, so
++// this rides the suite's own fixture seam instead of the zero-touch config wrapper.
++// Idempotent per context.
++async function installTierlessWaits(context: BrowserContext) {
++  await installTransportWaits(context);
++  recordForceBrowserRoutes(context);
++}
++
+ export const test = baseTest.extend<{}, {}>({
+   // Wrap browser.newPage so contexts created via doCachedLogin also get coverage
+   browser: [
+@@ -86,6 +102,7 @@
+       ) => {
+         const page = await origNewPage(options);
+         await setupCoverageCollection(page.context());
++        await installTierlessWaits(page.context());
+         return page;
+       };
+       try {
+@@ -102,6 +119,7 @@
+ 
+   context: async ({ context }, use) => {
+     await setupCoverageCollection(context);
++    await installTierlessWaits(context);
+     await use(context);
+     await collectCoverageFromContext(context);
+   },

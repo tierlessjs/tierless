@@ -34,9 +34,10 @@ cp ports/inventree/env.sh "$WORK/env.sh"
 source "$WORK/env.sh"
 cd "$WORK/src"
 
-# 3. frontend deps; the ported arm additionally links the tierless package the patch imports
+# 3. frontend deps, plus the tierless link. BOTH arms need it: the port patch imports it
+# on the ported side, and the transport-waits TEST patch imports it on both.
 yarn --cwd src/frontend install --network-timeout 600000
-[ "$VARIANT" = inventree ] && yarn --cwd src/frontend add "tierless@link:$ROOT/packages/tierless"
+yarn --cwd src/frontend add "tierless@link:$ROOT/packages/tierless"
 
 # 4. database + demo dataset. Their CI clones the demo-dataset branch matching the target
 # branch; 1.4.x does not exist there yet, and setup_test falls back to main on its own.

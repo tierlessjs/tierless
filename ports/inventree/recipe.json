@@ -18,5 +18,5 @@
 		"codeload": null
 	},
 	"patches": ["patches/0001-tierless-axios.patch"],
-	"testPatches": []
+	"testPatches": ["patches/0002-transport-waits-fixture.patch"]
 }
