@@ -22,8 +22,8 @@ The port is one call to `tierlessAxios` at the end of `setApiDefaults()`
 (patches/0001-tierless-axios.patch), plus a `yarn add tierless@link:…` in the
 ported tree only.
 
-Three things in this app needed framework work first — each would have made the
-port measure nothing:
+Six framework gaps, each found by running the port and each fixed with a probe.
+The first three would have made the port measure nothing:
 
 - `api.defaults.withCredentials = true` pinned 100% of requests to the browser
   fallback. `crossCredentialed` crosses them instead; it is only sound behind a
@@ -34,6 +34,25 @@ port measure nothing:
 - Django CSRF: axios injects the XSRF header inside its **adapters**, so
   replacing the adapter dropped it and every mutating request would have 403'd.
   The adapter now applies axios's own rule against the readable cookie jar.
+
+The other three came out of live runs:
+
+- `awaitClaims: true`. Their login is `clearCsrfCookie(); await ensureCsrf();`
+  and posts credentials on the very next line, so the CSRF cookie has to be in
+  the jar when that GET resolves. The default fire-and-forget claim landed a beat
+  later; Django answered 403 and no test could log in.
+- `AxiosError.status` (axios ≥1.8) was missing from every error shape the
+  framework builds. Their password-change flow keys its entire success path off
+  `err.status === 401`.
+- `restResources` attached a body to GET crossings. XHR drops it; fetch REJECTS
+  the Request. Their form layer sends `data` on every submit, exports included,
+  so four export specs hung 90 s each.
+
+Plus one test accommodation, applied to both arms
+(patches/0002-transport-waits-fixture.patch): `pui_printing` waits on an HTTP
+response for `/api/label/print/`, which the ported build carries over the socket.
+Their playwright (1.60) seals the client classes, so `installTransportWaits`
+rides their own `baseFixtures` seam rather than the zero-touch config wrapper.
 
 ## Environment (this box)
 
