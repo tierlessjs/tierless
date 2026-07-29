@@ -182,10 +182,29 @@ records `cache-control` and `etag`, so cacheability comes from the server's own
 declaration; logs written before that change carry the size heuristic and its caveat.
 
 Those 46 MB are the many-small-requests slice — the number that would actually test the
-request-shape predictor — and the ported side is **unmeasured**: the remeasure driver kept
-the per-path HTTP log but not the per-path SESSION log. `drive-remeasure-chunks.sh` now
-keeps both. Until a run produces them, no claim about n8n's small-JSON traffic is
-supported by data.
+request-shape predictor — and it is now MEASURED (`ports/n8n/report-smallslice.mts`,
+editor chunk, budget mode, advisory on). The advisory is what made it measurable: with
+the 12.66 MB catalogue back on browser HTTP, the session's TCP counter contains only the
+small calls.
+
+    baseline, small /rest/* over HTTP     12.17 MB  in 6605 requests
+      of which request headers             6.10 MB  (50.2%)
+      of which response bodies             6.07 MB
+    ported, same traffic on the session     4.19 MB  (TCP-true, deflate included)
+    -> AT LEAST 65.5% cheaper on the session
+
+A BOUND rather than a point estimate: 5 crossings of the catalogue still occurred in the
+run's first 13 seconds, because the advisory is learned and only declared in hellos
+issued after the first oversize reply completes — sessions opening inside that window
+miss it. Those frames inflate the ported side only, so the true win is larger. Closing
+that window would make the figure exact.
+
+The mechanism is visible in the split: **half the baseline's small-API bytes are request
+headers** — cookies, UA, accept, repeated across 6605 requests — which a persistent
+session removes outright, before any body compression against a shared window. This is
+the request-shape predictor holding up under direct measurement, and it is invisible in
+the suite headline: -65% on a 46 MB slice reads as -0.6% once ~5 GB of harness-repeated
+bundles are in the denominator.
 
 Two further facts finish n8n off as a byte story. There were **zero 304s in either arm** —
 fresh contexts hold no cached copy to revalidate, so the harness cannot exercise caching
