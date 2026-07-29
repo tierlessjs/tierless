@@ -23,6 +23,27 @@ OUT="ports/inventree/results/$MODE"
 BRANCH=claude/tierless-port-generality-uwm1f9
 mkdir -p "$OUT"
 
+# PRISTINE PARITY. The arms have separate databases, so "same demo dataset" is an
+# assumption, not a fact — and it silently broke once: the ported tree's snapshot was
+# taken AFTER a suite run against it and carried that run's mutations (779 supplier parts
+# vs 778). Their pui_company spec asserts an exact count, so it failed on the ported arm
+# and passed on the baseline, which reads as a port defect and is not one.
+counts() {
+  python3 - "$1" <<'PY'
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+print(*(c.execute(f'select count(*) from {t}').fetchone()[0] for t in
+        ('part_part', 'part_supplierpart', 'build_build', 'stock_stockitem', 'order_purchaseorder', 'order_salesorder')))
+PY
+}
+a=$(counts ports/work/inventree/data/pristine/inventree.sqlite3)
+b=$(counts ports/work/inventree-baseline/data/pristine/inventree.sqlite3)
+[ "$a" = "$b" ] || { echo "!! the arms' pristine databases DISAGREE — refusing to measure
+   ported   $a
+   baseline $b
+   re-run \`invoke dev.setup-test -i\` in the odd one out and re-snapshot data/pristine"; exit 1; }
+echo "pristine parity OK ($a)"
+
 env_for() {
   case "$MODE" in
     truth) echo "TIERLESS_WIRE_TRUTH=1 TIERLESS_WIRE_BUDGET=1" ;;
