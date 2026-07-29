@@ -13,6 +13,14 @@
 #   bash ports/grafana/drive-budget-pair.sh
 set -uo pipefail
 cd "$(dirname "$0")/../.."
+
+# SINGLE-INSTANCE LOCK. Two copies of this driver ran concurrently against the same work
+# tree and the same grafana instance; both Playwright runs appended to the same
+# measure-truth.jsonl, producing 200 rows for 105 tests (every id twice, all retry=0) and
+# a wrecked pass rate as they fought over ports. Nothing detected it but the row count.
+# A measurement driver must be unable to race itself.
+exec 9>/tmp/tierless-grafana-budget.lock
+flock -n 9 || { echo "another drive-budget-pair.sh is already running — refusing to start"; exit 1; }
 SP=/tmp/claude-0/-home-user-tierless/7647f3ec-cdd4-5925-82f8-2bb4d6d44004/scratchpad
 OUT=ports/grafana/results/budget
 BRANCH=claude/tierless-port-generality-uwm1f9
