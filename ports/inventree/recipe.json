@@ -1,0 +1,22 @@
+{
+	"name": "inventree",
+	"repo": "inventree/InvenTree",
+	"sha": "6b237de54e4cbfd7f51daff8403c17869898d965",
+	"sources": [
+		{
+			"kind": "git",
+			"url": "https://github.com/inventree/InvenTree.git",
+			"ref": "1.4.3"
+		},
+		{
+			"kind": "codeload",
+			"zip": "https://codeload.github.com/inventree/InvenTree/zip/6b237de54e4cbfd7f51daff8403c17869898d965"
+		}
+	],
+	"treeHash": {
+		"git": "2aea293fa722d66f6af3c66f1e2aa8d45443d2bc22632ec16ea26d62f93bbae8",
+		"codeload": null
+	},
+	"patches": ["patches/0001-tierless-axios.patch"],
+	"testPatches": []
+}

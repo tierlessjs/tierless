@@ -1,0 +1,30 @@
+--- a/src/frontend/src/App.tsx
++++ b/src/frontend/src/App.tsx
+@@ -1,5 +1,6 @@
+ import { QueryClient } from '@tanstack/react-query';
+ import axios from 'axios';
++import { tierlessAxios } from 'tierless/adapt-auto';
+
+ import { ApiEndpoints, apiUrl } from '@lib/index';
+ import { frontendID, serviceName } from './defaults/defaults';
+@@ -25,6 +26,20 @@
+   axios.defaults.withXSRFToken = true;
+   axios.defaults.xsrfHeaderName = 'X-CSRFToken';
+   axios.defaults.xsrfCookieName = 'csrftoken';
++
++  // The tierless port — the whole thing (docs/corpus.md rung 3). `api` is the app's
++  // single API client: services, hooks and the whole interceptor chain sit above it and
++  // are untouched, and only the I/O bottom under them changes. Every same-origin request
++  // becomes one exec crossing on a single ws session to the gateway on <page-port>+100;
++  // browser-pinned configs (progress, blob, FormData bodies) fall through to axios's own
++  // adapter. Installed here rather than at `axios.create` so the crossing's exec is bound
++  // to the resolved API host; idempotent, so the host-switch path re-runs harmlessly.
++  //
++  // Both relaxations are load-bearing for this app and are why they exist: InvenTree sets
++  // `withCredentials` and a 5000 ms `timeout` on EVERY request, and each is pinned by
++  // default. The gateway runs with --cookie-authority, which is what makes the session
++  // cookie reproducible on the other tier; the deadline is enforced in the adapter.
++  tierlessAxios(axios, api, { crossCredentialed: true, crossTimeouts: true });
+ }
+
+ export const queryClient = new QueryClient({
