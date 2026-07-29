@@ -128,9 +128,28 @@ with its catalogue kept off the socket; blended with the catalogue the same slic
 -6.7%, which is a compression delta on one payload and must not be quoted as a
 request-shape result (`ports/report-marginal.mts` refuses that label automatically).
 
-Caveats that travel with these numbers: grafana's arms differed in pass count (93 vs 97),
-so its figures want a parity re-run; and n8n's -51% is a bound, since a few catalogue
-crossings still occurred before the browse advisory was learned.
+Caveats that travel with these numbers. n8n's -51% is a bound: a few catalogue crossings
+still beat the browse advisory's learning window, and they inflate the ported side only.
+
+Grafana's suite does not reach pass parity under the double-proxy budget instrumentation,
+so its SUITE-TOTAL row is not quotable. Its slice figure is, because it barely moves while
+the pass set does: **-81.4%** (97/93 passed) and **-83.9%** (85/72 passed, clean database)
+across two independent pairs. A ratio that survives a 13-test change in which tests ran is
+not an artifact of which tests ran.
+
+Two measurement defects were found and fixed while getting there, both invisible in the
+headline numbers:
+
+- Grafana's own `start-server` never resets `scripts/grafana-server/tmp/data`, so each arm
+  inherited the dashboards the previous arm's tests created — the same ported arm scored
+  97 passed on a clean database and 82 on a repeat. `ports/grafana/boot.mts` now wipes it
+  before every arm. Run 1's baseline ran second, so it was the dirty one.
+- Two copies of a driver ran concurrently against one work tree, both appending to one
+  measure file: 200 rows for 105 tests, every id twice at retry=0. `drive-budget-pair.sh`
+  now takes a single-instance lock.
+
+(Unrelated and benign: 118 rows for 105 ids in a clean run is Playwright re-running
+FAILED tests in a fresh worker after a crash and reporting them again at retry=0.)
 
 ## What a byte headline actually reports
 
