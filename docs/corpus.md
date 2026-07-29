@@ -98,6 +98,27 @@ about the page; each hand hunk carries a comment saying why. Failures that remai
 (e.g. a login provider whose container we don't run) fail identically in both arms and
 fall out of the report's pass-parity gate, listed with both statuses.
 
+## Reading a byte number (start here)
+
+One run produces three legitimate numbers, and they differ by 100x. They are not
+competing results — they are the SAME bytes over three denominators:
+
+    what you count                              baseline -> ported     n8n
+    1. everything the suite downloaded           6132 -> 6095 MB      -0.6%
+    2. minus repeats a warm browser cache serves  934 ->  873 MB      -6.6%
+    3. just the ordinary API calls               12.17 -> 5.94 MB      -51%
+
+(1) is mostly the app's JS bundles, re-downloaded for every test because Playwright gives
+each test a clean browser; a real user downloads them once. (2) still contains one 12 MB
+catalogue fetched hundreds of times. (3) is the API chatter that remains — the only part
+a transport choice can actually move.
+
+Quote (3) for what the transport does, (1) only with the caveat that the harness inflates
+it, and never (1) alone as "parity". And state the mechanism honestly: on n8n the ported
+arm is cheaper BOTH because it makes 53% fewer calls (its cache answers repeats) AND
+because each call is cheaper (no repeated request headers). It is not purely
+"socket beats HTTP".
+
 ## What a byte headline actually reports
 
 Two ports produced very different numbers on the same transport — vikunja cut suite IO,
