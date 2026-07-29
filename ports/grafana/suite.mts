@@ -17,12 +17,14 @@ import { rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { delayProxy, type WireCounter } from "../latency-proxy.mts";
+import { httpLogProxy } from "../http-log-proxy.mts";
 import { createServer } from "node:http";
 import { writeSuiteConfig } from "../pw-wrapper.mts";
 
 const VARIANT = process.argv.includes("--baseline") ? "grafana-baseline" : "grafana";
 const TRUTH = !!process.env.TIERLESS_WIRE_TRUTH;
 const RTT = Number(process.env.TIERLESS_RTT_MS || 0);
+const BUDGET = !!process.env.TIERLESS_WIRE_BUDGET;
 if (TRUTH && RTT) { console.error("pick one: TIERLESS_WIRE_TRUTH (bytes) or TIERLESS_RTT_MS (time)"); process.exit(2); }
 const SRC = fileURLToPath(new URL(`../work/${VARIANT}/src/`, import.meta.url));
 const OUT = fileURLToPath(new URL(`../work/${VARIANT}/measure${TRUTH ? "-truth" : ""}${RTT ? `-rtt${RTT}` : ""}.jsonl`, import.meta.url));
@@ -39,10 +41,26 @@ const PROJECTS = (process.env.TIERLESS_PROJECTS ||
 
 let pageUrl = "http://localhost:3001";
 const wireUrls: string[] = [];
+// TIERLESS_WIRE_BUDGET: per-path HTTP attribution + the gateway's per-path session log.
+// Without it a run yields only suite TOTALS, which cannot separate bundles a real
+// session downloads once from the API traffic a transport actually carries — the
+// distinction that turned n8n's -0.6% headline into a -66% many-small result
+// (docs/corpus.md, ports/report-marginal.mts). Chained INSIDE the counting relay so
+// the TCP total still covers everything the page sent.
+if (BUDGET && !TRUTH) { console.error("TIERLESS_WIRE_BUDGET composes with TIERLESS_WIRE_TRUTH=1 — set both"); process.exit(2); }
+if (BUDGET) {
+  const httpLog = fileURLToPath(new URL(`../work/${VARIANT}/wire-http.jsonl`, import.meta.url));
+  const sessLog = fileURLToPath(new URL(`../work/${VARIANT}/wire-session.jsonl`, import.meta.url));
+  rmSync(httpLog, { force: true });
+  rmSync(sessLog, { force: true });
+  httpLogProxy(33001, 3001, httpLog).unref();
+  process.env.TIERLESS_WIRE_LOG = sessLog;
+  console.log("wire budget: per-path HTTP log behind the relay, session log via TIERLESS_WIRE_LOG");
+}
 if (TRUTH) {
   // browser-facing origin through a counting relay; the gateway counts its own ws bytes
   const app: WireCounter = { toServer: 0, toClient: 0 };
-  delayProxy(23001, 3001, 0, app).unref();
+  delayProxy(23001, BUDGET ? 33001 : 3001, 0, app).unref();
   createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ apiOut: app.toServer, apiIn: app.toClient })); }).listen(14992, "127.0.0.1").unref();
   pageUrl = "http://127.0.0.1:23001";
   // the page now derives ws as page-port+100 = 23101 (the autoSession convention):
