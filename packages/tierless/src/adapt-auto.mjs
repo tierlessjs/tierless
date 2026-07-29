@@ -125,5 +125,7 @@ export function tierlessAxios(axios, instance, opts = {}) {
     instance.defaults.adapter = axiosAdapter({
         exec: sharedAuto.execFor(instance.defaults.baseURL || "/"),
         fallback: typeof XMLHttpRequest !== "undefined" && axios.getAdapter ? axios.getAdapter(["xhr", "http"]) : undefined,
+        crossCredentialed: opts.crossCredentialed,
+        crossTimeouts: opts.crossTimeouts,
     });
 }

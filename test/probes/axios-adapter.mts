@@ -80,6 +80,32 @@ check("cancelToken uses fallback adapter", fell);
 await adapter({ method: "get", baseURL: "http://x.test/api/v1", url: "/t0", timeout: 0, headers: {} });
 check("timeout 0 (axios default: none) still crosses", (seen!.args as [string])[0] === "/api/v1/t0", (seen!.args as [string])[0]);
 
+// --- the two opt-in relaxations (AxiosAdapterOpts): credentials and timeouts -------------
+// An app that sets either GLOBALLY on its api client (InvenTree: withCredentials = true,
+// timeout = 5000) would otherwise pin 100% of its traffic and cross nothing.
+canned = { status: 200, headers: {}, body: null };
+const relaxed = axiosAdapter({ exec: async (req) => { seen = req; return canned; }, fallback: async () => { fell = true; return "fallback-response"; }, crossCredentialed: true, crossTimeouts: true });
+fell = false;
+await relaxed({ method: "post", baseURL: "http://x.test/api/v1", url: "/thing", withCredentials: true, timeout: 5000, headers: {} });
+check("crossCredentialed + crossTimeouts: a credentialed, deadlined request crosses", !fell && (seen!.args as [string])[0] === "/api/v1/thing", String(fell) + " " + (seen!.args as [string])[0]);
+// each opt-in relaxes only its own rule
+fell = false;
+await axiosAdapter({ exec: async () => canned, fallback: async () => { fell = true; return "f"; }, crossCredentialed: true })({ method: "get", baseURL: "http://x.test/api/v1", url: "/t", timeout: 5000, headers: {} });
+check("crossCredentialed alone still pins on timeout", fell);
+fell = false;
+await axiosAdapter({ exec: async () => canned, fallback: async () => { fell = true; return "f"; }, crossTimeouts: true })({ method: "get", baseURL: "http://x.test/api/v1", url: "/t", withCredentials: true, headers: {} });
+check("crossTimeouts alone still pins on withCredentials", fell);
+// the deadline is really enforced, with axios's own ECONNABORTED shape
+const slow = axiosAdapter({ exec: () => new Promise(() => { /* never settles */ }), crossTimeouts: true });
+type Timed = Error & { code?: string; isAxiosError?: boolean };
+let timedOut: Timed | null = null;
+try { await slow({ method: "get", baseURL: "http://x.test/api/v1", url: "/slow", timeout: 30, headers: {} }); } catch (e) { timedOut = e as Timed; }
+check("a crossing past its deadline rejects with axios's ECONNABORTED", timedOut?.code === "ECONNABORTED" && timedOut?.isAxiosError === true && /timeout of 30ms/.test(timedOut?.message || ""), String(timedOut?.message));
+// and a crossing that beats the deadline is NOT held open by the timer
+const t0 = Date.now();
+await relaxed({ method: "get", baseURL: "http://x.test/api/v1", url: "/fast", timeout: 60_000, headers: {} });
+check("a crossing inside its deadline returns immediately (timer cleared)", Date.now() - t0 < 1000);
+
 // --- responseType text/document are browser-pinned (crossing parses by content-type) ------
 fell = false;
 await withFallback({ method: "get", baseURL: "http://x.test/api/v1", url: "/raw", responseType: "text", headers: {} });
@@ -107,6 +133,27 @@ check("URLSearchParams params serialize via toString", (seen!.args as [string])[
 canned = { status: 200, headers: {}, body: null };
 await adapter({ method: "get", baseURL: "http://x.test/api/v1", url: "/f", params: { a: 1 }, paramsSerializer: { serialize: () => "custom=1" }, headers: {} });
 check("config paramsSerializer wins", (seen!.args as [string])[0].endsWith("/f?custom=1"));
+
+// --- XSRF: axios sets it INSIDE its adapters, so ours has to (Django/Laravel CSRF) -------
+// Stubbed browser globals, matching the api's origin so nothing else in the adapter shifts.
+const env = globalThis as Record<string, unknown>;
+env.document = { cookie: "other=1; csrftoken=tok%20en; more=2" };
+env.location = { href: "http://x.test/app/", origin: "http://x.test" };
+canned = { status: 200, headers: {}, body: null };
+const xsrfCfg = { xsrfCookieName: "csrftoken", xsrfHeaderName: "X-CSRFToken" };
+const crossedHeaders = async (c: Record<string, unknown>): Promise<Record<string, string>> => {
+  await adapter({ method: "post", baseURL: "http://x.test/api/v1", url: "/p", data: {}, headers: {}, ...c });
+  return ((seen!.args as unknown[])[2] as { headers: Record<string, string> }).headers;
+};
+check("withXSRFToken true: the cookie rides as the configured header, url-decoded", (await crossedHeaders({ ...xsrfCfg, withXSRFToken: true }))["x-csrftoken"] === "tok en");
+check("withXSRFToken false: no header, like axios", (await crossedHeaders({ ...xsrfCfg, withXSRFToken: false }))["x-csrftoken"] === undefined);
+check("unset withXSRFToken: same-origin api still gets it (axios's default rule)", (await crossedHeaders(xsrfCfg))["x-csrftoken"] === "tok en");
+env.location = { href: "http://page.test/app/", origin: "http://page.test" };
+check("unset withXSRFToken: cross-origin api does NOT get it (axios's default rule)", (await crossedHeaders(xsrfCfg))["x-csrftoken"] === undefined);
+check("withXSRFToken true overrides the origin rule, like axios", (await crossedHeaders({ ...xsrfCfg, withXSRFToken: true }))["x-csrftoken"] === "tok en");
+env.document = { cookie: "other=1" };
+check("no csrf cookie: no header", (await crossedHeaders({ ...xsrfCfg, withXSRFToken: true }))["x-csrftoken"] === undefined);
+delete env.document; delete env.location;
 
 // --- crossHttpRequest: an ASYNC interceptor chain is awaited exactly once ----------------
 const { crossHttpRequest, httpPins } = await import("../../packages/tierless/src/adapt.mts");

@@ -1,4 +1,4 @@
-import { type AxiosishConfig } from "./adapt-axios.mjs";
+import { type AxiosAdapterOpts, type AxiosishConfig } from "./adapt-axios.mjs";
 import type { Exec } from "./types.mjs";
 export interface AutoSessionOpts {
     /** Explicit ws URL (overrides the page-derived convention; the localStorage override
@@ -61,5 +61,5 @@ interface AxiosInstanceLike {
  *  configs fall through to the app's own stock adapter via `axios.getAdapter`. Under
  *  SSR/Node this is a no-op — the stock adapter stays. Idempotent per instance; the
  *  first call's opts configure the shared session (one socket per page). */
-export declare function tierlessAxios(axios: AxiosModuleLike, instance: AxiosInstanceLike, opts?: AutoSessionOpts): void;
+export declare function tierlessAxios(axios: AxiosModuleLike, instance: AxiosInstanceLike, opts?: AutoSessionOpts & Pick<AxiosAdapterOpts, "crossCredentialed" | "crossTimeouts">): void;
 export {};

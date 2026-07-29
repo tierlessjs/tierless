@@ -26,7 +26,7 @@ import { configureTierless, sessionExec, sessionHello } from "./browser.mjs";
 import { cookieSessionAuth } from "./adapt-session-auth.mjs";
 import { conditionalCrossings } from "./adapt-cache.mjs";
 import { restResources } from "./adapt.mjs";
-import { axiosAdapter, type AxiosishConfig } from "./adapt-axios.mjs";
+import { axiosAdapter, type AxiosAdapterOpts, type AxiosishConfig } from "./adapt-axios.mjs";
 import { WS_PATH } from "./ws-path.mjs";
 import { matchesForceBrowser, type ForceBrowserDescriptor } from "./url-glob.mjs";
 import type { Exec, ResourceRequest } from "./types.mjs";
@@ -156,7 +156,7 @@ const INSTALLED = new WeakSet<object>();
  *  configs fall through to the app's own stock adapter via `axios.getAdapter`. Under
  *  SSR/Node this is a no-op — the stock adapter stays. Idempotent per instance; the
  *  first call's opts configure the shared session (one socket per page). */
-export function tierlessAxios(axios: AxiosModuleLike, instance: AxiosInstanceLike, opts: AutoSessionOpts = {}): void {
+export function tierlessAxios(axios: AxiosModuleLike, instance: AxiosInstanceLike, opts: AutoSessionOpts & Pick<AxiosAdapterOpts, "crossCredentialed" | "crossTimeouts"> = {}): void {
   if (typeof window === "undefined" || typeof location === "undefined") return;
   if (INSTALLED.has(instance)) return;
   INSTALLED.add(instance);
@@ -164,5 +164,7 @@ export function tierlessAxios(axios: AxiosModuleLike, instance: AxiosInstanceLik
   instance.defaults.adapter = axiosAdapter({
     exec: sharedAuto.execFor(instance.defaults.baseURL || "/"),
     fallback: typeof XMLHttpRequest !== "undefined" && axios.getAdapter ? axios.getAdapter(["xhr", "http"]) : undefined,
+    crossCredentialed: opts.crossCredentialed,
+    crossTimeouts: opts.crossTimeouts,
   });
 }

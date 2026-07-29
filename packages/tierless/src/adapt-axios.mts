@@ -32,6 +32,9 @@ export interface AxiosishConfig {
   onUploadProgress?: unknown;
   onDownloadProgress?: unknown;
   withCredentials?: boolean;
+  withXSRFToken?: boolean | ((config: AxiosishConfig) => boolean);
+  xsrfCookieName?: string;
+  xsrfHeaderName?: string;
   timeout?: number;
   signal?: unknown;
   cancelToken?: unknown;
@@ -44,6 +47,23 @@ export interface AxiosAdapterOpts {
   exec: Exec;
   /** Axios's own adapter, for browser-pinned configs (progress, blob). */
   fallback?: (config: AxiosishConfig) => Promise<unknown>;
+  /** Cross requests marked `withCredentials` instead of pinning them to the browser.
+   *  ONLY valid behind a `--cookie-authority` gateway, which holds the upgrade's cookie
+   *  and replays it upstream — that is what makes the jar reproducible on the other
+   *  tier. Off by default: without an authority a crossed credentialed request silently
+   *  loses its cookies and the app sees 401/403.
+   *
+   *  Needed by any cookie-auth app that sets the flag globally: InvenTree's
+   *  `api.defaults.withCredentials = true` pinned 100% of its traffic, so the port
+   *  would have measured a session that carried nothing. */
+  crossCredentialed?: boolean;
+  /** Cross requests that carry a `timeout` instead of pinning them, enforcing the
+   *  deadline here (the caller gets axios's own ECONNABORTED shape). Off by default
+   *  because the semantics are NOT identical: XHR aborts the request, while a crossing
+   *  that misses its deadline is abandoned by the caller and still completes upstream.
+   *  For an app whose api client sets a blanket default timeout — InvenTree sets
+   *  5000 ms — pinning on it would exclude every request. */
+  crossTimeouts?: boolean;
 }
 
 // AUTH CONTRACT: this adapter is for HEADER-authenticated APIs (bearer/API-key tokens the
@@ -83,19 +103,49 @@ export function serializeParams(params: Record<string, unknown>): string {
   return q.toString();
 }
 
-const pinned = (c: AxiosishConfig): boolean =>
+// `opts` relaxes two of these; see AxiosAdapterOpts for why each is pinned by default.
+const pinned = (c: AxiosishConfig, o: { crossCredentialed?: boolean; crossTimeouts?: boolean } = {}): boolean =>
   // text: axios must return the RAW string even for JSON-labeled responses, but the
   // crossing's exec parses by content-type; document: browser-specific decoding
   !!(c.onUploadProgress || c.onDownloadProgress || c.responseType === "blob" || c.responseType === "stream" || c.responseType === "arraybuffer" || c.responseType === "text" || c.responseType === "document"
-    || c.withCredentials   // cookie-jar auth (incl. HttpOnly) exists only in the browser — another tier can't reproduce it
-    || c.signal || c.cancelToken || (typeof c.timeout === "number" && c.timeout > 0)   // in-flight abort/timeout semantics don't cross the exec boundary — the adapter owns them, so these run stock
+    || (c.withCredentials && !o.crossCredentialed)   // cookie-jar auth (incl. HttpOnly) exists only in the browser — unless a cookie-authority gateway replays it
+    || c.signal || c.cancelToken || (typeof c.timeout === "number" && c.timeout > 0 && !o.crossTimeouts)   // in-flight abort/timeout semantics don't cross the exec boundary — the adapter owns them, so these run stock
     || (typeof FormData !== "undefined" && c.data instanceof FormData)
     || (typeof Blob !== "undefined" && c.data instanceof Blob)
     || (typeof ArrayBuffer !== "undefined" && (c.data instanceof ArrayBuffer || ArrayBuffer.isView(c.data))));   // binary bodies would JSON-serialize to {} on the crossing
 
-export function axiosAdapter({ exec, fallback }: AxiosAdapterOpts) {
+/** axios's own timeout rejection shape, so app code that inspects err.code still works. */
+const timeoutError = (c: AxiosishConfig): Error => {
+  const e = new Error(`timeout of ${c.timeout}ms exceeded`) as Error & { code?: string; config?: unknown; isAxiosError?: boolean };
+  e.code = "ECONNABORTED"; e.config = c; e.isAxiosError = true;
+  return e;
+};
+
+/** Race a crossing against the config's deadline. NOT identical to XHR's abort: the
+ *  upstream request is only ABANDONED — it still completes on the backend. */
+const withDeadline = async <T,>(p: Promise<T>, c: AxiosishConfig): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([p, new Promise<never>((_, rej) => { timer = setTimeout(() => rej(timeoutError(c)), c.timeout); })]);
+  } finally { clearTimeout(timer); }
+};
+
+/** axios sets the XSRF header inside its ADAPTERS (v1 resolveConfig.js), so replacing the
+ *  adapter silently drops it and every mutating request to a Django/Laravel-style backend
+ *  403s. Same rule as theirs: an explicit `withXSRFToken`, else same-origin-only, and the
+ *  value comes from the page's readable cookie jar (so a HttpOnly csrf cookie is out of
+ *  reach here exactly as it is for stock axios). */
+const xsrfHeader = (c: AxiosishConfig, url: URL): [string, string] | undefined => {
+  if (typeof document === "undefined" || !c.xsrfCookieName || !c.xsrfHeaderName) return undefined;
+  const want = typeof c.withXSRFToken === "function" ? c.withXSRFToken(c) : c.withXSRFToken;
+  if (want === false || (want === undefined && url.origin !== location.origin)) return undefined;
+  const m = new RegExp("(?:^|;\\s*)" + c.xsrfCookieName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "=([^;]*)").exec(document.cookie);
+  return m ? [c.xsrfHeaderName.toLowerCase(), decodeURIComponent(m[1])] : undefined;
+};
+
+export function axiosAdapter({ exec, fallback, crossCredentialed, crossTimeouts }: AxiosAdapterOpts) {
   return async function tierlessAxiosAdapter(config: AxiosishConfig): Promise<unknown> {
-    if (pinned(config)) {
+    if (pinned(config, { crossCredentialed, crossTimeouts })) {
       if (!fallback) throw new Error("tierless axios adapter: browser-pinned config (progress/blob) needs a fallback adapter");
       return fallback(config);
     }
@@ -142,15 +192,19 @@ export function axiosAdapter({ exec, fallback }: AxiosAdapterOpts) {
         ? btoa(String.fromCharCode(...new TextEncoder().encode(cred)))
         : Buffer.from(cred, "utf8").toString("base64"));
     }
+    const xsrf = xsrfHeader(config, joined);
+    if (xsrf) headers[xsrf[0]] = xsrf[1];
 
     // ORIGIN-RELATIVE on purpose: the api namespace is tier-owned — whoever executes the
     // request binds it to ITS OWN base (browser: restResources(origin); a session
     // gateway: its localhost backend). An absolute URL would weld the browser's origin
     // spelling (hostname, counting-relay port) into a request another tier executes.
-    const envelope = await exec({
+    const crossing = exec({
       op: "resource", tier: "server", name: "api." + method,
       args: [path, config.data === undefined ? undefined : config.data, { headers }],
-    }) as { status: number; headers: Record<string, string>; body: unknown };
+    }) as Promise<{ status: number; headers: Record<string, string>; body: unknown }>;
+    // a timeout only reached this far under crossTimeouts — pinned() rejected it otherwise
+    const envelope = typeof config.timeout === "number" && config.timeout > 0 ? await withDeadline(crossing, config) : await crossing;
 
     const response = {
       data: envelope.body,
