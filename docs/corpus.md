@@ -100,24 +100,37 @@ fall out of the report's pass-parity gate, listed with both statuses.
 
 ## Reading a byte number (start here)
 
-One run produces three legitimate numbers, and they differ by 100x. They are not
-competing results — they are the SAME bytes over three denominators:
+One run yields several legitimate numbers that differ by 100x. They are not competing
+results — they are the SAME bytes over different denominators, and only the last one
+says anything about the transport.
 
-    what you count                              baseline -> ported     n8n
-    1. everything the suite downloaded           6132 -> 6095 MB      -0.6%
-    2. minus repeats a warm browser cache serves  934 ->  873 MB      -6.6%
-    3. just the ordinary API calls               12.17 -> 5.94 MB      -51%
+    what you count                          n8n              grafana
+    1. everything the suite downloaded      -0.6%            +0.1%
+    2. the small API calls that recur        -51%             -81%
 
-(1) is mostly the app's JS bundles, re-downloaded for every test because Playwright gives
-each test a clean browser; a real user downloads them once. (2) still contains one 12 MB
-catalogue fetched hundreds of times. (3) is the API chatter that remains — the only part
-a transport choice can actually move.
+(1) is dominated by things the harness re-downloads because Playwright gives every test
+a clean browser: bundles, fonts, and on n8n a 12 MB node catalogue fetched ~510 times.
+A real user does not pay that repeatedly, and the response headers prove it rather than
+our inference — every one of those paths ships an ETag (bundles `public, max-age=0`,
+`/types/*.json` `no-cache, must-revalidate`, the catalogue etag-only), so a warm browser
+REVALIDATES and receives a 0-byte 304. The harness never does: fresh contexts hold no
+cached copy, so zero 304s appear in either arm and both pay full price for everything.
 
-Quote (3) for what the transport does, (1) only with the caveat that the harness inflates
-it, and never (1) alone as "parity". And state the mechanism honestly: on n8n the ported
-arm is cheaper BOTH because it makes 53% fewer calls (its cache answers repeats) AND
-because each call is cheaper (no repeated request headers). It is not purely
-"socket beats HTTP".
+(2) is what remains once those are modelled away — the traffic a real session actually
+re-fetches. On n8n that is ~46 MB of small `/rest/*`; on grafana ~22 MB of
+dashboard/plugin/settings JSON. This is the number to quote.
+
+Why the win differs so much between the two: **request shape**. A session deletes
+per-request overhead (half of n8n's small-API bytes are request headers, repeated across
+6605 requests) and compresses bodies against a shared window, so it wins big on many
+small responses (grafana, -81%) and much less on a few huge ones. n8n's -51% is measured
+with its catalogue kept off the socket; blended with the catalogue the same slice reads
+-6.7%, which is a compression delta on one payload and must not be quoted as a
+request-shape result (`ports/report-marginal.mts` refuses that label automatically).
+
+Caveats that travel with these numbers: grafana's arms differed in pass count (93 vs 97),
+so its figures want a parity re-run; and n8n's -51% is a bound, since a few catalogue
+crossings still occurred before the browse advisory was learned.
 
 ## What a byte headline actually reports
 
