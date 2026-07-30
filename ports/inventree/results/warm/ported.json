@@ -1,0 +1,42 @@
+{
+  "variant": "inventree",
+  "rounds": 4,
+  "routes": [
+    "/web/home",
+    "/web/part/category/index/parts",
+    "/web/stock/location/index/stock-items",
+    "/web/manufacturing/index/buildorders",
+    "/web/purchasing/index/purchaseorders",
+    "/web/sales/index/salesorders"
+  ],
+  "perRound": [
+    {
+      "round": 1,
+      "httpBytes": 1178697,
+      "httpRequests": 552,
+      "from304": 488,
+      "sessionBytes": 714895
+    },
+    {
+      "round": 2,
+      "httpBytes": 665596,
+      "httpRequests": 552,
+      "from304": 546,
+      "sessionBytes": 731011
+    },
+    {
+      "round": 3,
+      "httpBytes": 665417,
+      "httpRequests": 552,
+      "from304": 546,
+      "sessionBytes": 707776
+    },
+    {
+      "round": 4,
+      "httpBytes": 758738,
+      "httpRequests": 567,
+      "from304": 544,
+      "sessionBytes": 708400
+    }
+  ]
+}

@@ -109,3 +109,38 @@ mode. The default lane (vite dev on :5173) serves thousands of unbundled ES
 modules and would make byte measurement meaningless.
 
 Playwright browsers live in `/root/pw-browsers` here, not the default cache.
+
+## The warm-cache arm — what a returning user actually pays
+
+`warm-arm.mts` runs the configuration no suite arm can: ONE browser context, one
+login, the same six list routes walked round after round, so the HTTP cache warms
+exactly as a returning user's does. Suite arms give every test a fresh context,
+which systematically flatters the socket for anything a real browser would cache.
+
+Warm rounds (2–4), MB per round, same workload in every arm:
+
+| arm | total | HTTP | session |
+|---|---|---|---|
+| baseline | 1.75 | 1.75 | — |
+| ported | 1.41 (**−19%**) | 0.70 | 0.72 |
+| ported, `/api/icons/` delegated | 0.85 (**−51%**) | 0.73 | 0.12 |
+
+Two findings, and the second is the one that answers the routing question.
+
+**A warm cache does not deflate the API win.** Isolating the traffic that moved:
+the baseline spends ~1.03 MB/round on API over HTTP; the delegated arm spends
+0.12 MB/round on the socket. That is **−88% on the moved slice with a warm
+cache** — consistent with the cold-context slice figures (grafana −81%, this
+app's suite −83.2%), not an artifact of them.
+
+**One cacheable-static path was eating 83% of the session budget.** `/api/icons/`
+is `public, max-age=86400`. The baseline fetches it exactly ONCE across all 24
+navigations; the browser cache serves the rest for free. The port crossed it on
+every navigation — the freshness cache is per-page and each hard load is a new
+page — costing 0.60 of the 0.72 MB/round. Delegating it drops the session to
+0.12 MB and the total win from −19% to −51%.
+
+Caveats: one app, one workload, four rounds, single run. Delegation was triggered
+with the advisory's existing SIZE lever (`TIERLESS_BROWSE_OVER=500000`) as a
+stand-in for keying on `cache-control`; keying on cacheability would delegate
+this path and possibly others.
