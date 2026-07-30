@@ -318,7 +318,13 @@ export function restResources(baseUrl, { token, headers = {}, fetchImpl = fetch,
         // wrap keys its envelope cache on it and revalidates with If-None-Match — which
         // already forwards through reqOpts.headers above, and a 304 is a tiny envelope
         // (envelopeErrors mode), exactly HTTP's own revalidation shape on the socket.
-        r.headers.forEach((v, k) => { if (k === "content-type" || k === "etag" || k.startsWith("x-"))
+        // cache-control/expires/vary ride along for FRESHNESS (adapt-cache.mts): without them
+        // the browser side cannot see a max-age it is entitled to honor, and InvenTree's
+        // /api/icons/ (public, max-age=86400, no etag) re-crossed 401 times where a browser
+        // fetched it 164 — the transport was worse than the HTTP it replaced. `vary` is what
+        // makes a freshness hit safe: the entry is only reused for a request whose
+        // vary-named headers match.
+        r.headers.forEach((v, k) => { if (k === "content-type" || k === "etag" || k === "cache-control" || k === "expires" || k === "vary" || k.startsWith("x-"))
             hdrs[k] = v; });
         // NO SERDE WE DON'T NEED: when the caller signalled it takes raw text (handleExec —
         // the fetch arm, which ships the body in the frame's binary slot), the gateway hands

@@ -51,6 +51,10 @@ import { RAW_TEXT, SKIP_EXEC_LOG, pushExecLog } from "./transport.mjs";
  *  had the crossing's whole RTT to finish; a store that misses this window costs a
  *  cache miss, not a hang. (The WRITE path has no such budget — it has no await.) */
 const READ_BUDGET_MS = 1000;
+/** How many bytes of FRESH envelopes one page may hold in memory. A page cannot grow
+ *  this without bound; the least-recently-used entry goes first. Sized to hold a few
+ *  static catalogues (InvenTree's icon pack is 643 KB) and nothing like a data plane. */
+const MEM_BUDGET_BYTES = 8_000_000;
 /** The write fence (Web Locks). Held while envelope writes are in flight; the next page
  *  queues its index refresh behind it. */
 const LOCK = "tierless-envelopes";
@@ -137,6 +141,68 @@ const dbg = (ev, path) => {
 // SKIP_EXEC_LOG (the wire layer stays silent) and THIS wrap logs the one app-visible
 // entry: the envelope it returned, against the app's own request. The drift path
 // (evicted body) refetches with the UNMARKED original request, which logs itself.
+// ---------------------------------------------------------------- freshness ----------
+// The OTHER half of browser cache semantics, and the half revalidation cannot supply: a
+// response the server declared fresh is reused WITHOUT contacting it (RFC 9111 §4.2).
+// This is not a staleness heuristic — max-age is the origin's own explicit instruction,
+// and honoring it is exactly what fetch() does. Without it the transport is WORSE than
+// the HTTP it replaces: InvenTree's /api/icons/ is `public, max-age=86400` with no ETag,
+// so revalidation never engaged and the port re-crossed 643 KB 401 times where the stock
+// browser fetched it 164 (once per test, every within-test repeat served from memory).
+//
+// Deliberately PER-PAGE AND IN MEMORY, not persistent. Two reasons, both load-bearing:
+//   - it is where the entire measured penalty lives (the baseline's 1-per-test says the
+//     browser's own memory cache absorbed the repeats; we had nothing);
+//   - a persistent freshness entry would have to survive a change of login, and the
+//     identity that governs that is the cookie jar — which is httpOnly and invisible
+//     here. Within one page there is no such hazard. Cross-page freshness is a further
+//     win and needs that question answered first.
+// A hit is SYNCHRONOUS, so it costs strictly less than the cold path it replaces.
+const CC_NO_STORE = /(?:^|,)\s*no-(?:store|cache)\s*(?:,|$)/;
+const CC_MAX_AGE = /(?:^|,)\s*max-age\s*=\s*(\d+)/;
+/** Milliseconds this response may be reused without asking, per its own headers.
+ *  0 = not freshly cacheable (no directive, no-store/no-cache, or already expired). */
+const freshLifetime = (headers) => {
+    const cc = (headers?.["cache-control"] ?? "").toLowerCase();
+    if (CC_NO_STORE.test(cc))
+        return 0;
+    const m = CC_MAX_AGE.exec(cc);
+    if (m)
+        return Number(m[1]) * 1000;
+    if (cc)
+        return 0; // a directive that says nothing about age: no freshness
+    // Expires applies only in the absence of max-age, as HTTP specifies
+    const exp = headers?.expires ? Date.parse(headers.expires) : Number.NaN;
+    return Number.isNaN(exp) ? 0 : Math.max(0, exp - Date.now());
+};
+/** The request-side values of the headers a response's `Vary` names — what makes reuse
+ *  safe. A cached entry serves a later request only if this string matches. `*` never
+ *  matches (uncacheable by definition). `cookie` uses the readable jar: httpOnly
+ *  cookies are invisible, which is why this cache does not outlive the page. */
+const varyValues = (vary, reqHeaders) => {
+    if (!vary)
+        return "";
+    const names = vary.toLowerCase().split(",").map((n) => n.trim()).filter(Boolean);
+    if (names.includes("*"))
+        return null;
+    return names.map((n) => n + "=" + (n === "cookie"
+        ? (typeof document === "undefined" ? "" : document.cookie)
+        : (reqHeaders?.[n] ?? ""))).join(" ");
+};
+/** Charge an envelope against the memory budget. The raw JSON text is already at hand on
+ *  the fetch arm (transport.mts RAW_TEXT) — free, and the number that matters. Anything
+ *  else is measured once, on store, never on a hit. */
+const envelopeBytes = (env) => {
+    const raw = env[RAW_TEXT];
+    if (typeof raw === "string")
+        return raw.length;
+    try {
+        return JSON.stringify(env?.body ?? "").length;
+    }
+    catch {
+        return MEM_BUDGET_BYTES + 1;
+    } // unserializable: refuse to cache it
+};
 const presentAs = (req, env) => {
     const v = env;
     pushExecLog(req, v && typeof v.status === "number" ? v.status : undefined, v?.body, !!v && "body" in v, v?.headers);
@@ -187,17 +253,58 @@ export function conditionalCrossings({ store, fence } = {}) {
             .then(() => dbg("ok", path), (e) => dbg("fail:" + String(e).slice(0, 80), path)) // over quota etc: next use pays full price
             .finally(writeEnded);
     };
+    // this page's freshness cache (insertion order IS the LRU order — re-set on every hit)
+    const memo = new Map();
+    let memoBytes = 0;
+    const memoDrop = (k) => { const e = memo.get(k); if (e) {
+        memoBytes -= e.bytes;
+        memo.delete(k);
+    } };
+    const memoPut = (path, env, headers, reqHeaders, bytes) => {
+        const life = freshLifetime(headers);
+        if (!life)
+            return;
+        const values = varyValues(headers?.vary, reqHeaders);
+        if (values === null || bytes > MEM_BUDGET_BYTES)
+            return;
+        memoDrop(path);
+        memo.set(path, { exp: Date.now() + life, env, vary: headers?.vary, values, bytes });
+        memoBytes += bytes;
+        for (const k of memo.keys()) {
+            if (memoBytes <= MEM_BUDGET_BYTES)
+                break;
+            memoDrop(k);
+            dbg("fresh:evict", k);
+        }
+        dbg("fresh:store", path);
+    };
     const READ_MISS = Symbol("tierless-read-miss");
     return {
         wrap: (inner) => async (req) => {
             const r = req;
             const path = r.name === "api.get" ? String((r.args ?? [])[0] ?? "") : "";
+            const reqHeaders = (r.args ?? [])[2]?.headers;
+            // FRESHNESS FIRST, and synchronously: a live entry is reused with no crossing at
+            // all, which is what the browser cache does for the same response.
+            const hit = r.name === "api.get" ? memo.get(path) : undefined;
+            if (hit) {
+                if (hit.exp > Date.now() && hit.values === varyValues(hit.vary, reqHeaders)) {
+                    memo.delete(path);
+                    memo.set(path, hit); // LRU touch
+                    dbg("fresh:hit", path);
+                    presentAs(r, hit.env);
+                    return hit.env;
+                }
+                memoDrop(path); // expired, or the vary-named headers moved
+            }
             const etag = r.name === "api.get" ? etags.get(path) : undefined; // SYNC: a cold GET adds no work
             if (!etag) {
                 const env = await inner(req);
                 const fresh = r.name === "api.get" ? env?.headers?.etag : undefined;
                 if (env?.status === 200 && fresh)
                     persist("cold", path, fresh, env, env[RAW_TEXT]);
+                if (env?.status === 200 && r.name === "api.get")
+                    memoPut(path, env, env.headers, reqHeaders, envelopeBytes(env));
                 return env;
             }
             const bodyRead = s.body(path).catch(() => undefined); // CONCURRENT with the crossing — hides under the RTT
@@ -209,6 +316,8 @@ export function conditionalCrossings({ store, fence } = {}) {
                 const fresh = env?.headers?.etag;
                 if (env?.status === 200 && fresh && fresh !== etag)
                     persist("changed", path, fresh, env, env[RAW_TEXT]);
+                if (env?.status === 200)
+                    memoPut(path, env, env.headers, reqHeaders, envelopeBytes(env));
                 presentAs(r, env);
                 return env;
             }

@@ -375,6 +375,55 @@ check("…and the dead index entry stops attaching validators", again.status ===
   delete g.__TIERLESS_EXEC_LOG__; delete g.__tierlessExecLog;
 }
 
+// ---- FRESHNESS: max-age is honored without a crossing (RFC 9111 4.2) ----------------
+// The gap InvenTree exposed: /api/icons/ is `public, max-age=86400` with NO etag, so
+// revalidation never engaged and the port re-crossed 643 KB on every request where the
+// browser served its own memory cache. A crossing that never happens is the fix.
+{
+  let hits = 0;
+  const inner = async (): Promise<unknown> => { hits++; return { status: 200, headers: { "cache-control": "public, max-age=60", vary: "Accept, Cookie" }, body: { icons: 1 } }; };
+  const wrap = conditionalCrossings({ store: memoryStore() }).wrap(inner as never);
+  const get = (headers?: Record<string, string>): Promise<unknown> =>
+    wrap({ op: "res", tier: "server", name: "api.get", args: ["/api/icons/", undefined, { headers: headers ?? {} }] } as never);
+  const first = await get() as { body: { icons: number } };
+  const second = await get() as { body: { icons: number } };
+  check("a fresh response is reused with NO second crossing", hits === 1, `${hits} crossings`);
+  check("the reused envelope is the one the app got the first time", second.body.icons === first.body.icons);
+  // vary is load-bearing: a request whose vary-named header moved must NOT reuse it
+  await get({ accept: "text/csv" });
+  check("a vary-named header change forces a real crossing", hits === 2, `${hits} crossings`);
+  // and the no-store family is never held
+  let nsHits = 0;
+  const ns = conditionalCrossings({ store: memoryStore() }).wrap((async () => { nsHits++; return { status: 200, headers: { "cache-control": "no-store" }, body: { x: 1 } }; }) as never);
+  await ns({ op: "res", tier: "server", name: "api.get", args: ["/ns"] } as never);
+  await ns({ op: "res", tier: "server", name: "api.get", args: ["/ns"] } as never);
+  check("no-store is never reused", nsHits === 2, `${nsHits} crossings`);
+  // an expired entry falls back to the normal path, it does not serve stale
+  let exHits = 0;
+  const ex = conditionalCrossings({ store: memoryStore() }).wrap((async () => { exHits++; return { status: 200, headers: { "cache-control": "max-age=0" }, body: { x: 1 } }; }) as never);
+  await ex({ op: "res", tier: "server", name: "api.get", args: ["/ex"] } as never);
+  await ex({ op: "res", tier: "server", name: "api.get", args: ["/ex"] } as never);
+  check("max-age=0 is never reused", exHits === 2, `${exHits} crossings`);
+  // a POST to the same path is not a cache lookup
+  let pHits = 0;
+  const pw = conditionalCrossings({ store: memoryStore() }).wrap((async () => { pHits++; return { status: 200, headers: { "cache-control": "max-age=60" }, body: { x: 1 } }; }) as never);
+  await pw({ op: "res", tier: "server", name: "api.get", args: ["/m"] } as never);
+  await pw({ op: "res", tier: "server", name: "api.post", args: ["/m"] } as never);
+  check("only api.get consults freshness", pHits === 2, `${pHits} crossings`);
+}
+
+// a fresh hit must present to a harness as the stock 200 the app saw, like a 304 replay
+{
+  const g = globalThis as { __TIERLESS_EXEC_LOG__?: boolean; __tierlessExecLog?: Array<{ url?: string; status?: number }> };
+  g.__TIERLESS_EXEC_LOG__ = true; g.__tierlessExecLog = [];
+  const wrap = conditionalCrossings({ store: memoryStore() }).wrap((async () => ({ status: 200, headers: { "cache-control": "max-age=60" }, body: { f: 1 } })) as never);
+  await wrap({ op: "res", tier: "server", name: "api.get", args: ["/fresh"] } as never);
+  await wrap({ op: "res", tier: "server", name: "api.get", args: ["/fresh"] } as never);
+  const e = g.__tierlessExecLog!.filter((x) => x.url === "/fresh");
+  check("a fresh hit logs one app-visible 200 (harness waits still fire)", e.length === 1 && e[0].status === 200, JSON.stringify(e));
+  delete g.__TIERLESS_EXEC_LOG__; delete g.__tierlessExecLog;
+}
+
 const { pass, fail } = counts();
 console.log(fail === 0
   ? `\nOK — conditional crossings give session GETs the browser cache's own revalidation: validated replay on 304, full fetch on change, untouched otherwise — and storage is advisory: no crossing ever waits on a write, a wedged read costs one refetch, cross-page read-your-writes rides the write fence, and replays present to harnesses as the 200 the app saw (${pass} checks)`
