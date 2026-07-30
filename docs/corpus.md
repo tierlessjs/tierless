@@ -104,9 +104,9 @@ One run yields several legitimate numbers that differ by 100x. They are not comp
 results — they are the SAME bytes over different denominators, and only the last one
 says anything about the transport.
 
-    what you count                          n8n              grafana
-    1. everything the suite downloaded      -0.6%            +0.1%
-    2. the small API calls that recur        -51%             -81%
+    what you count                     n8n        grafana      inventree
+    1. everything the suite downloaded -0.6%      +0.1%        -17.4%
+    2. the small API calls that recur   -51%       -81%         -83.2%
 
 (1) is dominated by things the harness re-downloads because Playwright gives every test
 a clean browser: bundles, fonts, and on n8n a 12 MB node catalogue fetched ~510 times.
@@ -118,18 +118,30 @@ cached copy, so zero 304s appear in either arm and both pay full price for every
 
 (2) is what remains once those are modelled away — the traffic a real session actually
 re-fetches. On n8n that is ~46 MB of small `/rest/*`; on grafana ~22 MB of
-dashboard/plugin/settings JSON. This is the number to quote.
+dashboard/plugin/settings JSON; on inventree 171 MB across 572 paths, of which 106 MB is
+one `max-age=86400` icon catalogue that a real browser fetches once a day (excluding it,
+the slice is 79 MB baseline against at most 29 MB ported — a bound, since a shared deflate
+window makes per-path compressed bytes unobservable). This is the number to quote.
 
-Why the win differs so much between the two: **request shape**. A session deletes
+InvenTree is also why (2) is the row that matters even when (1) looks good: its -17.4%
+suite total is real but is mostly that same icon catalogue, not transport work.
+
+Why the win differs so much between them: **request shape**. A session deletes
 per-request overhead (half of n8n's small-API bytes are request headers, repeated across
 6605 requests) and compresses bodies against a shared window, so it wins big on many
-small responses (grafana, -81%) and much less on a few huge ones. n8n's -51% is measured
+small responses (grafana -81%, inventree -83.2% on traffic that is 100% small responses
+and 0% bulk — the cleanest case in the corpus) and much less on a few huge ones. n8n's -51% is measured
 with its catalogue kept off the socket; blended with the catalogue the same slice reads
 -6.7%, which is a compression delta on one payload and must not be quoted as a
 request-shape result (`ports/report-marginal.mts` refuses that label automatically).
 
 Caveats that travel with these numbers. n8n's -51% is a bound: a few catalogue crossings
 still beat the browse advisory's learning window, and they inflate the ported side only.
+
+InvenTree does not reach pass parity either — 143 baseline against 146 ported, the ported
+arm passing MORE — and its suite is flaky at 3-9 failures per run in both arms, with the
+failing sets disjoint between consecutive runs of the same arm. Its slice figure survives
+that the same way grafana's does; its suite total should be read with the caveat above.
 
 Grafana's suite does not reach pass parity under the double-proxy budget instrumentation,
 so its SUITE-TOTAL row is not quotable. Its slice figure is, because it barely moves while

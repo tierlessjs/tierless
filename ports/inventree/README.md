@@ -1,4 +1,37 @@
-# InvenTree — corpus app #6 (in progress)
+# InvenTree — corpus app #6
+
+## Results
+
+Read `docs/corpus.md` "Reading a byte number" first: the same bytes give three
+numbers 20x apart depending on the denominator.
+
+| | baseline | ported | delta |
+|---|---|---|---|
+| suite total | 822 MB | 679 MB | **−17.4%** |
+| marginal (what a warm cache still fetches) | 184 MB | 43 MB | **−76.9%** |
+| the many-small slice (traffic the port moved) | 171 MB | 29 MB | **−83.2%** |
+| wall clock, 136 pass-parity pairs | 20.7 min | 20.9 min | +1% |
+
+The third row is the one this app was picked for, and it is the cleanest in the
+corpus: the moved traffic is **100% small responses, 0% bulk**, across 572 paths.
+Grafana's small slice came in at −81%/−84% and n8n's at −51%; InvenTree at −83.2%
+is the prediction confirmed on a third app.
+
+Two things a reader has to be told:
+
+- **`/api/icons/` is 106 MB — 57% of the baseline's marginal bytes.** It is one
+  path, `public, max-age=86400`, byte-identical at 643 KB, fetched once per test
+  by both arms only because every Playwright context starts cold. A real browser
+  fetches it once a day. Excluding it, the slice is 79 MB baseline against at most
+  29 MB ported — still **≥−63%**, but that is a bound, not a measurement: the
+  session's shared deflate window makes per-path compressed bytes unobservable
+  (packages/tierless/src/server.mts), so the ported side cannot be split.
+- **Pass counts are 3 apart** (baseline 143, ported 146 — the ported arm passes
+  *more*), so the totals are not strictly comparable and `report-marginal.mts`
+  says so on every run. This suite is flaky at 3–9 failures per run in both arms;
+  the failing sets are disjoint between consecutive runs of the same arm.
+
+# InvenTree — the port
 
 Pinned: `inventree/InvenTree` 1.4.3 (`6b237de54e4cbfd7f51daff8403c17869898d965`).
 Django 5.2 backend + React 19 / Mantine frontend, Playwright suite in
