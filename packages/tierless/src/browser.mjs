@@ -62,16 +62,6 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
     // run-protocol globals) where per-frame costs matter. Review once more ports exist.
     const raw = makePeer(wsPort(ws));
     const base = globalThis.__TIERLESS_EXEC_BATCH__ ? batchExec(raw) : raw;
-    const ready = new Promise((res, rej) => {
-        onEvent(ws, "open", () => res());
-        onEvent(ws, "error", (e) => rej(new Error("tierless: websocket error" + (e && e.message ? ": " + e.message : ""))));
-    });
-    // requests gate on the socket, not the machines: an async function's body runs
-    // SYNCHRONOUSLY to its first suspension (a compiled method must too — a stub that
-    // defers the whole body behind the socket reorders reads the original performed on
-    // the call, e.g. a localStorage read racing test-driver writes), so runLocal starts
-    // pumping immediately and only a run's first CROSSING waits here for the session.
-    const peer = { ...base, request: async (payload, bin) => { await ready; return base.request(payload, bin); } };
     // the gateway's unsolicited "hello" (server sends it the instant the socket is up):
     // sealed auth blob + pre-fetched boot GETs. Registered synchronously here so the frame
     // is never missed; resolves { blob:null } if the socket settles with no hello (a gateway
@@ -83,6 +73,38 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
         return { obj: { type: "ok" } };
     });
     onEvent(ws, "open", () => setTimeout(() => helloResolve({ blob: null }), 5000)); // safety net: a gateway that never sends hello must not hang crossings — fall back to reseal. Long enough never to preempt a real hello (which arrives ~one latency after open).
+    // A DEAD SOCKET MUST FAIL, NOT HANG. The transport is an optimization; a build whose
+    // gateway is unreachable (CSP, firewall, gateway down) has to degrade to the browser's
+    // own fetch, and it cannot do that until something SETTLES. Two gaps did the opposite:
+    // a rejected upgrade or a CSP block can close WITHOUT ever firing `error`, so `ready`
+    // stayed pending forever; and `hello` only resolved on open, so the cookie-auth wrap's
+    // own gate hung too. Grafana measured the result — their e2e CSP blocked ws://:3101 and
+    // 94 of 101 tests sat until the suite timeout instead of running stock.
+    //
+    // `downReason` is what lets the caller degrade SAFELY, and the distinction is
+    // load-bearing: "never-opened" means nothing was ever sent, so ANY request may be
+    // reissued elsewhere; "dropped" means the socket lived, so a request in flight may
+    // already have been applied upstream and only an idempotent one may be retried.
+    let opened = false;
+    let downReason = "";
+    const ready = new Promise((res, rej) => {
+        onEvent(ws, "open", () => { opened = true; res(); });
+        const fail = (why) => {
+            if (!downReason)
+                downReason = opened ? "dropped" : "never-opened";
+            helloResolve({ blob: null }); // idempotent; unblocks the auth wrap's gate
+            rej(new Error("tierless: session socket " + why)); // a no-op once `ready` resolved
+        };
+        onEvent(ws, "error", (e) => fail("error" + (e && e.message ? ": " + e.message : "")));
+        onEvent(ws, "close", () => fail(opened ? "closed" : "closed before it opened"));
+    });
+    void ready.catch(() => { });
+    // requests gate on the socket, not the machines: an async function's body runs
+    // SYNCHRONOUSLY to its first suspension (a compiled method must too — a stub that
+    // defers the whole body behind the socket reorders reads the original performed on
+    // the call, e.g. a localStorage read racing test-driver writes), so runLocal starts
+    // pumping immediately and only a run's first CROSSING waits here for the session.
+    const peer = { ...base, request: async (payload, bin) => { await ready; return base.request(payload, bin); } };
     if (traceUrl) { // PROFILING run: batch records to the gateway
         // a lost batch must not go silent: an incomplete run that still delivers its `end`
         // record would teach buildProfile a FALSE trajectory. Failed batches requeue at the
@@ -151,6 +173,7 @@ traceUrl = globalThis.__TIERLESS_TRACE__, profileUrl = globalThis.__TIERLESS_PRO
     });
     return {
         ready,
+        downReason: () => downReason,
         hello,
         register,
         call: async (entry, args = [], module = "") => {
@@ -212,6 +235,13 @@ export function sessionExec() {
  *  connection (opens the socket), same as sessionExec — pair them behind one preconnect. */
 export function sessionHello() {
     return sharedConn().hello;
+}
+/** Why the shared session socket cannot serve a crossing, "" if it can (or if no
+ *  connection has been materialized). Read by adapt-auto to degrade to the browser's own
+ *  fetch — the transport is an optimization, so an unreachable gateway must cost stock
+ *  behavior, not the app. Never materializes a connection. */
+export function sessionDown() {
+    return shared ? shared.downReason() : "";
 }
 // ---- the actions surface (what the Vite plugin emits calls into) ----------------------
 let sharedOpts = {};

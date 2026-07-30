@@ -42,6 +42,7 @@ const backend = createServer((req, res) => {
   backendHits[path] = (backendHits[path] ?? 0) + 1;
   backendCookies[path] = String(req.headers.cookie ?? "");
   res.setHeader("content-type", "application/json");
+  if (path === "/api/hang") return;                          // never answers: a crossing to it is provably in flight
   if (path === "/api/heavy") {
     // an ETag'd mega-GET, the n8n community-node-types shape: If-None-Match -> 0-byte 304
     res.setHeader("etag", 'W/"heavy-v1"');
@@ -242,10 +243,52 @@ const page = await context.newPage();
   check("a socket from a disallowed origin is refused", outcome === "closed");
 }
 
+// 9. AN UNREACHABLE GATEWAY DEGRADES TO THE BROWSER'S OWN FETCH, it does not hang the app.
+// Grafana measured the alternative: their e2e CSP blocked ws://:3101 and 94 of 101 tests
+// sat until the suite timeout, because neither `ready` nor `hello` ever settled.
+{
+  const warnings: string[] = [];
+  const dead = await browser.newPage();
+  dead.on("console", (m: { type(): string; text(): string }) => { if (m.type() === "warning") warnings.push(m.text()); });
+  await dead.goto(pageUrl + "/?ws=" + encodeURIComponent("ws://127.0.0.1:1/__tierless"));   // nothing listens on :1
+  const boot = await dead.evaluate("window.firstCrossing") as { status?: number; err?: string };
+  check("the first crossing to a dead gateway SETTLES (no hang) — 404 from the page origin, not a timeout", boot.status === 404, JSON.stringify(boot));
+  const env = await dead.evaluate("window.cross('get', '/direct.json')") as { status?: number; body?: { direct?: boolean }; err?: string };
+  check("and a crossing is served by the browser's own fetch instead", env.status === 200 && env.body?.direct === true, JSON.stringify(env));
+  check("with ONE console warning naming the degradation", warnings.filter((w) => w.includes("falling back to the browser's own fetch")).length === 1, JSON.stringify(warnings));
+  await dead.close();
+}
+
+// 10. A socket that LIVED and then died is a DIFFERENT failure. A request issued after the
+// drop is known-unsent, so any method may go direct. The one that must NOT be reissued is
+// the one that was IN FLIGHT when the socket died — it may already have been applied
+// upstream, and a replayed POST would apply it twice. /api/hang never answers, so the
+// crossing below is provably still in flight when the gateway dies.
+{
+  const wsDrop = await spawnGateway([]);
+  const doomed = children[children.length - 1];
+  const page2 = await browser.newPage();
+  await page2.goto(pageUrl + "/?ws=" + encodeURIComponent(wsDrop));
+  const up = await page2.evaluate("window.cross('get', '/api/items')") as { status?: number };
+  check("the doomed arm's socket works while it is up", up.status === 200, JSON.stringify(up));
+
+  // parked on window WITHOUT awaiting: evaluate/evaluateHandle would await the promise
+  // here and the kill below would never run
+  await page2.evaluate("window.__inflight = window.cross('post', '/api/hang', { a: 1 }); 0");
+  await new Promise((r) => setTimeout(r, 300));              // the POST is out on the socket, unanswered
+  doomed.kill();
+  const outcome = await page2.evaluate("window.__inflight") as { status?: number; err?: string };
+  check("an IN-FLIGHT POST is not replayed when the socket dies — the app sees the error", !!outcome.err && outcome.status === undefined, JSON.stringify(outcome));
+
+  const g = await page2.evaluate("window.cross('get', '/direct.json')") as { status?: number; body?: { direct?: boolean } };
+  check("a request issued AFTER the drop was never sent, so it goes direct", g.status === 200 && g.body?.direct === true, JSON.stringify(g));
+  await page2.close();
+}
+
 await browser.close();
 for (const c of children) c.kill();
 backend.close(); pages.close();
 console.log(ok()
-  ? "PASS — one-call port surface, live: the CLI gateway served both arms, autoSession crossed same-origin REST with auto cookie authority (free for header-auth, sealed-blob for cookie-auth), the force-browser seam and recorded route mocks stayed interceptable, the browse advisory returned an oversize path to browser fetch, fetchAdapter split JSON/stock correctly, and the shaped-run override rerouted the socket"
+  ? "PASS — one-call port surface, live: the CLI gateway served both arms, autoSession crossed same-origin REST with auto cookie authority (free for header-auth, sealed-blob for cookie-auth), the force-browser seam and recorded route mocks stayed interceptable, the browse advisory returned an oversize path to browser fetch, fetchAdapter split JSON/stock correctly, the shaped-run override rerouted the socket, and an unreachable gateway degraded to the browser's own fetch instead of hanging (replaying idempotent requests only after a mid-session drop)"
   : "FAIL");
 process.exit(ok() ? 0 : 1);

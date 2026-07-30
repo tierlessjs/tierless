@@ -23,8 +23,15 @@ export interface ConnectOpts {
      *  method-boundary §6 rule — chains migrate, everything else keeps the fetch arm. */
     profileUrl?: string;
 }
+/** Why a session socket cannot serve a crossing, "" if it can. The two failures are NOT
+ *  interchangeable: "never-opened" means nothing was ever sent, so any request may be
+ *  reissued over plain HTTP; "dropped" means the socket lived, so an in-flight request may
+ *  already have been applied upstream and only an idempotent one may be retried. */
+export type DownReason = "" | "never-opened" | "dropped";
 export interface Connection {
     ready: Promise<void>;
+    /** Why crossings on this connection cannot succeed, "" while it is healthy. */
+    downReason(): DownReason;
     register(module: string, bundle: Bundle): Host;
     /** Start entry(...args) on the SERVER; bounces back here are serviced by `exec`. */
     call(entry: string, args?: unknown[], module?: string): Promise<unknown>;
@@ -63,6 +70,11 @@ export declare function sessionExec(): Exec;
  *  a reseal round trip, and the preboot map seeds its join buffer. Materializes the shared
  *  connection (opens the socket), same as sessionExec — pair them behind one preconnect. */
 export declare function sessionHello(): Promise<import("./adapt-session-auth.mjs").SessionHello>;
+/** Why the shared session socket cannot serve a crossing, "" if it can (or if no
+ *  connection has been materialized). Read by adapt-auto to degrade to the browser's own
+ *  fetch — the transport is an optimization, so an unreachable gateway must cost stock
+ *  behavior, not the app. Never materializes a connection. */
+export declare function sessionDown(): DownReason;
 export declare function configureTierless(opts: ConnectOpts & {
     preconnect?: boolean;
 }): void;

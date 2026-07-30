@@ -22,7 +22,7 @@
 //     lets the GATEWAY's hello declaration decide — a sealing gateway delivers the blob
 //     in the ws upgrade, a header-auth gateway declares sealed:false and the wrap
 //     no-ops. Costs header-auth apps nothing (attachTierless always sends a hello).
-import { configureTierless, sessionExec, sessionHello } from "./browser.mjs";
+import { configureTierless, sessionDown, sessionExec, sessionHello } from "./browser.mjs";
 import { cookieSessionAuth } from "./adapt-session-auth.mjs";
 import { conditionalCrossings } from "./adapt-cache.mjs";
 import { restResources } from "./adapt.mjs";
@@ -119,6 +119,40 @@ export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "ti
   // have done for these requests. conditional:false is the measurement ablation.
   const session: Exec = conditional ? conditionalCrossings().wrap(bare) : bare;
 
+  // THE TRANSPORT IS AN OPTIMIZATION, SO ITS FAILURE MUST COST STOCK BEHAVIOR, NOT THE
+  // APP. A build whose gateway is unreachable — CSP, firewall, gateway down — runs on the
+  // browser's own fetch instead. Grafana measured what the alternative costs: their e2e
+  // CSP blocked ws://:3101 and 94 of 101 tests sat until the suite timeout.
+  //
+  // WHAT MAY BE REISSUED IS NOT THE SAME IN BOTH FAILURES (browser.mts DownReason).
+  // "never-opened": nothing was ever sent, so every request may go direct. "dropped": the
+  // socket lived, so a request that was in flight may ALREADY have been applied upstream —
+  // reissuing a POST would double-apply it, so only idempotent requests are retried and
+  // everything else surfaces the error the app would have seen from a failed fetch.
+  let warned = false;
+  const degrade = (why: string): void => {
+    if (warned) return;
+    warned = true;
+    console.warn(`tierless: session socket unavailable (${why}) — falling back to the browser's own fetch (stock behavior)`);
+  };
+  const IDEMPOTENT = /^api\.(get|head|options)$/;
+  const withFallback = (direct: Exec): Exec => async (req) => {
+    // ALREADY known dead: this request has not been sent anywhere, so any method may go
+    // direct — it is indistinguishable from an app that was never ported.
+    if (sessionDown()) { degrade(sessionDown()); return direct(req); }
+    try {
+      return await session(req);
+    } catch (err) {
+      // It FAILED while we thought the socket was live, which is the ambiguous case: the
+      // request may have reached the gateway and been applied before the reply was lost.
+      // Reissuing a GET is free; reissuing a POST could double-apply it, so that error
+      // surfaces exactly as a failed fetch would and the app decides.
+      const why = sessionDown();
+      if (why === "never-opened" || (why === "dropped" && IDEMPOTENT.test((req as ResourceRequest).name))) { degrade(why); return direct(req); }
+      throw err;                                             // healthy socket, or an unsafe replay: the app's own error
+    }
+  };
+
   const crosses = cross ?? ((origin: string) => origin === location.origin);
   const byOrigin = new Map<string, Exec>();
   const execFor = (baseUrl = "/"): Exec => {
@@ -126,7 +160,8 @@ export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "ti
     let e = byOrigin.get(origin);
     if (!e) {
       const direct = restResources(origin, { envelopeErrors: true });
-      e = crosses(origin) ? (req) => (forced(req, origin) ? direct(req) : session(req)) : direct;
+      const crossed = withFallback(direct);
+      e = crosses(origin) ? (req) => (forced(req, origin) ? direct(req) : crossed(req)) : direct;
       byOrigin.set(origin, e);
     }
     return e;
