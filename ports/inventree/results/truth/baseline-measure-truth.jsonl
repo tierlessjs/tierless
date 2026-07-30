@@ -1,0 +1,161 @@
+{"id":"pages/pui_build.spec.ts:18 › Build - Index","status":"passed","retry":0,"durationMs":6626,"wireApiOut":93169,"wireApiIn":4675512,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_build.spec.ts:30 › Build Order - Basic Tests","status":"passed","retry":0,"durationMs":18992,"wireApiOut":184036,"wireApiIn":7617186,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_build.spec.ts:124 › Build Order - Tags","status":"passed","retry":0,"durationMs":9137,"wireApiOut":128074,"wireApiIn":5088131,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_build.spec.ts:169 › Build Order - Reference","status":"timedOut","retry":0,"durationMs":90002,"wireApiOut":102563,"wireApiIn":4670293,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_build.spec.ts:169 › Build Order - Reference","status":"passed","retry":1,"durationMs":8688,"wireApiOut":191035,"wireApiIn":5086665,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_build.spec.ts:212 › Build Order - Calendar","status":"passed","retry":0,"durationMs":9234,"wireApiOut":153540,"wireApiIn":4814035,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_build.spec.ts:237 › Build Order - Edit","status":"passed","retry":0,"durationMs":7566,"wireApiOut":177764,"wireApiIn":4673827,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_build.spec.ts:264 › Build Order - Build Outputs","status":"passed","retry":0,"durationMs":18620,"wireApiOut":218589,"wireApiIn":6674121,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_build.spec.ts:403 › Build Order - Allocation","status":"passed","retry":0,"durationMs":14010,"wireApiOut":283984,"wireApiIn":5299885,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_build.spec.ts:521 › Build Order - Auto Allocate Tracked","status":"passed","retry":0,"durationMs":9140,"wireApiOut":121181,"wireApiIn":4553251,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_build.spec.ts:562 › Build Order - Consume Stock","status":"passed","retry":0,"durationMs":16060,"wireApiOut":152500,"wireApiIn":4800602,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_build.spec.ts:633 › Build Order - Tracked Outputs","status":"passed","retry":0,"durationMs":16136,"wireApiOut":142110,"wireApiIn":4669187,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_build.spec.ts:734 › Build Order - Filters","status":"passed","retry":0,"durationMs":15270,"wireApiOut":197509,"wireApiIn":5350334,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_build.spec.ts:771 › Build Order - Duplicate","status":"passed","retry":0,"durationMs":11033,"wireApiOut":207692,"wireApiIn":4778493,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_build.spec.ts:827 › Build Order - External","status":"passed","retry":0,"durationMs":15614,"wireApiOut":258454,"wireApiIn":5643598,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_build.spec.ts:878 › Build Order - BOM Quantity","status":"passed","retry":0,"durationMs":11836,"wireApiOut":140889,"wireApiIn":5192170,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_company.spec.ts:14 › Company - Basic Tests","status":"passed","retry":0,"durationMs":10931,"wireApiOut":201515,"wireApiIn":5359287,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_company.spec.ts:59 › Company - Parameters","status":"passed","retry":0,"durationMs":4838,"wireApiOut":100928,"wireApiIn":4740809,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_company.spec.ts:76 › Company - Supplier Parts","status":"passed","retry":0,"durationMs":9366,"wireApiOut":115823,"wireApiIn":5070167,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_core.spec.ts:5 › Core User/Group/Contact","status":"passed","retry":0,"durationMs":8658,"wireApiOut":171703,"wireApiIn":4496890,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_dashboard.spec.ts:14 › Dashboard - Basic","status":"passed","retry":0,"durationMs":5535,"wireApiOut":81263,"wireApiIn":4242877,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_dashboard.spec.ts:50 › Dashboard - Stocktake","status":"passed","retry":0,"durationMs":4716,"wireApiOut":77924,"wireApiIn":4243823,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_dashboard.spec.ts:72 › Dashboard - Plugins","status":"passed","retry":0,"durationMs":5630,"wireApiOut":75450,"wireApiIn":4237223,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_dashboard.spec.ts:101 › Dashboard - Preserve widget sizes","status":"passed","retry":0,"durationMs":8567,"wireApiOut":151693,"wireApiIn":4382899,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:23 › Parts - Tabs","status":"passed","retry":0,"durationMs":17876,"wireApiOut":317695,"wireApiIn":7466395,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:70 › Parts - Image Selection","status":"passed","retry":0,"durationMs":7222,"wireApiOut":139389,"wireApiIn":7288527,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:108 › Parts - Subscriptions","status":"passed","retry":0,"durationMs":7524,"wireApiOut":133714,"wireApiIn":5085687,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:139 › Parts - Manufacturer Parts","status":"passed","retry":0,"durationMs":5897,"wireApiOut":127306,"wireApiIn":5406219,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:152 › Parts - Supplier Parts","status":"passed","retry":0,"durationMs":6014,"wireApiOut":130046,"wireApiIn":5093274,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:163 › Parts - BOM","status":"passed","retry":0,"durationMs":23791,"wireApiOut":355844,"wireApiIn":6220316,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:287 › Parts - BOM Validation","status":"passed","retry":0,"durationMs":9838,"wireApiOut":126469,"wireApiIn":5218452,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:331 › Parts - BOM Comparison","status":"passed","retry":0,"durationMs":10564,"wireApiOut":237766,"wireApiIn":5501882,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:364 › Parts - Used In","status":"passed","retry":0,"durationMs":7651,"wireApiOut":116282,"wireApiIn":5076116,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:392 › Parts - Editing","status":"passed","retry":0,"durationMs":6628,"wireApiOut":120994,"wireApiIn":5026004,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:431 › Parts - Locking","status":"passed","retry":0,"durationMs":8697,"wireApiOut":230029,"wireApiIn":5627264,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:472 › Parts - Details","status":"passed","retry":0,"durationMs":4464,"wireApiOut":108721,"wireApiIn":4902900,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:498 › Parts - Requirements","status":"passed","retry":0,"durationMs":13402,"wireApiOut":438571,"wireApiIn":5465973,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:543 › Parts - Allocations","status":"passed","retry":0,"durationMs":11454,"wireApiOut":234154,"wireApiIn":5564568,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:606 › Parts - Pricing (Nothing, BOM)","status":"passed","retry":0,"durationMs":8690,"wireApiOut":232184,"wireApiIn":5575035,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:661 › Parts - Pricing (Supplier)","status":"passed","retry":0,"durationMs":5930,"wireApiOut":135144,"wireApiIn":5084436,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:684 › Parts - Pricing (Variant)","status":"passed","retry":0,"durationMs":6085,"wireApiOut":207522,"wireApiIn":5301738,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:706 › Parts - Pricing (Internal)","status":"passed","retry":0,"durationMs":6233,"wireApiOut":119298,"wireApiIn":5117350,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:729 › Parts - Pricing (Purchase)","status":"passed","retry":0,"durationMs":5050,"wireApiOut":110806,"wireApiIn":5004395,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:749 › Parts - Attachments","status":"passed","retry":0,"durationMs":5911,"wireApiOut":113642,"wireApiIn":4938247,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:775 › Parts - Parameters by Category","status":"passed","retry":0,"durationMs":11143,"wireApiOut":287332,"wireApiIn":5063276,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:827 › Parts - Parameters","status":"passed","retry":0,"durationMs":9694,"wireApiOut":132834,"wireApiIn":5078661,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:927 › Parts - Parameter Filtering","status":"passed","retry":0,"durationMs":7774,"wireApiOut":117954,"wireApiIn":4717417,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:957 › Parts - Test Results","status":"passed","retry":0,"durationMs":5398,"wireApiOut":112419,"wireApiIn":5025120,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:966 › Parts - Notes","status":"passed","retry":0,"durationMs":19041,"wireApiOut":123544,"wireApiIn":5336061,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:986 › Parts - 404","status":"passed","retry":0,"durationMs":3679,"wireApiOut":102198,"wireApiIn":4890454,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:994 › Parts - Revisions","status":"passed","retry":0,"durationMs":5662,"wireApiOut":120170,"wireApiIn":4943175,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:1016 › Parts - Bulk Edit","status":"passed","retry":0,"durationMs":6435,"wireApiOut":106522,"wireApiIn":4503364,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:1035 › Parts - Duplicate","status":"passed","retry":0,"durationMs":5933,"wireApiOut":116048,"wireApiIn":5005420,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_part.spec.ts:1050 › Parts - Import supplier part","status":"passed","retry":0,"durationMs":22045,"wireApiOut":218169,"wireApiIn":4730649,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_purchasing.spec.ts:21 › Purchasing - Index","status":"passed","retry":0,"durationMs":15841,"wireApiOut":176298,"wireApiIn":6344343,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_purchasing.spec.ts:86 › Purchasing - Parameters","status":"passed","retry":0,"durationMs":9737,"wireApiOut":110668,"wireApiIn":4378070,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_purchasing.spec.ts:151 › Purchasing - Manufacturer Parts","status":"passed","retry":0,"durationMs":10469,"wireApiOut":126378,"wireApiIn":4890000,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_purchasing.spec.ts:175 › Purchase Orders - General","status":"passed","retry":0,"durationMs":12912,"wireApiOut":210294,"wireApiIn":6941402,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_purchasing.spec.ts:232 › Purchase Orders - Table","status":"passed","retry":0,"durationMs":9264,"wireApiOut":125243,"wireApiIn":4899084,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_purchasing.spec.ts:263 › Purchase Orders - Calendar","status":"passed","retry":0,"durationMs":6370,"wireApiOut":103739,"wireApiIn":4722486,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_purchasing.spec.ts:288 › Purchase Orders - Barcodes","status":"passed","retry":0,"durationMs":13039,"wireApiOut":303688,"wireApiIn":5040185,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_purchasing.spec.ts:348 › Purchase Orders - Filters","status":"passed","retry":0,"durationMs":5479,"wireApiOut":104646,"wireApiIn":4725500,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_purchasing.spec.ts:377 › Purchase Orders - Price Breaks","status":"passed","retry":0,"durationMs":7400,"wireApiOut":98416,"wireApiIn":4505028,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_purchasing.spec.ts:415 › Purchase Orders - Order Parts","status":"passed","retry":0,"durationMs":18553,"wireApiOut":280022,"wireApiIn":6202727,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_purchasing.spec.ts:496 › Purchase Orders - Receive Items","status":"passed","retry":0,"durationMs":15885,"wireApiOut":251490,"wireApiIn":5439703,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_purchasing.spec.ts:590 › Purchase Orders - Receive Virtual Items","status":"timedOut","retry":0,"durationMs":90001,"wireApiOut":175065,"wireApiIn":4420846,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_purchasing.spec.ts:590 › Purchase Orders - Receive Virtual Items","status":"passed","retry":1,"durationMs":6513,"wireApiOut":111625,"wireApiIn":4463545,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_purchasing.spec.ts:625 › Purchase Orders - Duplicate","status":"passed","retry":0,"durationMs":4582,"wireApiOut":101026,"wireApiIn":4354363,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_return.spec.ts:5 › Return Orders - Receive Items","status":"passed","retry":0,"durationMs":6565,"wireApiOut":112758,"wireApiIn":4760476,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_sales.spec.ts:16 › Sales Orders - Tabs","status":"passed","retry":0,"durationMs":15552,"wireApiOut":197949,"wireApiIn":5946430,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_sales.spec.ts:90 › Sales Orders - Basic Tests","status":"passed","retry":0,"durationMs":8967,"wireApiOut":119960,"wireApiIn":4931603,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_sales.spec.ts:131 › Sales Orders - Auto Allocate","status":"passed","retry":0,"durationMs":9283,"wireApiOut":120057,"wireApiIn":4452819,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_sales.spec.ts:167 › Sales Orders - Shipments","status":"passed","retry":0,"durationMs":16985,"wireApiOut":174052,"wireApiIn":5708924,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_sales.spec.ts:280 › Sales Orders - Shipments - Tags","status":"passed","retry":0,"durationMs":6799,"wireApiOut":108500,"wireApiIn":4659617,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_sales.spec.ts:303 › Sales Orders - Complete Shipment","status":"passed","retry":0,"durationMs":16402,"wireApiOut":259696,"wireApiIn":5534305,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_sales.spec.ts:373 › Sales Orders - Duplicate","status":"passed","retry":0,"durationMs":10320,"wireApiOut":131590,"wireApiIn":4579080,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_sales.spec.ts:433 › Sales Orders - Price Breaks","status":"passed","retry":0,"durationMs":7122,"wireApiOut":105225,"wireApiIn":4497309,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_scan.spec.ts:13 › Barcode Scanning - Dialog","status":"passed","retry":0,"durationMs":6543,"wireApiOut":124729,"wireApiIn":5085682,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_scan.spec.ts:36 › Barcode Scanning - Basic","status":"passed","retry":0,"durationMs":4969,"wireApiOut":76875,"wireApiIn":4261309,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_scan.spec.ts:57 › Barcode Scanning - Part","status":"passed","retry":0,"durationMs":4231,"wireApiOut":69253,"wireApiIn":4110996,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_scan.spec.ts:67 › Barcode Scanning - Stockitem","status":"passed","retry":0,"durationMs":3705,"wireApiOut":67772,"wireApiIn":4110208,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_scan.spec.ts:77 › Barcode Scanning - StockLocation","status":"passed","retry":0,"durationMs":3544,"wireApiOut":68542,"wireApiIn":4106353,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_scan.spec.ts:90 › Barcode Scanning - SupplierPart","status":"passed","retry":0,"durationMs":3525,"wireApiOut":67816,"wireApiIn":4105830,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_scan.spec.ts:100 › Barcode Scanning - PurchaseOrder","status":"passed","retry":0,"durationMs":3611,"wireApiOut":67041,"wireApiIn":4106935,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_scan.spec.ts:113 › Barcode Scanning - SalesOrder","status":"passed","retry":0,"durationMs":3462,"wireApiOut":68555,"wireApiIn":4107441,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_scan.spec.ts:124 › Barcode Scanning - Build","status":"passed","retry":0,"durationMs":3384,"wireApiOut":67755,"wireApiIn":4112640,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_scan.spec.ts:135 › Barcode Scanning - Forms","status":"passed","retry":0,"durationMs":9672,"wireApiOut":200606,"wireApiIn":5005355,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:15 › Stock - Basic Tests","status":"passed","retry":0,"durationMs":16124,"wireApiOut":379471,"wireApiIn":6244807,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:60 › Stock - Location Tree","status":"passed","retry":0,"durationMs":8570,"wireApiOut":203910,"wireApiIn":4843308,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:93 › Stock - Location Delete","status":"passed","retry":0,"durationMs":7857,"wireApiOut":131923,"wireApiIn":4819588,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:150 › Stock - Filters","status":"passed","retry":0,"durationMs":10097,"wireApiOut":113665,"wireApiIn":4897076,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:202 › Stock - Serial Numbers","status":"passed","retry":0,"durationMs":9049,"wireApiOut":129253,"wireApiIn":5239803,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:268 › Stock - Serial Navigation","status":"passed","retry":0,"durationMs":7318,"wireApiOut":141425,"wireApiIn":5131898,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:294 › Stock - Serialize","status":"passed","retry":0,"durationMs":5026,"wireApiOut":105926,"wireApiIn":4393069,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:335 › Stock - Stock Actions","status":"timedOut","retry":0,"durationMs":90003,"wireApiOut":177000,"wireApiIn":5014639,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:335 › Stock - Stock Actions","status":"timedOut","retry":1,"durationMs":90004,"wireApiOut":149359,"wireApiIn":4994163,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:429 › Stock - Convert","status":"passed","retry":0,"durationMs":5811,"wireApiOut":106475,"wireApiIn":4402090,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:461 › Stock - Return Items","status":"passed","retry":0,"durationMs":10255,"wireApiOut":207575,"wireApiIn":4697084,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:495 › Stock - Tracking","status":"passed","retry":0,"durationMs":8579,"wireApiOut":147161,"wireApiIn":5246850,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:556 › Stock - Location","status":"passed","retry":0,"durationMs":5335,"wireApiOut":104973,"wireApiIn":4744121,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:587 › Transfer Orders - General","status":"passed","retry":0,"durationMs":8291,"wireApiOut":126103,"wireApiIn":5402550,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:632 › Transfer Order - Reference","status":"passed","retry":0,"durationMs":5258,"wireApiOut":112866,"wireApiIn":4989350,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:681 › Transfer Order - Calendar","status":"passed","retry":0,"durationMs":8098,"wireApiOut":164600,"wireApiIn":4888948,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:696 › Transfer Order - Edit","status":"passed","retry":0,"durationMs":6772,"wireApiOut":165120,"wireApiIn":4624614,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:723 › Transfer Order - Allocate and Transfer","status":"passed","retry":0,"durationMs":13023,"wireApiOut":196443,"wireApiIn":4762460,"wireWsIn":0,"wireWsOut":0}
+{"id":"pages/pui_stock.spec.ts:771 › Transfer Orders - Duplicate","status":"passed","retry":0,"durationMs":4758,"wireApiOut":104186,"wireApiIn":4366304,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_exporting.spec.ts:16 › Exporting - Orders","status":"passed","retry":0,"durationMs":16166,"wireApiOut":295703,"wireApiIn":5524592,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_exporting.spec.ts:74 › Exporting - BOM","status":"passed","retry":0,"durationMs":16611,"wireApiOut":214110,"wireApiIn":5719719,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_forms.spec.ts:9 › Forms - Hover","status":"timedOut","retry":0,"durationMs":90004,"wireApiOut":120555,"wireApiIn":4740056,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_forms.spec.ts:9 › Forms - Hover","status":"passed","retry":1,"durationMs":6307,"wireApiOut":101837,"wireApiIn":4719608,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_forms.spec.ts:42 › Forms - Stock Item Validation","status":"passed","retry":0,"durationMs":10132,"wireApiOut":145257,"wireApiIn":5468184,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_forms.spec.ts:117 › Forms - Supplier Validation","status":"passed","retry":0,"durationMs":8497,"wireApiOut":206247,"wireApiIn":5053563,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_forms.spec.ts:172 › Forms - Keep form open option","status":"passed","retry":0,"durationMs":4728,"wireApiOut":99209,"wireApiIn":4573388,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_general.spec.ts:9 › General - Admin Button","status":"passed","retry":0,"durationMs":4535,"wireApiOut":113545,"wireApiIn":5191383,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_general.spec.ts:24 › General - Search","status":"passed","retry":0,"durationMs":8099,"wireApiOut":116257,"wireApiIn":4845365,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_importing.spec.ts:5 › Importing - Admin Center","status":"passed","retry":0,"durationMs":10308,"wireApiOut":101339,"wireApiIn":4369168,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_importing.spec.ts:73 › Importing - BOM","status":"passed","retry":0,"durationMs":10141,"wireApiOut":126695,"wireApiIn":5172538,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_importing.spec.ts:159 › Importing - Purchase Order","status":"passed","retry":0,"durationMs":4814,"wireApiOut":97850,"wireApiIn":4434557,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_importing.spec.ts:177 › Importing - Natural Keys","status":"passed","retry":0,"durationMs":8906,"wireApiOut":108605,"wireApiIn":4473607,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_login.spec.ts:11 › Login - Failures","status":"passed","retry":0,"durationMs":8239,"wireApiOut":193746,"wireApiIn":1691565,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_login.spec.ts:50 › Login - Change Password","status":"passed","retry":0,"durationMs":10622,"wireApiOut":147774,"wireApiIn":4386955,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_login.spec.ts:91 › Login - MFA - TOTP","status":"passed","retry":0,"durationMs":7878,"wireApiOut":152164,"wireApiIn":4396310,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_machines.spec.ts:7 › Machines - Admin Panel","status":"passed","retry":0,"durationMs":4393,"wireApiOut":81954,"wireApiIn":4193998,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_machines.spec.ts:21 › Machines - Activation","status":"passed","retry":0,"durationMs":23139,"wireApiOut":379424,"wireApiIn":5299600,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_modals.spec.ts:6 › Modals - Admin","status":"timedOut","retry":0,"durationMs":90004,"wireApiOut":83435,"wireApiIn":4509462,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_modals.spec.ts:6 › Modals - Admin","status":"timedOut","retry":1,"durationMs":90003,"wireApiOut":77429,"wireApiIn":4497098,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_modals.spec.ts:56 › Spotlight - Check Actions","status":"passed","retry":0,"durationMs":4394,"wireApiOut":70160,"wireApiIn":4232457,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_modals.spec.ts:84 › Spotlight - No Keys","status":"timedOut","retry":0,"durationMs":90002,"wireApiOut":77499,"wireApiIn":4492247,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_modals.spec.ts:84 › Spotlight - No Keys","status":"timedOut","retry":1,"durationMs":90004,"wireApiOut":76712,"wireApiIn":4490983,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_permissions.spec.ts:14 › Permissions - Admin","status":"passed","retry":0,"durationMs":8597,"wireApiOut":97517,"wireApiIn":4295459,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_permissions.spec.ts:61 › Permissions - Reader","status":"passed","retry":0,"durationMs":8936,"wireApiOut":150901,"wireApiIn":5276830,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_plugins.spec.ts:15 › Plugins - Settings","status":"passed","retry":0,"durationMs":11573,"wireApiOut":171091,"wireApiIn":4672128,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_plugins.spec.ts:65 › Plugins - User Settings","status":"passed","retry":0,"durationMs":7525,"wireApiOut":154336,"wireApiIn":4480086,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_plugins.spec.ts:106 › Plugins - Functionality","status":"passed","retry":0,"durationMs":14517,"wireApiOut":89651,"wireApiIn":4267996,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_plugins.spec.ts:149 › Plugins - Panels","status":"passed","retry":0,"durationMs":11060,"wireApiOut":184551,"wireApiIn":5277512,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_plugins.spec.ts:197 › Plugins - Custom Admin","status":"passed","retry":0,"durationMs":8725,"wireApiOut":150955,"wireApiIn":4466746,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_plugins.spec.ts:229 › Plugins - Locate Item","status":"timedOut","retry":0,"durationMs":90003,"wireApiOut":183130,"wireApiIn":4819401,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_plugins.spec.ts:229 › Plugins - Locate Item","status":"passed","retry":1,"durationMs":9504,"wireApiOut":184815,"wireApiIn":5162825,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_plugins.spec.ts:270 › Plugins - Creator","status":"failed","retry":0,"durationMs":4272,"wireApiOut":70146,"wireApiIn":4237862,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_plugins.spec.ts:270 › Plugins - Creator","status":"failed","retry":1,"durationMs":4243,"wireApiOut":70115,"wireApiIn":4237094,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_printing.spec.ts:9 › Printing - Label Editing","status":"passed","retry":0,"durationMs":7915,"wireApiOut":86077,"wireApiIn":4821482,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_printing.spec.ts:33 › Printing - Label Printing","status":"passed","retry":0,"durationMs":12536,"wireApiOut":119543,"wireApiIn":4745982,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_printing.spec.ts:112 › Printing - Report Printing","status":"passed","retry":0,"durationMs":7775,"wireApiOut":124567,"wireApiIn":4941796,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_printing.spec.ts:137 › Printing - Report Editing","status":"passed","retry":0,"durationMs":10694,"wireApiOut":103983,"wireApiIn":4999648,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_printing.spec.ts:212 › Printing - Broken Template","status":"passed","retry":0,"durationMs":11851,"wireApiOut":191758,"wireApiIn":5190670,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_settings.spec.ts:37 › Settings - User theme","status":"passed","retry":0,"durationMs":5741,"wireApiOut":88296,"wireApiIn":4313280,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_settings.spec.ts:84 › Settings - User","status":"passed","retry":0,"durationMs":5126,"wireApiOut":86265,"wireApiIn":4213057,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_settings.spec.ts:137 › Settings - Global","status":"passed","retry":0,"durationMs":6634,"wireApiOut":86289,"wireApiIn":4262514,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_settings.spec.ts:212 › Settings - Admin","status":"passed","retry":0,"durationMs":13085,"wireApiOut":120655,"wireApiIn":4516745,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_settings.spec.ts:316 › Settings - Admin - Background Tasks","status":"passed","retry":0,"durationMs":3986,"wireApiOut":83451,"wireApiIn":4189229,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_settings.spec.ts:339 › Settings - Admin - Barcode History","status":"timedOut","retry":0,"durationMs":90002,"wireApiOut":99637,"wireApiIn":4343200,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_settings.spec.ts:339 › Settings - Admin - Barcode History","status":"passed","retry":1,"durationMs":20497,"wireApiOut":86287,"wireApiIn":4340714,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_settings.spec.ts:404 › Settings - Admin - Parameter","status":"passed","retry":0,"durationMs":15187,"wireApiOut":285257,"wireApiIn":5683140,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_settings.spec.ts:541 › Settings - Admin - Unauthorized","status":"passed","retry":0,"durationMs":8942,"wireApiOut":224646,"wireApiIn":4563073,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_settings.spec.ts:574 › Settings - Auth - Email","status":"passed","retry":0,"durationMs":4248,"wireApiOut":84362,"wireApiIn":4187213,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_settings.spec.ts:603 › Settings - Auth - Tokens","status":"passed","retry":0,"durationMs":4595,"wireApiOut":81846,"wireApiIn":4185222,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_tables.spec.ts:13 › Tables - Quick Filters","status":"passed","retry":0,"durationMs":6706,"wireApiOut":112891,"wireApiIn":4600362,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_tables.spec.ts:47 › Tables - Filters","status":"passed","retry":0,"durationMs":28125,"wireApiOut":308422,"wireApiIn":5653016,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_tables.spec.ts:108 › Tables - Pagination","status":"passed","retry":0,"durationMs":6477,"wireApiOut":95436,"wireApiIn":4753217,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_tables.spec.ts:139 › Tables - Columns","status":"passed","retry":0,"durationMs":7512,"wireApiOut":187923,"wireApiIn":4911012,"wireWsIn":0,"wireWsOut":0}
+{"id":"pui_tables.spec.ts:166 › Tables - Sorting","status":"passed","retry":0,"durationMs":9083,"wireApiOut":199355,"wireApiIn":5074299,"wireWsIn":0,"wireWsOut":0}
