@@ -171,6 +171,10 @@ const page = await context.newPage();
 {
   const env = await page.evaluate("window.cross('get', '/api/forced?x=1')") as { status: number; body: { forced: boolean } };
   check("a forceBrowser glob keeps the request on browser HTTP (page server hit, backend never)", env.status === 200 && env.body.forced === true && pageHits["/api/forced"] === 1 && !backendHits["/api/forced"]);
+  const globDeleg = await page.evaluate("window.__tierlessDelegated || []") as Array<{ path: string; why: string }>;
+  // the path is recorded AS ISSUED, query string included — a report can normalize, but the
+  // record must not lose what the app actually asked for
+  check("a static glob's delegation is recorded as the port author's own choice, not the gateway's", globDeleg.some((d) => d.path.startsWith("/api/forced") && d.why === "glob"), JSON.stringify(globDeleg));
 }
 
 // 5. recorded routes: a page.route() mock fires because its pattern auto-registered as force-browser
@@ -212,6 +216,14 @@ const page = await context.newPage();
   check("the hello's advisory landed in the page's force-browser list", declared.some((d) => d.glob === "**/api/heavy"), JSON.stringify(declared));
   const second = await page2.evaluate("window.cross('get', '/api/heavy')") as { status: number; body: { nodes: unknown[] } };
   check("later sessions fetch it browser-side, stock semantics intact", second.status === 200 && second.body.nodes.length === 2000 && (pageHits["/api/heavy"] ?? 0) === 1, JSON.stringify({ pageHeavyHits: pageHits["/api/heavy"] }));
+
+  // DELEGATION IS RECORDED, and the two reasons stay apart: a port author's own glob is a
+  // different claim from what the gateway advised, and a report that blends them cannot
+  // say what the routing policy actually did.
+  const delegated = await page2.evaluate("window.__tierlessDelegated || []") as Array<{ name: string; path: string; why: string }>;
+  check("the advisory delegation is recorded, attributed to the gateway", delegated.some((d) => d.path === "/api/heavy" && d.why === "advisory" && d.name === "api.get"), JSON.stringify(delegated));
+  check("and it did NOT enter the harness-waits exec log (the browser's own response is the truthful one)",
+    ((await page2.evaluate("(window.__tierlessExecLog || []).filter(e => e.url === '/api/heavy').length")) as number) === 0);
   await ctx2.close();
 }
 

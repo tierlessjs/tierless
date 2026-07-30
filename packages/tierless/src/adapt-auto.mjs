@@ -66,9 +66,19 @@ export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "ti
             }
         }).catch(() => { });
     }
+    const noteDelegated = (req, path, why) => {
+        const g = globalThis;
+        const log = (g.__tierlessDelegated ||= []);
+        log.push({ t: Date.now(), name: String(req.name), path, why });
+        if (log.length > 500)
+            log.splice(0, 250); // a long-lived page must not grow one
+    };
+    /** Whether this request is delegated to the browser's own fetch, recording the decision.
+     *  `why` separates the port author's own globs from what the GATEWAY advised — they are
+     *  different claims and a report must not blend them. */
     const forced = (req, origin) => {
-        const list = [...staticList, ...pageList()];
-        if (!list.length)
+        const fromPage = pageList();
+        if (!staticList.length && !fromPage.length)
             return false;
         const path0 = String((req.args ?? [])[0] ?? "");
         let full;
@@ -78,7 +88,15 @@ export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "ti
         catch {
             full = origin + path0;
         }
-        return matchesForceBrowser(list, full);
+        if (staticList.length && matchesForceBrowser(staticList, full)) {
+            noteDelegated(req, path0, "glob");
+            return true;
+        }
+        if (fromPage.length && matchesForceBrowser(fromPage, full)) {
+            noteDelegated(req, path0, "advisory");
+            return true;
+        }
+        return false;
     };
     const bare = auth === "none"
         ? sessionExec()

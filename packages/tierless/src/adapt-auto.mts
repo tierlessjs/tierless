@@ -102,13 +102,36 @@ export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "ti
       }
     }).catch(() => { /* no hello: list stays as configured */ });
   }
+  // DELEGATION IS A DECISION, SO IT HAS TO BE VISIBLE. A request the session hands to the
+  // browser's own fetch is indistinguishable in the logs from an asset the app always
+  // fetched over HTTP, so nothing could report how much traffic a port put on the socket
+  // versus delegated, or why — the exact number needed to judge whether delegating a class
+  // of response (cacheable static) is worth it. This records that decision.
+  //
+  // NOT the exec log. That log is the harness-waits contract (tierless/playwright), and a
+  // delegated request travels over real HTTP, so the browser already fires the truthful
+  // response event those waits fall through to. A second, facade entry would make one
+  // request matchable twice — the double-entry mode that cost 32 nocodb tests when
+  // adapt-cache first tried to rewrite entries rather than push the right one.
+  interface Delegation { t: number; name: string; path: string; why: "glob" | "advisory" }
+  const noteDelegated = (req: ResourceRequest, path: string, why: Delegation["why"]): void => {
+    const g = globalThis as { __tierlessDelegated?: Delegation[] };
+    const log = (g.__tierlessDelegated ||= []);
+    log.push({ t: Date.now(), name: String(req.name), path, why });
+    if (log.length > 500) log.splice(0, 250);                // a long-lived page must not grow one
+  };
+  /** Whether this request is delegated to the browser's own fetch, recording the decision.
+   *  `why` separates the port author's own globs from what the GATEWAY advised — they are
+   *  different claims and a report must not blend them. */
   const forced = (req: ResourceRequest, origin: string): boolean => {
-    const list = [...staticList, ...pageList()];
-    if (!list.length) return false;
+    const fromPage = pageList();
+    if (!staticList.length && !fromPage.length) return false;
     const path0 = String((req.args ?? [])[0] ?? "");
     let full: string;
     try { full = new URL(path0, origin + "/").href; } catch { full = origin + path0; }
-    return matchesForceBrowser(list, full);
+    if (staticList.length && matchesForceBrowser(staticList, full)) { noteDelegated(req, path0, "glob"); return true; }
+    if (fromPage.length && matchesForceBrowser(fromPage, full)) { noteDelegated(req, path0, "advisory"); return true; }
+    return false;
   };
 
   const bare: Exec = auth === "none"
