@@ -6,6 +6,13 @@ export VIRTUAL_ENV="$ROOT/../inventree-venv"
 export PATH="$VIRTUAL_ENV/bin:$PATH"
 export INVENTREE_DB_ENGINE=django.db.backends.sqlite3
 export INVENTREE_DB_NAME="$ROOT/data/inventree.sqlite3"
+# WAL + a real busy timeout. Their CI lane gets a Postgres service; SQLite serializes
+# writers, and the runserver competes with the qcluster worker for every write. Under the
+# truth arm's extra load (counting relay + per-path HTTP log) a login POST blew through
+# SQLite's 5 s default and Django returned 500 "database is locked", which killed global
+# setup outright. WAL lets readers run during a write; 60 s is longer than any request the
+# suite makes. Both arms, so the fix is symmetric.
+export INVENTREE_DB_OPTIONS='{"timeout": 60, "init_command": "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;"}'
 export INVENTREE_MEDIA_ROOT="$ROOT/data/media"
 export INVENTREE_STATIC_ROOT="$ROOT/data/static"
 export INVENTREE_BACKUP_DIR="$ROOT/data/backup"
