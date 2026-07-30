@@ -43,6 +43,17 @@ const backend = createServer((req, res) => {
   backendCookies[path] = String(req.headers.cookie ?? "");
   res.setHeader("content-type", "application/json");
   if (path === "/api/hang") return;                          // never answers: a crossing to it is provably in flight
+  if (path === "/api/icons") {                               // SMALL but fresh: the size rule would never catch it
+    res.setHeader("cache-control", "public, max-age=86400");
+    res.end(JSON.stringify({ icons: ["a", "b", "c"] }));
+    return;
+  }
+  if (path === "/api/live") {                                // etag-only: revalidation, NOT zero-network — stays on the socket
+    res.setHeader("etag", 'W/"live-v1"');
+    res.setHeader("cache-control", "no-cache");
+    res.end(JSON.stringify({ live: true }));
+    return;
+  }
   if (path === "/api/heavy") {
     // an ETag'd mega-GET, the n8n community-node-types shape: If-None-Match -> 0-byte 304
     res.setHeader("etag", 'W/"heavy-v1"');
@@ -253,6 +264,28 @@ const page = await context.newPage();
     setTimeout(() => resolve("open"), 3000);
   });
   check("a socket from a disallowed origin is refused", outcome === "closed");
+}
+
+// 8b. THE ADVISORY KEYS ON ZERO-NETWORK REUSE, NOT SIZE. A response the origin declares
+// fresh is one the browser's cache serves on repeat with no network at all, and nothing on
+// the socket beats zero — measured on InvenTree, where a 643 KB `max-age=86400` catalogue
+// slipped under the 1 MB size rule and ate 83% of the session's bytes. A response that only
+// carries a VALIDATOR still costs a round trip per use, and the socket does round trips
+// more cheaply than HTTP, so those stay.
+{
+  const wsFresh = await spawnGateway([], { TIERLESS_BROWSE_OVER: "0" });   // size rule OFF: freshness alone must carry this
+  const ctx3 = await browser.newContext();
+  const p3 = await ctx3.newPage();
+  await p3.goto(pageUrl + "/?ws=" + encodeURIComponent(wsFresh));
+  const cold = await p3.evaluate("window.cross('get', '/api/icons')") as { status: number };
+  const live = await p3.evaluate("window.cross('get', '/api/live')") as { status: number };
+  check("both cross on the first session (that request is how the headers are learned)", cold.status === 200 && live.status === 200 && backendHits["/api/icons"] === 1);
+  await p3.goto(pageUrl + "/?ws=" + encodeURIComponent(wsFresh));
+  await p3.waitForFunction("(window.__tierlessForceBrowser || []).some(d => d.glob === '**/api/icons')");
+  const declared3 = await p3.evaluate("window.__tierlessForceBrowser") as { glob?: string }[];
+  check("a SMALL but fresh reply is declared browser-side with the size rule disabled", declared3.some((d) => d.glob === "**/api/icons"), JSON.stringify(declared3));
+  check("an etag-only reply is NOT declared — revalidation is cheaper on the socket", !declared3.some((d) => d.glob === "**/api/live"), JSON.stringify(declared3));
+  await ctx3.close();
 }
 
 // 9. AN UNREACHABLE GATEWAY DEGRADES TO THE BROWSER'S OWN FETCH, it does not hang the app.

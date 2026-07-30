@@ -281,16 +281,46 @@ if (cmd === "build") {
   // declared in every later hello, and autoSession returns those paths to stock
   // browser fetch. Advisory, not load-bearing: the first request still crosses (that
   // is how the size is learned), a raced hello just costs one more full crossing.
+  //
+  // SIZE IS NOT THE ONLY REASON, AND IT WAS THE WRONG DEFAULT. A response the origin
+  // declares FRESH — a positive max-age — is one the browser's own cache serves on
+  // repeat with ZERO network. Nothing on the socket can beat zero. Measured on
+  // InvenTree (ports/inventree/README.md, the warm-cache arm): /api/icons/ is
+  // `public, max-age=86400`, 643 KB, and slipped under the 1 MB size rule; the baseline
+  // browser fetched it ONCE across 24 navigations while the port crossed it every time,
+  // consuming 83% of the session's bytes. Delegating it took a warm returning user's
+  // page cost from -19% to -51% against stock.
+  //
+  // The line is zero-network reuse, not cacheability in general. A response that only
+  // carries a VALIDATOR (etag, no-cache, must-revalidate) still costs a round trip per
+  // use, and the socket does round trips more cheaply than HTTP — those stay. This is
+  // also why n8n's etag-only 12.66 MB catalogue still needs the size rule: it would
+  // never trip the freshness one.
   const browseOver = Number(process.env.TIERLESS_BROWSE_OVER ?? 1_000_000);
+  const browseFresh = process.env.TIERLESS_BROWSE_FRESH !== "0";
+  const MAX_DECLARED = 200;                                  // the list rides every hello and is matched per request
   const browsePaths = new Set<string>();
-  const exec: typeof logged = !(browseOver > 0) ? logged : async (req) => {
+  /** Seconds this response may be reused with no network at all, per its own headers. */
+  const freshFor = (h: Record<string, string> | undefined): number => {
+    const cc = (h?.["cache-control"] ?? "").toLowerCase();
+    if (/(?:^|,)\s*no-(?:store|cache)\s*(?:,|$)/.test(cc)) return 0;
+    const m = /(?:^|,)\s*(?:s-maxage|max-age)\s*=\s*(\d+)/.exec(cc);
+    return m ? Number(m[1]) : 0;
+  };
+  const declare = (p: string, why: string): void => {
+    if (!p || browsePaths.has(p) || browsePaths.size >= MAX_DECLARED) return;
+    browsePaths.add(p);
+    console.log(`tierless gateway: ${p} ${why} — declaring browser-side`);
+  };
+  const exec: typeof logged = !(browseOver > 0 || browseFresh) ? logged : async (req) => {
     const v = await logged(req);
     if (req.name === "api.get") {
-      const t = (v as { body?: { text?: unknown } } | null)?.body?.text;
-      if (typeof t === "string" && t.length > browseOver) {
-        const p = String((req.args ?? [])[0] ?? "").split("?")[0];
-        if (p && !browsePaths.has(p)) { browsePaths.add(p); console.log(`tierless gateway: ${p} reply is ${(t.length / 1e6).toFixed(1)} MB plaintext — declaring browser-side (TIERLESS_BROWSE_OVER=${browseOver})`); }
-      }
+      const env = v as { body?: { text?: unknown }; headers?: Record<string, string> } | null;
+      const t = env?.body?.text;
+      const p = String((req.args ?? [])[0] ?? "").split("?")[0];
+      const age = browseFresh ? freshFor(env?.headers) : 0;
+      if (age > 0) declare(p, `is fresh for ${age}s (the browser cache serves repeats with no network)`);
+      else if (browseOver > 0 && typeof t === "string" && t.length > browseOver) declare(p, `reply is ${(t.length / 1e6).toFixed(1)} MB plaintext (TIERLESS_BROWSE_OVER=${browseOver})`);
     }
     return v;
   };
