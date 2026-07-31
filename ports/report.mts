@@ -168,6 +168,8 @@ if (counted.length && counted.every(({ b, p }) => hasDur(b) && hasDur(p))) {
   console.log(`  median per-test time saved   ${medianSaved(counted, dur)}`);
   const deltas = counted.map(({ b, p }) => med(p, dur) - med(b, dur));
   console.log(`  per-test delta ported-stock: median ${median(deltas) >= 0 ? "+" : ""}${median(deltas).toFixed(0)} ms, total ${(sum(deltas) / 1000).toFixed(1)}s`);
+  // machine-readable, for ports/summary.mts — same numbers the lines above print
+  console.log("SUMMARY_JSON " + JSON.stringify({ wallMs: [db, dp], pairs: counted.length, medianDeltaMs: median(deltas) }));
   if (covered.length) {
     const cdb = sum(covered.map(({ b }) => med(b, dur))), cdp = sum(covered.map(({ p }) => med(p, dur)));
     console.log(`  covered subset: total ${(cdb / 60000).toFixed(1)} -> ${(cdp / 60000).toFixed(1)} min (${pct(cdb, cdp)} less), median per-test ${medianSaved(covered, dur)} less`);

@@ -61,6 +61,11 @@ console.log(`\n  CALL COUNTS: baseline ${bReq}, ported ${pCalls} — the ported 
 console.log(`  small-API calls (conditional crossings serve repeats from the session's own`);
 console.log(`  cache). So this delta is call ELIMINATION plus per-call cost, not per-call alone.`);
 const delta = (pTotal - bBytes) / bBytes;
+// machine-readable for ports/summary.mts. THIS definition, not report-marginal's generic
+// one: it counts all small API traffic in BOTH arms wherever it ends up, including the
+// bytes the ported arm still pays on browser HTTP. Omitting those flatters the port — the
+// same error that once turned this figure into 65.5% before it was corrected to 51.2%.
+console.log("SUMMARY_JSON " + JSON.stringify({ sliceBaseline: bBytes, slicePorted: pTotal, session: pWs, stillHttp: pHttp, bound: bulkFrames > 0 }));
 if (bulkFrames > 0) {
   // The advisory is LEARNED: it is declared in hellos AFTER the first oversize reply,
   // so sessions opening inside that window still carry the payload. Measured here as 5

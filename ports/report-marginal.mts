@@ -186,6 +186,16 @@ for (const [p, v] of B.byPath) {
 }
 const movedBytes = bulkBytes + smallBytes;
 const measured = (pMarg - bMarg) / bMarg;
+// ONE MACHINE-READABLE LINE, computed by exactly the code that prints the human report
+// above — ports/summary.mts reads this instead of re-deriving anything. A summary that
+// re-implements the arithmetic drifts from the reporter; a summary that scrapes prose
+// breaks when the prose is edited. InvenTree's README carried stale figures for a week
+// because nothing regenerated them from the artifacts.
+console.log("SUMMARY_JSON " + JSON.stringify({
+  dir, suiteTotal: [bTotal, pTotal], marginal: [bMarg, pMarg],
+  moved: movedBytes, movedBulk: bulkBytes, movedSmall: smallBytes, session: pWs,
+  passes: [bPass, pPass], requests: [B.n, P.n],
+}));
 console.log(`  suite-wide marginal delta: ${(100 * measured).toFixed(1)}%`);
 if (movedBytes > 0) {
   const bulkShare = bulkBytes / movedBytes;
