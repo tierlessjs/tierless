@@ -51,6 +51,12 @@ for arm in ported baseline; do
   [ "$arm" = baseline ] && { flag=--baseline; work=n8n-baseline; }
   [ -s "$OUT/$arm-measure.jsonl" ] && { echo "== skip $arm (done)"; continue; }
   echo "== run $arm"
+  # SEED the advisory so the measurement is EXACT rather than a bound. The catalogue is
+  # chunked, so its size is knowable only once the body has arrived (24.8 s), and every
+  # request issued during that window crosses — 3-5 of them per run, 41% of the ported
+  # arm's session plaintext, inflating the ported side only. Seeding declares what the
+  # gateway would have learned anyway; it changes WHEN, not WHAT.
+  TIERLESS_BROWSE_SEED=/rest/community-node-types \
   TIERLESS_WIRE_TRUTH=1 TIERLESS_WIRE_BUDGET=1 TIERLESS_SPEC="$SPEC" \
     timeout 5400 node ports/n8n/suite.mts $flag > "$OUT/$arm.log" 2>&1
   rows=$(wc -l < "ports/work/$work/measure-truth.jsonl" 2>/dev/null || echo 0)

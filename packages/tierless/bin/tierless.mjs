@@ -365,7 +365,16 @@ else if (cmd === "gateway") {
     const browseOver = Number(process.env.TIERLESS_BROWSE_OVER ?? 1_000_000);
     const browseFresh = process.env.TIERLESS_BROWSE_FRESH !== "0";
     const MAX_DECLARED = 200; // the list rides every hello and is matched per request
-    const browsePaths = new Set();
+    // SEED: paths known browser-side before the first reply. Learning cannot be instant for
+    // a CHUNKED reply — n8n's 12.9 MB catalogue carries no content-length, so its size is
+    // knowable only once the body has arrived, 24.8 s in, and every request issued during
+    // that window crosses. Neither the mid-session push nor header classification can help
+    // there: the first has nothing to retract, the second has nothing to read. A seed is
+    // what makes a measured run deterministic, and what a deployment that already knows its
+    // own big endpoints should use.
+    const browsePaths = new Set((process.env.TIERLESS_BROWSE_SEED ?? "").split(",").map((p) => p.trim()).filter(Boolean));
+    if (browsePaths.size)
+        console.log(`tierless gateway: seeded browser-side (TIERLESS_BROWSE_SEED): ${[...browsePaths].join(" ")}`);
     /** Seconds this response may be reused with no network at all, per its own headers. */
     const freshFor = (h) => {
         const cc = (h?.["cache-control"] ?? "").toLowerCase();
