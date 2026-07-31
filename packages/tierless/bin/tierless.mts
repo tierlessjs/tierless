@@ -257,7 +257,10 @@ if (cmd === "build") {
     if (authority?.handleHttp(req, res)) return;
     res.statusCode = 200; res.end("tierless gateway");              // the suite's boot readiness wait
   });
-  const plainExec = restResources(backend, { envelopeErrors: true, upstreamIdentity: true });
+  // classifyHeaders is assigned below, once browseOver/browseFresh/declare exist — the
+  // advisory has to see a reply's headers, and this is the only place they exist
+  let classifyHeaders: ((p: string, h: Headers) => void) | undefined;
+  const plainExec = restResources(backend, { envelopeErrors: true, upstreamIdentity: true, onHeaders: (p, h) => classifyHeaders?.(p, h) });
   const baseExec = authority ? authority.exec : (coalescePaths.length ? coalesceGets(plainExec, coalescePaths) : plainExec);
   // --log-gets: profiling for the preboot manifest — append each distinct 2xx GET path,
   // so one boot capture becomes the --preboot-file of the frozen arm. Zero cost unset.
@@ -318,6 +321,17 @@ if (cmd === "build") {
     console.log(`tierless gateway: ${p} ${why} — declaring browser-side (${liveSessions.size} live session(s) told)`);
     for (const push of liveSessions) push({ type: "browse", forceBrowser: [p] });
   };
+  // DECLARE FROM HEADERS, not from the finished body. content-length and cache-control are
+  // both known one round trip in, where the body can be tens of seconds away.
+  classifyHeaders = (rawPath, h) => {
+    const p = String(rawPath).split("?")[0].replace(/^https?:\/\/[^/]+/, "");
+    const age = browseFresh ? freshFor({ "cache-control": h.get("cache-control") ?? "" }) : 0;
+    if (age > 0) { declare(p, `is fresh for ${age}s (the browser cache serves repeats with no network)`); return; }
+    const len = Number(h.get("content-length") ?? 0);
+    if (browseOver > 0 && len > browseOver) declare(p, `reply is ${(len / 1e6).toFixed(1)} MB (content-length, TIERLESS_BROWSE_OVER=${browseOver})`);
+  };
+  // The body-length rule stays as the FALLBACK: a chunked or compressed reply carries no
+  // content-length, and then completion is the only place the size is knowable.
   const exec: typeof logged = !(browseOver > 0 || browseFresh) ? logged : async (req) => {
     const v = await logged(req);
     if (req.name === "api.get") {

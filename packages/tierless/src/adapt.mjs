@@ -263,7 +263,7 @@ export function coalesceGets(inner, paths) {
         } // leader clears the slot, success or failure
     };
 }
-export function restResources(baseUrl, { token, headers = {}, fetchImpl = fetch, envelopeErrors = false, upstreamIdentity = false } = {}) {
+export function restResources(baseUrl, { token, headers = {}, fetchImpl = fetch, envelopeErrors = false, upstreamIdentity = false, onHeaders } = {}) {
     const base = baseUrl.replace(/\/$/, "");
     return async (req) => {
         const m = /^api\.(get|post|put|patch|delete|head|options)$/.exec(req.name);
@@ -309,6 +309,14 @@ export function restResources(baseUrl, { token, headers = {}, fetchImpl = fetch,
             headers: merged,
             ...(sendBody ? { body: typeof body === "string" ? body : JSON.stringify(body) } : {}),
         });
+        // HEADERS ARE KNOWN LONG BEFORE THE BODY, and for a big reply that gap is the whole
+        // problem. The browse advisory used to classify a path only once the reply had been
+        // read: measured on n8n, the first 12.9 MB catalogue took 24.8 s to arrive, and three
+        // more sessions issued their own request at 6.8 s, 14.0 s and 21.0 s — every one of
+        // them already in flight before any declaration could exist. Nothing downstream can
+        // retract those. Classifying from content-length and cache-control here collapses the
+        // window from the body's download time to one round trip.
+        onHeaders?.(path, r.headers);
         const text = await r.text();
         const isJson = (r.headers.get("content-type") || "").includes("json");
         if (!r.ok && !envelopeErrors)

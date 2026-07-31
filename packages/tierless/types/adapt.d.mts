@@ -36,6 +36,12 @@ export interface RestResourcesOpts {
      *  uncompressed, so leave this OFF when the gateway is far from the backend.
      *  A caller's own accept-encoding header always wins. */
     upstreamIdentity?: boolean;
+    /** Called with (path, responseHeaders) the moment a reply's HEADERS arrive — before its
+     *  body is read. The browse advisory classifies here: waiting for the body meant a big
+     *  reply was classified only after it had fully downloaded, and on n8n three more
+     *  sessions issued their own request during that 24.8 s. Never throws into the request:
+     *  a classifier is advisory. */
+    onHeaders?: (path: string, headers: Headers) => void;
 }
 /** An Exec servicing `api.get(path)` / `api.post(path, body)` — and per-request headers
  *  via `api.get(path, undefined, {headers})` — against a real REST base URL.
@@ -105,4 +111,4 @@ export declare function httpResources(instance: Record<string, unknown>): Exec;
  *  credential (inside cookieAuthority, not above it: a sealed blob is re-randomized per
  *  session and would never match). */
 export declare function coalesceGets(inner: Exec, paths: Iterable<string>): Exec;
-export declare function restResources(baseUrl: string, { token, headers, fetchImpl, envelopeErrors, upstreamIdentity }?: RestResourcesOpts): Exec;
+export declare function restResources(baseUrl: string, { token, headers, fetchImpl, envelopeErrors, upstreamIdentity, onHeaders }?: RestResourcesOpts): Exec;

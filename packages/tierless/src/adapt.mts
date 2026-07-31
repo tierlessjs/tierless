@@ -92,6 +92,12 @@ export interface RestResourcesOpts {
    *  uncompressed, so leave this OFF when the gateway is far from the backend.
    *  A caller's own accept-encoding header always wins. */
   upstreamIdentity?: boolean;
+  /** Called with (path, responseHeaders) the moment a reply's HEADERS arrive — before its
+   *  body is read. The browse advisory classifies here: waiting for the body meant a big
+   *  reply was classified only after it had fully downloaded, and on n8n three more
+   *  sessions issued their own request during that 24.8 s. Never throws into the request:
+   *  a classifier is advisory. */
+  onHeaders?: (path: string, headers: Headers) => void;
 }
 
 /** An Exec servicing `api.get(path)` / `api.post(path, body)` — and per-request headers
@@ -272,7 +278,7 @@ export function coalesceGets(inner: Exec, paths: Iterable<string>): Exec {
   };
 }
 
-export function restResources(baseUrl: string, { token, headers = {}, fetchImpl = fetch, envelopeErrors = false, upstreamIdentity = false }: RestResourcesOpts = {}): Exec {
+export function restResources(baseUrl: string, { token, headers = {}, fetchImpl = fetch, envelopeErrors = false, upstreamIdentity = false, onHeaders }: RestResourcesOpts = {}): Exec {
   const base = baseUrl.replace(/\/$/, "");
   return async (req: ResourceRequest) => {
     const m = /^api\.(get|post|put|patch|delete|head|options)$/.exec(req.name);
@@ -313,6 +319,14 @@ export function restResources(baseUrl: string, { token, headers = {}, fetchImpl 
       headers: merged,
       ...(sendBody ? { body: typeof body === "string" ? body : JSON.stringify(body) } : {}),
     });
+    // HEADERS ARE KNOWN LONG BEFORE THE BODY, and for a big reply that gap is the whole
+    // problem. The browse advisory used to classify a path only once the reply had been
+    // read: measured on n8n, the first 12.9 MB catalogue took 24.8 s to arrive, and three
+    // more sessions issued their own request at 6.8 s, 14.0 s and 21.0 s — every one of
+    // them already in flight before any declaration could exist. Nothing downstream can
+    // retract those. Classifying from content-length and cache-control here collapses the
+    // window from the body's download time to one round trip.
+    onHeaders?.(path, r.headers);
     const text = await r.text();
     const isJson = (r.headers.get("content-type") || "").includes("json");
     if (!r.ok && !envelopeErrors) throw new Error(`api.${m[1]} ${path}: ${r.status} ${text.slice(0, 200)}`);
