@@ -135,8 +135,19 @@ with its catalogue kept off the socket; blended with the catalogue the same slic
 -6.7%, which is a compression delta on one payload and must not be quoted as a
 request-shape result (`ports/report-marginal.mts` refuses that label automatically).
 
-Caveats that travel with these numbers. n8n's -51% is a bound: a few catalogue crossings
-still beat the browse advisory's learning window, and they inflate the ported side only.
+Caveats that travel with these numbers. n8n's -51% is a bound, and the learning window is
+now quantified: re-measured after the advisory was re-keyed on cacheability, the catalogue
+was fetched over browser HTTP 291 times and CROSSED 3 times before the declaration landed
+(295 page sessions). Those 3 crossings are 38.6 MB of the ported arm's 94.1 MB of session
+plaintext — **41% of the session is learning-window cost**, and it inflates the ported side
+only. Closing the window would remove it and turn the bound into an exact, better figure.
+
+That re-measurement also confirms the re-keying changed nothing here: the gateway declared
+ONLY /rest/community-node-types and did so by the SIZE rule (12.9 MB plaintext); n8n's
+paths are etag-only or max-age=0, so the freshness rule declared nothing. The slice reads
+-50.9% against -51.2% before, at identical pass counts (263 passed / 12 failed on both
+arms). The catalogue crossings moved 5 -> 3 between runs, which is variance in the
+learning-window race, not an effect of the re-keying.
 
 InvenTree does not reach pass parity either — 143 baseline against 146 ported, the ported
 arm passing MORE — and its suite is flaky at 3-9 failures per run in both arms, with the
