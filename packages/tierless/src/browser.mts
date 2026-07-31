@@ -17,6 +17,7 @@ import { makeCoherence } from "./coherence.mjs";
 import { methodMigrate, loadProfile, type Profile } from "./trace.mjs";
 import { makePeer, wsPort, onEvent, pushExecLog } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
+import { TIERLESS_BUILD } from "./build-stamp.mjs";
 import { httpResources, httpPins, crossHttpRequest } from "./adapt.mjs";
 import type { Bundle, Exec, Host } from "./types.mjs";
 
@@ -311,6 +312,12 @@ let shared: Connection | null = null;
 // first action — on a fresh page the TCP+upgrade handshake (~2 RTT) otherwise lands on
 // the first navigation's critical path and cancels most of what the migration saves.
 export function configureTierless(opts: ConnectOpts & { preconnect?: boolean }): void {
+  // Stamp the PAGE with the tierless source this bundle was built from. Two jobs: a
+  // measured run can refuse to start against a stale bundle (ports/assert-fresh.mts), and
+  // anyone debugging a build can read which framework is actually running. Assigned to a
+  // global on purpose — a bare exported constant is tree-shakeable, and a stamp that can
+  // vanish from the artifact is exactly the failure it exists to catch.
+  (globalThis as { __tierlessBuild?: string }).__tierlessBuild = TIERLESS_BUILD;
   sharedOpts = opts || {}; shared = null;
   if (opts?.preconnect) sharedConn();
 }

@@ -23,6 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { writeSuiteConfig } from "../pw-wrapper.mts";
+import { assertFreshBuild } from "../assert-fresh.mts";
 import { delayProxy, type WireCounter } from "../latency-proxy.mts";
 import { httpLogProxy } from "../http-log-proxy.mts";
 
@@ -74,6 +75,11 @@ if (RTT) {
 }
 
 rmSync(OUT, { force: true });
+// A PORTED ARM MUST NOT RUN A STALE BUNDLE (ports/assert-fresh.mts). The app bundle
+// embedded tierless at BUILD time, so a framework edit without a rebuild would measure
+// the old framework silently — it has cost a voided ablation and two debugging sessions.
+// Baseline arms carry no tierless in the app bundle, so the check is ported-only.
+if (VARIANT === "n8n") assertFreshBuild(path.join(SRC, "packages/frontend/editor-ui/dist"), "corepack pnpm turbo run build --filter=@n8n/rest-api-client --filter=n8n-editor-ui --force  (in " + SRC + ")");
 const { bootN8n } = await import("./boot.mts");
 const app = await bootN8n();
 for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => { app.close(); process.exit(1); });
