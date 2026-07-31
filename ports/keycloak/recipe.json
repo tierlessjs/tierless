@@ -1,0 +1,24 @@
+{
+	"name": "keycloak",
+	"repo": "keycloak/keycloak",
+	"sha": "6c73e3027811d9c7b22683edd825e839272e9547",
+	"sources": [
+		{
+			"kind": "git",
+			"url": "https://github.com/keycloak/keycloak.git",
+			"ref": "26.7.0"
+		},
+		{
+			"kind": "codeload",
+			"zip": "https://codeload.github.com/keycloak/keycloak/zip/6c73e3027811d9c7b22683edd825e839272e9547"
+		}
+	],
+	"treeHash": {
+		"git": "ce36dd2ae9a6cf745255e0408d28e4755d737e99c4b40d2b69e0748ee5535391",
+		"codeload": null
+	},
+	"patches": [
+		"patches/0001-tierless-fetch.patch"
+	],
+	"testPatches": []
+}

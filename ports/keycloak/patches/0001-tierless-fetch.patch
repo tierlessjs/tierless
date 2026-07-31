@@ -1,0 +1,52 @@
+--- a/js/libs/keycloak-admin-client/src/utils/fetchWithError.ts
++++ b/js/libs/keycloak-admin-client/src/utils/fetchWithError.ts
+@@ -1,3 +1,34 @@
++import { autoSession } from "tierless/adapt-auto";
++import { fetchAdapter } from "tierless/adapt-fetch";
++
++// The tierless port — the whole thing (docs/corpus.md rung 3). Every admin-client
++// resource reaches the network at the ONE `fetch` call below, so replacing it here puts
++// the whole Admin REST API on one ws session to the gateway on <page-port>+100
++// (`tierless gateway`, spawned by ports/keycloak/suite.mts). Everything above it runs
++// untouched: the resource classes, agent.ts's request building, NetworkError,
++// parseResponse.
++//
++// No --cookie-authority here, unlike the strapi/inventree ports. The console's authority
++// is a BEARER token that agent.ts puts in `init.headers` on every call, so it rides in
++// the crossing exactly as it rode in the fetch, and autoSession's auth:"auto" no-ops
++// against a gateway that declares sealed:false.
++//
++// Crossability is the framework's (tierless/adapt-fetch), and this client lands on the
++// right side of it by itself: agent.ts sends `accept: application/json, text/plain, */*`,
++// so JSON reads and writes cross, while the calls that must NOT — FormData uploads, the
++// `application/yaml` workflow endpoints, `application/octet-stream` downloads — fail the
++// JSON negotiation or the string-body test and stay on the browser's own fetch.
++// `AbortSignal.timeout` (attached whenever the client carries a timeout) races the
++// crossing browser-side rather than pinning the request.
++//
++// Under SSR the stock fetch stays: this library is published for Node use too — which is
++// also why the browser probe goes through globalThis. This package compiles with
++// `lib: ["ESNext"]` and no DOM, so a bare `window` is not a name TypeScript knows here.
++const tierlessFetch =
++  typeof (globalThis as { window?: unknown }).window === "undefined"
++    ? (input: string | URL, init?: RequestInit) => fetch(input, init)
++    : fetchAdapter({ exec: autoSession().exec });
++
+ const ERROR_FIELDS = ["error", "errorMessage"];
+ 
+ export type NetworkErrorOptions = { response: Response; responseData: unknown };
+@@ -17,7 +48,13 @@
+   input: Request | string | URL,
+   init?: RequestInit,
+ ) {
+-  const response = await fetch(input, init);
++  // A Request-shaped input keeps the stock fetch: its body is a consumed-once stream and
++  // it carries its own signal, neither transportable. (adapt-fetch refuses it too; the
++  // branch is here so the types stay honest about what crosses.)
++  const response =
++    input instanceof Request
++      ? await fetch(input, init)
++      : await tierlessFetch(input, init);
+ 
+   if (!response.ok) {
+     const responseData = await parseResponse(response);

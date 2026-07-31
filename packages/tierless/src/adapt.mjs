@@ -332,7 +332,11 @@ export function restResources(baseUrl, { token, headers = {}, fetchImpl = fetch,
         // fetched it 164 — the transport was worse than the HTTP it replaced. `vary` is what
         // makes a freshness hit safe: the entry is only reused for a request whose
         // vary-named headers match.
-        r.headers.forEach((v, k) => { if (k === "content-type" || k === "etag" || k === "cache-control" || k === "expires" || k === "vary" || k.startsWith("x-"))
+        // `location` rides along because on a REST API it is not a redirect hint but the
+        // CREATE contract: the id of the thing just made lives only there. Keycloak's admin
+        // client reads it on every create (`returnResourceIdInLocationHeader`) and throws
+        // outright when it is missing, so dropping it turned "make a client" into an error.
+        r.headers.forEach((v, k) => { if (k === "content-type" || k === "etag" || k === "cache-control" || k === "expires" || k === "vary" || k === "location" || k.startsWith("x-"))
             hdrs[k] = v; });
         // NO SERDE WE DON'T NEED: when the caller signalled it takes raw text (handleExec —
         // the fetch arm, which ships the body in the frame's binary slot), the gateway hands
