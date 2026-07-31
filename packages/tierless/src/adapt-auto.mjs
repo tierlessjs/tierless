@@ -22,7 +22,7 @@
 //     lets the GATEWAY's hello declaration decide — a sealing gateway delivers the blob
 //     in the ws upgrade, a header-auth gateway declares sealed:false and the wrap
 //     no-ops. Costs header-auth apps nothing (attachTierless always sends a hello).
-import { configureTierless, sessionDown, sessionExec, sessionHello } from "./browser.mjs";
+import { configureTierless, onSessionBrowse, sessionDown, sessionExec, sessionHello } from "./browser.mjs";
 import { cookieSessionAuth } from "./adapt-session-auth.mjs";
 import { conditionalCrossings } from "./adapt-cache.mjs";
 import { restResources } from "./adapt.mjs";
@@ -53,17 +53,24 @@ export function autoSession({ url, gatewayPort, path = WS_PATH, storageKey = "ti
     // streams them off-thread, compressed, through the browser's own cache. ADVISORY:
     // merged whenever the hello lands; a request racing it crosses once at full price.
     // Gated so it never materializes a connection nothing else opens.
+    const mergeDeclared = (paths) => {
+        const g = window;
+        const list = (g.__tierlessForceBrowser ||= []);
+        for (const p of paths) {
+            const glob = "**" + p;
+            if (!list.some((d) => "glob" in d && d.glob === glob))
+                list.push({ glob });
+        }
+    };
+    // The hello carries what the gateway knew AT CONNECT; the push carries what it learns
+    // afterwards. Without the second channel a session that opened before the first oversize
+    // reply completed never hears the declaration and keeps crossing the payload for its
+    // whole life — 41% of n8n's ported session plaintext was exactly that.
+    onSessionBrowse(mergeDeclared);
     if (auth !== "none" || preconnect) {
         void sessionHello().then((h) => {
-            if (!h.forceBrowser?.length)
-                return;
-            const g = window;
-            const list = (g.__tierlessForceBrowser ||= []);
-            for (const p of h.forceBrowser) {
-                const glob = "**" + p;
-                if (!list.some((d) => "glob" in d && d.glob === glob))
-                    list.push({ glob });
-            }
+            if (h.forceBrowser?.length)
+                mergeDeclared(h.forceBrowser);
         }).catch(() => { });
     }
     const noteDelegated = (req, path, why) => {

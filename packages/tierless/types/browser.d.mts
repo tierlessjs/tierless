@@ -65,6 +65,9 @@ export declare function connect({ url, protocols, exec, bundle, tier, heap, trac
  *  `axiosAdapter({ exec: sessionExec(), ... })`. Lazy: the socket opens on first use
  *  (or at configureTierless({ preconnect }) time), each call awaits readiness. */
 export declare function sessionExec(): Exec;
+/** Called whenever the gateway declares more browser-side paths DURING a session, not just
+ *  in the hello. Registered before the socket opens; survives reconnects. */
+export declare function onSessionBrowse(cb: (paths: string[]) => void): void;
 /** The shared connection's ws "hello" (sealed blob + preboot GETs). The I/O-bottom auth
  *  wrapper (cookieSessionAuth) takes this so the startup blob rides the upgrade instead of
  *  a reseal round trip, and the preboot map seeds its join buffer. Materializes the shared

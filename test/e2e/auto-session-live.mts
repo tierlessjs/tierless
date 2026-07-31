@@ -266,6 +266,28 @@ const page = await context.newPage();
   check("a socket from a disallowed origin is refused", outcome === "closed");
 }
 
+// 8a. THE LEARNING WINDOW IS CLOSED: a session already OPEN when the gateway learns a path
+// is told, not just sessions that connect later. The hello is one-shot, so without the push
+// an early session keeps crossing a payload the gateway has already classified — measured
+// on n8n as 3 sessions and 41% of that arm's session plaintext.
+{
+  const wsPush = await spawnGateway([], { TIERLESS_BROWSE_OVER: "1000" });
+  const ctxP = await browser.newContext();
+  const pp = await ctxP.newPage();
+  await pp.goto(pageUrl + "/?ws=" + encodeURIComponent(wsPush));
+  await pp.evaluate("window.firstCrossing");                 // this session is connected BEFORE anything is learned
+  const before = await pp.evaluate("(window.__tierlessForceBrowser || []).length") as number;
+  await pp.evaluate("window.cross('get', '/api/heavy')");     // learned HERE, on this very session
+  await pp.waitForFunction("(window.__tierlessForceBrowser || []).some(d => d.glob === '**/api/heavy')");
+  const after = await pp.evaluate("window.__tierlessForceBrowser") as { glob?: string }[];
+  check("a session open BEFORE the path was learned receives the declaration mid-session", before === 0 && after.some((d) => d.glob === "**/api/heavy"), JSON.stringify({ before, after }));
+  // and it takes effect immediately: the next request goes over browser HTTP
+  const hitsBefore = pageHits["/api/heavy"] ?? 0;
+  await pp.evaluate("window.cross('get', '/api/heavy')");
+  check("and the very next request on that same session goes browser-side", (pageHits["/api/heavy"] ?? 0) === hitsBefore + 1, JSON.stringify({ hitsBefore, now: pageHits["/api/heavy"] }));
+  await ctxP.close();
+}
+
 // 8b. THE ADVISORY KEYS ON ZERO-NETWORK REUSE, NOT SIZE. A response the origin declares
 // fresh is one the browser's cache serves on repeat with no network at all, and nothing on
 // the socket beats zero — measured on InvenTree, where a 643 KB `max-age=86400` catalogue

@@ -9,6 +9,15 @@ export interface SessionSetup {
     entry?: string;
     args?: unknown[];
     onDone?: (value: unknown) => void;
+    /** Called once the session's pipe is up, with a push for SERVER-INITIATED frames to
+     *  THIS session. The browse advisory needs it: a path is learned from the first
+     *  oversize/fresh reply, and without a push only sessions that connect AFTERWARDS ever
+     *  hear about it — every session already open keeps crossing it. Measured on n8n: 3
+     *  crossings of a 12.9 MB catalogue, 41% of the ported arm's session plaintext, all by
+     *  sessions that had already sent their hello when the first reply completed. */
+    onOpen?: (session: {
+        push(msg: object): void;
+    }) => void;
     /** Session twin registry (docs/migrate-arm.md slice 3): resolve a class-stamped §5
      *  handle to a LOCAL instance — typically the app's own service class constructed
      *  with this session's credentials. Opt-in per class; scoped to this connection.

@@ -307,10 +307,16 @@ if (cmd === "build") {
     const m = /(?:^|,)\s*(?:s-maxage|max-age)\s*=\s*(\d+)/.exec(cc);
     return m ? Number(m[1]) : 0;
   };
+  // Every session open RIGHT NOW, so a path learned mid-run reaches them too. Without
+  // this the hello is the only channel and the advisory only ever reaches sessions that
+  // connect afterwards: measured on n8n, 3 sessions kept crossing a 12.9 MB catalogue the
+  // gateway had already classified, 41% of that arm's session plaintext.
+  const liveSessions = new Set<(msg: object) => void>();
   const declare = (p: string, why: string): void => {
     if (!p || browsePaths.has(p) || browsePaths.size >= MAX_DECLARED) return;
     browsePaths.add(p);
-    console.log(`tierless gateway: ${p} ${why} — declaring browser-side`);
+    console.log(`tierless gateway: ${p} ${why} — declaring browser-side (${liveSessions.size} live session(s) told)`);
+    for (const push of liveSessions) push({ type: "browse", forceBrowser: [p] });
   };
   const exec: typeof logged = !(browseOver > 0 || browseFresh) ? logged : async (req) => {
     const v = await logged(req);
@@ -390,10 +396,15 @@ if (cmd === "build") {
       // browse advisory rides every hello (authority or not): paths learned oversize
       // since the gateway booted return to stock browser HTTP on later sessions
       const browse = browsePaths.size ? { forceBrowser: [...browsePaths] } : {};
+      const onOpen = (sess: { push(msg: object): void }): void => {
+        liveSessions.add(sess.push);
+        // no per-session close hook here: a push to a dead peer rejects and is swallowed,
+        // and the set is bounded by concurrent sessions, not by run length
+      };
       return authority
         // TIERLESS_PREBOOT=0: the ablation arm — manifest configured, pre-fetch off
-        ? { exec: sessionExec, ...(twins ? { twins } : {}), hello: { ...await authority.hello(String(req.headers.cookie || ""), { auth: upgradeSeal, preboot: prebootPaths.length > 0 && process.env.TIERLESS_PREBOOT !== "0" }), ...browse } }
-        : { exec: sessionExec, ...(twins ? { twins } : {}), ...(browsePaths.size ? { hello: browse } : {}) };
+        ? { exec: sessionExec, onOpen, ...(twins ? { twins } : {}), hello: { ...await authority.hello(String(req.headers.cookie || ""), { auth: upgradeSeal, preboot: prebootPaths.length > 0 && process.env.TIERLESS_PREBOOT !== "0" }), ...browse } }
+        : { exec: sessionExec, onOpen, ...(twins ? { twins } : {}), ...(browsePaths.size ? { hello: browse } : {}) };
     },
   });
   // print the BOUND port (--port 0 lets a harness pick a free one and parse it back)

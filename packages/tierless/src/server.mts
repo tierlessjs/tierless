@@ -39,6 +39,13 @@ export interface SessionSetup {
   entry?: string;
   args?: unknown[];
   onDone?: (value: unknown) => void;
+  /** Called once the session's pipe is up, with a push for SERVER-INITIATED frames to
+   *  THIS session. The browse advisory needs it: a path is learned from the first
+   *  oversize/fresh reply, and without a push only sessions that connect AFTERWARDS ever
+   *  hear about it — every session already open keeps crossing it. Measured on n8n: 3
+   *  crossings of a 12.9 MB catalogue, 41% of the ported arm's session plaintext, all by
+   *  sessions that had already sent their hello when the first reply completed. */
+  onOpen?: (session: { push(msg: object): void }) => void;
   /** Session twin registry (docs/migrate-arm.md slice 3): resolve a class-stamped §5
    *  handle to a LOCAL instance — typically the app's own service class constructed
    *  with this session's credentials. Opt-in per class; scoped to this connection.
@@ -127,7 +134,7 @@ export function bearerFromUpgrade(req: IncomingMessage): string | undefined {
 // differs only in how the Peer's Port is made — the session logic is identical.
 async function serveSessionOn(peer: Peer, req: IncomingMessage, cfg: { resolveBundle: (id: string) => Bundle | Promise<Bundle>; session: (req: IncomingMessage) => SessionSetup | Promise<SessionSetup>; heap: boolean; tier: string }): Promise<void> {
   const setup = await cfg.session(req);
-  const { entry, args = [], onDone, twins, hello } = setup;
+  const { entry, args = [], onDone, twins, hello, onOpen } = setup;
   // GATEWAY-SIDE phase timing (TIERLESS_WIRE_LOG): how long each crossing spends
   // upstream+decoding before the reply exists. Pairs with the send-side timing in
   // wireLogPort (frame encode) and the browser's __tierlessWirePhases to give one
@@ -142,6 +149,8 @@ async function serveSessionOn(peer: Peer, req: IncomingMessage, cfg: { resolveBu
   // up — ALWAYS, defaulting to "no cookie authority here" so the browser's auth wrapper
   // (auth:"auto") settles at socket-open instead of its 5s no-hello safety net.
   peer.request({ type: "hello", blob: null, sealed: false, ...hello }).catch(() => {});
+  // server-initiated frames for this session, from here on (the browse advisory's push)
+  onOpen?.({ push: (msg: object) => { peer.request(msg).catch(() => { /* a closing session simply misses it — advisory */ }); } });
   const coherence = cfg.heap ? makeCoherence(cfg.tier) : undefined;
   if (coherence) coherence.serve(peer);
   const hosts = new Map<string, import("./types.mjs").Host>();     // moduleId -> host (stateless; cached per connection)

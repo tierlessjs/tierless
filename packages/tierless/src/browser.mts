@@ -127,6 +127,14 @@ export function connect({ url, protocols, exec, bundle, tier = "browser", heap =
     helloResolve({ blob: payload?.blob ?? null, sealed: payload?.sealed, preboot: payload?.preboot ?? null, ...(payload?.forceBrowser?.length ? { forceBrowser: payload.forceBrowser } : {}) });
     return { obj: { type: "ok" } };
   });
+  // MID-SESSION browse advisory. The hello is one-shot, so a path the gateway learns after
+  // this session connected could never reach it — the session kept crossing a payload the
+  // gateway already knew belonged on browser HTTP. Same declaration, pushed instead of
+  // handshaken; adapt-auto merges it into the same force-browser list.
+  raw.on("browse", (payload: { forceBrowser?: string[] }) => {
+    if (payload?.forceBrowser?.length) for (const cb of browseListeners) { try { cb(payload.forceBrowser); } catch { /* one bad listener must not drop the frame */ } }
+    return { obj: { type: "ok" } };
+  });
   onEvent(ws, "open", () => setTimeout(() => helloResolve({ blob: null }), 5000));   // safety net: a gateway that never sends hello must not hang crossings — fall back to reseal. Long enough never to preempt a real hello (which arrives ~one latency after open).
 
   // A DEAD SOCKET MUST FAIL, NOT HANG. The transport is an optimization; a build whose
@@ -268,6 +276,14 @@ export function connect({ url, protocols, exec, bundle, tier = "browser", heap =
  *  (or at configureTierless({ preconnect }) time), each call awaits readiness. */
 export function sessionExec(): Exec {
   return (req) => sharedConn().exec(req);
+}
+
+// listeners for mid-session browse advisories (adapt-auto registers the merge)
+const browseListeners: Array<(paths: string[]) => void> = [];
+/** Called whenever the gateway declares more browser-side paths DURING a session, not just
+ *  in the hello. Registered before the socket opens; survives reconnects. */
+export function onSessionBrowse(cb: (paths: string[]) => void): void {
+  browseListeners.push(cb);
 }
 
 /** The shared connection's ws "hello" (sealed blob + preboot GETs). The I/O-bottom auth

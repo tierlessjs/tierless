@@ -73,7 +73,7 @@ export function bearerFromUpgrade(req) {
 // differs only in how the Peer's Port is made — the session logic is identical.
 async function serveSessionOn(peer, req, cfg) {
     const setup = await cfg.session(req);
-    const { entry, args = [], onDone, twins, hello } = setup;
+    const { entry, args = [], onDone, twins, hello, onOpen } = setup;
     // GATEWAY-SIDE phase timing (TIERLESS_WIRE_LOG): how long each crossing spends
     // upstream+decoding before the reply exists. Pairs with the send-side timing in
     // wireLogPort (frame encode) and the browser's __tierlessWirePhases to give one
@@ -92,6 +92,8 @@ async function serveSessionOn(peer, req, cfg) {
     // up — ALWAYS, defaulting to "no cookie authority here" so the browser's auth wrapper
     // (auth:"auto") settles at socket-open instead of its 5s no-hello safety net.
     peer.request({ type: "hello", blob: null, sealed: false, ...hello }).catch(() => { });
+    // server-initiated frames for this session, from here on (the browse advisory's push)
+    onOpen?.({ push: (msg) => { peer.request(msg).catch(() => { }); } });
     const coherence = cfg.heap ? makeCoherence(cfg.tier) : undefined;
     if (coherence)
         coherence.serve(peer);
