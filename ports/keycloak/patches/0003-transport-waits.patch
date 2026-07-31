@@ -1,0 +1,17 @@
+--- a/js/apps/admin-ui/test/clients/saml.ts
++++ b/js/apps/admin-ui/test/clients/saml.ts
+@@ -85,6 +85,14 @@
+ }
+ 
+ export async function clickGenerate(page: Page) {
++  // Transport-agnostic wait (tierless corpus run protocol, test patch — applied to BOTH
++  // arms; docs/corpus.md test accommodations). This is the suite's only HTTP-response
++  // wait, and the ported build carries /generate over a session socket, where no HTTP
++  // response ever fires. installTransportWaits patches waitForResponse on this page in
++  // place, so the predicate below runs unchanged against a truthful crossing facade; on
++  // the stock build it reduces to the original exactly. Idempotent per page.
++  const { installTransportWaits } = await import("tierless/playwright");
++  await installTransportWaits(page);
+   const responsePromise = page.waitForResponse(
+     (res) => res.url().includes("/generate") && res.status() === 200,
+     { timeout: 60000 },

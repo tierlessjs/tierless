@@ -20,5 +20,8 @@
 	"patches": [
 		"patches/0001-tierless-fetch.patch"
 	],
-	"testPatches": []
+	"testPatches": [
+		"patches/0002-server-url-env.patch",
+		"patches/0003-transport-waits.patch"
+	]
 }
