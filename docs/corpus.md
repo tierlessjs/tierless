@@ -135,19 +135,23 @@ with its catalogue kept off the socket; blended with the catalogue the same slic
 -6.7%, which is a compression delta on one payload and must not be quoted as a
 request-shape result (`ports/report-marginal.mts` refuses that label automatically).
 
-Caveats that travel with these numbers. n8n's -51% is a bound, and the learning window is
-now quantified: re-measured after the advisory was re-keyed on cacheability, the catalogue
-was fetched over browser HTTP 291 times and CROSSED 3 times before the declaration landed
-(295 page sessions). Those 3 crossings are 38.6 MB of the ported arm's 94.1 MB of session
-plaintext — **41% of the session is learning-window cost**, and it inflates the ported side
-only. Closing the window would remove it and turn the bound into an exact, better figure.
+Caveats that travel with these numbers. n8n's slice is no longer a bound. The advisory's
+learning window is now SEEDED for that run (TIERLESS_BROWSE_SEED), so the catalogue crosses
+ZERO times instead of 3-5, and the figure is an exact **-50.7%** (296 page sessions, 258 vs
+260 passed).
 
-That re-measurement also confirms the re-keying changed nothing here: the gateway declared
-ONLY /rest/community-node-types and did so by the SIZE rule (12.9 MB plaintext); n8n's
-paths are etag-only or max-age=0, so the freshness rule declared nothing. The slice reads
--50.9% against -51.2% before, at identical pass counts (263 passed / 12 failed on both
-arms). The catalogue crossings moved 5 -> 3 between runs, which is variance in the
-learning-window race, not an effect of the re-keying.
+Worth stating precisely, because it corrects an earlier claim in this file: closing the
+window made the number EXACT but barely moved it — 50.9% as a bound, 50.7% measured. The
+41% of session plaintext the window used to cost was the CATALOGUE, and the catalogue was
+never in the slice's denominator; the slice counts small /rest/* only. What closing the
+window actually bought is a ported arm that no longer ships 38-52 MB of a payload it had
+already classified as browser-side (session plaintext 94.1 -> 53.9 MB), which moves the
+SUITE-TOTAL and MARGINAL rows, not this one.
+
+The re-keying of the advisory onto cacheability changed nothing on n8n, as its recorded
+headers predicted: the gateway declared ONLY /rest/community-node-types, and by the SIZE
+rule (12.9 MB), because n8n's paths are etag-only or max-age=0 and the freshness rule
+matches neither.
 
 InvenTree does not reach pass parity either — 143 baseline against 146 ported, the ported
 arm passing MORE — and its suite is flaky at 3-9 failures per run in both arms, with the
