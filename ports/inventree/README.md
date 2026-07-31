@@ -7,29 +7,31 @@ numbers 20x apart depending on the denominator.
 
 | | baseline | ported | delta |
 |---|---|---|---|
-| suite total | 822 MB | 679 MB | **−17.4%** |
-| marginal (what a warm cache still fetches) | 184 MB | 43 MB | **−76.9%** |
-| the many-small slice (traffic the port moved) | 171 MB | 29 MB | **−83.2%** |
+| suite total | 825 MB | 812 MB | **−1.6%** |
+| marginal (what a warm cache still fetches) | 78 MB | 22 MB | **−71.8%** |
+| the many-small slice (traffic the port moved) | 64 MB | 7 MB | **−88.3%** |
 | wall clock, 136 pass-parity pairs | 20.7 min | 20.9 min | +1% |
 
-The third row is the one this app was picked for, and it is the cleanest in the
-corpus: the moved traffic is **100% small responses, 0% bulk**, across 572 paths.
-Grafana's small slice came in at −81%/−84% and n8n's at −51%; InvenTree at −83.2%
-is the prediction confirmed on a third app.
+The third row is the one this app was picked for, and it is now the cleanest in
+the corpus: the moved traffic is **100% small responses, 0% bulk**, across 574
+paths, with no single path dominating it. Grafana's small slice came in at
+−81%/−84% and n8n's at −50.7%; InvenTree at −88.3% is the request-shape predictor
+confirmed on a third app — and it matches the warm-cache arm's independent −88%.
 
-Two things a reader has to be told:
+**These numbers replaced better-looking ones, and that is the point.** Measured
+before the browse advisory keyed on cacheability, the same pair read −17.4% suite
+and −83.2% slice. `/api/icons/` — `public, max-age=86400`, 643 KB — was then being
+carried on the socket, where it was 57% of the baseline's marginal bytes and the
+caveat on every figure. The advisory now delegates it to browser fetch
+automatically, so it is HTTP in both arms and elides as a static repeat. The suite
+total falls to −1.6% because most of the old −17.4% was the port shipping a
+payload the browser should have cached; the slice rises to −88.3% because what
+remains is genuinely the traffic a transport moves.
 
-- **`/api/icons/` is 106 MB — 57% of the baseline's marginal bytes.** It is one
-  path, `public, max-age=86400`, byte-identical at 643 KB, fetched once per test
-  by both arms only because every Playwright context starts cold. A real browser
-  fetches it once a day. Excluding it, the slice is 79 MB baseline against at most
-  29 MB ported — still **≥−63%**, but that is a bound, not a measurement: the
-  session's shared deflate window makes per-path compressed bytes unobservable
-  (packages/tierless/src/server.mts), so the ported side cannot be split.
-- **Pass counts are 3 apart** (baseline 143, ported 146 — the ported arm passes
-  *more*), so the totals are not strictly comparable and `report-marginal.mts`
-  says so on every run. This suite is flaky at 3–9 failures per run in both arms;
-  the failing sets are disjoint between consecutive runs of the same arm.
+One caveat still travels: **pass counts are 7 apart** (baseline 142, ported 135),
+so the totals are not strictly comparable and `report-marginal.mts` says so on
+every run. This suite is flaky at 3–9 failures per run in both arms, with the
+failing sets disjoint between consecutive runs of the same arm.
 
 # InvenTree — the port
 

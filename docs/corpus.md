@@ -105,8 +105,8 @@ results — they are the SAME bytes over different denominators, and only the la
 says anything about the transport.
 
     what you count                     n8n        grafana      inventree
-    1. everything the suite downloaded -0.6%      +0.1%        -17.4%
-    2. the small API calls that recur   -51%       -81%         -83.2%
+    1. everything the suite downloaded -0.6%      +0.1%         -1.6%
+    2. the small API calls that recur -50.7%       -81%         -88.3%
 
 (1) is dominated by things the harness re-downloads because Playwright gives every test
 a clean browser: bundles, fonts, and on n8n a 12 MB node catalogue fetched ~510 times.
