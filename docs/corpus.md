@@ -347,9 +347,28 @@ tables, forms, settings, permissions and importing, and a client seam that is on
 `export const api = axios.create({})` in `src/frontend/src/App.tsx`. Its fixtures do no
 `page.route()` mocking, and CI serves the frontend from Django on :8000, so the API is
 same-origin and the gateway convention applies unchanged. Traffic is paginated tables and
-settings panels: many small JSON, the shape grafana showed pays best. Queued after it:
-Keycloak admin-ui (69 specs, embedded H2, no DB container) once we settle how a ported
-bundle is served by `kc.sh` rather than Vite.
+settings panels: many small JSON, the shape grafana showed pays best. **Next: Keycloak admin-ui** (`keycloak/keycloak`, Quarkus/Java + React). The question this
+entry used to defer — how a ported bundle is served by `kc.sh` rather than Vite — is
+settled, by reading the tree rather than guessing:
+
+- `test/utils/constants.ts` pins `SERVER_URL = http://localhost:8080`: the suite drives a
+  REAL Keycloak, not the Vite dev server, so the measured path is the packaged one (the
+  mistake InvenTree nearly made, where the default lane serves unbundled ES modules).
+- `playwright.config.ts` has NO `webServer` and already sets `workers: 1` — their own
+  comment says the console tests are not parallel-safe. 56 spec files.
+- admin-ui's vite build writes to `target/classes/theme/keycloak.v2/admin/resources`,
+  which is exactly the path Keycloak serves the console from inside
+  `org.keycloak.keycloak-admin-ui-<ver>.jar`.
+
+So the port builds `js/apps/admin-ui` and injects the result into that jar in a pinned
+RELEASE distribution, identically in both arms (the baseline injects the unpatched build).
+No Maven build of the server is needed. Java 21 and Maven are present; embedded H2 means
+no DB container.
+
+What it adds: a JAVA backend (the six ported so far are Go, Node and Python), a
+fetch-based client (`@keycloak/keycloak-admin-client`, where four ports used axios and
+grafana used rxjs `fromFetch`), and OIDC BEARER auth rather than cookies — so no
+`--cookie-authority`, which every cookie-auth port has needed.
 
 Also checked and rejected, recorded so the search is not repeated: **nocobase** dropped
 SQLite (`DB_DIALECT=postgres`), **metabase** needs a docker container set plus Cypress and
