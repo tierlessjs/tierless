@@ -19,7 +19,7 @@ flock -n 9 || { echo "another drive-pair.sh is already running — refusing to s
 
 MODE="${MODE:-floor}"
 OUT="ports/keycloak/results/$MODE"
-BRANCH=claude/tierless-port-generality-uwm1f9
+BRANCH=claude/tierless-port-generality-rescue-an26nc
 mkdir -p "$OUT"
 
 # PRISTINE PARITY. The arms have separate databases, so "same starting rows" is an
@@ -65,7 +65,7 @@ for arm in ported baseline; do
   git add "$OUT" && git commit -q -m "keycloak $MODE arm: $arm ($rows rows)
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_011JsGFUBBubsTp15Gf6Fi3j" \
+Claude-Session: https://claude.ai/code/session_01EJ4xGkzqNv622MKvKSGWFC" \
     && git push -q -u origin "$BRANCH" || echo "!! commit/push failed"
 done
 

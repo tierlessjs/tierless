@@ -355,7 +355,7 @@ settled, by reading the tree rather than guessing:
   REAL Keycloak, not the Vite dev server, so the measured path is the packaged one (the
   mistake InvenTree nearly made, where the default lane serves unbundled ES modules).
 - `playwright.config.ts` has NO `webServer` and already sets `workers: 1` — their own
-  comment says the console tests are not parallel-safe. 56 spec files.
+  comment says the console tests are not parallel-safe. 68 spec files.
 - admin-ui's vite build writes to `target/classes/theme/keycloak.v2/admin/resources`,
   which is exactly the path Keycloak serves the console from inside
   `org.keycloak.keycloak-admin-ui-<ver>.jar`.
