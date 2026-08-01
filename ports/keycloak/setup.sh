@@ -69,9 +69,14 @@ rm -rf "$STAGE"
 
 # 6. the pristine database: boot once so Keycloak builds its H2 schema and the bootstrap
 # admin user, then snapshot. boot.mts restores this before every arm.
+#
+# Same --features as boot.mts, read from it so the list is written once: these features
+# create schema of their own, and a snapshot taken without them would make every arm's
+# first boot run a migration that the snapshot was supposed to have settled.
+FEATURES=$(cd "$ROOT" && node -e 'import("./ports/keycloak/boot.mts").then(m => console.log(m.FEATURES))')
 rm -rf "$KC/data" "$WORK/kc-pristine-data"
 KC_BOOTSTRAP_ADMIN_USERNAME=admin KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
-  timeout 300 "$KC/bin/kc.sh" start-dev --http-port=8080 > "$WORK/bootstrap.log" 2>&1 &
+  timeout 300 "$KC/bin/kc.sh" start-dev --http-port=8080 --features="$FEATURES" > "$WORK/bootstrap.log" 2>&1 &
 BOOT_PID=$!
 for _ in $(seq 1 120); do
   curl -sf -o /dev/null "http://localhost:8080/realms/master/.well-known/openid-configuration" && break

@@ -22,6 +22,19 @@ const KC = path.join(WORK, "kc/");
 export const FRONT = "http://localhost:8080";      // Keycloak serves the console AND the admin API on one origin
 export const GATEWAY = "http://localhost:8180";
 
+/** The feature set their Admin UI E2E job starts the server with, verbatim
+ *  (.github/workflows/js-ci.yml, job `admin-ui-e2e`, at the pinned 26.7.0 tree).
+ *
+ *  Not optional decoration: 11 of the suite's 68 specs exercise UI that only exists when
+ *  the matching feature is on — 4 oid4vci (client-scope, mappers, client assignment, realm
+ *  attributes), 2 workflows, 2 permissions (admin-fine-grained-authz:v2), and one each for
+ *  spiffe, kubernetes-service-accounts and jwt-authorization-grant. Booting bare fails them
+ *  on BOTH arms, which measures nothing and costs a suite run to discover.
+ *
+ *  setup.sh reads this constant for its snapshot boot, so the pristine database and every
+ *  measured arm agree on the schema these features create. */
+export const FEATURES = "admin-fine-grained-authz:v2,transient-users,spiffe,oid4vc-vci,kubernetes-service-accounts,jwt-authorization-grant,workflows";
+
 const serving = (url: string): Promise<boolean> => fetch(url).then(() => true, () => false);
 async function waitFor(url: string, ms: number): Promise<void> {
   const t0 = Date.now();
@@ -51,7 +64,7 @@ export async function bootKeycloak(): Promise<{ close(): void }> {
   resetData();
   const log = (name: string): ["ignore", number, number] => { const fd = openSync(path.join(WORK, name + ".log"), "w"); return ["ignore", fd, fd]; };
   const procs: ChildProcess[] = [
-    spawn(path.join(KC, "bin/kc.sh"), ["start-dev", "--http-port=8080"], {
+    spawn(path.join(KC, "bin/kc.sh"), ["start-dev", "--http-port=8080", `--features=${FEATURES}`], {
       cwd: KC,
       // start-dev is what their own e2e lane runs; the bootstrap admin is the
       // admin/admin the suite's test/utils/constants.ts expects.
