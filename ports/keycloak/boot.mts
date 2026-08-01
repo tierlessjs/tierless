@@ -56,7 +56,24 @@ function resetData(): void {
   cpSync(pristine, path.join(KC, "data"), { recursive: true });
 }
 
-export async function bootKeycloak(): Promise<{ close(): void }> {
+/** `frontend` is the origin the BROWSER reaches this arm through — plain `FRONT` for an
+ *  unshaped run, the relay (`:28080` truth, `:18080` RTT) when one is in front. It is
+ *  passed to `--hostname`, and that is load-bearing rather than cosmetic:
+ *
+ *  Keycloak derives a realm's OIDC issuer from the request's Host unless told otherwise,
+ *  and it validates bearer tokens against that issuer. The ported arm is the only arm
+ *  whose traffic reaches the server by TWO hosts — the browser logs in through the relay,
+ *  while admin-API crossings ride the session and arrive from the gateway on :8080 — so a
+ *  token minted with `iss` of the relay host was rejected 401 on the backend host. It cost
+ *  the whole suite: the console rendered "HTTP 401 Unauthorized" and every spec timed out
+ *  waiting for a page that never loaded, while the baseline arm (one host throughout) and
+ *  the unshaped ported arm (page and backend both :8080) passed and hid it.
+ *
+ *  Pinning the frontend URL makes the issuer constant no matter which port a request
+ *  arrives on, so one token is valid on both. Measured on 26.7.0: unpinned, a :28080 token
+ *  is 401 on :8080; pinned, every token is 200 on both. */
+export async function bootKeycloak(opts: { frontend?: string } = {}): Promise<{ close(): void }> {
+  const frontend = opts.frontend ?? FRONT;
   if (!existsSync(path.join(KC, "bin/kc.sh"))) throw new Error("no distribution in " + KC + " — run ports/keycloak/setup.sh first");
   for (const url of [FRONT, GATEWAY]) {
     if (await serving(url)) throw new Error(`${url} is already serving — a stale stack owns the port; kill it before booting`);
@@ -64,7 +81,7 @@ export async function bootKeycloak(): Promise<{ close(): void }> {
   resetData();
   const log = (name: string): ["ignore", number, number] => { const fd = openSync(path.join(WORK, name + ".log"), "w"); return ["ignore", fd, fd]; };
   const procs: ChildProcess[] = [
-    spawn(path.join(KC, "bin/kc.sh"), ["start-dev", "--http-port=8080", `--features=${FEATURES}`], {
+    spawn(path.join(KC, "bin/kc.sh"), ["start-dev", "--http-port=8080", `--features=${FEATURES}`, `--hostname=${frontend}`], {
       cwd: KC,
       // start-dev is what their own e2e lane runs; the bootstrap admin is the
       // admin/admin the suite's test/utils/constants.ts expects.

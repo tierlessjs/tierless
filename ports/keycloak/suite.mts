@@ -73,7 +73,10 @@ rmSync(OUT, { force: true });
 // injected INTO it — setup.sh injects immediately after building.
 if (VARIANT === "keycloak") assertFreshBuild(path.join(SRC, "target/classes/theme/keycloak.v2/admin/resources"), "bash ports/keycloak/setup.sh  (rebuilds the console and re-injects the jar)");
 const { bootKeycloak } = await import("./boot.mts");
-const app = await bootKeycloak();
+// pageUrl, not the backend: the server's issuer must match the origin the BROWSER used,
+// or the ported arm's session crossings arrive with a token minted for the relay host and
+// are rejected 401 (boot.mts, `frontend`).
+const app = await bootKeycloak({ frontend: pageUrl });
 for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => { app.close(); process.exit(1); });
 
 const CONFIG = writeSuiteConfig({ suiteDir: SRC, outFile: path.join(WORK, "pw/tierless.config.ts") });
