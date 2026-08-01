@@ -384,7 +384,7 @@ check("…and the dead index entry stops attaching validators", again.status ===
   const inner = async (): Promise<unknown> => { hits++; return { status: 200, headers: { "cache-control": "public, max-age=60", vary: "Accept, Cookie" }, body: { icons: 1 } }; };
   const wrap = conditionalCrossings({ store: memoryStore() }).wrap(inner as never);
   const get = (headers?: Record<string, string>): Promise<unknown> =>
-    wrap({ op: "res", tier: "server", name: "api.get", args: ["/api/icons/", undefined, { headers: headers ?? {} }] } as never);
+    wrap({ op: "res", tier: "server", name: "api.get", args: ["/api/icons/", undefined, { headers: headers ?? {} }] } as never) as never;
   const first = await get() as { body: { icons: number } };
   const second = await get() as { body: { icons: number } };
   check("a fresh response is reused with NO second crossing", hits === 1, `${hits} crossings`);

@@ -16,10 +16,12 @@ import { fileURLToPath } from "node:url";
 import { readJsonl } from "../read-jsonl.mts";
 
 const DIR = fileURLToPath(new URL("./results/timeline/", import.meta.url));
-const load = (f: string) => readJsonl(DIR + f);
+const load = <T,>(f: string) => readJsonl<T>(DIR + f);
 
 interface Http { ts: number; startedAt: number; method: string; path: string; status: number }
 interface Ev { rel: number; dur: number; path: string; kind: "http" | "crossing" }
+interface Frame { ts: number; d?: string; k?: string; t?: string; p?: string }
+interface Row { retry: number; durationMs: number }
 
 // IDs differ across arms (each run seeds its own workflows) — normalize so paths join.
 const norm = (p: string) =>
@@ -36,7 +38,7 @@ function windows(http: Http[]): { anchor: number; end: number }[] {
 }
 
 function arm(name: "baseline" | "ported") {
-  const http = load(`${name}-http.jsonl`) as Http[];
+  const http = load<Http>(`${name}-http.jsonl`);
   const ws = windows(http);
   const tests: Ev[][] = ws.map(() => []);
   const place = (t: number): number => ws.findIndex((w) => t >= w.anchor && t < w.end);
@@ -47,20 +49,22 @@ function arm(name: "baseline" | "ported") {
   if (name === "ported") {
     // crossings: "in" exec frame = browser request arrival at gateway; the matching
     // "out" reply (same normalized path, FIFO within a path) ends it
-    const ses = load("ported-session.jsonl");
+    const ses = load<Frame>("ported-session.jsonl");
     const pend = new Map<string, number[]>();
     for (const r of ses) {
-      if (r.d === "in" && r.t === "exec") (pend.get(norm(r.p)) ?? pend.set(norm(r.p), []).get(norm(r.p))!).push(r.ts);
-      else if (r.d === "out" && r.k === "reply" && r.p !== undefined) {
-        const q = pend.get(norm(r.p));
+      if (r.p === undefined) continue;
+      const p = norm(r.p);
+      if (r.d === "in" && r.t === "exec") (pend.get(p) ?? pend.set(p, []).get(p)!).push(r.ts);
+      else if (r.d === "out" && r.k === "reply") {
+        const q = pend.get(p);
         const t0 = q?.shift();
         if (t0 === undefined) continue;
         const i = place(t0);
-        if (i >= 0) tests[i].push({ rel: t0 - ws[i].anchor, dur: r.ts - t0, path: norm(r.p), kind: "crossing" });
+        if (i >= 0) tests[i].push({ rel: t0 - ws[i].anchor, dur: r.ts - t0, path: p, kind: "crossing" });
       }
     }
   }
-  const measure = load(`${name}-measure.jsonl`).filter((r) => r.retry === 0);
+  const measure = load<Row>(`${name}-measure.jsonl`).filter((r) => r.retry === 0);
   return { ws, tests, measure };
 }
 
