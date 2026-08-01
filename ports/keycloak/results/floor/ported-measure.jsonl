@@ -1,0 +1,434 @@
+{"id":"autentication/flows.spec.ts:44 › Authentication flows › searches for an existing flow","status":"passed","retry":0,"durationMs":7999}
+{"id":"autentication/flows.spec.ts:55 › Authentication flows › creates a duplicate of an existing flow","status":"passed","retry":0,"durationMs":4634}
+{"id":"autentication/flows.spec.ts:67 › Authentication flows › fails to create duplicate flow with an empty name","status":"passed","retry":0,"durationMs":4140}
+{"id":"autentication/flows.spec.ts:80 › Authentication flows › fails to create duplicate flow with an existing name","status":"passed","retry":0,"durationMs":4496}
+{"id":"autentication/flows.spec.ts:100 › Authentication flow details › adds an execution","status":"passed","retry":0,"durationMs":4738}
+{"id":"autentication/flows.spec.ts:117 › Authentication flow details › adds a condition","status":"passed","retry":0,"durationMs":4094}
+{"id":"autentication/flows.spec.ts:134 › Authentication flow details › adds a sub-flow","status":"passed","retry":0,"durationMs":4364}
+{"id":"autentication/flows.spec.ts:149 › Authentication flow details › removes an execution","status":"passed","retry":0,"durationMs":4252}
+{"id":"autentication/flows.spec.ts:165 › Authentication flow details › sets as default in action menu","status":"passed","retry":0,"durationMs":4696}
+{"id":"autentication/flows.spec.ts:189 › Authentication flow details › drags and drops execution","status":"passed","retry":0,"durationMs":4861}
+{"id":"autentication/flows.spec.ts:217 › Authentication flow details › edits flow details","status":"passed","retry":0,"durationMs":4191}
+{"id":"autentication/flows.spec.ts:235 › Required actions › enables delete account","status":"passed","retry":0,"durationMs":3445}
+{"id":"autentication/flows.spec.ts:251 › Required actions › registers an unregistered action","status":"passed","retry":0,"durationMs":3374}
+{"id":"autentication/flows.spec.ts:275 › Required actions › sets action as default","status":"passed","retry":0,"durationMs":3136}
+{"id":"autentication/flows.spec.ts:293 › Password policies tab › adds password policies","status":"passed","retry":0,"durationMs":2875}
+{"id":"autentication/flows.spec.ts:311 › Accessibility tests for authentication › passes accessibility checks on main page","status":"passed","retry":0,"durationMs":2950}
+{"id":"autentication/flows.spec.ts:319 › Accessibility tests for authentication › passes a11y checks on creating flow form","status":"passed","retry":0,"durationMs":4783}
+{"id":"autentication/flows.spec.ts:330 › Accessibility tests for authentication › passes a11y checks when creating flow","status":"passed","retry":0,"durationMs":3925}
+{"id":"autentication/flows.spec.ts:346 › Accessibility tests for authentication › passes a11y checks on flow details page","status":"passed","retry":0,"durationMs":4349}
+{"id":"autentication/flows.spec.ts:355 › Accessibility tests for authentication › passes a11y checks on required actions tab","status":"passed","retry":0,"durationMs":5495}
+{"id":"autentication/flows.spec.ts:364 › Accessibility tests for authentication › passes a11y checks on password policy tab","status":"passed","retry":0,"durationMs":4275}
+{"id":"autentication/flows.spec.ts:373 › Accessibility tests for authentication › passes a11y checks when adding policy","status":"passed","retry":0,"durationMs":4058}
+{"id":"autentication/flows.spec.ts:383 › Accessibility tests for authentication › passes a11y checks on otp policy tab","status":"passed","retry":0,"durationMs":4430}
+{"id":"autentication/flows.spec.ts:392 › Accessibility tests for authentication › passes a11y checks on WebAuthn Policies tab","status":"passed","retry":0,"durationMs":4534}
+{"id":"autentication/flows.spec.ts:401 › Accessibility tests for authentication › passes a11y checks on CIBA Policy tab","status":"passed","retry":0,"durationMs":3827}
+{"id":"autentication/policies-ciba.spec.ts:27 › Authentication - Policies - CIBA › displays the initial state","status":"passed","retry":0,"durationMs":2744}
+{"id":"autentication/policies-ciba.spec.ts:43 › Authentication - Policies - CIBA › validates the fields","status":"passed","retry":0,"durationMs":3059}
+{"id":"autentication/policies-ciba.spec.ts:80 › Authentication - Policies - CIBA › saves the form","status":"passed","retry":0,"durationMs":3072}
+{"id":"autentication/policies.spec.ts:19 › OTP policies tab › changes to hotp","status":"passed","retry":0,"durationMs":3495}
+{"id":"autentication/policies.spec.ts:48 › Webauthn policies tabs › fills webauthn settings","status":"passed","retry":0,"durationMs":4151}
+{"id":"autentication/policies.spec.ts:71 › Webauthn policies tabs › fills webauthn passwordless settings","status":"passed","retry":0,"durationMs":3915}
+{"id":"client-scope/main.spec.ts:48 › Client scopes filtering › filters item by name","status":"passed","retry":0,"durationMs":2575}
+{"id":"client-scope/main.spec.ts:60 › Client scopes filtering › filters items by assigned type 'default'","status":"passed","retry":0,"durationMs":3118}
+{"id":"client-scope/main.spec.ts:75 › Client scopes filtering › filters items by assigned type 'optional'","status":"passed","retry":0,"durationMs":2976}
+{"id":"client-scope/main.spec.ts:90 › Client scopes filtering › filters items by assigned type 'all'","status":"passed","retry":0,"durationMs":3090}
+{"id":"client-scope/main.spec.ts:104 › Client scopes filtering › filters items by protocol 'openid'","status":"passed","retry":0,"durationMs":3225}
+{"id":"client-scope/main.spec.ts:118 › Client scopes filtering › filters items by protocol 'saml'","status":"passed","retry":0,"durationMs":3016}
+{"id":"client-scope/main.spec.ts:132 › Client scopes filtering › shows items on next page are more than 11","status":"passed","retry":0,"durationMs":3279}
+{"id":"client-scope/main.spec.ts:144 › Client scopes modification › modifies selected item type to 'default'","status":"passed","retry":0,"durationMs":2919}
+{"id":"client-scope/main.spec.ts:162 › Client scopes creation › fails creating client scope with an existing name","status":"passed","retry":0,"durationMs":3338}
+{"id":"client-scope/main.spec.ts:183 › Client scopes creation › hides 'consent text' field when 'display consent' switch is disabled","status":"passed","retry":0,"durationMs":2571}
+{"id":"client-scope/main.spec.ts:198 › Client scopes creation › creates and deletes a client scope","status":"passed","retry":0,"durationMs":4538}
+{"id":"client-scope/mappers.spec.ts:41 › Mappers tab › updates a predefined mapper","status":"passed","retry":0,"durationMs":7151}
+{"id":"client-scope/mappers.spec.ts:85 › Mappers tab › creates and removes mappers by configuration","status":"passed","retry":0,"durationMs":4293}
+{"id":"client-scope/mappers.spec.ts:103 › Mappers tab › auto-navigates after creating an Audience mapper","status":"passed","retry":0,"durationMs":4229}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:144 › OID4VCI Client Scope Functionality › should display OID4VCI fields when protocol is selected","status":"passed","retry":0,"durationMs":2676}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:189 › OID4VCI Client Scope Functionality › should save and persist OID4VCI field values","status":"passed","retry":0,"durationMs":4339}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:287 › OID4VCI Client Scope Functionality › should show OID4VCI protocol when global feature is enabled","status":"passed","retry":0,"durationMs":2732}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:304 › OID4VCI Client Scope Functionality › should not display OID4VCI fields when protocol is not OID4VCI","status":"passed","retry":0,"durationMs":2932}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:339 › OID4VCI Client Scope Functionality › should handle OID4VCI protocol selection correctly","status":"passed","retry":0,"durationMs":3139}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:375 › OID4VCI Client Scope Functionality › should only show supported format options (dc+sd-jwt and jwt_vc)","status":"passed","retry":0,"durationMs":3645}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:397 › OID4VCI Client Scope Functionality › should show format-specific fields for SD-JWT format","status":"passed","retry":0,"durationMs":3018}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:420 › OID4VCI Client Scope Functionality › should show format-specific fields for JWT VC format","status":"passed","retry":0,"durationMs":2521}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:443 › OID4VCI Client Scope Functionality › should save and persist new OID4VCI field values for SD-JWT format","status":"passed","retry":0,"durationMs":3698}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:508 › OID4VCI Client Scope Functionality › should omit optional OID4VCI fields when left blank","status":"passed","retry":0,"durationMs":3351}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:539 › OID4VCI Client Scope Functionality › should conditionally show/hide fields when format changes","status":"passed","retry":0,"durationMs":3092}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:591 › OID4VCI Client Scope Functionality › should show token_jws_type for all formats","status":"passed","retry":0,"durationMs":3031}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:609 › OID4VCI Client Scope Functionality › should show warning for mismatched token_jws_type based on selected format","status":"passed","retry":0,"durationMs":3256}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:641 › OID4VCI Client Scope Functionality › should not show token_jws_type warning when the value is empty","status":"passed","retry":0,"durationMs":2767}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:664 › OID4VCI Client Scope Functionality › should display signing algorithm dropdown with available algorithms","status":"passed","retry":0,"durationMs":2998}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:684 › OID4VCI Client Scope Functionality › should display hash algorithm dropdown with available algorithms","status":"passed","retry":0,"durationMs":2834}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:705 › OID4VCI Client Scope Functionality › should save and persist hash algorithm value","status":"passed","retry":0,"durationMs":3775}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:738 › OID4VCI Client Scope Functionality › should require binding methods and proof types when binding is enabled","status":"passed","retry":0,"durationMs":3822}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:789 › OID4VCI Client Scope Functionality › should default to sha-256 when hash algorithm is not set","status":"passed","retry":0,"durationMs":3685}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:818 › OID4VCI Client Scope Functionality › should reject unsupported cryptographic binding methods","status":"passed","retry":0,"durationMs":3412}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:852 › OID4VCI Client Scope Functionality › should reject unsupported proof types","status":"passed","retry":0,"durationMs":3595}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:886 › OID4VCI Client Scope Functionality › should reject mixed valid and invalid proof types","status":"passed","retry":0,"durationMs":2633}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:914 › OID4VCI Client Scope Functionality › should accept valid binding methods and proof types","status":"passed","retry":0,"durationMs":3904}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:958 › OID4VCI Client Scope Functionality › should hide binding fields when binding toggle is off","status":"passed","retry":0,"durationMs":2861}
+{"id":"client-scope/oid4vci-client-scope.spec.ts:998 › OID4VCI Client Scope Functionality › should not offer OID4VCI protocol when verifiable credentials are disabled for the realm","status":"passed","retry":0,"durationMs":2893}
+{"id":"client-scope/oid4vci-mappers.spec.ts:97 › OID4VCI Protocol Mapper Configuration › should display mandatory claim toggle and claim display fields","status":"passed","retry":0,"durationMs":3670}
+{"id":"client-scope/oid4vci-mappers.spec.ts:105 › OID4VCI Protocol Mapper Configuration › should save and persist mandatory claim and display fields","status":"passed","retry":0,"durationMs":4024}
+{"id":"client-scope/oid4vci-mappers.spec.ts:139 › OID4VCI Protocol Mapper Configuration › should allow adding multiple display entries","status":"passed","retry":0,"durationMs":3879}
+{"id":"client-scope/oid4vci-mappers.spec.ts:173 › OID4VCI Protocol Mapper Configuration › should allow removing display entries","status":"passed","retry":0,"durationMs":3795}
+{"id":"client-scope/oid4vci-mappers.spec.ts:193 › OID4VCI Protocol Mapper Configuration › should work with all OID4VC mapper types","status":"passed","retry":0,"durationMs":4050}
+{"id":"client-scope/scope.spec.ts:27 › Scope tab › assigns and unassigns role","status":"passed","retry":0,"durationMs":3949}
+{"id":"clients/advanced.spec.ts:59 › Advanced tab test › Clustering","status":"passed","retry":0,"durationMs":2650}
+{"id":"clients/advanced.spec.ts:69 › Advanced tab test › Fine grain OpenID connect configuration","status":"passed","retry":0,"durationMs":2496}
+{"id":"clients/advanced.spec.ts:78 › Advanced tab test › OIDC Compatibility Modes configuration","status":"passed","retry":0,"durationMs":2443}
+{"id":"clients/advanced.spec.ts:86 › Advanced tab test › Client Offline Session Max","status":"passed","retry":0,"durationMs":1940}
+{"id":"clients/advanced.spec.ts:90 › Advanced tab test › Advanced settings","status":"passed","retry":0,"durationMs":2145}
+{"id":"clients/advanced.spec.ts:99 › Advanced tab test › Authentication flow override","status":"passed","retry":0,"durationMs":2777}
+{"id":"clients/advanced.spec.ts:136 › Client Offline Session Max › Client Offline Session Max","status":"passed","retry":0,"durationMs":2208}
+{"id":"clients/advanced.spec.ts:176 › OpenID for Verifiable Credentials › with protocol openid-connect › should handle OID4VC section visibility based on feature flag","status":"passed","retry":0,"durationMs":2694}
+{"id":"clients/advanced.spec.ts:198 › OpenID for Verifiable Credentials › with protocol openid-connect › should hide OID4VC section when verifiable credentials are disabled for the realm","status":"passed","retry":0,"durationMs":3564}
+{"id":"clients/advanced.spec.ts:220 › OpenID for Verifiable Credentials › with protocol openid-connect › should show OID4VCI Attester Trust IdPs field only when OID4VCI is enabled","status":"passed","retry":0,"durationMs":2503}
+{"id":"clients/advanced.spec.ts:232 › OpenID for Verifiable Credentials › with protocol openid-connect › should persist OID4VCI Attester Trust IdPs values","status":"passed","retry":0,"durationMs":3754}
+{"id":"clients/assign-oid4vci-client-scope.spec.ts:11 › OIDC client can assign OID4VCI client scopes","status":"passed","retry":0,"durationMs":5072}
+{"id":"clients/authorization.spec.ts:70 › Client authentication subtab › Should update the resource server settings","status":"passed","retry":0,"durationMs":2169}
+{"id":"clients/authorization.spec.ts:76 › Client authentication subtab › Should create a resource","status":"passed","retry":0,"durationMs":2418}
+{"id":"clients/authorization.spec.ts:89 › Client authentication subtab › Edit a resource","status":"passed","retry":0,"durationMs":2387}
+{"id":"clients/authorization.spec.ts:99 › Client authentication subtab › Should navigate to previous page when last resource on current page is deleted","status":"passed","retry":0,"durationMs":5361}
+{"id":"clients/authorization.spec.ts:137 › Client authentication subtab › Should create a scope","status":"passed","retry":0,"durationMs":2224}
+{"id":"clients/authorization.spec.ts:154 › Client authentication subtab › Should create a permission","status":"passed","retry":0,"durationMs":2456}
+{"id":"clients/authorization.spec.ts:170 › Client authentication subtab › Should create a policy","status":"passed","retry":0,"durationMs":2500}
+{"id":"clients/authorization.spec.ts:183 › Client authentication subtab › Should delete a policy","status":"passed","retry":0,"durationMs":2388}
+{"id":"clients/authorization.spec.ts:190 › Client authentication subtab › Should create a client policy","status":"passed","retry":0,"durationMs":2383}
+{"id":"clients/authorization.spec.ts:202 › Client authentication subtab › Should copy auth details","status":"passed","retry":0,"durationMs":2133}
+{"id":"clients/authorization.spec.ts:211 › Client authentication subtab › Should export auth details","status":"passed","retry":0,"durationMs":2243}
+{"id":"clients/authorization.spec.ts:255 › Client authorization tab access for view-realm-authorization › Should view authorization tab","status":"passed","retry":0,"durationMs":3198}
+{"id":"clients/authorization.spec.ts:302 › Accessibility tests for client authorization › Check a11y violations on load/ client authorization","status":"passed","retry":0,"durationMs":3504}
+{"id":"clients/authorization.spec.ts:344 › Client authorization resources pagination › Should not duplicate the 10th item on the 2nd page","status":"passed","retry":0,"durationMs":2219}
+{"id":"clients/details.spec.ts:42 › Clients details test › Should test clientId required","status":"passed","retry":0,"durationMs":2051}
+{"id":"clients/details.spec.ts:47 › Clients details test › Cancel create should return to clients","status":"passed","retry":0,"durationMs":2303}
+{"id":"clients/details.spec.ts:57 › Clients details test › Should be able to create a client","status":"passed","retry":0,"durationMs":2630}
+{"id":"clients/details.spec.ts:70 › Clients details test › Should be able to update a client","status":"passed","retry":0,"durationMs":2930}
+{"id":"clients/initial-access.spec.ts:42 › Client initial access tokens › Initial access token can't be created with 0 days and count","status":"passed","retry":0,"durationMs":1820}
+{"id":"clients/initial-access.spec.ts:54 › Client initial access tokens › Initial access token","status":"passed","retry":0,"durationMs":3345}
+{"id":"clients/keys.spec.ts:37 › Clients OIDC keys › Should enable reload when JWKS URL is disabled","status":"passed","retry":0,"durationMs":2350}
+{"id":"clients/main.spec.ts:43 › Clients test › Should test clientId required","status":"passed","retry":0,"durationMs":2276}
+{"id":"clients/main.spec.ts:48 › Clients test › Cancel create should return to clients","status":"passed","retry":0,"durationMs":2476}
+{"id":"clients/main.spec.ts:54 › Clients test › Should be able to create a client","status":"passed","retry":0,"durationMs":2462}
+{"id":"clients/main.spec.ts:67 › Clients test › Should fail creating client that already exists","status":"passed","retry":0,"durationMs":2385}
+{"id":"clients/main.spec.ts:82 › Clients test › Create client","status":"passed","retry":0,"durationMs":3283}
+{"id":"clients/main.spec.ts:112 › Clients test › Search for clients","status":"passed","retry":0,"durationMs":1969}
+{"id":"clients/main.spec.ts:133 › Clients test › Clients import › Import client","status":"passed","retry":0,"durationMs":2209}
+{"id":"clients/registration-policies.spec.ts:45 › Client registration policies tab › Anonymous client policies subtab › check anonymous clients list is not empty","status":"passed","retry":0,"durationMs":2059}
+{"id":"clients/registration-policies.spec.ts:50 › Client registration policies tab › Anonymous client policies subtab › add anonymous client registration policy","status":"passed","retry":0,"durationMs":2258}
+{"id":"clients/registration-policies.spec.ts:64 › Client registration policies tab › Anonymous client policies subtab › edit anonymous client registration policy","status":"passed","retry":0,"durationMs":2300}
+{"id":"clients/registration-policies.spec.ts:78 › Client registration policies tab › Anonymous client policies subtab › delete anonymous client registration policy","status":"passed","retry":0,"durationMs":2077}
+{"id":"clients/registration-policies.spec.ts:97 › Client registration policies tab › Authenticated client policies subtab › check authenticated clients list is not empty","status":"passed","retry":0,"durationMs":1961}
+{"id":"clients/registration-policies.spec.ts:102 › Client registration policies tab › Authenticated client policies subtab › add authenticated client registration policy","status":"passed","retry":0,"durationMs":2302}
+{"id":"clients/registration-policies.spec.ts:116 › Client registration policies tab › Authenticated client policies subtab › edit authenticated client registration policy","status":"passed","retry":0,"durationMs":2487}
+{"id":"clients/registration-policies.spec.ts:129 › Client registration policies tab › Authenticated client policies subtab › delete authenticated client registration policy","status":"passed","retry":0,"durationMs":2304}
+{"id":"clients/registration-policies.spec.ts:151 › Accessibility tests for client registration policies › Check accessibility violations","status":"passed","retry":0,"durationMs":2878}
+{"id":"clients/role.spec.ts:80 › Roles tab test › should fail to create client role with empty name","status":"passed","retry":0,"durationMs":2560}
+{"id":"clients/role.spec.ts:92 › Roles tab test › should create client role","status":"passed","retry":0,"durationMs":2388}
+{"id":"clients/role.spec.ts:102 › Roles tab test › should update client role description","status":"passed","retry":0,"durationMs":2390}
+{"id":"clients/role.spec.ts:114 › Roles tab test › should add and delete attribute to client role","status":"passed","retry":0,"durationMs":2670}
+{"id":"clients/role.spec.ts:133 › Roles tab test › should fail to create duplicate client role","status":"passed","retry":0,"durationMs":2335}
+{"id":"clients/role.spec.ts:146 › Roles tab test › should search existing and non-existing client role","status":"passed","retry":0,"durationMs":2407}
+{"id":"clients/role.spec.ts:166 › Roles tab test › should handle associated realm roles","status":"passed","retry":0,"durationMs":3099}
+{"id":"clients/role.spec.ts:183 › Roles tab test › should handle associated client roles","status":"passed","retry":0,"durationMs":2824}
+{"id":"clients/role.spec.ts:194 › Roles tab test › should delete client role","status":"passed","retry":0,"durationMs":2328}
+{"id":"clients/role.spec.ts:204 › Roles tab test › Should delete client role from role details test","status":"skipped","retry":0,"durationMs":0}
+{"id":"clients/saml.spec.ts:59 › Fine Grain SAML Endpoint Configuration › should set Terms of service URL","status":"passed","retry":0,"durationMs":2458}
+{"id":"clients/saml.spec.ts:75 › Fine Grain SAML Endpoint Configuration › should show error for invalid terms of service URL","status":"passed","retry":0,"durationMs":1992}
+{"id":"clients/saml.spec.ts:107 › Clients SAML tests › should display the saml sections on details screen","status":"passed","retry":0,"durationMs":2094}
+{"id":"clients/saml.spec.ts:113 › Clients SAML tests › should save force name id format","status":"passed","retry":0,"durationMs":2089}
+{"id":"clients/saml.spec.ts:119 › Clients SAML tests › should not disable signature when cancel","status":"passed","retry":0,"durationMs":2041}
+{"id":"clients/saml.spec.ts:127 › Clients SAML tests › should disable client signature","status":"passed","retry":0,"durationMs":2085}
+{"id":"clients/saml.spec.ts:136 › Clients SAML tests › should enable Encryption keys config","status":"failed","retry":0,"durationMs":1883}
+{"id":"clients/saml.spec.ts:190 › Clients SAML tests › should check SAML capabilities","status":"skipped","retry":0,"durationMs":0}
+{"id":"clients/saml.spec.ts:212 › Clients SAML tests › should check access settings","status":"skipped","retry":0,"durationMs":0}
+{"id":"clients/scope.spec.ts:105 › Client details - Client scopes subtab › Should list client scopes","status":"passed","retry":0,"durationMs":2589}
+{"id":"clients/scope.spec.ts:111 › Client details - Client scopes subtab › Should search existing client scope by name","status":"passed","retry":0,"durationMs":2330}
+{"id":"clients/scope.spec.ts:117 › Client details - Client scopes subtab › Should search non-existent client scope by name","status":"passed","retry":0,"durationMs":2485}
+{"id":"clients/scope.spec.ts:122 › Client details - Client scopes subtab › Should add client scope with optional assigned type","status":"passed","retry":0,"durationMs":2874}
+{"id":"clients/scope.spec.ts:141 › Client details - Client scopes subtab › Should change item AssignedType to default from search bar","status":"passed","retry":0,"durationMs":3096}
+{"id":"clients/scope.spec.ts:155 › Client details - Client scopes subtab › Should show items on next page are more than 11","status":"passed","retry":0,"durationMs":2597}
+{"id":"clients/scope.spec.ts:161 › Client details - Client scopes subtab › Should remove client scope","status":"passed","retry":0,"durationMs":2828}
+{"id":"clients/scope.spec.ts:170 › Client details - Client scopes subtab › Should remove multiple client scopes from search bar","status":"passed","retry":0,"durationMs":2947}
+{"id":"clients/scope.spec.ts:216 › Client scopes evaluate subtab › check effective protocol mappers list","status":"passed","retry":0,"durationMs":2556}
+{"id":"clients/scope.spec.ts:226 › Client scopes evaluate subtab › check generated id token and user info","status":"passed","retry":0,"durationMs":2817}
+{"id":"events/list.spec.ts:64 › Events tests › User events list empty › Show empty when no save events","status":"passed","retry":0,"durationMs":1842}
+{"id":"events/list.spec.ts:97 › Events tests › User events with events › Expand item to see more information","status":"passed","retry":0,"durationMs":2282}
+{"id":"events/list.spec.ts:102 › Events tests › User events with events › Search by user ID","status":"passed","retry":0,"durationMs":1643}
+{"id":"events/list.spec.ts:116 › Events tests › User events with events › Filters the type select options while typing","status":"passed","retry":0,"durationMs":2482}
+{"id":"events/list.spec.ts:134 › Events tests › User events with events › Check accessibility on user events tab","status":"passed","retry":0,"durationMs":2313}
+{"id":"events/list.spec.ts:138 › Events tests › User events with events › Check accessibility on admin events tab","status":"passed","retry":0,"durationMs":2705}
+{"id":"events/list.spec.ts:143 › Events tests › User events with events › creating user","status":"passed","retry":0,"durationMs":1836}
+{"id":"groups/attributes.spec.ts:30 › Attributes › Add/remove attribute","status":"passed","retry":0,"durationMs":1898}
+{"id":"groups/list.spec.ts:51 › Group test › Create group test","status":"passed","retry":0,"durationMs":2543}
+{"id":"groups/list.spec.ts:70 › Group test › Fail to create group with empty name","status":"passed","retry":0,"durationMs":1611}
+{"id":"groups/list.spec.ts:78 › Group test › Fail to create group with duplicated name","status":"passed","retry":0,"durationMs":1892}
+{"id":"groups/list.spec.ts:105 › Search group under current group › Search group that exists","status":"passed","retry":0,"durationMs":1821}
+{"id":"groups/list.spec.ts:110 › Search group under current group › Search group that does not exists","status":"passed","retry":0,"durationMs":2278}
+{"id":"groups/list.spec.ts:115 › Search group under current group › Duplicate group from item bar","status":"passed","retry":0,"durationMs":2244}
+{"id":"groups/list.spec.ts:122 › Search group under current group › Delete group from item bar","status":"passed","retry":0,"durationMs":2132}
+{"id":"groups/list.spec.ts:129 › Search group under current group › Delete group from search bar","status":"passed","retry":0,"durationMs":2304}
+{"id":"groups/list.spec.ts:137 › Search group under current group › Edit group","status":"passed","retry":0,"durationMs":2185}
+{"id":"groups/list.spec.ts:147 › Search group under current group › Delete group from group details","status":"passed","retry":0,"durationMs":2094}
+{"id":"groups/list.spec.ts:155 › Search group under current group › Check a11y violations on groups page","status":"passed","retry":0,"durationMs":2751}
+{"id":"groups/members.spec.ts:66 › Members › Add member from search bar","status":"passed","retry":0,"durationMs":2177}
+{"id":"groups/members.spec.ts:71 › Members › Show members with sub-group users","status":"passed","retry":0,"durationMs":2709}
+{"id":"groups/members.spec.ts:96 › Members › Add member from empty state","status":"passed","retry":0,"durationMs":2577}
+{"id":"groups/members.spec.ts:104 › Members › Leave group from search bar","status":"passed","retry":0,"durationMs":2403}
+{"id":"groups/members.spec.ts:114 › Members › Leave group from item bar","status":"passed","retry":0,"durationMs":2093}
+{"id":"groups/members.spec.ts:123 › Members › Show memberships from item bar","status":"passed","retry":0,"durationMs":2497}
+{"id":"groups/role.spec.ts:51 › Role mappings › Check empty state","status":"passed","retry":0,"durationMs":1994}
+{"id":"groups/role.spec.ts:55 › Role mappings › Assign roles from empty state","status":"passed","retry":0,"durationMs":2383}
+{"id":"groups/role.spec.ts:64 › Role mappings › Check hide inherited roles option","status":"passed","retry":0,"durationMs":2140}
+{"id":"groups/role.spec.ts:72 › Role mappings › Remove roles","status":"passed","retry":0,"durationMs":2266}
+{"id":"identity-providers/default-trust.spec.ts:33 › Default Trust identity provider test › should only show trust material settings","status":"passed","retry":0,"durationMs":1713}
+{"id":"identity-providers/default-trust.spec.ts:57 › Default Trust identity provider test › should create and edit a Default Trust provider","status":"passed","retry":0,"durationMs":2201}
+{"id":"identity-providers/jwt-authorization-grant.spec.ts:26 › JWT Authorization Grant identity provider test › should create a JWT Authorization Grant provider with JWKS url","status":"passed","retry":0,"durationMs":2350}
+{"id":"identity-providers/jwt-authorization-grant.spec.ts:71 › JWT Authorization Grant identity provider test › should create a JWT Authorization Grant provider with public key pem","status":"passed","retry":0,"durationMs":3430}
+{"id":"identity-providers/kubernetes.spec.ts:17 › Kubernetes identity provider test › should create a Kubernetes provider","status":"passed","retry":0,"durationMs":2417}
+{"id":"identity-providers/kubernetes.spec.ts:41 › Kubernetes identity provider test › should set and persist federated client assertion max expiration","status":"passed","retry":0,"durationMs":2211}
+{"id":"identity-providers/oidc.spec.ts:36 › OIDC identity provider test › should create an OIDC provider using discovery url","status":"passed","retry":0,"durationMs":6417}
+{"id":"identity-providers/oidc.spec.ts:93 › Edit OIDC Provider › should add OIDC mapper of type Attribute Importer","status":"passed","retry":0,"durationMs":2704}
+{"id":"identity-providers/oidc.spec.ts:102 › Edit OIDC Provider › should add OIDC mapper of type Claim To Role","status":"passed","retry":0,"durationMs":2547}
+{"id":"identity-providers/oidc.spec.ts:109 › Edit OIDC Provider › should cancel the addition of the OIDC mapper","status":"passed","retry":0,"durationMs":2469}
+{"id":"identity-providers/saml-signature-defaults.spec.ts:7 › should enable SAML signature switches by default","status":"passed","retry":0,"durationMs":1603}
+{"id":"identity-providers/saml.spec.ts:29 › SAML identity provider test › should create a SAML provider using entity descriptor","status":"passed","retry":0,"durationMs":4460}
+{"id":"identity-providers/saml.spec.ts:55 › SAML identity provider test › should add auth constraints to existing SAML provider","status":"passed","retry":0,"durationMs":2271}
+{"id":"identity-providers/saml.spec.ts:78 › SAML identity provider test › should add SAML mapper of type SAML mapper","status":"passed","retry":0,"durationMs":2781}
+{"id":"identity-providers/saml.spec.ts:78 › SAML identity provider test › should add SAML mapper of type SAML Username Template Importer Mapper","status":"passed","retry":0,"durationMs":2500}
+{"id":"identity-providers/saml.spec.ts:78 › SAML identity provider test › should add SAML mapper of type Hardcoded User Session Attribute","status":"passed","retry":0,"durationMs":2485}
+{"id":"identity-providers/saml.spec.ts:78 › SAML identity provider test › should add SAML mapper of type Attribute Importer","status":"passed","retry":0,"durationMs":2790}
+{"id":"identity-providers/saml.spec.ts:78 › SAML identity provider test › should add SAML mapper of type Hardcoded Role","status":"passed","retry":0,"durationMs":2524}
+{"id":"identity-providers/saml.spec.ts:78 › SAML identity provider test › should add SAML mapper of type SAML Attribute To Role","status":"passed","retry":0,"durationMs":2593}
+{"id":"identity-providers/saml.spec.ts:87 › SAML identity provider test › should edit SAML settings","status":"passed","retry":0,"durationMs":3457}
+{"id":"identity-providers/spiffe.spec.ts:17 › SPIFFE identity provider test › should create a SPIFFE provider","status":"passed","retry":0,"durationMs":2351}
+{"id":"masthead/main.spec.ts:24 › Masthead tests › Desktop view › Go to account console and back to admin console","status":"passed","retry":0,"durationMs":1776}
+{"id":"masthead/main.spec.ts:31 › Masthead tests › Desktop view › Sign out reaches to log in screen","status":"passed","retry":0,"durationMs":1897}
+{"id":"masthead/main.spec.ts:36 › Masthead tests › Desktop view › Go to realm info","status":"passed","retry":0,"durationMs":1747}
+{"id":"masthead/main.spec.ts:43 › Masthead tests › Desktop view › Should go to documentation page","status":"passed","retry":0,"durationMs":1170}
+{"id":"masthead/main.spec.ts:51 › Masthead tests › Desktop view › Enable/disable help mode in desktop mode","status":"passed","retry":0,"durationMs":1682}
+{"id":"masthead/main.spec.ts:63 › Masthead tests › Desktop view › Check a11y violations on load/ masthead","status":"passed","retry":0,"durationMs":1244}
+{"id":"masthead/main.spec.ts:88 › Masthead tests › Login works for unprivileged users › Login without privileges to see admin console","status":"passed","retry":0,"durationMs":2551}
+{"id":"masthead/main.spec.ts:105 › Masthead tests › Mobile view › Mobile menu is shown when in mobile view","status":"passed","retry":0,"durationMs":1131}
+{"id":"masthead/main.spec.ts:109 › Masthead tests › Mobile view › Enable/disable help mode in mobile view","status":"passed","retry":0,"durationMs":1598}
+{"id":"masthead/main.spec.ts:117 › Masthead tests › Mobile view › Check a11y violations on load/ masthead","status":"passed","retry":0,"durationMs":1371}
+{"id":"masthead/realm.spec.ts:49 › Realm tests › should fail creating duplicated or empty name realm","status":"passed","retry":0,"durationMs":1866}
+{"id":"masthead/realm.spec.ts:64 › Realm tests › should create Test realm","status":"passed","retry":0,"durationMs":3402}
+{"id":"masthead/realm.spec.ts:75 › Realm tests › CRUD test of Disabled realm","status":"passed","retry":0,"durationMs":11057}
+{"id":"masthead/realm.spec.ts:97 › Realm tests › should create realm from new a realm","status":"passed","retry":0,"durationMs":3537}
+{"id":"masthead/realm.spec.ts:114 › Realm tests › should create realm with special characters","status":"passed","retry":0,"durationMs":2602}
+{"id":"masthead/realm.spec.ts:122 › Realm tests › should disable preview if json very long","status":"passed","retry":0,"durationMs":1873}
+{"id":"organization/groups/attributes.spec.ts:45 › Org Group Attributes › Add/remove attribute","status":"passed","retry":0,"durationMs":2475}
+{"id":"organization/groups/list.spec.ts:58 › Org group list tests › Org group CRUD › Create group from empty state","status":"passed","retry":0,"durationMs":2358}
+{"id":"organization/groups/list.spec.ts:65 › Org group list tests › Org group CRUD › Create group from toolbar","status":"passed","retry":0,"durationMs":2657}
+{"id":"organization/groups/list.spec.ts:83 › Org group list tests › Org group CRUD › Fail to create group with empty name","status":"passed","retry":0,"durationMs":2192}
+{"id":"organization/groups/list.spec.ts:92 › Org group list tests › Org group CRUD › Fail to create group with duplicated name","status":"passed","retry":0,"durationMs":2466}
+{"id":"organization/groups/list.spec.ts:118 › Org group list tests › Search and manage org groups › Search group that exists","status":"passed","retry":0,"durationMs":2567}
+{"id":"organization/groups/list.spec.ts:123 › Org group list tests › Search and manage org groups › Search group that does not exist","status":"passed","retry":0,"durationMs":2513}
+{"id":"organization/groups/list.spec.ts:128 › Org group list tests › Search and manage org groups › Duplicate group from item bar","status":"passed","retry":0,"durationMs":2866}
+{"id":"organization/groups/list.spec.ts:135 › Org group list tests › Search and manage org groups › Delete group from item bar","status":"passed","retry":0,"durationMs":2588}
+{"id":"organization/groups/list.spec.ts:142 › Org group list tests › Search and manage org groups › Delete group from toolbar","status":"passed","retry":0,"durationMs":2604}
+{"id":"organization/groups/list.spec.ts:150 › Org group list tests › Search and manage org groups › Edit group","status":"passed","retry":0,"durationMs":2756}
+{"id":"organization/groups/list.spec.ts:160 › Org group list tests › Search and manage org groups › Delete group from group details","status":"passed","retry":0,"durationMs":2701}
+{"id":"organization/groups/list.spec.ts:168 › Org group list tests › Search and manage org groups › Check a11y violations on org groups page","status":"passed","retry":0,"durationMs":3843}
+{"id":"organization/groups/members.spec.ts:84 › Org Group Members › Add member from search bar","status":"passed","retry":0,"durationMs":2794}
+{"id":"organization/groups/members.spec.ts:91 › Org Group Members › Include sub-group users checkbox is not shown for org groups","status":"passed","retry":0,"durationMs":2232}
+{"id":"organization/groups/members.spec.ts:97 › Org Group Members › Add member from empty state","status":"passed","retry":0,"durationMs":3311}
+{"id":"organization/groups/members.spec.ts:108 › Org Group Members › Leave group from search bar","status":"passed","retry":0,"durationMs":3332}
+{"id":"organization/groups/members.spec.ts:121 › Org Group Members › Leave group from item bar","status":"passed","retry":0,"durationMs":3187}
+{"id":"organization/groups/members.spec.ts:133 › Org Group Members › Show memberships from item bar","status":"passed","retry":0,"durationMs":3116}
+{"id":"organization/idp.spec.ts:46 › Identity providers › should add idp","status":"passed","retry":0,"durationMs":2435}
+{"id":"organization/main.spec.ts:38 › Organization CRUD › should create new organization","status":"passed","retry":0,"durationMs":2576}
+{"id":"organization/main.spec.ts:78 › Organization CRUD › Existing organization › should modify existing organization","status":"passed","retry":0,"durationMs":2285}
+{"id":"organization/main.spec.ts:93 › Organization CRUD › Existing organization › should delete from list","status":"passed","retry":0,"durationMs":1917}
+{"id":"organization/main.spec.ts:102 › Organization CRUD › Existing organization › should delete from details page","status":"passed","retry":0,"durationMs":2071}
+{"id":"organization/members.spec.ts:41 › Members › should add member","status":"passed","retry":0,"durationMs":2190}
+{"id":"permissions/main.spec.ts:46 › Permissions section tests › should create permission","status":"passed","retry":0,"durationMs":3485}
+{"id":"permissions/main.spec.ts:85 › Permissions section tests › should edit group permission","status":"passed","retry":0,"durationMs":3143}
+{"id":"permissions/main.spec.ts:149 › Permissions section tests › evaluate permissions › should evaluate permissions success","status":"passed","retry":0,"durationMs":2363}
+{"id":"permissions/main.spec.ts:162 › Permissions section tests › evaluate permissions › should evaluate permissions denied","status":"passed","retry":0,"durationMs":2400}
+{"id":"permissions/main.spec.ts:191 › Permissions section tests › permission search › should search permission","status":"passed","retry":0,"durationMs":2305}
+{"id":"permissions/main.spec.ts:200 › Permissions section tests › permission search › should search permission filter clients","status":"passed","retry":0,"durationMs":2354}
+{"id":"permissions/policy.spec.ts:30 › Policy section tests › create policy","status":"passed","retry":0,"durationMs":2245}
+{"id":"realm-roles/axe.spec.ts:22 › Accessibility tests for realm roles › Check a11y violations on load/ realm roles","status":"passed","retry":0,"durationMs":2846}
+{"id":"realm-roles/axe.spec.ts:26 › Accessibility tests for realm roles › Check a11y violations on default-roles-master default tab and default roles tabs","status":"passed","retry":0,"durationMs":3732}
+{"id":"realm-roles/axe.spec.ts:36 › Accessibility tests for realm roles › Check a11y violations on empty create role form","status":"passed","retry":0,"durationMs":2667}
+{"id":"realm-roles/main.spec.ts:52 › Realm roles test › should fail creating realm role","status":"passed","retry":0,"durationMs":2332}
+{"id":"realm-roles/main.spec.ts:70 › Realm roles test › shouldn't create a realm role based with only whitespace name","status":"passed","retry":0,"durationMs":1786}
+{"id":"realm-roles/main.spec.ts:78 › Realm roles test › Realm role CRUD test","status":"passed","retry":0,"durationMs":2344}
+{"id":"realm-roles/main.spec.ts:97 › Realm roles test › should delete role from details action","status":"passed","retry":0,"durationMs":2379}
+{"id":"realm-roles/main.spec.ts:110 › Realm roles test › should not be able to delete default role","status":"passed","retry":0,"durationMs":1930}
+{"id":"realm-roles/main.spec.ts:117 › Realm roles test › Add associated roles test","status":"passed","retry":0,"durationMs":3604}
+{"id":"realm-roles/main.spec.ts:147 › Realm roles test › should search existing associated role by name and go to it","status":"passed","retry":0,"durationMs":2149}
+{"id":"realm-roles/main.spec.ts:160 › Realm roles test › should go to default-roles-master link role name and check assign roles table is not empty","status":"passed","retry":0,"durationMs":2116}
+{"id":"realm-roles/main.spec.ts:173 › Realm roles test › Should search non-existent associated role by name","status":"passed","retry":0,"durationMs":1815}
+{"id":"realm-roles/main.spec.ts:181 › Realm roles test › Should hide inherited roles test","status":"passed","retry":0,"durationMs":2019}
+{"id":"realm-roles/main.spec.ts:191 › Realm roles test › Should fail to remove role when all unchecked from search bar","status":"passed","retry":0,"durationMs":2470}
+{"id":"realm-roles/main.spec.ts:208 › Realm roles test › Should delete single non-inherited role item","status":"passed","retry":0,"durationMs":2567}
+{"id":"realm-roles/main.spec.ts:225 › Realm roles test › Should delete all roles from search bar","status":"passed","retry":0,"durationMs":2691}
+{"id":"realm-roles/main.spec.ts:258 › Realm roles test › edit role details › should edit realm role details","status":"passed","retry":0,"durationMs":2126}
+{"id":"realm-roles/main.spec.ts:273 › Realm roles test › edit role details › should add attribute","status":"passed","retry":0,"durationMs":2207}
+{"id":"realm-roles/main.spec.ts:284 › Realm roles test › edit role details › should add attribute multiple","status":"passed","retry":0,"durationMs":2307}
+{"id":"realm-roles/main.spec.ts:300 › Realm roles test › edit role details › should delete attribute","status":"passed","retry":0,"durationMs":2208}
+{"id":"realm-settings/accessibility.spec.ts:32 › Accessibility tests for realm settings › Check a11y violations on load/ realm settings/ general tab","status":"passed","retry":0,"durationMs":2510}
+{"id":"realm-settings/accessibility.spec.ts:38 › Accessibility tests for realm settings › Check a11y violations on login tab","status":"passed","retry":0,"durationMs":3313}
+{"id":"realm-settings/accessibility.spec.ts:43 › Accessibility tests for realm settings › Check a11y violations on email tab","status":"passed","retry":0,"durationMs":3490}
+{"id":"realm-settings/accessibility.spec.ts:48 › Accessibility tests for realm settings › Check a11y violations on themes tab","status":"passed","retry":0,"durationMs":3173}
+{"id":"realm-settings/accessibility.spec.ts:53 › Accessibility tests for realm settings › Check a11y violations on keys tab/ keys list sub tab","status":"passed","retry":0,"durationMs":3443}
+{"id":"realm-settings/accessibility.spec.ts:60 › Accessibility tests for realm settings › Check a11y violations on keys tab/ providers sub tab","status":"passed","retry":0,"durationMs":3594}
+{"id":"realm-settings/accessibility.spec.ts:68 › Accessibility tests for realm settings › Check a11y violations on keys tab/ providers sub tab / adding provider","status":"passed","retry":0,"durationMs":3176}
+{"id":"realm-settings/accessibility.spec.ts:77 › Accessibility tests for realm settings › Check a11y violations on events tab/ event listeners sub tab","status":"passed","retry":0,"durationMs":3198}
+{"id":"realm-settings/accessibility.spec.ts:84 › Accessibility tests for realm settings › Check a11y violations on events tab/ user events settings sub tab","status":"passed","retry":0,"durationMs":3989}
+{"id":"realm-settings/accessibility.spec.ts:92 › Accessibility tests for realm settings › Check a11y violations on events tab/ admin events settings sub tab","status":"passed","retry":0,"durationMs":3889}
+{"id":"realm-settings/accessibility.spec.ts:100 › Accessibility tests for realm settings › Check a11y violations on localization locales sub tab","status":"passed","retry":0,"durationMs":3466}
+{"id":"realm-settings/accessibility.spec.ts:107 › Accessibility tests for realm settings › Check a11y violations on localization realm overrides sub tab","status":"passed","retry":0,"durationMs":3511}
+{"id":"realm-settings/accessibility.spec.ts:115 › Accessibility tests for realm settings › Check a11y violations on localization realm overrides sub tab/ adding message bundle","status":"passed","retry":0,"durationMs":3306}
+{"id":"realm-settings/accessibility.spec.ts:124 › Accessibility tests for realm settings › Check a11y violations on localization effective message bundles sub tab","status":"passed","retry":0,"durationMs":3650}
+{"id":"realm-settings/accessibility.spec.ts:134 › Accessibility tests for realm settings › Check a11y violations on security defenses tab","status":"passed","retry":0,"durationMs":3375}
+{"id":"realm-settings/accessibility.spec.ts:139 › Accessibility tests for realm settings › Check a11y violations on sessions tab","status":"passed","retry":0,"durationMs":3702}
+{"id":"realm-settings/accessibility.spec.ts:144 › Accessibility tests for realm settings › Check a11y violations on tokens tab","status":"passed","retry":0,"durationMs":4051}
+{"id":"realm-settings/accessibility.spec.ts:149 › Accessibility tests for realm settings › Check a11y violations on client policies tab/ profiles sub tab","status":"passed","retry":0,"durationMs":3404}
+{"id":"realm-settings/accessibility.spec.ts:156 › Accessibility tests for realm settings › Check a11y violations on client policies tab/ creating profile","status":"passed","retry":0,"durationMs":2942}
+{"id":"realm-settings/accessibility.spec.ts:164 › Accessibility tests for realm settings › Check a11y violations on client policies tab/ policies sub tab","status":"passed","retry":0,"durationMs":3229}
+{"id":"realm-settings/accessibility.spec.ts:172 › Accessibility tests for realm settings › Check a11y violations on client policies tab/ creating policy","status":"passed","retry":0,"durationMs":3258}
+{"id":"realm-settings/accessibility.spec.ts:182 › Accessibility tests for realm settings › Check a11y violations on user registration tab/ default roles sub tab","status":"passed","retry":0,"durationMs":3678}
+{"id":"realm-settings/accessibility.spec.ts:189 › Accessibility tests for realm settings › Check a11y violations on user registration tab/ default roles sub tab/ assigning role","status":"passed","retry":0,"durationMs":3497}
+{"id":"realm-settings/client-policies.spec.ts:60 › Realm settings client policies tab tests › Complete new client form and cancel","status":"passed","retry":0,"durationMs":2293}
+{"id":"realm-settings/client-policies.spec.ts:69 › Realm settings client policies tab tests › Complete new client form and submit","status":"passed","retry":0,"durationMs":2534}
+{"id":"realm-settings/client-policies.spec.ts:88 › Realm settings client policies tab tests › Editing client policy › Should perform client profile search by profile name","status":"passed","retry":0,"durationMs":2504}
+{"id":"realm-settings/client-policies.spec.ts:97 › Realm settings client policies tab tests › Editing client policy › Should not have conditions configured by default","status":"passed","retry":0,"durationMs":2266}
+{"id":"realm-settings/client-policies.spec.ts:103 › Realm settings client policies tab tests › Editing client policy › Should cancel adding a new condition to a client profile","status":"passed","retry":0,"durationMs":2563}
+{"id":"realm-settings/client-policies.spec.ts:110 › Realm settings client policies tab tests › Editing client policy › Should add a new client-roles condition to a client profile","status":"passed","retry":0,"durationMs":2688}
+{"id":"realm-settings/client-policies.spec.ts:120 › Realm settings client policies tab tests › Editing client policy › Should edit the client-roles condition of a client profile","status":"passed","retry":0,"durationMs":2869}
+{"id":"realm-settings/client-policies.spec.ts:137 › Realm settings client policies tab tests › Editing client policy › Should cancel deleting condition from a client profile","status":"passed","retry":0,"durationMs":2878}
+{"id":"realm-settings/client-policies.spec.ts:161 › Realm settings client policies tab tests › Editing client policy › Should not create duplicate client profile","status":"passed","retry":0,"durationMs":2813}
+{"id":"realm-settings/client-policies.spec.ts:174 › Realm settings client policies tab tests › Check reloading JSON policies","status":"passed","retry":0,"durationMs":2288}
+{"id":"realm-settings/client-policies.spec.ts:187 › Realm settings client policies tab tests › Delete client policy › Check deleting the client policy","status":"passed","retry":0,"durationMs":2379}
+{"id":"realm-settings/client-policies.spec.ts:194 › Realm settings client policies tab tests › Delete client policy › Check deleting newly created client policy from create view via dropdown","status":"passed","retry":0,"durationMs":2459}
+{"id":"realm-settings/client-profiles.spec.ts:44 › Realm settings client profiles tab tests › Complete new client form and cancel","status":"passed","retry":0,"durationMs":2528}
+{"id":"realm-settings/client-profiles.spec.ts:50 › Realm settings client profiles tab tests › Complete new client form and submit","status":"passed","retry":0,"durationMs":2404}
+{"id":"realm-settings/client-profiles.spec.ts:56 › Realm settings client profiles tab tests › Should perform client profile search by profile name","status":"passed","retry":0,"durationMs":2307}
+{"id":"realm-settings/client-profiles.spec.ts:62 › Realm settings client profiles tab tests › Should search non-existent client profile","status":"passed","retry":0,"durationMs":2005}
+{"id":"realm-settings/client-profiles.spec.ts:81 › Realm settings client profiles tab tests › Edit client profile › Should add executor to client profile","status":"passed","retry":0,"durationMs":2523}
+{"id":"realm-settings/client-profiles.spec.ts:99 › Realm settings client profiles tab tests › Edit client profile › Should delete executor from a client profile","status":"passed","retry":0,"durationMs":2833}
+{"id":"realm-settings/client-profiles.spec.ts:115 › Realm settings client profiles tab tests › Edit client profile › Check deleting the client profile","status":"passed","retry":0,"durationMs":2939}
+{"id":"realm-settings/email.spec.ts:31 › Email › Add email data with no authentication","status":"passed","retry":0,"durationMs":3944}
+{"id":"realm-settings/events.spec.ts:33 › Realm settings events tab tests › Enable user events","status":"passed","retry":0,"durationMs":4038}
+{"id":"realm-settings/events.spec.ts:59 › Realm settings events tab tests › Should revert saving event listener","status":"passed","retry":0,"durationMs":2630}
+{"id":"realm-settings/events.spec.ts:64 › Realm settings events tab tests › Should save event listener","status":"passed","retry":0,"durationMs":2614}
+{"id":"realm-settings/events.spec.ts:70 › Realm settings events tab tests › Should remove event from event listener","status":"passed","retry":0,"durationMs":2491}
+{"id":"realm-settings/export.spec.ts:33 › Partial realm export › Closes the dialog","status":"passed","retry":0,"durationMs":2217}
+{"id":"realm-settings/export.spec.ts:38 › Partial realm export › Shows a warning message","status":"passed","retry":0,"durationMs":2070}
+{"id":"realm-settings/export.spec.ts:51 › Partial realm export › Exports the realm","status":"passed","retry":0,"durationMs":2184}
+{"id":"realm-settings/general.spec.ts:33 › Realm settings general tab tests › Check Access Endpoints OpenID Endpoint Configuration link","status":"passed","retry":0,"durationMs":2237}
+{"id":"realm-settings/general.spec.ts:54 › Realm settings general tab tests › all general tab switches","status":"passed","retry":0,"durationMs":2271}
+{"id":"realm-settings/general.spec.ts:64 › Realm settings general tab tests › realm enable/disable switch","status":"passed","retry":0,"durationMs":2390}
+{"id":"realm-settings/general.spec.ts:77 › Realm settings general tab tests › Fail to set Realm ID to empty","status":"passed","retry":0,"durationMs":2166}
+{"id":"realm-settings/general.spec.ts:83 › Realm settings general tab tests › Modify Display name","status":"passed","retry":0,"durationMs":2364}
+{"id":"realm-settings/general.spec.ts:93 › Realm settings general tab tests › Modify front end URL","status":"passed","retry":0,"durationMs":2520}
+{"id":"realm-settings/general.spec.ts:106 › Realm settings general tab tests › Select SSL all requests","status":"passed","retry":0,"durationMs":2573}
+{"id":"realm-settings/general.spec.ts:117 › Realm settings general tab tests › Verify 'Revert' button works","status":"passed","retry":0,"durationMs":2418}
+{"id":"realm-settings/i18n.spec.ts:94 › i18n tests › should use THEME localization for fallback when no realm localization exists","status":"passed","retry":0,"durationMs":1516}
+{"id":"realm-settings/i18n.spec.ts:101 › i18n tests › should use THEME localization for language with existing theme localization","status":"passed","retry":0,"durationMs":1978}
+{"id":"realm-settings/i18n.spec.ts:108 › i18n tests › should use REALM localization for language when available","status":"passed","retry":0,"durationMs":1312}
+{"id":"realm-settings/i18n.spec.ts:116 › i18n tests › should apply plurals and interpolation for THEME localization","status":"passed","retry":0,"durationMs":1588}
+{"id":"realm-settings/i18n.spec.ts:123 › i18n tests › should apply plurals and interpolation for REALM localization","status":"passed","retry":0,"durationMs":1685}
+{"id":"realm-settings/import.spec.ts:49 › Partial import test › Opens and closes partial import dialog","status":"passed","retry":0,"durationMs":2219}
+{"id":"realm-settings/import.spec.ts:55 › Partial import test › Import button only enabled if JSON has something to import","status":"passed","retry":0,"durationMs":2057}
+{"id":"realm-settings/import.spec.ts:63 › Partial import test › Displays user options after multi-realm import","status":"passed","retry":0,"durationMs":2579}
+{"id":"realm-settings/import.spec.ts:101 › Partial import test › Displays user options after realm-less import and does the import","status":"passed","retry":0,"durationMs":2573}
+{"id":"realm-settings/import.spec.ts:126 › Partial import test › Should clear the input with the button","status":"passed","retry":0,"durationMs":2149}
+{"id":"realm-settings/keys.spec.ts:36 › Realm Settings - Keys › Add Providers","status":"passed","retry":0,"durationMs":3107}
+{"id":"realm-settings/keys.spec.ts:62 › Realm Settings - Keys › Search providers","status":"passed","retry":0,"durationMs":2186}
+{"id":"realm-settings/keys.spec.ts:68 › Realm Settings - Keys › Go to details","status":"passed","retry":0,"durationMs":2475}
+{"id":"realm-settings/keys.spec.ts:74 › Realm Settings - Keys › Should search active keys","status":"passed","retry":0,"durationMs":2318}
+{"id":"realm-settings/keys.spec.ts:80 › Realm Settings - Keys › Should search passive keys","status":"passed","retry":0,"durationMs":2486}
+{"id":"realm-settings/keys.spec.ts:96 › Realm Settings - Keys › Should search disabled keys","status":"passed","retry":0,"durationMs":2602}
+{"id":"realm-settings/keys.spec.ts:112 › Realm Settings - Keys › Delete provider","status":"passed","retry":0,"durationMs":2441}
+{"id":"realm-settings/localization.spec.ts:38 › Go to localization tab › Locales tab - Add locale","status":"passed","retry":0,"durationMs":2582}
+{"id":"realm-settings/localization.spec.ts:55 › Go to localization tab › Locales tab - CRUD bundle › Realm Overrides - Search function","status":"passed","retry":0,"durationMs":2676}
+{"id":"realm-settings/localization.spec.ts:66 › Go to localization tab › Locales tab - CRUD bundle › Realm Overrides - Add and delete bundle","status":"passed","retry":0,"durationMs":2696}
+{"id":"realm-settings/localization.spec.ts:86 › Go to localization tab › Locales tab - CRUD bundle › Realm Overrides - Edit and cancel edit message bundle","status":"passed","retry":0,"durationMs":2668}
+{"id":"realm-settings/login.spec.ts:44 › Realm settings tabs tests › Go to login tab","status":"passed","retry":0,"durationMs":3618}
+{"id":"realm-settings/login.spec.ts:58 › Realm settings tabs tests › Toggle passkeys enabled switch","status":"passed","retry":0,"durationMs":2318}
+{"id":"realm-settings/oid4vci-attributes.spec.ts:10 › OID4VCI section is hidden in Tokens tab when verifiable credentials are disabled","status":"passed","retry":0,"durationMs":2956}
+{"id":"realm-settings/oid4vci-attributes.spec.ts:34 › OID4VCI section visibility and jump link in Tokens tab","status":"passed","retry":0,"durationMs":2824}
+{"id":"realm-settings/oid4vci-attributes.spec.ts:55 › should render fields and save values with correct attribute keys","status":"passed","retry":0,"durationMs":3433}
+{"id":"realm-settings/oid4vci-attributes.spec.ts:93 › should persist values after page refresh","status":"passed","retry":0,"durationMs":3233}
+{"id":"realm-settings/oid4vci-attributes.spec.ts:147 › should validate form fields and save valid values","status":"passed","retry":0,"durationMs":3967}
+{"id":"realm-settings/oid4vci-attributes.spec.ts:205 › should show validation error for values below minimum threshold","status":"passed","retry":0,"durationMs":3657}
+{"id":"realm-settings/oid4vci-attributes.spec.ts:244 › should save signed metadata, encryption, and batch issuance settings","status":"passed","retry":0,"durationMs":3561}
+{"id":"realm-settings/oid4vci-attributes.spec.ts:315 › should save time-based correlation mitigation settings","status":"passed","retry":0,"durationMs":5147}
+{"id":"realm-settings/oid4vci-attributes.spec.ts:365 › should save Deflate Compression setting","status":"passed","retry":0,"durationMs":3340}
+{"id":"realm-settings/security-defenses.spec.ts:34 › Security defenses › Realm header settings","status":"passed","retry":0,"durationMs":2386}
+{"id":"realm-settings/security-defenses.spec.ts:41 › Security defenses › Brute force detection","status":"passed","retry":0,"durationMs":2577}
+{"id":"realm-settings/security-defenses.spec.ts:52 › Security defenses › Realm header settings followed by Brute force detection","status":"passed","retry":0,"durationMs":2775}
+{"id":"realm-settings/session.spec.ts:30 › Sessions › Add session data when Remember Me is disabled","status":"passed","retry":0,"durationMs":2688}
+{"id":"realm-settings/session.spec.ts:48 › Sessions › Add session data when Remember Me is enabled","status":"passed","retry":0,"durationMs":2890}
+{"id":"realm-settings/tokens.spec.ts:31 › Realm Settings - Tokens › Add token data","status":"passed","retry":0,"durationMs":4080}
+{"id":"realm-settings/user-registration.spec.ts:40 › Realm settings - User registration tab › Add / remove theRole role","status":"passed","retry":0,"durationMs":3163}
+{"id":"realm-settings/user-registration.spec.ts:58 › Realm settings - User registration tab › Add default group","status":"passed","retry":0,"durationMs":2483}
+{"id":"realm-settings/userprofile.spec.ts:69 › User profile tabs › Attributes sub tab tests › Completes new attribute form and performs cancel","status":"passed","retry":0,"durationMs":2561}
+{"id":"realm-settings/userprofile.spec.ts:80 › User profile tabs › Attributes sub tab tests › Completes new attribute form and performs submit","status":"passed","retry":0,"durationMs":2550}
+{"id":"realm-settings/userprofile.spec.ts:92 › User profile tabs › Attributes sub tab tests › Modifies existing attribute and performs save","status":"passed","retry":0,"durationMs":2672}
+{"id":"realm-settings/userprofile.spec.ts:104 › User profile tabs › Attributes sub tab tests › Adds and removes validator to/from existing attribute and performs save","status":"passed","retry":0,"durationMs":2758}
+{"id":"realm-settings/userprofile.spec.ts:127 › User profile tabs › Deletes an attributes group","status":"passed","retry":0,"durationMs":2446}
+{"id":"realm-settings/userprofile.spec.ts:134 › User profile tabs › Checks that not required attribute is not present when user is created with email as username and edit username set to disabled","status":"passed","retry":0,"durationMs":3334}
+{"id":"realm-settings/userprofile.spec.ts:156 › User profile tabs › Checks that not required attribute is not present when user is created/edited with email as username enabled","status":"passed","retry":0,"durationMs":3521}
+{"id":"realm-settings/userprofile.spec.ts:182 › User profile tabs › Checks that not required attribute with permissions to view/edit is present when user is created","status":"passed","retry":0,"durationMs":3582}
+{"id":"realm-settings/userprofile.spec.ts:207 › User profile tabs › Checks that required attribute with permissions to view/edit is present and required when user is created","status":"passed","retry":0,"durationMs":3693}
+{"id":"realm-settings/userprofile.spec.ts:235 › User profile tabs › Checks that attribute group is visible when user with existing attribute is created","status":"passed","retry":0,"durationMs":3498}
+{"id":"sessions/main.spec.ts:39 › Sessions test › Sessions list view › check item values","status":"passed","retry":0,"durationMs":2123}
+{"id":"sessions/main.spec.ts:47 › Sessions test › Sessions list view › go to item accessed clients link","status":"passed","retry":0,"durationMs":1898}
+{"id":"sessions/main.spec.ts:99 › Offline sessions › check offline token","status":"passed","retry":0,"durationMs":2284}
+{"id":"sessions/main.spec.ts:115 › Search › search non-existent session","status":"passed","retry":0,"durationMs":1754}
+{"id":"sessions/main.spec.ts:127 › revocation › Clear revocation notBefore","status":"passed","retry":0,"durationMs":1842}
+{"id":"sessions/main.spec.ts:136 › revocation › Check if notBefore cleared","status":"passed","retry":0,"durationMs":1805}
+{"id":"sessions/main.spec.ts:141 › revocation › Set revocation notBefore","status":"passed","retry":0,"durationMs":1707}
+{"id":"sessions/main.spec.ts:150 › revocation › Push when URI not configured","status":"passed","retry":0,"durationMs":1642}
+{"id":"sessions/main.spec.ts:166 › Accessibility tests for sessions › Check a11y violations on load/ sessions","status":"passed","retry":0,"durationMs":2132}
+{"id":"sessions/main.spec.ts:170 › Accessibility tests for sessions › Check a11y violations on revocation dialog","status":"passed","retry":0,"durationMs":2551}
+{"id":"sessions/main.spec.ts:176 › Accessibility tests for sessions › Check a11y violations on sign out all active sessions dialog","status":"passed","retry":0,"durationMs":2637}
+{"id":"user-federation/kerberos.spec.ts:60 › User Fed Kerberos tests › Should create Kerberos provider from empty state","status":"passed","retry":0,"durationMs":2221}
+{"id":"user-federation/kerberos.spec.ts:93 › User Fed Kerberos tests › Edit Kerberos provider › Should edit existing Kerberos provider and cancel","status":"passed","retry":0,"durationMs":2697}
+{"id":"user-federation/kerberos.spec.ts:108 › User Fed Kerberos tests › Edit Kerberos provider › Should edit existing Kerberos provider","status":"passed","retry":0,"durationMs":2371}
+{"id":"user-federation/kerberos.spec.ts:135 › User Fed Kerberos tests › Edit Kerberos provider › Should set cache policy to evict_daily","status":"passed","retry":0,"durationMs":2627}
+{"id":"user-federation/kerberos.spec.ts:150 › User Fed Kerberos tests › Edit Kerberos provider › Should set cache policy to evict_weekly","status":"passed","retry":0,"durationMs":2717}
+{"id":"user-federation/kerberos.spec.ts:166 › User Fed Kerberos tests › Edit Kerberos provider › Should set cache policy to max_lifespan","status":"passed","retry":0,"durationMs":2522}
+{"id":"user-federation/kerberos.spec.ts:182 › User Fed Kerberos tests › Edit Kerberos provider › Should set cache policy to no_cache","status":"passed","retry":0,"durationMs":2598}
+{"id":"user-federation/kerberos.spec.ts:195 › User Fed Kerberos tests › Edit Kerberos provider › Should disable an existing Kerberos provider","status":"passed","retry":0,"durationMs":2312}
+{"id":"user-federation/kerberos.spec.ts:206 › User Fed Kerberos tests › Edit Kerberos provider › Should create new Kerberos provider using the New Provider dropdown","status":"passed","retry":0,"durationMs":2179}
+{"id":"user-federation/ldap-mapper.spec.ts:78 › User Fed LDAP mapper tests › Delete default mappers","status":"passed","retry":0,"durationMs":3294}
+{"id":"user-federation/ldap-mapper.spec.ts:109 › User Fed LDAP mapper tests › Create hardcoded attribute mapper","status":"passed","retry":0,"durationMs":2765}
+{"id":"user-federation/ldap-mapper.spec.ts:124 › User Fed LDAP mapper tests › Create hardcoded ldap group mapper","status":"passed","retry":0,"durationMs":2519}
+{"id":"user-federation/ldap-mapper.spec.ts:139 › User Fed LDAP mapper tests › Create hardcoded ldap attribute mapper","status":"passed","retry":0,"durationMs":2668}
+{"id":"user-federation/ldap-mapper.spec.ts:154 › User Fed LDAP mapper tests › Create hardcoded ldap role mapper","status":"passed","retry":0,"durationMs":2870}
+{"id":"user-federation/ldap-mapper.spec.ts:168 › User Fed LDAP mapper tests › Create role ldap mapper","status":"passed","retry":0,"durationMs":2781}
+{"id":"user-federation/ldap-mapper.spec.ts:182 › User Fed LDAP mapper tests › Client ID hidden when 'Use Realm Roles Mapping' is on","status":"passed","retry":0,"durationMs":2630}
+{"id":"user-federation/ldap.spec.ts:75 › User Federation LDAP tests › Should create LDAP provider from empty state","status":"passed","retry":0,"durationMs":2632}
+{"id":"user-federation/ldap.spec.ts:127 › User Federation LDAP tests › Edit provider › Should fail updating advanced settings","status":"passed","retry":0,"durationMs":2145}
+{"id":"user-federation/ldap.spec.ts:135 › User Federation LDAP tests › Edit provider › Should update advanced settings","status":"passed","retry":0,"durationMs":2933}
+{"id":"user-federation/ldap.spec.ts:161 › User Federation LDAP tests › Edit provider › Should set cache policy to evict_daily","status":"passed","retry":0,"durationMs":3177}
+{"id":"user-federation/ldap.spec.ts:177 › User Federation LDAP tests › Edit provider › Should set cache policy to evict_weekly","status":"passed","retry":0,"durationMs":3208}
+{"id":"user-federation/ldap.spec.ts:195 › User Federation LDAP tests › Edit provider › Update connection and authentication settings and save","status":"passed","retry":0,"durationMs":2391}
+{"id":"users/main.spec.ts:39 › User creation › navigates to the create user page","status":"passed","retry":0,"durationMs":3142}
+{"id":"users/main.spec.ts:51 › User creation › creates a new user","status":"passed","retry":0,"durationMs":2919}
+{"id":"users/main.spec.ts:64 › User creation › checks temporary admin user existence","status":"passed","retry":0,"durationMs":1584}
+{"id":"users/main.spec.ts:77 › User creation › creates a user that joins a group","status":"passed","retry":0,"durationMs":3360}
+{"id":"users/main.spec.ts:90 › User creation › creates a user with a password credential","status":"passed","retry":0,"durationMs":3813}
+{"id":"users/main.spec.ts:125 › Existing users › searches for an existing user","status":"passed","retry":0,"durationMs":2590}
+{"id":"users/main.spec.ts:134 › Existing users › searches for a non-existing user","status":"passed","retry":0,"durationMs":2889}
+{"id":"users/main.spec.ts:143 › Existing users › edits a user","status":"passed","retry":0,"durationMs":2667}
+{"id":"users/main.spec.ts:163 › Existing users › formats Terms and Conditions accepted timestamp","status":"passed","retry":0,"durationMs":2897}
+{"id":"users/main.spec.ts:236 › Existing users › shows validation error for empty required attribute","status":"passed","retry":0,"durationMs":3000}
+{"id":"users/main.spec.ts:285 › Existing users › adds unmanaged attributes to a user","status":"passed","retry":0,"durationMs":4214}
+{"id":"users/main.spec.ts:320 › Existing users › adds unmanaged attributes with multiple values to a user","status":"passed","retry":0,"durationMs":3983}
+{"id":"users/main.spec.ts:341 › Existing users › adds a user to a group","status":"passed","retry":0,"durationMs":3454}
+{"id":"workflows/main.spec.ts:77 › Workflow CRUD › should create simple workflow from empty state","status":"passed","retry":0,"durationMs":2304}
+{"id":"workflows/main.spec.ts:87 › Workflow CRUD › should create complex workflow from create button","status":"passed","retry":0,"durationMs":2010}
+{"id":"workflows/main.spec.ts:98 › Workflow CRUD › should modify existing workflow","status":"passed","retry":0,"durationMs":2337}
+{"id":"workflows/main.spec.ts:113 › Workflow CRUD › should disable workflow","status":"passed","retry":0,"durationMs":1750}
+{"id":"workflows/main.spec.ts:130 › Workflow CRUD › should copy workflow from list","status":"passed","retry":0,"durationMs":2102}
+{"id":"workflows/main.spec.ts:138 › Workflow CRUD › should copy workflow from edit page","status":"passed","retry":0,"durationMs":2046}
+{"id":"workflows/main.spec.ts:147 › Workflow CRUD › should delete workflow from list","status":"passed","retry":0,"durationMs":1868}
+{"id":"workflows/workflow-user-tab.spec.ts:54 › Workflow tab in Users section › should show pending workflow details","status":"passed","retry":0,"durationMs":2449}
