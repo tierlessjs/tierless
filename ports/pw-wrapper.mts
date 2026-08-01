@@ -37,6 +37,16 @@ try {
 const anchored = T.anchorPlaywrightConfig(base, ${JSON.stringify(suiteDir)});
 export default {
   ...anchored,
+  // KEEP PLAYWRIGHT'S TRANSFORM OFF THE FRAMEWORK'S OWN ESM. Playwright transpiles every
+  // file that is not under a node_modules/ path segment, and a test's
+  // \`import("tierless/playwright")\` resolves through the work tree's link: dependency to
+  // this repo — a real path with no node_modules in it. So the runner rewrote tierless's
+  // .mjs to CommonJS, node then loaded that as ESM because of the extension, and the
+  // import died on \`ReferenceError: exports is not defined in ES module scope\`. It only
+  // bites on playwright >=1.60, whose transform added .mjs; keycloak is the first target
+  // on it. build.external is the supported opt-out (common/index.js: userConfig.build
+  // .external feeds the transform's matcher).
+  build: { external: [${JSON.stringify(path.join(TIERLESS_SRC, "**"))}] },
   // per-suite config overrides (ports/<name>/suite.mts). The one that matters so far is
   // \`webServer: null\` for a suite whose config spawns the stack unconditionally — the
   // port's boot.mts owns it instead, identically in both arms (grafana gets the same
