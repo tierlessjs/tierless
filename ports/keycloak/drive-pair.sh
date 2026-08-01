@@ -69,5 +69,7 @@ Claude-Session: https://claude.ai/code/session_01EJ4xGkzqNv622MKvKSGWFC" \
     && git push -q -u origin "$BRANCH" || echo "!! commit/push failed"
 done
 
-if [ "$MODE" = truth ]; then node ports/report-marginal.mts "$OUT"; else node ports/report.mts "$OUT"; fi
+# report-marginal takes the results DIR; report.mts takes the two measure files.
+if [ "$MODE" = truth ]; then node ports/report-marginal.mts "$OUT"
+else node ports/report.mts "$OUT/baseline-measure.jsonl" "$OUT/ported-measure.jsonl"; fi
 echo "KEYCLOAK_${MODE}_DONE"

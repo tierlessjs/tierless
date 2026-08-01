@@ -77,5 +77,7 @@ Claude-Session: https://claude.ai/code/session_011JsGFUBBubsTp15Gf6Fi3j" \
     && git push -q -u origin "$BRANCH" || echo "!! commit/push failed"
 done
 
-if [ "$MODE" = truth ]; then node ports/report-marginal.mts "$OUT"; else node ports/report.mts "$OUT"; fi
+# report-marginal takes the results DIR; report.mts takes the two measure files.
+if [ "$MODE" = truth ]; then node ports/report-marginal.mts "$OUT"
+else node ports/report.mts "$OUT/baseline-measure.jsonl" "$OUT/ported-measure.jsonl"; fi
 echo "INVENTREE_${MODE}_DONE"
