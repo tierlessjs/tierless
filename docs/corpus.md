@@ -347,9 +347,19 @@ tables, forms, settings, permissions and importing, and a client seam that is on
 `export const api = axios.create({})` in `src/frontend/src/App.tsx`. Its fixtures do no
 `page.route()` mocking, and CI serves the frontend from Django on :8000, so the API is
 same-origin and the gateway convention applies unchanged. Traffic is paginated tables and
-settings panels: many small JSON, the shape grafana showed pays best. **Next: Keycloak admin-ui** (`keycloak/keycloak`, Quarkus/Java + React). The question this
-entry used to defer — how a ported bundle is served by `kc.sh` rather than Vite — is
-settled, by reading the tree rather than guessing:
+settings panels: many small JSON, the shape grafana showed pays best.
+
+**Keycloak admin-ui** (`keycloak/keycloak`, Quarkus/Java + React) — MEASURED, and the
+first corpus app whose slice could not be isolated. Suite total −2.1%, marginal −2.6%,
+wall parity (+1%, two floor pairs agreeing at +8 ms and +28 ms median per test); full
+numbers and caveats in `ports/keycloak/README.md`. The port moves 2717 MB onto a session
+costing 24 MB, but 43% of that is bulk, and one deflate window makes per-message sizes
+unobservable — so the −99% is a compression delta and **the request-shape predictor is
+untested here**. `ports/summary.mts` prints the slice as n/a rather than quoting it. To
+test the predictor on this app the bulk has to be kept off the socket first, the way n8n's
+browse advisory does it.
+
+How a ported bundle is served by `kc.sh` rather than Vite, settled by reading the tree:
 
 - `test/utils/constants.ts` pins `SERVER_URL = http://localhost:8080`: the suite drives a
   REAL Keycloak, not the Vite dev server, so the measured path is the packaged one (the
