@@ -64,9 +64,8 @@ const PORTS: Port[] = [
     truth: "ports/keycloak/results/truth",
     floor: ["ports/keycloak/results/floor/baseline-measure.jsonl", "ports/keycloak/results/floor/ported-measure.jsonl"],
     caveats: [
-      "SLICE IS NOT SEPARABLE HERE: 43% of the bytes the port moved onto the session are bulk (>1 MB), and session bytes are one counter, so the -99% on moved traffic is a compression delta, not a many-small result. The request-shape predictor is untested on this app.",
-      "The console re-fetches its own bundle every test (patternfly CSS, main.css/js, CodeEditor are ~70% of marginal bytes in BOTH arms) and the harness has no warm cache, so those repeats swamp the admin API the port carries.",
-      "Neither truth pair reached exact pass parity; the flaky specs differ run to run and three fail on the stock bundle too, so the byte row quoted from report.mts is gated to the 413 pairs that passed in both arms.",
+      "138 of the slice's 159 MB is /admin/serverinfo, which stock Keycloak sends UNCOMPRESSED; the session deflates it. So the slice mostly measures compression the stock server skips, not request shape. No gzip-baseline arm has been run.",
+      "Two truth pairs, with pass mismatches in opposite directions (418/423, 428/417): slice (-84.9%/-85.5%) and marginal (-54.9%/-55.8%) agree; suite total does not (-2.1%/-5.6%).",
     ],
   },
 ];

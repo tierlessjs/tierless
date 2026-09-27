@@ -14,27 +14,24 @@ Read `docs/corpus.md` "Reading a byte number" first: the same bytes give three n
 | | baseline | ported | delta |
 |---|---|---|---|
 | suite total | 3086 MB | 3022 MB | **−2.1%** |
-| marginal (what a warm cache still fetches) | 2726 MB | 2655 MB | **−2.6%** |
-| bytes over 413 pass-parity pairs (`ports/report.mts`) | 2951 MB | 2847 MB | **−4%** |
+| marginal (what a warm cache still fetches) | 241 MB | 109 MB | **−54.9%** |
+| the many-small slice (traffic the port moved) | 159 MB | 24 MB | **−84.9%** |
 | wall clock, 421 pass-parity pairs | 19.7 min | 20.0 min | +1% |
 
-Wall is parity. Two floor pairs agree: +8 ms and +28 ms median per test, 19.7 → 19.7 and
-19.7 → 20.0 min. The port neither costs nor buys time on this app.
+The moved traffic is 100% small responses (0% bulk) across 1030 paths. Two truth pairs
+agree: slice −84.9% / −85.5%, marginal −54.9% / −55.8%. The suite total does not
+(−2.1% / −5.6%): 92% of it is the console's own bundle, re-downloaded because the harness
+gives every test a cold browser.
 
-**The many-small slice is NOT separable on this app, and that is the honest headline.**
-The port moves 2717 MB of baseline traffic onto the session and pays 24 MB for it
-(−99.1%), but 43% of those moved bytes are BULK (>1 MB responses), and session bytes are
-a single counter — per-message sizes are unobservable through one deflate window. So that
-−99.1% is dominated by the compression delta on a few huge payloads, not by the
-many-small effect the corpus is testing. **The request-shape predictor is untested here.**
-Isolating it needs bulk kept OFF the socket first, the way n8n's browse advisory does it
-(`ports/n8n/report-smallslice.mts`, −50.7%).
+Wall is parity. Two floor pairs agree: +8 ms and +28 ms median per test.
 
-Why the suite-wide number is small: the console re-fetches its own bundle every test —
-patternfly's CSS, `main-*.css`, `main-*.js` and `CodeEditor-*` are ~70% of marginal bytes
-in BOTH arms — and the harness has no warm cache, so those repeats swamp the admin API
-the port actually carries. The session's 24 MB is 0.79% of suite total; that share is the
-ceiling on any byte win here, and it held identical across two independent pairs.
+**Most of the slice is one uncompressed endpoint.** `/admin/serverinfo` is 138 of the
+159 MB: ~323 KB, fetched on every console load, and stock Keycloak sends it uncompressed
+(322,875 B on the wire against a 322,838 B plaintext frame). The session's
+permessage-deflate compresses it; stock HTTP does not. So this −85% mostly measures
+compression the stock server skips, not per-request overhead, and session bytes are one
+counter, so serverinfo's share of the 24 MB can't be split out. The fair comparison is a
+gzip-baseline arm (nocodb's `drive-apples.sh`); it has not been run.
 
 ## Running it
 

@@ -14,7 +14,7 @@ quoting any of them.
 | inventree | 825 MB → 812 MB · -1.6% | 78 MB → 22 MB · -71.8% | 64 MB → 7 MB · **-88.3%** | 20.7 → 20.9 min · 0.9% |
 | n8n | 2814 MB → 2830 MB · 0.6% | 23 MB → 17 MB · -26.3% | 12 MB → 6 MB · **-50.7%** | — |
 | grafana | 1254 MB → 1698 MB · 35.4% | 37 MB → 25 MB · -31.5% | 21 MB → 3 MB · **-83.9%** | — |
-| keycloak | 3086 MB → 3022 MB · -2.1% | 2726 MB → 2655 MB · -2.6% | 2717 MB → 24 MB · n/a (43% bulk) | 19.7 → 20.0 min · 1.4% |
+| keycloak | 3086 MB → 3022 MB · -2.1% | 241 MB → 109 MB · -54.9% | 159 MB → 24 MB · **-84.9%** | 19.7 → 20.0 min · 1.4% |
 
 - **suite total** — everything the suite downloaded. Dominated by what the harness
   re-downloads because Playwright gives every test a cold browser. Not a user-facing number.
@@ -43,6 +43,5 @@ quoting any of them.
 
 **keycloak** — 47753 baseline requests, 43717 ported.
 - Pass counts differ: baseline 418, ported 423 — the arms did not run identical work, so the byte totals are not strictly comparable.
-- SLICE IS NOT SEPARABLE HERE: 43% of the bytes the port moved onto the session are bulk (>1 MB), and session bytes are one counter, so the -99% on moved traffic is a compression delta, not a many-small result. The request-shape predictor is untested on this app.
-- The console re-fetches its own bundle every test (patternfly CSS, main.css/js, CodeEditor are ~70% of marginal bytes in BOTH arms) and the harness has no warm cache, so those repeats swamp the admin API the port carries.
-- Neither truth pair reached exact pass parity; the flaky specs differ run to run and three fail on the stock bundle too, so the byte row quoted from report.mts is gated to the 413 pairs that passed in both arms.
+- 138 of the slice's 159 MB is /admin/serverinfo, which stock Keycloak sends UNCOMPRESSED; the session deflates it. So the slice mostly measures compression the stock server skips, not request shape. No gzip-baseline arm has been run.
+- Two truth pairs, with pass mismatches in opposite directions (418/423, 428/417): slice (-84.9%/-85.5%) and marginal (-54.9%/-55.8%) agree; suite total does not (-2.1%/-5.6%).

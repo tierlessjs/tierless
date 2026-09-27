@@ -349,15 +349,12 @@ tables, forms, settings, permissions and importing, and a client seam that is on
 same-origin and the gateway convention applies unchanged. Traffic is paginated tables and
 settings panels: many small JSON, the shape grafana showed pays best.
 
-**Keycloak admin-ui** (`keycloak/keycloak`, Quarkus/Java + React) — MEASURED, and the
-first corpus app whose slice could not be isolated. Suite total −2.1%, marginal −2.6%,
-wall parity (+1%, two floor pairs agreeing at +8 ms and +28 ms median per test); full
-numbers and caveats in `ports/keycloak/README.md`. The port moves 2717 MB onto a session
-costing 24 MB, but 43% of that is bulk, and one deflate window makes per-message sizes
-unobservable — so the −99% is a compression delta and **the request-shape predictor is
-untested here**. `ports/summary.mts` prints the slice as n/a rather than quoting it. To
-test the predictor on this app the bulk has to be kept off the socket first, the way n8n's
-browse advisory does it.
+**Keycloak admin-ui** (`keycloak/keycloak`, Quarkus/Java + React) — MEASURED. Slice
+−84.9% (159 → 24 MB, 100% small), marginal −54.9%, suite total −2.1%, wall parity (+1%);
+details in `ports/keycloak/README.md`. The slice does NOT cleanly test the request-shape
+predictor: 138 of its 159 MB is `/admin/serverinfo`, which stock Keycloak sends
+uncompressed, so most of the win is the session's deflate against uncompressed HTTP. A
+gzip-baseline arm would separate the two; it has not been run.
 
 How a ported bundle is served by `kc.sh` rather than Vite, settled by reading the tree:
 

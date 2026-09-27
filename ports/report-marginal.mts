@@ -58,7 +58,16 @@ const stem = (p: string): string => p.split("?")[0];
 // (dot). Matching only the dash form left every grafana bundle unmatched across arms, so
 // 457 MB of JS was reported as "static but moved to the session" — a bundle cannot cross
 // the session, and the nonsense per-slice figure (217.9%) is what exposed it.
-const unhashed = (p: string): string => stem(p).replace(/[-.][A-Za-z0-9_-]{8,}(\.[a-z0-9]+)$/i, ".*$1");
+// Keycloak does the same one level up: every static file sits under a per-build version
+// directory (/resources/bhcz5/... in one arm, /resources/67zs5/... in the other), and its
+// suite names fixtures with a fresh UUID per run. Unmatched, the whole bundle read as
+// "moved" (2717 MB, 43% bulk) against a session log where nothing under /resources/ ever
+// crossed; matched, the moved traffic is 149 MB of admin JSON, 0% bulk.
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+const unhashed = (p: string): string => stem(p)
+  .replace(/^\/resources\/[a-z0-9]{5}\//, "/resources/*/")
+  .replace(UUID, "*")
+  .replace(/[-.][A-Za-z0-9_-]{8,}(\.[a-z0-9]+)$/i, ".*$1");
 
 /** Per-path evidence for one arm: distinct 2xx body sizes. Non-2xx is ignored — one
  *  stray 401 on n8n's /types/nodes.json otherwise gave the path "two sizes" and
