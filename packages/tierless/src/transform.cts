@@ -1492,7 +1492,9 @@ function compile(src: string, preamble: string): { code: string; meta: CompileMe
     // caps handle, not a use of the router import.
     // not preceded by . (property walk), a word char, or a quote (a dyn park's member
     // STRING names the callee — it is data, not a binding reference)
-    const refdIn = (name: string, text: string): boolean => new RegExp(`(?<![.\\w$"'])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text);
+    // ...and a whole identifier: `Section$loader` (a component closure's program name)
+    // is not a use of `Section`, and \b would say it is — `$` is an identifier char
+    const refdIn = (name: string, text: string): boolean => new RegExp(`(?<![.\\w$"'])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w$])`).test(text);
     let machineText = progs.join(",\n");
     const included = new Set<number>();
     // referenced TOP-LEVEL BINDINGS (const config values, arrow helpers) join the closure

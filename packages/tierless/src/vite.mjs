@@ -25,6 +25,12 @@ import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { WS_PATH } from "./ws-path.mjs";
 const require = createRequire(import.meta.url);
+// this package's own root: never an app module. A port links tierless from outside
+// node_modules, so without this the auto compile took the RUNTIME for app code — with
+// closures on it compiled host.mjs, whose module-init bindMethods call then ran inside
+// the runtime's own import cycle (keycloak: "Cannot access APP_MERGED before
+// initialization", a console that never rendered).
+const OWN_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url))) + path.sep;
 const DIRECTIVE = /^(?:\s|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*["']use tierless["']\s*;?/;
 // A stable, collision-free filename for a module's server bundle: its basename plus a short
 // FNV-1a hash of the full id (two src/actions.mjs in different dirs don't clash).
@@ -170,7 +176,7 @@ export default function tierless(opts = {}) {
             // the compiler's own verdict below (at least one method compiled). Fail-safe: any
             // error under auto records in the coverage report and the module runs stock.
             const auto = autoCompile && !ssrBuild && !explicit &&
-                !id.startsWith("\0") && !cleanId.includes("node_modules") &&
+                !id.startsWith("\0") && !cleanId.includes("node_modules") && !path.resolve(cleanId).startsWith(OWN_ROOT) &&
                 /\.(m?[tj]s|[tj]sx)$/.test(cleanId) && !isTierlessModule(code) &&
                 (/\bclass\s+[A-Za-z_$]/.test(code) || /\bdefineStore\s*\(/.test(code) || (!!compilerOptions.closures && /\basync\b/.test(code)));
             if (explicit || auto) {

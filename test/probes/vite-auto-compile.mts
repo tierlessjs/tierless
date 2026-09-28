@@ -88,6 +88,33 @@ const cov2 = JSON.parse(readFileSync(join(dir, "dist-tierless", "tierless.compil
 check("ssr build leaves the client build's coverage artifact intact", cov2.compiledModules === 2, JSON.stringify(cov2));
 check("ssr build leaves the client build's manifest intact", existsSync(join(dir, "dist-tierless", "tierless.manifest.json")));
 
+// ---- closures: a React component's loader compiles, its JSX passes through untouched,
+// and the plugin never compiles ITS OWN runtime — a port links tierless from outside
+// node_modules, and compiling host.mjs put a bindMethods call inside the runtime's own
+// import cycle (Keycloak's console died at startup: APP_MERGED read before init).
+{
+  const comp = F("Section.tsx", `import { useClient } from "./client";
+export default function Section({ label }: { label: string }) {
+  const { client } = useClient();
+  const loader = async () => {
+    const a = await client.scopes.a();
+    const b = await client.scopes.b(a);
+    return label + b;
+  };
+  return <table data-loader={loader}><tbody /></table>;
+}
+`);
+  const cplugin: any = tierless({ apiUrl: "http://127.0.0.1:1", compile: "auto", compilerOptions: { closures: true }, runtime: pathToFileURL(join(SRC_DIR, "browser.mjs")).href });
+  cplugin.configResolved({ root: dir, resolve: { alias: [] } });
+  cplugin.buildStart();
+  const ct = (p: string): Promise<{ code: string } | null> => cplugin.transform.call({ warn() {} }, readFileSync(p, "utf8"), p);
+  const compOut = await ct(comp);
+  check("closures: a component's const loader compiles in a .tsx module", !!compOut && compOut.code.includes("Section$loader") && compOut.code.includes("__tlBindMethods"));
+  check("closures: the component's JSX is preserved for the app's own React plugin", !!compOut && compOut.code.includes("<table") && !compOut.code.includes("React.createElement"));
+  const own = join(SRC_DIR, "host.mjs");
+  check("closures: the plugin never compiles its own runtime (linked outside node_modules)", (await ct(own)) === null);
+}
+
 const { pass, fail } = counts();
 console.log(fail === 0
   ? `OK — compile:"auto" makes eligibility a build feature: the compiler judges every candidate form, non-candidates and refusals run stock, mix modules are untouched, and the coverage artifact is the committed evidence (${pass} checks)`

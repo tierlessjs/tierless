@@ -203,6 +203,8 @@ export const Hooked = () => {
   const ms = cmeta.methods as any[];
   check("closures on: a const arrow and a declaration compile; the one-call function stays plain",
     ms.some((m) => m.program === "Section$loader") && ms.some((m) => m.program === "Hooked$two") && !ms.some((m) => m.method === "one"), JSON.stringify(ms));
+  check("server code carries the program, not the component it was declared in (Section$loader is not a use of Section)",
+    typeof cmeta.serverCode === "string" && cmeta.serverCode.includes("Section$loader") && !/function Section\(/.test(cmeta.serverCode), String(cmeta.serverCode).slice(0, 200));
   writeFileSync(join(dir, "comp.mjs"), ccode);
   const cmod = await import(pathToFileURL(join(dir, "comp.mjs")).href);
   const cbundle = { PROGRAMS: cmod.PROGRAMS, __unwind: cmod.__unwind, __slots: cmod.__slots };
