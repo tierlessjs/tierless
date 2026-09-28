@@ -14,6 +14,8 @@
 //   - the twin's data-field writes land on the live client (member-path delta)
 //   - a twin call that throws unwinds into the compiled catch on the server
 //   - a server without a twin sends the call home with its path: correct, just unbatched
+//   - with the `closures` option, a component's `const loader = async () => {...}` and a
+//     hook's `async function` compile (2+ awaits only) and run the same way
 import { createRequire } from "node:module";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -80,7 +82,7 @@ const bundle = { PROGRAMS: mod.PROGRAMS, __unwind: mod.__unwind, __slots: mod.__
 const log: string[] = [];
 const counts: Record<string, number> = {};
 // one in-process browser<->server pair; `twins` is the server's session registry
-const connect = (twins?: (cls: string) => object | undefined) => {
+const connect = (bundle: object, twins?: (cls: string) => object | undefined) => {
   const cbs: Array<((obj: unknown, bin: Uint8Array | null) => void) | null> = [null, null];
   const mkPort = (me: number, count: boolean): Port => ({
     send(obj: any, bin?: Uint8Array): void {
@@ -92,15 +94,15 @@ const connect = (twins?: (cls: string) => object | undefined) => {
     onClose(): void { /* in-process */ },
     close(): void { /* in-process */ },
   });
-  makeHost({ bundle, tier: "server", exec: (() => { throw new Error("no resources here"); }) as never, ...(twins ? { twins } : {}) }).answer(makePeer(mkPort(1, false)));
+  makeHost({ bundle: bundle as never, tier: "server", exec: (() => { throw new Error("no resources here"); }) as never, ...(twins ? { twins } : {}) }).answer(makePeer(mkPort(1, false)));
   return makePeer(mkPort(0, true));
 };
 const bhost = makeHost({ bundle, tier: "browser", exec: (() => { throw new Error("browser owns nothing"); }) as never });
 const reset = (): void => { log.length = 0; for (const k of Object.keys(counts)) delete counts[k]; };
 
 const twin = new Client("server", log);
-const withTwin = connect((cls) => (cls === "Client" ? twin : undefined));
-const noTwin = connect();
+const withTwin = connect(bundle, (cls) => (cls === "Client" ? twin : undefined));
+const noTwin = connect(bundle);
 
 // ---- fetch arm: nothing migrates -----------------------------------------------------
 {
@@ -140,6 +142,59 @@ const noTwin = connect();
   const r = await bhost.runLocal(noTwin, "scopes$load", [{ client: live, label: "n" }], { migrate: () => true });
   check("no twin: right value, the live client served every call (correct, unbatched)",
     r === "n:2,20,17" && log.join(",") === "browser:a,browser:b,browser:c", JSON.stringify({ r, log, counts }));
+}
+
+// ---- the React shape: async functions declared in a component body (closures option) ---
+// `const loader = async () => {...}` inside a function component, the client from a hook:
+// Keycloak admin-ui's ClientScopesSection loader, reduced. Opt-in, and only functions
+// with 2+ tier-reaching awaits — a one-call function has no chain to fold.
+{
+  const COMP = `"use tierless";
+function useClient() { return { client: globalThis.__probeClient }; }
+export function Section(props) {
+  const { client } = useClient();
+  const label = props.label;
+  const loader = async (n) => {
+    const a = await client.scopes.a(n);
+    const b = await client.scopes.b(a);
+    const c = await client.scopes.c(b);
+    return label + ":" + [a, b, c].join(",");
+  };
+  async function one() { return await client.scopes.a(1); }
+  return { loader, one };
+}
+export const Hooked = () => {
+  const { client } = useClient();
+  async function two() { const a = await client.scopes.a(0); return await client.scopes.b(a); }
+  return { two };
+};`;
+  const off = compile(COMP, { filename: "comp.js" });
+  check("closures off: component functions stay plain", !(off.meta.methods as any[]).some((m) => m.class.startsWith("fn:")), JSON.stringify(off.meta.methods));
+  const { code: ccode, meta: cmeta } = compile(COMP, { filename: "comp.js", closures: true });
+  const ms = cmeta.methods as any[];
+  check("closures on: a const arrow and a declaration compile; the one-call function stays plain",
+    ms.some((m) => m.program === "Section$loader") && ms.some((m) => m.program === "Hooked$two") && !ms.some((m) => m.method === "one"), JSON.stringify(ms));
+  writeFileSync(join(dir, "comp.mjs"), ccode);
+  const cmod = await import(pathToFileURL(join(dir, "comp.mjs")).href);
+  const cbundle = { PROGRAMS: cmod.PROGRAMS, __unwind: cmod.__unwind, __slots: cmod.__slots };
+  const cpeer = connect(cbundle, (cls) => (cls === "Client" ? twin : undefined));
+  const chost = makeHost({ bundle: cbundle as never, tier: "browser", exec: (() => { throw new Error("browser owns nothing"); }) as never });
+
+  reset();
+  (globalThis as Record<string, unknown>).__probeClient = new Client("browser", log);
+  const sec = cmod.Section({ label: "n" });
+  check("the stub carries the program stamp", sec.loader.__tierless_program === "Section$loader", String(sec.loader.__tierless_program));
+  const r0 = await sec.loader(1);
+  check("unbound: the original runs on the live client", r0 === "n:2,20,17" && log.join(",") === "browser:a,browser:b,browser:c", JSON.stringify({ r0, log }));
+
+  reset();
+  cmod.__bindTierlessMethods((prog: string, caps: object, args: unknown[]) => chost.runLocal(cpeer, prog, [caps, ...args], { migrate: () => true }));
+  const r1 = await cmod.Section({ label: "n" }).loader(1);
+  const r2 = await cmod.Hooked().two();
+  cmod.__bindTierlessMethods(null);
+  check("bound + migrate: the component loader's three calls ran on the twin in ONE crossing",
+    r1 === "n:2,20,17" && log.slice(0, 3).join(",") === "server:a,server:b,server:c", JSON.stringify({ r1, log, counts }));
+  check("bound + migrate: the hook declaration form too (two calls, one crossing each run)", r2 === 10 && counts.resume === 2, JSON.stringify({ r2, counts }));
 }
 
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }

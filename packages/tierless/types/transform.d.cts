@@ -7,6 +7,9 @@ interface CompileOptions {
     autoWriteback?: boolean;
     trackWrites?: boolean;
     sourceMap?: boolean;
+    /** Also compile async functions declared in a component or hook body (a top-level
+     *  function) that make 2+ tier-reaching awaits — the loaders React apps write. */
+    closures?: boolean;
 }
 interface CompileMeta {
     programs: string[];

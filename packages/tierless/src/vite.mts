@@ -247,14 +247,15 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
       // needs the exec), which also sidesteps app-alias imports (@/…) in Node.
       const cleanId = id.split("?")[0];
       const explicit = !ssrBuild && !autoCompile && hasCompile && compileTargets.has(path.resolve(cleanId));
-      // AUTO: candidacy is a cheap truthful prefilter — the two forms the compiler
-      // carries (top-level classes, Pinia setup stores) — and INCLUSION is the
-      // compiler's own verdict below (at least one method compiled). Fail-safe: any
+      // AUTO: candidacy is a cheap truthful prefilter — the forms the compiler carries
+      // (top-level classes, Pinia setup stores, and with compilerOptions.closures any
+      // module with an async function, for component/hook closures) — and INCLUSION is
+      // the compiler's own verdict below (at least one method compiled). Fail-safe: any
       // error under auto records in the coverage report and the module runs stock.
       const auto = autoCompile && !ssrBuild && !explicit &&
         !id.startsWith("\0") && !cleanId.includes("node_modules") &&
         /\.(m?[tj]s|[tj]sx)$/.test(cleanId) && !isTierlessModule(code) &&
-        (/\bclass\s+[A-Za-z_$]/.test(code) || /\bdefineStore\s*\(/.test(code));
+        (/\bclass\s+[A-Za-z_$]/.test(code) || /\bdefineStore\s*\(/.test(code) || (!!compilerOptions.closures && /\basync\b/.test(code)));
       if (explicit || auto) {
         const rel = path.relative(root, cleanId);
         try {
@@ -263,7 +264,9 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
           const appRequire = createRequire(path.join(root, "package.json"));
           const esbuild = appRequire("esbuild") as { transformSync: (code: string, opts: object) => { code: string } };
           const loader = /\.[tj]sx$/.test(cleanId) ? "tsx" : "ts";
-          const stripped = esbuild.transformSync(code, { loader, format: "esm", target: "es2022", sourcefile: cleanId });
+          // jsx: "preserve" — JSX is the app's own React plugin's job (automatic runtime,
+          // fast refresh); lowering it here would emit React.createElement it never imports
+          const stripped = esbuild.transformSync(code, { loader, format: "esm", target: "es2022", sourcefile: cleanId, jsx: "preserve" });
           const { compile } = require("./transform.cjs");
           const { code: compiled, meta } = compile(stripped.code, { ...compilerOptions, resources: { "this.http": "server", ...(resources || {}) }, filename: id, preamble: "" });
           const some = meta.methods.some((m: { program: string | null }) => m.program);

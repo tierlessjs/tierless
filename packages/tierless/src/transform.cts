@@ -158,6 +158,7 @@ function allowlist(ast: t.File): void {
 // handlers and refuses to silently skip a finally.
 let blocks: Block[], suspSet: Set<string>, AUTO_DEREF = false, AUTO_WRITEBACK = false, TRACK_WRITES = false;
 let SOURCE_MAP = false, curLine = 0, srcFile = "", fnSites: Record<string, Record<number, number | undefined>> = {};   // --source-map: stamp each block with its source line so a migrated frame reports file:line, not just a pc
+let CLOSURES = false;   // opts.closures: compile async functions declared in component/hook bodies
 let fnSlots: Record<string, Record<number, string[]>> = {};   // §5 stop rule: per program per state, the frame slots its segment references (docs/migrate-arm.md)
 const nb = (): number => { const b: Block = { lines: [], term: null }; if (SOURCE_MAP) b.line = curLine; blocks.push(b); return blocks.length - 1; };
 const isSusp = (s: t.Statement): boolean =>
@@ -1199,14 +1200,144 @@ function rewriteDynAwaits(file: t.File, fnNode: t.FunctionDeclaration): void {
   } });
 }
 
-// ---- Pinia-style setup-store functions as PROGRAMS (docs/migrate-arm.md slice 3) --------
-// The other unit real apps write: `defineStore(key, () => { ... async function f() {...}
-// ... })`. Each async function DECLARED in the setup body whose awaits reach tier calls
-// (directly or through awaited member calls) compiles into a PROGRAM named key$f, with
-// its free setup-scope bindings (refs, service instances, sibling stores) rewritten to
-// `__caps.<name>` — frame arg 0, built AT CALL TIME from the live closure, excised whole
-// under §5 like a method's __self. The kept function becomes the same routing stub the
-// class path uses, falling back to the untouched original. Per-function and graceful.
+// ---- closure functions as PROGRAMS (docs/migrate-arm.md slice 3) ------------------------
+// The units real apps write their request chains in are CLOSURES: Pinia setup-store
+// functions (`defineStore(key, () => { async function f() {...} })`), and — with the
+// `closures` option — async functions declared in a component or hook body
+// (`function Section() { const { adminClient } = useAdminClient(); const loader = async
+// () => {...} }`). Each compiles into a PROGRAM with its free bindings (refs, services,
+// hook results, module imports alike) rewritten to `__caps.<name>` — frame arg 0, built AT
+// CALL TIME from the live closure, excised whole under §5 like a method's __self. The kept
+// function becomes the same routing stub the class path uses, falling back to the
+// untouched original. Per-function and graceful.
+
+interface CapsUnit {
+  /** Reporting owner: "store:<key>" or "fn:<Component>". */
+  owner: string;
+  fnName: string;
+  progName: string;
+  fnPath: NodePath<t.FunctionDeclaration | t.ArrowFunctionExpression | t.FunctionExpression>;
+  /** Fewest tier-reaching awaits worth compiling. A component closure with ONE call can't
+   *  gain from migrating (there is no chain to fold), so it stays plain code. */
+  minParks: number;
+}
+
+/** Lower one closure unit; returns its captures, or null when it has too few parks.
+ *  Throws (with the reason) when the function can't be carried. */
+function lowerCapsUnit(u: CapsUnit, progs: string[], meta: CompileMeta): string[] | null {
+  const fn = u.fnPath.node;
+  const label = `${u.owner.replace(/^\w+:/, "")}.${u.fnName}`;
+  // free bindings — the caps. EVERYTHING bound outside the function captures: closure
+  // refs and services, and MODULE-scope imports/consts alike. Module singletons (a
+  // router, i18n, a base store) are browser-owned live values the slot rule couldn't
+  // fence as imports — through the caps handle they fence like any owned slot, and the
+  // machine's server bundle needs (almost) no app imports. An ASSIGNMENT to a captured
+  // binding can't be carried (the caps object is a snapshot of bindings, not the
+  // bindings themselves) — the function stays original.
+  const captures: string[] = [];
+  const seen = new Set<string>();
+  const within = (p: NodePath, anc: NodePath): boolean => p === anc || !!p.findParent((q) => q === anc);
+  u.fnPath.traverse({ ReferencedIdentifier(ip) {
+    const name = ip.node.name;
+    if (name === "arguments" && t.isArrowFunctionExpression(fn) && ip.getFunctionParent()?.node === fn) throw new Error(`tierless: ${label} reads the enclosing function's \`arguments\` — an arrow can't carry it; the function stays uncompiled`);
+    if (seen.has(name)) return;
+    const b = ip.scope.getBinding(name);
+    if (!b || within(b.scope.path, u.fnPath)) return;               // fn-local or a true global: stays as-is
+    seen.add(name); captures.push(name);
+    for (const v of b.constantViolations) if (within(v, u.fnPath)) throw new Error(`tierless: ${label} assigns to captured binding '${name}' — a caps snapshot can't carry the write; the function stays uncompiled`);
+  } });
+
+  // isolated machine copy: function prog(__caps, ...params) { body }, captures rewritten
+  // to __caps.<name> — precisely, via the isolated file's own scope (a nested shadowing
+  // declaration keeps its local meaning). A concise arrow body becomes `return <expr>`.
+  const body = t.isBlockStatement(fn.body) ? t.cloneNode(fn.body, true) : t.blockStatement([t.returnStatement(t.cloneNode(fn.body, true))]);
+  const fnNode = t.functionDeclaration(t.identifier(u.progName), [t.identifier("__caps"), ...(fn.params.map((x) => t.cloneNode(x, true)) as t.FunctionDeclaration["params"])], body);
+  const file = t.file(t.program([fnNode]));
+  const capSet = new Set(captures);
+  traverse(file, { ReferencedIdentifier(ip) {
+    if (!capSet.has(ip.node.name) || ip.scope.getBinding(ip.node.name)) return;   // bound in the copy = shadowed
+    ip.replaceWith(t.memberExpression(t.identifier("__caps"), t.identifier(ip.node.name)));
+  } });
+  allowlist(file);
+  rewriteDynAwaits(file, fnNode);
+  let yields = 0;
+  traverse(file, { YieldExpression(yp) { if (isResYield(yp.node) || isDynYield(yp.node)) yields++; } });
+  if (yields < u.minParks) return null;                            // too few tier-reaching awaits: stays a plain function
+  traverse(file, { ThisExpression(tp) {
+    throw new Error(`tierless: ${label} uses \`this\` (line ${tp.node.loc?.start.line ?? "?"}) — a closure function has no instance; the function stays uncompiled`);
+  } });
+  traverse(file, { "JSXElement|JSXFragment"(jp: NodePath) {
+    throw new Error(`tierless: ${label} builds JSX (line ${jp.node.loc?.start.line ?? "?"}) — rendering stays with the app's own pipeline; the function stays uncompiled`);
+  } });
+  traverse(file, { AwaitExpression(ap) {
+    if (ap.getFunctionParent()?.node !== fnNode) return;     // a nested closure's own await: plain JS, stays
+    throw new Error(`tierless: ${label} awaits a non-call value (line ${ap.node.loc?.start.line ?? "?"}) — a pending native promise can't migrate; the function stays uncompiled`);
+  } });
+  let mpath: NodePath<t.FunctionDeclaration> | null = null;
+  traverse(file, { FunctionDeclaration(p) { if (p.node.id?.name === u.progName) { mpath = p; p.stop(); } } });
+  progs.push(lower(mpath!));
+  meta.programs.push(u.progName);
+  meta.methods.push({ class: u.owner, method: u.fnName, program: u.progName });
+  return captures;
+}
+
+// the routing stub's body: the bound runtime runs the program over a CALL-TIME caps
+// literal from the live closure; unbound, the untouched original runs
+const stubCall = (progName: string, capsLit: t.ObjectExpression, argv: t.Expression, orig: string, spread: t.Expression): t.ConditionalExpression =>
+  t.conditionalExpression(
+    t.binaryExpression("===", t.unaryExpression("typeof", t.identifier("__TIERLESS_METHOD__")), t.stringLiteral("function")),
+    t.callExpression(t.identifier("__TIERLESS_METHOD__"), [t.stringLiteral(progName), capsLit, argv]),
+    t.callExpression(t.identifier(orig), [t.spreadElement(spread)]));
+// the stamps a compiled CALLER's dynamic park dispatches on (sibling calls), and the CAPS
+// BUILDER for that dispatch: a sibling's frame arg 0 is ITS OWN caps, which only this
+// closure can build — a caller's dyn park must not hand the sibling the caller's caps
+// (checkAuth reading login's caps was the vikunja auth cluster)
+const stamps = (fnName: string, progName: string, capsLit: t.ObjectExpression): t.Statement[] => [
+  t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier(fnName), t.identifier("__tierless_program")), t.stringLiteral(progName))),
+  t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier(fnName), t.identifier("__tierless_caps")), t.arrowFunctionExpression([], t.cloneNode(capsLit)))),
+];
+const capsLiteral = (captures: string[]): t.ObjectExpression => t.objectExpression(captures.map((n) => t.objectProperty(t.identifier(n), t.identifier(n), false, true)));
+
+/** Compile an `async function f` statement in place: the visible function becomes the stub
+ *  (function declarations hoist, so no declaration-order constraints). */
+function compileDeclUnit(stmtPath: NodePath<t.FunctionDeclaration>, owner: string, progName: string, minParks: number, progs: string[], meta: CompileMeta): void {
+  const fnName = stmtPath.node.id!.name;
+  try {
+    const captures = lowerCapsUnit({ owner, fnName, progName, fnPath: stmtPath, minParks }, progs, meta);
+    if (!captures) return;
+    const origName = "__tierless_orig_" + fnName;
+    const orig = t.functionDeclaration(t.identifier(origName), stmtPath.node.params, stmtPath.node.body, false, stmtPath.node.async);
+    const capsLit = capsLiteral(captures);
+    stmtPath.node.params = [];
+    stmtPath.node.body = t.blockStatement([t.returnStatement(stubCall(progName, capsLit,
+      t.callExpression(t.memberExpression(t.identifier("Array"), t.identifier("from")), [t.identifier("arguments")]), origName, t.identifier("arguments")))]);
+    stmtPath.insertAfter([orig, ...stamps(fnName, progName, capsLit)]);
+  } catch (e) {
+    meta.methods.push({ class: owner, method: fnName, program: null, error: (e as Error).message.split("\n")[0] });
+  }
+}
+
+/** Compile `const f = async (...) => ...` (or an async function expression) in place: the
+ *  original moves to a const declared just before, the declarator becomes a rest-param
+ *  stub (an arrow has no `arguments`), and the stamps follow the statement. */
+function compileConstUnit(declPath: NodePath<t.VariableDeclarator>, owner: string, progName: string, minParks: number, progs: string[], meta: CompileMeta): void {
+  const fnName = (declPath.node.id as t.Identifier).name;
+  const initPath = declPath.get("init") as NodePath<t.ArrowFunctionExpression | t.FunctionExpression>;
+  try {
+    const captures = lowerCapsUnit({ owner, fnName, progName, fnPath: initPath, minParks }, progs, meta);
+    if (!captures) return;
+    const origName = "__tierless_orig_" + fnName;
+    const stmt = declPath.parentPath as NodePath<t.VariableDeclaration>;
+    stmt.insertBefore(t.variableDeclaration("const", [t.variableDeclarator(t.identifier(origName), initPath.node)]));
+    const capsLit = capsLiteral(captures);
+    declPath.node.init = t.arrowFunctionExpression([t.restElement(t.identifier("__tl_args"))],
+      stubCall(progName, capsLit, t.identifier("__tl_args"), origName, t.identifier("__tl_args")));
+    stmt.insertAfter(stamps(fnName, progName, capsLit));
+  } catch (e) {
+    meta.methods.push({ class: owner, method: fnName, program: null, error: (e as Error).message.split("\n")[0] });
+  }
+}
+
 function compileStoreFunctions(ast: t.File, progs: string[], meta: CompileMeta): void {
   traverse(ast, { CallExpression(csp) {
     if (!t.isIdentifier(csp.node.callee, { name: "defineStore" })) return;
@@ -1216,87 +1347,48 @@ function compileStoreFunctions(ast: t.File, progs: string[], meta: CompileMeta):
     const storeKey = keyArg.value.replace(/[^A-Za-z0-9_$]/g, "_");
     const body = setup.get("body");
     if (!body || Array.isArray(body) || !body.isBlockStatement()) return;
-
     for (const stmtPath of body.get("body")) {
       if (!stmtPath.isFunctionDeclaration() || !stmtPath.node.async || !stmtPath.node.id) continue;
-      const fnName = stmtPath.node.id.name;
-      const progName = storeKey + "$" + fnName;
-      try {
-        // free bindings — the caps. EVERYTHING bound outside the function captures:
-        // setup-scope refs and services, and MODULE-scope imports/consts alike. Module
-        // singletons (a router, i18n, a base store) are browser-owned live values the
-        // slot rule couldn't fence as imports — through the caps handle they fence like
-        // any owned slot, and the machine's server bundle needs (almost) no app imports.
-        // An ASSIGNMENT to a captured binding can't be carried (the caps object is a
-        // snapshot of bindings, not the bindings themselves) — the function stays original.
-        const captures: string[] = [];
-        const seen = new Set<string>();
-        const within = (p: NodePath, anc: NodePath): boolean => p === anc || !!p.findParent((q) => q === anc);
-        stmtPath.traverse({ ReferencedIdentifier(ip) {
-          const name = ip.node.name;
-          if (seen.has(name)) return;
-          const b = ip.scope.getBinding(name);
-          if (!b || within(b.scope.path, stmtPath)) return;               // fn-local or a true global: stays as-is
-          seen.add(name); captures.push(name);
-          for (const v of b.constantViolations) if (within(v, stmtPath)) throw new Error(`tierless: ${storeKey}.${fnName} assigns to captured binding '${name}' — a caps snapshot can't carry the write; the function stays uncompiled`);
-        } });
+      compileDeclUnit(stmtPath, "store:" + storeKey, storeKey + "$" + stmtPath.node.id.name, 1, progs, meta);
+    }
+  } });
+}
 
-        // isolated machine copy: function key$f(__caps, ...params) { body }, captures
-        // rewritten to __caps.<name> — precisely, via the isolated file's own scope
-        // (a nested shadowing declaration keeps its local meaning)
-        const fnNode = t.functionDeclaration(t.identifier(progName), [t.identifier("__caps"), ...(stmtPath.node.params.map((x) => t.cloneNode(x, true)) as t.FunctionDeclaration["params"])], t.cloneNode(stmtPath.node.body, true));
-        const file = t.file(t.program([fnNode]));
-        const capSet = new Set(captures);
-        traverse(file, { ReferencedIdentifier(ip) {
-          if (!capSet.has(ip.node.name) || ip.scope.getBinding(ip.node.name)) return;   // bound in the copy = shadowed
-          ip.replaceWith(t.memberExpression(t.identifier("__caps"), t.identifier(ip.node.name)));
-        } });
-        allowlist(file);
-        rewriteDynAwaits(file, fnNode);
-        let yields = 0;
-        traverse(file, { YieldExpression(yp) { if (isResYield(yp.node) || isDynYield(yp.node)) yields++; } });
-        if (!yields) continue;                                            // no tier-reaching awaits: stays a plain function
-        traverse(file, { ThisExpression(tp) {
-          throw new Error(`tierless: ${storeKey}.${fnName} uses \`this\` (line ${tp.node.loc?.start.line ?? "?"}) — setup-store functions have no instance; the function stays uncompiled`);
-        } });
-        traverse(file, { AwaitExpression(ap) {
-          if (ap.getFunctionParent()?.node !== fnNode) return;     // a nested closure's own await: plain JS, stays
-          throw new Error(`tierless: ${storeKey}.${fnName} awaits a non-call value (line ${ap.node.loc?.start.line ?? "?"}) — a pending native promise can't migrate; the function stays uncompiled`);
-        } });
-        let mpath: NodePath<t.FunctionDeclaration> | null = null;
-        traverse(file, { FunctionDeclaration(p) { if (p.node.id?.name === progName) { mpath = p; p.stop(); } } });
-        progs.push(lower(mpath!));
-        meta.programs.push(progName);
-        meta.methods.push({ class: "store:" + storeKey, method: fnName, program: progName });
-
-        // keep the original under a mangled name; the visible function becomes the stub.
-        // The caps literal is built AT CALL TIME from the live closure — always current,
-        // no declaration-order constraints (function declarations hoist).
-        const origName = "__tierless_orig_" + fnName;
-        const orig = t.functionDeclaration(t.identifier(origName), stmtPath.node.params, stmtPath.node.body, false, stmtPath.node.async);
-        const capsLit = t.objectExpression(captures.map((n) => t.objectProperty(t.identifier(n), t.identifier(n), false, true)));
-        stmtPath.node.params = [];
-        stmtPath.node.body = t.blockStatement([t.returnStatement(t.conditionalExpression(
-          t.binaryExpression("===", t.unaryExpression("typeof", t.identifier("__TIERLESS_METHOD__")), t.stringLiteral("function")),
-          t.callExpression(t.identifier("__TIERLESS_METHOD__"), [t.stringLiteral(progName), capsLit,
-            t.callExpression(t.memberExpression(t.identifier("Array"), t.identifier("from")), [t.identifier("arguments")])]),
-          t.callExpression(t.identifier(origName), [t.spreadElement(t.identifier("arguments"))]),
-        ))]);
-        stmtPath.insertAfter([orig,
-          // the stamp a compiled CALLER's dynamic park dispatches on (sibling store calls)
-          t.expressionStatement(t.assignmentExpression("=",
-            t.memberExpression(t.identifier(fnName), t.identifier("__tierless_program")), t.stringLiteral(progName))),
-          // the CAPS BUILDER for that dispatch: a sibling's frame arg 0 is ITS OWN caps,
-          // which only this closure can build — a caller's dyn park must not hand the
-          // sibling the caller's caps (checkAuth reading login's caps was the vikunja
-          // auth cluster). Same literal the stub passes, built at dispatch time.
-          t.expressionStatement(t.assignmentExpression("=",
-            t.memberExpression(t.identifier(fnName), t.identifier("__tierless_caps")),
-            t.arrowFunctionExpression([], t.cloneNode(capsLit))))]);
-      } catch (e) {
-        meta.methods.push({ class: "store:" + storeKey, method: fnName, program: null, error: (e as Error).message.split("\n")[0] });
+// A component or hook: a TOP-LEVEL function (declared, or a const arrow/function
+// expression, exported or not) whose body declares async functions. Only statements
+// directly in its body are units — a callback nested deeper is plain JS.
+function compileComponentFunctions(ast: t.File, progs: string[], meta: CompileMeta, skip: Set<string>): void {
+  traverse(ast, { Program(pp) {
+    const containers: [string, NodePath<t.Function>][] = [];
+    for (let sp of pp.get("body") as NodePath[]) {
+      if ((sp.isExportNamedDeclaration() || sp.isExportDefaultDeclaration()) && sp.node.declaration) sp = sp.get("declaration") as NodePath;
+      if (sp.isFunctionDeclaration()) containers.push([sp.node.id?.name ?? "default", sp as NodePath<t.Function>]);
+      else if (sp.isVariableDeclaration()) {
+        for (const d of sp.get("declarations")) {
+          const init = d.get("init");
+          if (t.isIdentifier(d.node.id) && !Array.isArray(init) && (init.isArrowFunctionExpression() || init.isFunctionExpression())) containers.push([d.node.id.name, init as NodePath<t.Function>]);
+        }
       }
     }
+    for (const [name, cp] of containers) {
+      if (skip.has(name)) continue;                                // compiled whole as a program already
+      const body = cp.get("body") as NodePath;
+      if (!body.isBlockStatement()) continue;
+      const owner = "fn:" + name;
+      for (const stmtPath of body.get("body")) {
+        if (stmtPath.isFunctionDeclaration() && stmtPath.node.async && stmtPath.node.id) {
+          compileDeclUnit(stmtPath, owner, name + "$" + stmtPath.node.id.name, 2, progs, meta);
+        } else if (stmtPath.isVariableDeclaration()) {
+          for (const d of stmtPath.get("declarations")) {
+            const init = d.node.init;
+            if (t.isIdentifier(d.node.id) && (t.isArrowFunctionExpression(init) || t.isFunctionExpression(init)) && init.async) {
+              compileConstUnit(d, owner, name + "$" + d.node.id.name, 2, progs, meta);
+            }
+          }
+        }
+      }
+    }
+    pp.stop();
   } });
 }
 
@@ -1345,7 +1437,9 @@ function lowerMethod(clsName: string, mName: string, m: t.ClassMethod, progName:
 }
 
 function compile(src: string, preamble: string): { code: string; meta: CompileMeta } {
-  const ast = parser.parse(src, { sourceType: "module" }) as unknown as t.File;
+  // jsx: a component module arrives with its JSX preserved (vite.mts) — it passes through
+  // the kept code untouched; a compiled unit may not contain any (lowerCapsUnit)
+  const ast = parser.parse(src, { sourceType: "module", plugins: ["jsx"] }) as unknown as t.File;
   allowlist(ast);
   checkNestedSuspensions(ast);
   USED_FORIN = false; USED_OBJREST = false;
@@ -1354,6 +1448,9 @@ function compile(src: string, preamble: string): { code: string; meta: CompileMe
   suspSet = susp;
 
   const pure: string[] = [], progs: string[] = [], meta: CompileMeta = { programs: [], exported: [], pure: [], imports: relativeImports(rest), methods: [] };
+  // component/hook closures (opt-in) BEFORE the pure print below: a component is a pure
+  // top-level function, printed from its node, so the stub swap must land first
+  if (CLOSURES) compileComponentFunctions(ast, progs, meta, suspSet);
   for (const [name, { p, exported }] of fnPaths) {                // pure single-tier fns run wholesale (lower() handles suspendable ones)
     if (suspSet.has(name)) { progs.push(lower(p!)); meta.programs.push(name); if (exported) meta.exported.push(name); }
     else { if (TRACK_WRITES) insertDirtyBarriers(p!); pure.push((exported ? "export " : "") + gen(p!.node)); meta.pure.push(name); }  // a pure helper can still mutate continuation state
@@ -1455,6 +1552,9 @@ interface CompileOptions {
   autoWriteback?: boolean;
   trackWrites?: boolean;
   sourceMap?: boolean;
+  /** Also compile async functions declared in a component or hook body (a top-level
+   *  function) that make 2+ tier-reaching awaits — the loaders React apps write. */
+  closures?: boolean;
 }
 interface CompileMeta {
   programs: string[];
@@ -1488,6 +1588,7 @@ function configure(opts: CompileOptions = {}): void {
   AUTO_DEREF = !!opts.autoDeref || AUTO_WRITEBACK;                // a write through a handle must first materialize it
   TRACK_WRITES = !!opts.trackWrites;
   SOURCE_MAP = !!opts.sourceMap;
+  CLOSURES = !!opts.closures;
   srcFile = opts.filename || "<tierless>";
   TIER_OF = { ...DEFAULT_RESOURCES, ...(opts.resources || {}) };
 }
