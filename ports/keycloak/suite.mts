@@ -10,7 +10,7 @@
 // the stack either way); measured arms run chromium only, as every other port does.
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { rmSync } from "node:fs";
+import { appendFileSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { delayProxy, type WireCounter } from "../latency-proxy.mts";
@@ -27,6 +27,35 @@ if (BUDGET && !TRUTH) { console.error("TIERLESS_WIRE_BUDGET composes with TIERLE
 const WORK = fileURLToPath(new URL(`../work/${VARIANT}/`, import.meta.url));
 const SRC = path.join(WORK, "src/js/apps/admin-ui/");
 const OUT = path.join(WORK, `measure${TRUTH ? "-truth" : ""}${RTT ? `-rtt${RTT}` : ""}.jsonl`);
+
+// RUN PROTOCOL (docs/corpus.md): TIERLESS_PROFILE_RUN=1 is a PROFILING run — the browser
+// traces every compiled method run to trace.jsonl; TIERLESS_PROFILE=<profile.json> is a
+// frozen COMPARISON run on that locked profile (built by ports/build-profile.mts). Keycloak
+// serves its own console HTML, so the endpoints live here and the page learns them from
+// localStorage keys the Playwright wrapper preloads (TIERLESS_LOCAL_STORAGE).
+const PROFILE_RUN = !!process.env.TIERLESS_PROFILE_RUN;
+const PROFILE = process.env.TIERLESS_PROFILE || "";
+if (PROFILE_RUN && PROFILE) { console.error("pick one: TIERLESS_PROFILE_RUN (profiling) or TIERLESS_PROFILE (comparison)"); process.exit(2); }
+const TRACE_OUT = path.join(WORK, "trace.jsonl");
+if (PROFILE_RUN || PROFILE) {
+  if (VARIANT !== "keycloak") { console.error("the profile protocol is for the ported arm"); process.exit(2); }
+  if (PROFILE_RUN) rmSync(TRACE_OUT, { force: true });
+  const profileJson = PROFILE ? readFileSync(PROFILE, "utf8") : "";
+  createServer((req, res) => {
+    res.setHeader("access-control-allow-origin", "*");
+    if (req.method === "POST" && req.url === "/trace") {
+      let body = "";
+      req.on("data", (c) => { body += String(c); });
+      req.on("end", () => { appendFileSync(TRACE_OUT, body.endsWith("\n") || !body ? body : body + "\n"); res.end(); });
+    } else if (req.method === "GET" && req.url === "/profile" && profileJson) {
+      res.setHeader("content-type", "application/json"); res.end(profileJson);
+    } else { res.statusCode = 404; res.end(); }
+  }).listen(14993, "127.0.0.1").unref();
+  process.env.TIERLESS_LOCAL_STORAGE = JSON.stringify(PROFILE_RUN
+    ? { tierlessTraceUrl: "http://127.0.0.1:14993/trace" }
+    : { tierlessProfileUrl: "http://127.0.0.1:14993/profile" });
+  console.log(PROFILE_RUN ? `profiling run: traces -> ${TRACE_OUT}` : `comparison run: locked profile ${PROFILE}`);
+}
 
 let pageUrl = "http://localhost:8080";
 const wireUrls: string[] = [];

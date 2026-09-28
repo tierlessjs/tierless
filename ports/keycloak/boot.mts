@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 const VARIANT = process.argv.includes("--baseline") ? "keycloak-baseline" : "keycloak";
 const WORK = fileURLToPath(new URL(`../work/${VARIANT}/`, import.meta.url));
 const KC = path.join(WORK, "kc/");
+const MACHINES = path.join(WORK, "src/js/apps/admin-ui/dist-tierless/");
 export const FRONT = "http://localhost:8080";      // Keycloak serves the console AND the admin API on one origin
 export const GATEWAY = "http://localhost:8180";
 
@@ -95,6 +96,9 @@ export async function bootKeycloak(opts: { frontend?: string } = {}): Promise<{ 
     spawn(process.execPath, [
       fileURLToPath(new URL("../../packages/tierless/bin/tierless.mjs", import.meta.url)), "gateway",
       "--backend", FRONT,
+      // the ported build's compiled machines + admin-client twins (patch 0004): a migrated
+      // loader resumes here. The baseline emits no manifest and stays exec-only.
+      ...(existsSync(path.join(MACHINES, "tierless.manifest.json")) ? ["--machines", MACHINES] : []),
       "--port", "8180",
       "--allow-origin", process.env.TIERLESS_ALLOWED_ORIGINS ||
         // 28080: the truth arm serves the page through the counting relay — its origin

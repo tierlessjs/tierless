@@ -49,7 +49,7 @@ fi
 # the vite build to actually run; ports/assert-fresh.mts is the backstop that catches it
 # if this ever stops working.
 pnpm --filter @keycloak/keycloak-admin-client build
-rm -rf apps/admin-ui/.wireit apps/admin-ui/target/classes/theme/keycloak.v2/admin/resources
+rm -rf apps/admin-ui/.wireit apps/admin-ui/target/classes/theme/keycloak.v2/admin/resources apps/admin-ui/dist-tierless
 pnpm --filter @keycloak/keycloak-admin-ui build
 
 # 5. this arm's distribution: the release tree with our console injected into the theme

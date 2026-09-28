@@ -59,6 +59,14 @@ export default {
     // recording costs sit inside every measured duration — off on measured runs,
     // identically in both arms (some suites record unconditionally, e.g. n8n trace:'on')
     ...(process.env.TIERLESS_MEASURE_OUT ? { trace: "off", video: "off", screenshot: "off" } : {}),
+    // TIERLESS_LOCAL_STORAGE: run-protocol keys (tierlessTraceUrl, tierlessProfileUrl) preloaded
+    // into the page origin's localStorage before any page script runs — for apps whose HTML the
+    // harness can't inject into, on a playwright whose Page class can't be patched (>=1.60)
+    ...(process.env.TIERLESS_LOCAL_STORAGE && process.env.TIERLESS_BASE_URL ? { storageState: {
+      cookies: [],
+      origins: [{ origin: new URL(process.env.TIERLESS_BASE_URL).origin,
+        localStorage: Object.entries(JSON.parse(process.env.TIERLESS_LOCAL_STORAGE)).map(([name, value]) => ({ name, value: String(value) })) }],
+    } } : {}),
   },
 };
 `;

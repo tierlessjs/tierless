@@ -103,12 +103,16 @@ const tryActivateProfile = (): void => {
   if (prof) { appMigrate = methodMigrate(prof); pendingProfile = null; }
 };
 
+const stored = (key: string): string | undefined => { try { return globalThis.localStorage?.getItem(key) ?? undefined; } catch { return undefined; } };
+
 export function connect({ url, protocols, exec, bundle, tier = "browser", heap = true,
   // run-protocol wiring can also come from page globals (a measured run's driver injects
   // them into the built index.html, like their CI's window.TESTING) — build-time shims
-  // can't know a preview-time mode
-  traceUrl = (globalThis as { __TIERLESS_TRACE__?: string }).__TIERLESS_TRACE__,
-  profileUrl = (globalThis as { __TIERLESS_PROFILE__?: string }).__TIERLESS_PROFILE__,
+  // can't know a preview-time mode. An app whose HTML the harness can't touch (Keycloak's
+  // console is served by the Java server) gets the same keys from localStorage, which a
+  // Playwright storageState preloads — the tierlessWsUrl override's mechanism.
+  traceUrl = (globalThis as { __TIERLESS_TRACE__?: string }).__TIERLESS_TRACE__ ?? stored("tierlessTraceUrl"),
+  profileUrl = (globalThis as { __TIERLESS_PROFILE__?: string }).__TIERLESS_PROFILE__ ?? stored("tierlessProfileUrl"),
 }: ConnectOpts = {}): Connection {
   const resolvedProtocols = typeof protocols === "function" ? protocols() : protocols;
   const ws = new WebSocket((typeof url === "function" ? url() : url) || defaultUrl(), resolvedProtocols);

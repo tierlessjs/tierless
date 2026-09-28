@@ -18,7 +18,8 @@
 		"codeload": null
 	},
 	"patches": [
-		"patches/0001-tierless-fetch.patch"
+		"patches/0001-tierless-fetch.patch",
+		"patches/0004-tierless-compile-closures.patch"
 	],
 	"testPatches": [
 		"patches/0002-server-url-env.patch",

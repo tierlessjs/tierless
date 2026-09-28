@@ -1,0 +1,50 @@
+--- a/js/apps/admin-ui/vite.config.ts
++++ b/js/apps/admin-ui/vite.config.ts
+@@ -6,12 +6,18 @@
+ import { checker } from "vite-plugin-checker";
+ import dts from "vite-plugin-dts";
+ import { configDefaults } from "vitest/config";
++import tierless from "tierless/vite";
+ 
+ // https://vitejs.dev/config/
+ export default defineConfig(({ mode }) => {
+   const env = loadEnv(mode, process.cwd(), "");
+   const external = ["react", "react/jsx-runtime", "react-dom"];
+   const plugins = [
++    // The tierless compile pass (port only). compile:'auto' + closures: component loaders
++    // that await 2+ calls compile into programs over their borrowed adminClient; the
++    // twins module stamps the admin client and builds its gateway-side session twin.
++    // What compiled, and why the rest didn't, lands in dist-tierless/.
++    tierless({ compile: "auto", compilerOptions: { closures: true }, twins: "src/tierless-twins.ts" }),
+     react(),
+     checker({ typescript: true }),
+     {
+--- /dev/null
++++ b/js/apps/admin-ui/src/tierless-twins.ts
+@@ -0,0 +1,26 @@
++// The tierless port's session twin of the admin client (docs/migrate-arm.md "twins").
++//
++// A compiled component loader borrows `adminClient` from useAdminClient() and awaits
++// several of its calls in a row (ClientScopesSection's loader: default scopes, optional
++// scopes, all scopes). Migrated, those calls run on the gateway against THIS instance —
++// one crossing for the chain instead of one per call — and hit Keycloak on localhost.
++//
++// Browser side, importing this module stamps the class, which is how the codec knows a
++// borrowed adminClient can be twinned. Gateway side, makeTwins builds one client per
++// session: the backend URL is the gateway's own, the realm comes from the live client's
++// fields as the stack shipped (it changes as the user navigates), and the token is the
++// latest bearer this session's crossings carried (keycloak-js refreshes it browser-side).
++import KeycloakAdminClient from "@keycloak/keycloak-admin-client";
++
++(KeycloakAdminClient.prototype as unknown as { __tierless_cls: string }).__tierless_cls = "KeycloakAdminClient";
++
++export function makeTwins({ apiUrl, bearer }: { apiUrl: string; bearer: () => string | null }) {
++  const client = new KeycloakAdminClient({ baseUrl: apiUrl });
++  client.registerTokenProvider({ getAccessToken: async () => bearer() ?? undefined });
++  return (cls: string, handle?: { state?: Record<string, unknown> }) => {
++    if (cls !== "KeycloakAdminClient") return undefined;
++    const realm = handle?.state?.realmName;
++    if (typeof realm === "string") client.setConfig({ realmName: realm });
++    return client;
++  };
++}
