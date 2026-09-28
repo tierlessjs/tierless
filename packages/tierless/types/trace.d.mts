@@ -66,13 +66,15 @@ export interface Recorder {
     flagOf(stack: {
         [k: string]: unknown;
     }[]): TraceFlag | null;
+    /** `bytes` overrides the measured result size: -1 records a touch with no size sample
+     *  (a borrowed-service call noted at its park, before it settles). */
     res(stack: {
         [k: string]: unknown;
     }[], req: {
         name: string;
         tier: string;
         args: unknown[];
-    }, result: unknown): void;
+    }, result: unknown, bytes?: number): void;
     /** The continuation is crossing: bump the stack-carried counters FIRST (the shipped wire
      *  must carry them so the receiving tier's records sort after this one), then encode via
      *  the thunk, then sink the crossing record with the pre-bump ids and the exact shipped

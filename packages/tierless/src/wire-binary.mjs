@@ -175,6 +175,11 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
                     intern(k);
                     intern(c);
                 }
+            if (s.h.mstate)
+                for (const [k, j] of Object.entries(s.h.mstate)) {
+                    intern(k);
+                    intern(j);
+                }
         }
         else if (s.k === "symu") {
             if (s.d !== undefined)
@@ -280,7 +285,7 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
             w.u8(4);
             w.varu(intern(s.h.owner));
             w.varu(intern(String(s.h.id)));
-            w.u8((s.h.kind ? 1 : 0) | (s.h.cls ? 2 : 0) | (s.h.mcls ? 4 : 0));
+            w.u8((s.h.kind ? 1 : 0) | (s.h.cls ? 2 : 0) | (s.h.mcls ? 4 : 0) | (s.h.mstate ? 8 : 0));
             if (s.h.kind)
                 w.varu(intern(s.h.kind));
             if (s.h.cls)
@@ -291,6 +296,14 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
                 for (const [k, c] of m) {
                     w.varu(intern(k));
                     w.varu(intern(c));
+                }
+            }
+            if (s.h.mstate) {
+                const m = Object.entries(s.h.mstate);
+                w.varu(m.length);
+                for (const [k, j] of m) {
+                    w.varu(intern(k));
+                    w.varu(intern(j));
                 }
             }
         }
@@ -401,6 +414,15 @@ export function decodeWireBinary(bytes, { content = null, tier = null } = {}) {
                     m[k] = S(r.varu());
                 }
                 h.mcls = m;
+            }
+            if (fl & 8) {
+                const m = {};
+                const c = r.varu();
+                for (let j = 0; j < c; j++) {
+                    const k = S(r.varu());
+                    m[k] = S(r.varu());
+                }
+                h.mstate = m;
             }
             slot = { k: "H", h };
         }

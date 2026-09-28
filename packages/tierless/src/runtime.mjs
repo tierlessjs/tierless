@@ -195,7 +195,10 @@ export function makePump(bundle, { twins } = {}) {
             if (i < path.length) {
                 const h = recv, k = path[i];
                 const cls = h.mcls?.[k];
-                const twin = cls && twins ? twins(cls, { id: h.id, owner: h.owner, path: [k] }) : undefined;
+                // the member's data fields as they were when the stack shipped: the registry
+                // applies what it trusts (realmName yes; a browser-side baseUrl no)
+                const state = h.mstate?.[k] ? JSON.parse(h.mstate[k]) : undefined;
+                const twin = cls && twins ? twins(cls, { id: h.id, owner: h.owner, path: [k], ...(state ? { state } : {}) }) : undefined;
                 if (!twin)
                     return { op: "home", tier: h.owner, name: "dyn:" + [...path.slice(i), r.member].join("."), args: [h, ...r.args] };
                 let target = twin;

@@ -28,6 +28,20 @@ export interface Handle {
    *  whole — so writes to shared state stay on the live object at home — and this is what
    *  lets the far side still reach a TWIN of one member (caps.adminClient) by path. */
   mcls?: Record<string, string>;
+  /** For each mcls member: a JSON image of its own data fields (functions and
+   *  unserializable values stay home). The twin factory applies what it trusts, so a
+   *  twin serves the call with the live object's state at the moment it shipped — the
+   *  mirror of the twin deltas that carry the twin's writes back. */
+  mstate?: Record<string, string>;
+}
+
+/** Does v reach a function through plain containers? Bounded; deep or odd shapes count as
+ *  holding one (they stay home rather than ship a lossy image). */
+function holdsFunction(v: unknown, depth = 0): boolean {
+  if (typeof v === "function") return true;
+  if (v === null || typeof v !== "object") return false;
+  if (depth > 4) return true;
+  return Object.values(v as object).some((x) => holdsFunction(x, depth + 1));
 }
 
 export function isHandle(x: unknown): x is Handle {
@@ -114,12 +128,22 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
   const exciseTo = (v: unknown): any => {
     const id = objs.length; idOf.set(v, id);
     const cls = stampOf(v);
-    let mcls: Record<string, string> | undefined;
+    let mcls: Record<string, string> | undefined, mstate: Record<string, string> | undefined;
     const proto = v && typeof v === "object" ? Object.getPrototypeOf(v) : undefined;
     if (proto === Object.prototype || proto === null) {
-      for (const [k, x] of Object.entries(v as object)) { const c = stampOf(x); if (c) (mcls ??= {})[k] = c; }
+      for (const [k, x] of Object.entries(v as object)) {
+        const c = stampOf(x);
+        if (!c) continue;
+        (mcls ??= {})[k] = c;
+        const data: Record<string, unknown> = {};
+        for (const [f, fv] of Object.entries(x as object)) {
+          if (holdsFunction(fv)) continue;                           // behavior, not state: {} after JSON would clobber the twin's own
+          try { const j = JSON.stringify(fv); if (j !== undefined) data[f] = JSON.parse(j); } catch { /* circular or unserializable: stays home */ }
+        }
+        (mstate ??= {})[k] = JSON.stringify(data);
+      }
     }
-    objs.push({ k: "H", h: { __tierless_handle__: true, owner: tier!.id, id: tier!.heapPut(v), kind: Array.isArray(v) ? "array" : "object", ...(cls ? { cls } : {}), ...(mcls ? { mcls } : {}) } });
+    objs.push({ k: "H", h: { __tierless_handle__: true, owner: tier!.id, id: tier!.heapPut(v), kind: Array.isArray(v) ? "array" : "object", ...(cls ? { cls } : {}), ...(mcls ? { mcls } : {}), ...(mstate ? { mstate } : {}) } });
     return { k: "r", id };
   };
 

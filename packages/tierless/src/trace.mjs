@@ -127,12 +127,12 @@ export function makeRecorder({ rate = 0, force = [], sink }) {
             if (stack.length)
                 stack[0].__trace = { id, hop: 0, seq: 0, on: 1, ...(entry ? { entry } : {}) };
         },
-        res(stack, req, result) {
+        res(stack, req, result, bytes) {
             const f = flagOf(stack);
             if (!f)
                 return;
             const { fn, pc } = top(stack);
-            emit({ t: "res", id: f.id, hop: f.hop, seq: f.seq++, fn, pc, resource: req.name, tier: req.tier, argFeatures: argFeatures(req.args), resultBytes: resultBytes(result), ...(f.entry ? { entry: f.entry } : {}) });
+            emit({ t: "res", id: f.id, hop: f.hop, seq: f.seq++, fn, pc, resource: req.name, tier: req.tier, argFeatures: argFeatures(req.args), resultBytes: bytes ?? resultBytes(result), ...(f.entry ? { entry: f.entry } : {}) });
         },
         ship(stack, req, encode, choice) {
             const f = flagOf(stack);

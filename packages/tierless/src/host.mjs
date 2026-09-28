@@ -287,10 +287,15 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                 const s = stack;
                 const onceExec = !rec ? onceBase : async (r) => { const v = await onceBase(r); rec.res(s, r, v); return v; };
                 // a borrowed service's call (caps.adminClient.x.m()) is a migrate point too: the
-                // same per-site decision as a resource park, asked by the pump at the dyn park
-                const offer = migrate ? (r) => {
+                // same per-site decision as a resource park, asked by the pump at the dyn park.
+                // It is also a TOUCH a profiling run must record (unsized: it hasn't settled), or
+                // a profile could never learn that such calls chain — profiling runs have no
+                // migrate callback, so the hook is live whenever either is.
+                const offer = migrate || rec ? (r) => {
                     const t = stack[stack.length - 1];
-                    return migrate({ op: "resource", tier: "peer", name: r.name, args: r.args }, { fn: t.fn, pc: t.pc, entry });
+                    const req = { op: "resource", tier: "peer", name: r.name, args: r.args };
+                    rec?.res(stack, req, undefined, -1);
+                    return migrate ? migrate(req, { fn: t.fn, pc: t.pc, entry }) : false;
                 } : undefined;
                 const res = await pump(stack, ownsHere, onceExec, request, undefined, offer);
                 if (res.done) {

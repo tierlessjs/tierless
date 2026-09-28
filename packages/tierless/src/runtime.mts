@@ -27,7 +27,7 @@ export interface PumpOpts {
    *  `handle` carries the receiver's identity (owner tier + heap id): a registry serving
    *  stateful per-instance classes must key on it, or two distinct home instances would
    *  share one twin's state. Keying by class alone is right only for singletons. */
-  twins?: (cls: string, handle?: { id: string; owner: string; path?: string[] }) => object | undefined;
+  twins?: (cls: string, handle?: { id: string; owner: string; path?: string[]; state?: Record<string, unknown> }) => object | undefined;
 }
 
 /** The tier an OFFERED park ships to: whichever peer answers this host's runLocal.
@@ -171,7 +171,10 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
       if (i < path.length) {
         const h = recv as Handle, k = path[i];
         const cls = h.mcls?.[k];
-        const twin = cls && twins ? twins(cls, { id: h.id, owner: h.owner, path: [k] }) : undefined;
+        // the member's data fields as they were when the stack shipped: the registry
+        // applies what it trusts (realmName yes; a browser-side baseUrl no)
+        const state = h.mstate?.[k] ? JSON.parse(h.mstate[k]) as Record<string, unknown> : undefined;
+        const twin = cls && twins ? twins(cls, { id: h.id, owner: h.owner, path: [k], ...(state ? { state } : {}) }) : undefined;
         if (!twin) return { op: "home", tier: h.owner, name: "dyn:" + [...path.slice(i), r.member].join("."), args: [h, ...r.args] };
         let target: unknown = twin;
         try { for (const p of path.slice(i + 1)) target = (target as Record<string, unknown> | null | undefined)?.[p]; }

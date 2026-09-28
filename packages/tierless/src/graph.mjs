@@ -14,6 +14,17 @@
 //     handle into the owning tier's heap (a leaf — it stays tier-local)
 // The encoded form is acyclic and JSON-safe; decodeGraph rebuilds the graph,
 // pre-creating each object so cycles and sharing are restored exactly.
+/** Does v reach a function through plain containers? Bounded; deep or odd shapes count as
+ *  holding one (they stay home rather than ship a lossy image). */
+function holdsFunction(v, depth = 0) {
+    if (typeof v === "function")
+        return true;
+    if (v === null || typeof v !== "object")
+        return false;
+    if (depth > 4)
+        return true;
+    return Object.values(v).some((x) => holdsFunction(x, depth + 1));
+}
 export function isHandle(x) {
     return x !== null && typeof x === "object" && x.__tierless_handle__ === true;
 }
@@ -88,16 +99,29 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024, conten
         const id = objs.length;
         idOf.set(v, id);
         const cls = stampOf(v);
-        let mcls;
+        let mcls, mstate;
         const proto = v && typeof v === "object" ? Object.getPrototypeOf(v) : undefined;
         if (proto === Object.prototype || proto === null) {
             for (const [k, x] of Object.entries(v)) {
                 const c = stampOf(x);
-                if (c)
-                    (mcls ??= {})[k] = c;
+                if (!c)
+                    continue;
+                (mcls ??= {})[k] = c;
+                const data = {};
+                for (const [f, fv] of Object.entries(x)) {
+                    if (holdsFunction(fv))
+                        continue; // behavior, not state: {} after JSON would clobber the twin's own
+                    try {
+                        const j = JSON.stringify(fv);
+                        if (j !== undefined)
+                            data[f] = JSON.parse(j);
+                    }
+                    catch { /* circular or unserializable: stays home */ }
+                }
+                (mstate ??= {})[k] = JSON.stringify(data);
             }
         }
-        objs.push({ k: "H", h: { __tierless_handle__: true, owner: tier.id, id: tier.heapPut(v), kind: Array.isArray(v) ? "array" : "object", ...(cls ? { cls } : {}), ...(mcls ? { mcls } : {}) } });
+        objs.push({ k: "H", h: { __tierless_handle__: true, owner: tier.id, id: tier.heapPut(v), kind: Array.isArray(v) ? "array" : "object", ...(cls ? { cls } : {}), ...(mcls ? { mcls } : {}), ...(mstate ? { mstate } : {}) } });
         return { k: "r", id };
     };
     function enc(v) {

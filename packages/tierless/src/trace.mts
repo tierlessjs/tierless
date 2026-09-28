@@ -104,7 +104,9 @@ export interface Recorder {
   /** Stamp a root frame with a spawn decision's id (unconditional — the decision was spawn()'s). */
   stamp(stack: { [k: string]: unknown }[], id: string, entry?: string): void;
   flagOf(stack: { [k: string]: unknown }[]): TraceFlag | null;
-  res(stack: { [k: string]: unknown }[], req: { name: string; tier: string; args: unknown[] }, result: unknown): void;
+  /** `bytes` overrides the measured result size: -1 records a touch with no size sample
+   *  (a borrowed-service call noted at its park, before it settles). */
+  res(stack: { [k: string]: unknown }[], req: { name: string; tier: string; args: unknown[] }, result: unknown, bytes?: number): void;
   /** The continuation is crossing: bump the stack-carried counters FIRST (the shipped wire
    *  must carry them so the receiving tier's records sort after this one), then encode via
    *  the thunk, then sink the crossing record with the pre-bump ids and the exact shipped
@@ -158,11 +160,11 @@ export function makeRecorder({ rate = 0, force = [], sink }: RecorderOpts): Reco
       // otherwise drown a chain-bearing caller in single-touch occurrences
       if (stack.length) (stack[0] as { __trace?: TraceFlag }).__trace = { id, hop: 0, seq: 0, on: 1, ...(entry ? { entry } : {}) };
     },
-    res(stack, req, result) {
+    res(stack, req, result, bytes) {
       const f = flagOf(stack);
       if (!f) return;
       const { fn, pc } = top(stack);
-      emit({ t: "res", id: f.id, hop: f.hop, seq: f.seq++, fn, pc, resource: req.name, tier: req.tier, argFeatures: argFeatures(req.args), resultBytes: resultBytes(result), ...(f.entry ? { entry: f.entry } : {}) });
+      emit({ t: "res", id: f.id, hop: f.hop, seq: f.seq++, fn, pc, resource: req.name, tier: req.tier, argFeatures: argFeatures(req.args), resultBytes: bytes ?? resultBytes(result), ...(f.entry ? { entry: f.entry } : {}) });
     },
     ship(stack, req, encode, choice) {
       const f = flagOf(stack);

@@ -13,6 +13,7 @@ export interface PumpOpts {
         id: string;
         owner: string;
         path?: string[];
+        state?: Record<string, unknown>;
     }) => object | undefined;
 }
 export declare function makePump(bundle: Bundle, { twins }?: PumpOpts): Pump;

@@ -26,6 +26,8 @@ export interface MakeHostOpts {
     twins?: (cls: string, handle?: {
         id: string;
         owner: string;
+        path?: string[];
+        state?: Record<string, unknown>;
     }) => object | undefined;
     /** §6 placement for the full-tierless drive path (docs/migrate-arm.md "§6 decide"):
      *  at each park the driver prices fetch-vs-migrate from the LOCKED profile — migrate

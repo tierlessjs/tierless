@@ -13,6 +13,8 @@
 //     the handle's member classes, serves all three dependent calls, ONE crossing
 //   - the twin's data-field writes land on the live client (member-path delta)
 //   - a twin call that throws unwinds into the compiled catch on the server
+//   - traced fetch-arm runs record the borrowed calls, and a profile built from them
+//     migrates the chain (the run protocol) while leaving a one-call function alone
 //   - a server without a twin sends the call home with its path: correct, just unbatched
 //   - with the `closures` option, a component's `const loader = async () => {...}` and a
 //     hook's `async function` compile (2+ awaits only) and run the same way
@@ -23,6 +25,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { makeHost } from "tierless";
 import { makePeer, encodeMessage, decodeMessage, type Port } from "tierless/transport";
+import { memorySink, buildProfile, loadProfile, methodMigrate } from "tierless/trace";
 
 const require = createRequire(import.meta.url);
 const { compile } = require("../../packages/tierless/src/transform.cjs");
@@ -82,7 +85,7 @@ const bundle = { PROGRAMS: mod.PROGRAMS, __unwind: mod.__unwind, __slots: mod.__
 const log: string[] = [];
 const counts: Record<string, number> = {};
 // one in-process browser<->server pair; `twins` is the server's session registry
-const connect = (bundle: object, twins?: (cls: string) => object | undefined) => {
+const connect = (bundle: object, twins?: (cls: string, h?: { state?: Record<string, unknown> }) => object | undefined) => {
   const cbs: Array<((obj: unknown, bin: Uint8Array | null) => void) | null> = [null, null];
   const mkPort = (me: number, count: boolean): Port => ({
     send(obj: any, bin?: Uint8Array): void {
@@ -101,7 +104,8 @@ const bhost = makeHost({ bundle, tier: "browser", exec: (() => { throw new Error
 const reset = (): void => { log.length = 0; for (const k of Object.keys(counts)) delete counts[k]; };
 
 const twin = new Client("server", log);
-const withTwin = connect(bundle, (cls) => (cls === "Client" ? twin : undefined));
+let lastState: Record<string, unknown> | undefined;
+const withTwin = connect(bundle, (cls, h) => { lastState = h?.state; return cls === "Client" ? twin : undefined; });
 const noTwin = connect(bundle);
 
 // ---- fetch arm: nothing migrates -----------------------------------------------------
@@ -125,6 +129,8 @@ const noTwin = connect(bundle);
   check("migrate: right value; the twin served all three dependent calls in ONE crossing",
     r === "n:2,20,17" && log.join(",") === "server:a,server:b,server:c" && counts.resume === 1, JSON.stringify({ r, log, counts }));
   check("migrate: the twin's field write landed on the live client", live.calls === 3, String(live.calls));
+  check("migrate: the twin factory got the live client's data fields as they shipped (no functions)",
+    lastState?.where === "browser" && lastState?.calls === 0 && !("scopes" in (lastState ?? {})), JSON.stringify(lastState));
 }
 
 // ---- a twin call that throws unwinds into the compiled catch over there ----------------
@@ -133,6 +139,29 @@ const noTwin = connect(bundle);
   const live = new Client("browser", log);
   const r = await bhost.runLocal(withTwin, "scopes$guarded", [{ client: live }], { migrate: () => true });
   check("error: caught by the compiled catch, served by the twin", r === "caught:nope" && log.join(",") === "server:fail" && counts.resume === 1, JSON.stringify({ r, log, counts }));
+}
+
+// ---- the PROFILE decides: traced fetch-arm runs record the borrowed calls, the method
+// boundary rule reads a stable 3-call chain at the first site, and the locked profile
+// migrates it — the run protocol, with no hand-set migrate callback ----------------------
+{
+  const { sink, records } = memorySink();
+  const thost = makeHost({ bundle, tier: "browser", exec: (() => { throw new Error("browser owns nothing"); }) as never, trace: { rate: 1, sink } });
+  for (let i = 0; i < 3; i++) await thost.runLocal(withTwin, "scopes$load", [{ client: new Client("browser", []), label: "n" }], {});
+  const touches = records.filter((r: any) => r.t === "res");
+  check("profiling: every borrowed call recorded as a touch (unsized), in order",
+    touches.length === 9 && touches.slice(0, 3).map((r: any) => r.resource).join(",") === "dyn:client.scopes.a,dyn:client.scopes.b,dyn:client.scopes.c" && touches.every((r: any) => r.resultBytes === -1),
+    JSON.stringify(touches.slice(0, 3)));
+  const profile = loadProfile(buildProfile(records, mod.BUNDLE_HASH), mod.BUNDLE_HASH);
+  const mig = methodMigrate(profile);
+  reset();
+  const live = new Client("browser", log);
+  const r = await bhost.runLocal(withTwin, "scopes$load", [{ client: live, label: "n" }], { migrate: mig });
+  check("profiled: the locked profile migrates the chain — ONE crossing, twin-served",
+    r === "n:2,20,17" && log.join(",") === "server:a,server:b,server:c" && counts.resume === 1, JSON.stringify({ r, log, counts }));
+  reset();
+  const r1 = await bhost.runLocal(withTwin, "scopes$guarded", [{ client: new Client("browser", log) }], { migrate: mig });
+  check("profiled: a one-call function the profile never saw chain stays on the fetch arm", r1 === "caught:nope" && !counts.resume && log.join(",") === "browser:fail", JSON.stringify({ r1, log, counts }));
 }
 
 // ---- no twin on the server: the call goes home with its path ---------------------------

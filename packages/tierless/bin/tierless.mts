@@ -363,7 +363,7 @@ if (cmd === "build") {
   const machinesDir = flag("--machines") || process.env.TIERLESS_MACHINES;
   const EXEC_ONLY = { PROGRAMS: {}, __unwind: () => false };
   let bundleFor: ((id: string) => unknown | Promise<unknown>) | null = null;
-  let makeTwinsFn: ((o: { token: string | null; apiUrl: string }) => (cls: string) => object | undefined) | undefined;
+  let makeTwinsFn: ((o: { token: string | null; apiUrl: string; bearer: () => string | null }) => (cls: string, handle?: { state?: Record<string, unknown> }) => object | undefined) | undefined;
   if (machinesDir) {
     const pathMod = await import("node:path");
     const { pathToFileURL } = await import("node:url");
@@ -406,7 +406,21 @@ if (cmd === "build") {
       if (origins.length && !origins.includes(origin)) throw new Error("tierless gateway: origin not allowed: " + JSON.stringify(origin));
       // machine-hosting sessions: compiled class methods park http.* against a twin of
       // the app's client; api.* stays the gateway exec (authority-mediated when on)
-      const sessionExec: typeof exec = !machinesDir ? exec : (r) => (String(r.name).startsWith("http.") ? httpResources(twinHttp(backend, {}))(r as never) : exec(r));
+      const execRouted: typeof exec = !machinesDir ? exec : (r) => (String(r.name).startsWith("http.") ? httpResources(twinHttp(backend, {}))(r as never) : exec(r));
+      // the LATEST bearer this session's crossings carried. A header-auth app sends its
+      // Authorization on every call, refreshed by its own client (keycloak-js), so this
+      // stays current where an upgrade-time token would expire — and an app that only
+      // gets its token after the socket opens (keycloak: preconnect precedes login) has
+      // no upgrade token at all.
+      let lastBearer: string | null = bearerFromUpgrade(req) ?? null;
+      const sessionExec: typeof exec = !machinesDir ? exec : (r) => {
+        for (const a of (r as { args?: unknown[] }).args ?? []) {
+          const h = a && typeof a === "object" ? (a as { headers?: Record<string, unknown> }).headers : undefined;
+          const v = h && (h.authorization ?? h.Authorization);
+          if (typeof v === "string" && /^bearer /i.test(v)) lastBearer = v.slice(7);
+        }
+        return execRouted(r);
+      };
       // Twins run the app's OWN client code server-side; anything that reads auth at
       // call time (a localStorage token behind a shim) needs THIS session's credential.
       // The browser offers it as the bearer subprotocol (it cannot set headers), so the
@@ -414,7 +428,7 @@ if (cmd === "build") {
       // twin: vikunja's first-compiled refreshUserInfo migrated, getToken() returned
       // null on the twin, and the method early-returned — user settings never loaded,
       // 16 e2e failures that were first blamed on the compiler.
-      const twins = makeTwinsFn ? makeTwinsFn({ token: bearerFromUpgrade(req) ?? null, apiUrl: backend }) : undefined;
+      const twins = makeTwinsFn ? makeTwinsFn({ token: bearerFromUpgrade(req) ?? null, apiUrl: backend, bearer: () => lastBearer }) : undefined;
       // browse advisory rides every hello (authority or not): paths learned oversize
       // since the gateway booted return to stock browser HTTP on later sessions
       const browse = browsePaths.size ? { forceBrowser: [...browsePaths] } : {};

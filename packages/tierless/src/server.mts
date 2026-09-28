@@ -51,7 +51,7 @@ export interface SessionSetup {
    *  with this session's credentials. Opt-in per class; scoped to this connection.
    *  `handle` is the receiver's identity (owner tier + heap id) — key on it for
    *  stateful per-instance classes; class-only keying is right only for singletons. */
-  twins?: (cls: string, handle?: { id: string; owner: string }) => object | undefined;
+  twins?: (cls: string, handle?: { id: string; owner: string; path?: string[]; state?: Record<string, unknown> }) => object | undefined;
   /** Sent to the browser as an unsolicited "hello" the instant the socket is up — the
    *  place to fold a startup round trip INTO the ws upgrade: a sealed auth blob (no reseal
    *  fetch) and/or GET envelopes pre-fetched from the upgrade's own credentials (boot

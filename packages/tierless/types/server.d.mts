@@ -26,6 +26,8 @@ export interface SessionSetup {
     twins?: (cls: string, handle?: {
         id: string;
         owner: string;
+        path?: string[];
+        state?: Record<string, unknown>;
     }) => object | undefined;
     /** Sent to the browser as an unsolicited "hello" the instant the socket is up — the
      *  place to fold a startup round trip INTO the ws upgrade: a sealed auth blob (no reseal

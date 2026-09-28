@@ -11,6 +11,11 @@ export interface Handle {
      *  whole — so writes to shared state stay on the live object at home — and this is what
      *  lets the far side still reach a TWIN of one member (caps.adminClient) by path. */
     mcls?: Record<string, string>;
+    /** For each mcls member: a JSON image of its own data fields (functions and
+     *  unserializable values stay home). The twin factory applies what it trusts, so a
+     *  twin serves the call with the live object's state at the moment it shipped — the
+     *  mirror of the twin deltas that carry the twin's writes back. */
+    mstate?: Record<string, string>;
 }
 export declare function isHandle(x: unknown): x is Handle;
 export declare const GLOBALS: Record<string, unknown>;

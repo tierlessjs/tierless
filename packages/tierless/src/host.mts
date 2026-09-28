@@ -49,7 +49,7 @@ export interface MakeHostOpts {
   /** Session twin registry for dynamic call parks (docs/migrate-arm.md slice 3):
    *  class-stamped handles resolve to LOCAL instances here. Opt-in per class; key on
    *  `handle` (owner + heap id) when instances are stateful — see PumpOpts.twins. */
-  twins?: (cls: string, handle?: { id: string; owner: string }) => object | undefined;
+  twins?: (cls: string, handle?: { id: string; owner: string; path?: string[]; state?: Record<string, unknown> }) => object | undefined;
   /** §6 placement for the full-tierless drive path (docs/migrate-arm.md "§6 decide"):
    *  at each park the driver prices fetch-vs-migrate from the LOCKED profile — migrate
    *  ships the whole continuation (type:"resume"), fetch pulls just the value
@@ -295,10 +295,15 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
         const s = stack;
         const onceExec: Exec = !rec ? onceBase : async (r) => { const v = await onceBase(r); rec.res(s, r, v); return v; };
         // a borrowed service's call (caps.adminClient.x.m()) is a migrate point too: the
-        // same per-site decision as a resource park, asked by the pump at the dyn park
-        const offer = migrate ? (r: { name: string; args: unknown[] }): boolean => {
+        // same per-site decision as a resource park, asked by the pump at the dyn park.
+        // It is also a TOUCH a profiling run must record (unsized: it hasn't settled), or
+        // a profile could never learn that such calls chain — profiling runs have no
+        // migrate callback, so the hook is live whenever either is.
+        const offer = migrate || rec ? (r: { name: string; args: unknown[] }): boolean => {
           const t = stack[stack.length - 1];
-          return migrate({ op: "resource", tier: "peer", name: r.name, args: r.args } as ResourceRequest, { fn: t.fn, pc: t.pc, entry });
+          const req = { op: "resource", tier: "peer", name: r.name, args: r.args } as ResourceRequest;
+          rec?.res(stack, req, undefined, -1);
+          return migrate ? migrate(req, { fn: t.fn, pc: t.pc, entry }) : false;
         } : undefined;
         const res = await pump(stack, ownsHere, onceExec, request, undefined, offer);
         if (res.done) { rec?.end(flag, "done"); return res.value; }
