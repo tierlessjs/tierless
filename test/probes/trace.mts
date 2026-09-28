@@ -10,7 +10,7 @@
 //   decide       cold -> migrate; side effect -> migrate; unstable suffix -> greedy;
 //                stable suffix -> trajectory pricing; stale bundle hash -> refused
 import { encodeWireBinary, decodeWireBinary } from "tierless/wire";
-import { sampleTrace, argFeatures, makeRecorder, memorySink, buildProfile, loadProfile, decide, expectedFetch, siteKey } from "tierless/trace";
+import { sampleTrace, argFeatures, makeRecorder, memorySink, buildProfile, loadProfile, profileCovers, decide, expectedFetch, siteKey } from "tierless/trace";
 import type { TraceRecord, TraceFlag } from "tierless/trace";
 import type { Frame } from "tierless/runtime";
 import { makeCounter } from "../lib/check.mts";
@@ -126,6 +126,12 @@ const END = (id: string, seq: number): TraceRecord => ({ t: "end", id, hop: 1, s
   // the bundle-identity gate
   check("loadProfile accepts the matching bundle", loadProfile(p, "cafe0001") === p);
   check("loadProfile refuses a mismatched bundle (stale = silent misattribution)", loadProfile(p, "cafe0002") === null);
+  // a MERGED key (ports/build-profile.mts) on a code-split app: pages load a subset
+  const m = buildProfile([], "merged:aa+bb+cc");
+  check("profileCovers: nothing loaded yet is pending", profileCovers(m, []) === "pending");
+  check("profileCovers: a loaded subset the profile was built from drives placement (code-split pages)", profileCovers(m, ["bb"]) === "ok" && profileCovers(m, ["cc", "aa"]) === "ok");
+  check("profileCovers: one loaded module it never saw refuses (another build — never misattribute)", profileCovers(m, ["aa", "zz"]) === "refuse");
+  check("profileCovers: a non-merged or absent profile refuses", profileCovers(p, ["cafe0001"]) === "refuse" && profileCovers(null, ["aa"]) === "refuse");
 }
 
 const { pass, fail } = counts();

@@ -14,7 +14,7 @@
 // mode, ui.* if you pin some); actions that never touch one simply run out on the server.
 import { makeHost, answerWith, batchExec, execOver } from "./host.mjs";
 import { makeCoherence } from "./coherence.mjs";
-import { methodMigrate, loadProfile } from "./trace.mjs";
+import { methodMigrate, profileCovers } from "./trace.mjs";
 import { makePeer, wsPort, onEvent, pushExecLog } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
 import { TIERLESS_BUILD } from "./build-stamp.mjs";
@@ -41,12 +41,28 @@ let pendingProfile = null;
 // runs must make the same decisions, so the first compiled-method call cannot race the
 // profile fetch — bindMethods stubs hold until this settles when a profileUrl is set
 let profileFetched = null;
+// the profile driving placement, kept to re-check every module that loads after it
+// activated (trace.mts profileCovers: a module it never saw switches it off for good)
+let activeProfile = null;
 const tryActivateProfile = () => {
+    if (activeProfile) {
+        if (profileCovers(activeProfile, appHashes) === "refuse") {
+            console.warn("tierless: a module this profile was not built from loaded — placement falls back to the fetch arm for this page");
+            activeProfile = null;
+            appMigrate = null;
+        }
+        return;
+    }
     if (!pendingProfile)
         return;
-    const prof = loadProfile(pendingProfile, mergedAppHash());
-    if (prof) {
-        appMigrate = methodMigrate(prof);
+    const cover = profileCovers(pendingProfile, appHashes);
+    if (cover === "ok") {
+        activeProfile = pendingProfile;
+        appMigrate = methodMigrate(pendingProfile);
+        pendingProfile = null;
+    }
+    else if (cover === "refuse") {
+        console.warn("tierless: profile refused — built for " + pendingProfile.bundle + ", loaded " + mergedAppHash());
         pendingProfile = null;
     }
 };

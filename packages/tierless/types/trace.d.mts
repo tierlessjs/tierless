@@ -144,6 +144,14 @@ export declare function buildProfile(records: TraceRecord[], bundle: string): Pr
 /** Accept a profile only for the exact bundle it was traced against — a stale profile does
  *  not miss, it silently MISATTRIBUTES (a pc renumbered by an edit inherits another site's
  *  whole trajectory history). Mismatch ⇒ null ⇒ the greedy/cold floor. */
+/** Can a profile keyed on a MERGED app world ("merged:" + sorted per-module BUNDLE_HASHes,
+ *  ports/build-profile.mts) drive the modules loaded so far? A code-split app never loads
+ *  every compiled module on one page, so waiting for the exact merged key left Keycloak's
+ *  comparison runs on the fetch arm forever. A site can only fire in a module that has
+ *  loaded, so it is enough that every LOADED module is one the profile was built from:
+ *  "ok" when they all are, "pending" before any loads, "refuse" as soon as one isn't — a
+ *  module the profile never saw means a different build, and nothing may be misattributed. */
+export declare function profileCovers(profile: Profile | null | undefined, loaded: string[]): "ok" | "pending" | "refuse";
 export declare function loadProfile(profile: Profile | null | undefined, bundleHash: string | undefined): Profile | null;
 export interface Decision {
     choice: "migrate" | "fetch";

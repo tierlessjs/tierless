@@ -133,6 +133,17 @@ const noTwin = connect(bundle);
     lastState?.where === "browser" && lastState?.calls === 0 && !("scopes" in (lastState ?? {})), JSON.stringify(lastState));
 }
 
+// ---- a BIG borrowed client: its graph is far over the codec's 8 KB inline threshold, but
+// it ships as a handle anyway — the size estimate must not charge it to the frame's args
+// array (Keycloak: the whole args array was excised, the gateway read F.args[0] undefined)
+{
+  reset();
+  const live = new Client("browser", log) as Client & { catalog?: string[] };
+  live.catalog = Array.from({ length: 2000 }, (_, i) => "entry-" + i);
+  const r = await bhost.runLocal(withTwin, "scopes$load", [{ client: live, label: "n" }], { migrate: () => true });
+  check("big client: the chain still runs on the twin in ONE crossing", r === "n:2,20,17" && log.join(",") === "server:a,server:b,server:c" && counts.resume === 1, JSON.stringify({ r, log, counts }));
+}
+
 // ---- a twin call that throws unwinds into the compiled catch over there ----------------
 {
   reset();

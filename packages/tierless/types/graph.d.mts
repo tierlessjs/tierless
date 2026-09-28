@@ -19,7 +19,12 @@ export interface Handle {
 }
 export declare function isHandle(x: unknown): x is Handle;
 export declare const GLOBALS: Record<string, unknown>;
-export declare function approxExceeds(root: unknown, limit: number): boolean;
+/** `claimed` (the encoder's excise predicate) marks values that ship as a handle whatever
+ *  their size: they cost a handle here, and their graph is not walked. Without it a small
+ *  frame args array holding a borrowed service ([caps, first, max]) measured the service's
+ *  whole reachable graph — Keycloak's admin client is far over 8 KB — and the ARGS ARRAY
+ *  itself was excised, so the far side saw F.args as a handle and F.args[0] as undefined. */
+export declare function approxExceeds(root: unknown, limit: number, claimed?: ((v: unknown) => boolean) | null): boolean;
 export interface EncodeTier {
     id: string;
     heapPut(v: unknown): string;

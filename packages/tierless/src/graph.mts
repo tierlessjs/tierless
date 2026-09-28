@@ -57,7 +57,12 @@ const GLOBAL_NAME = new Map(Object.entries(GLOBALS).map(([k, v]) => [v, k]));
 const WELLKNOWN = new Map(Object.getOwnPropertyNames(Symbol).filter((k) => typeof (Symbol as any)[k] === "symbol").map((k) => [(Symbol as any)[k], k])); // Symbol.iterator, .asyncIterator, ...
 
 // Cycle-safe, early-exiting size estimate (never JSON.stringify a cyclic graph).
-export function approxExceeds(root: unknown, limit: number): boolean {
+/** `claimed` (the encoder's excise predicate) marks values that ship as a handle whatever
+ *  their size: they cost a handle here, and their graph is not walked. Without it a small
+ *  frame args array holding a borrowed service ([caps, first, max]) measured the service's
+ *  whole reachable graph — Keycloak's admin client is far over 8 KB — and the ARGS ARRAY
+ *  itself was excised, so the far side saw F.args as a handle and F.args[0] as undefined. */
+export function approxExceeds(root: unknown, limit: number, claimed?: ((v: unknown) => boolean) | null): boolean {
   let total = 0;
   const seen = new Set<unknown>();
   const stack: unknown[] = [root];
@@ -66,6 +71,7 @@ export function approxExceeds(root: unknown, limit: number): boolean {
     if (x === null || typeof x !== "object") { total += typeof x === "string" ? x.length : 8; if (total > limit) return true; continue; }
     if (seen.has(x)) continue;
     seen.add(x);
+    if (claimed && x !== root && claimed(x)) { total += 32; if (total > limit) return true; continue; }
     total += 16; if (total > limit) return true;
     if (Array.isArray(x)) { for (const e of x) stack.push(e); }
     else if (x instanceof Map) { total += 16 * x.size; if (total > limit) return true; for (const [k, v] of x) { stack.push(k); stack.push(v); } } // entries aren't enumerable own keys — traverse them or a huge Map looks ~empty and wrongly ships inline
@@ -173,7 +179,7 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
     }
     // §5 handle into the owning tier's heap (stays tier-local): claimed by ownership
     // (the migrate arm's live instances/host objects) or simply too big to ship
-    if (tier && ((excise && excise(v)) || approxExceeds(v, threshold))) return exciseTo(v);
+    if (tier && ((excise && excise(v)) || approxExceeds(v, threshold, excise))) return exciseTo(v);
     const id = objs.length; idOf.set(v, id);              // reserve id BEFORE recursing (cycle-safe)
     if (v instanceof Map) { const slot: any = { k: "map", e: [] }; objs.push(slot); if (cah !== undefined) slot.cah = cah; for (const [mk, mv] of v) slot.e.push([enc(mk), enc(mv)]); return { k: "r", id }; }
     if (v instanceof Set) { const slot: any = { k: "set", e: [] }; objs.push(slot); if (cah !== undefined) slot.cah = cah; for (const sv of v) slot.e.push(enc(sv)); return { k: "r", id }; }

@@ -36,7 +36,12 @@ export const GLOBALS = { Math, JSON, Object, Array, Number, String, Boolean, par
 const GLOBAL_NAME = new Map(Object.entries(GLOBALS).map(([k, v]) => [v, k]));
 const WELLKNOWN = new Map(Object.getOwnPropertyNames(Symbol).filter((k) => typeof Symbol[k] === "symbol").map((k) => [Symbol[k], k])); // Symbol.iterator, .asyncIterator, ...
 // Cycle-safe, early-exiting size estimate (never JSON.stringify a cyclic graph).
-export function approxExceeds(root, limit) {
+/** `claimed` (the encoder's excise predicate) marks values that ship as a handle whatever
+ *  their size: they cost a handle here, and their graph is not walked. Without it a small
+ *  frame args array holding a borrowed service ([caps, first, max]) measured the service's
+ *  whole reachable graph — Keycloak's admin client is far over 8 KB — and the ARGS ARRAY
+ *  itself was excised, so the far side saw F.args as a handle and F.args[0] as undefined. */
+export function approxExceeds(root, limit, claimed) {
     let total = 0;
     const seen = new Set();
     const stack = [root];
@@ -51,6 +56,12 @@ export function approxExceeds(root, limit) {
         if (seen.has(x))
             continue;
         seen.add(x);
+        if (claimed && x !== root && claimed(x)) {
+            total += 32;
+            if (total > limit)
+                return true;
+            continue;
+        }
         total += 16;
         if (total > limit)
             return true;
@@ -175,7 +186,7 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024, conten
         }
         // §5 handle into the owning tier's heap (stays tier-local): claimed by ownership
         // (the migrate arm's live instances/host objects) or simply too big to ship
-        if (tier && ((excise && excise(v)) || approxExceeds(v, threshold)))
+        if (tier && ((excise && excise(v)) || approxExceeds(v, threshold, excise)))
             return exciseTo(v);
         const id = objs.length;
         idOf.set(v, id); // reserve id BEFORE recursing (cycle-safe)

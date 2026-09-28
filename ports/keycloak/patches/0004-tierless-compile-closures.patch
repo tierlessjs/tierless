@@ -48,3 +48,15 @@
 +    return client;
 +  };
 +}
+--- a/js/apps/admin-ui/src/main.tsx
++++ b/js/apps/admin-ui/src/main.tsx
+@@ -9,6 +9,9 @@
+ import { routes } from "./routes";
+ 
+ import "./index.css";
++// tierless port: stamp the admin client for session twinning. The plugin's own shim
++// would do it from index.html, but this console's HTML is Keycloak's theme template.
++import "./tierless-twins";
+ 
+ // Initialize required components before rendering app.
+ await i18n.init();
