@@ -44,6 +44,37 @@ function holdsFunction(v: unknown, depth = 0): boolean {
   return Object.values(v as object).some((x) => holdsFunction(x, depth + 1));
 }
 
+// ---- classes that cross by value --------------------------------------------------------
+// A value copied across tiers loses its prototype: an error thrown by a twin on the gateway
+// and caught by compiled code that finishes at home arrived as a plain object, so the app's
+// `instanceof NetworkError` (and even `instanceof Error`) said no — Keycloak's console then
+// showed no alert at all. Built-in errors keep their prototype by name; an app class keeps
+// its own when BOTH tiers registered it with shareClass (a port's twins module does, since
+// the browser and the gateway each load it). An unregistered Error subclass still decodes
+// as an Error. Nothing else changes prototype: only registered classes are ever restored.
+const SHARED = new Map<string, object>();
+const BUILTIN_ERRORS = new Set(["Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError", "URIError"]);
+/** Stamp a class's identity and register it on THIS tier, so its instances keep their class
+ *  when copied across tiers — and, as a §5 handle's `cls`, can dispatch to a session twin. */
+export function shareClass(name: string, cls: { prototype: object }): void {
+  (cls.prototype as { __tierless_cls?: string }).__tierless_cls = name;
+  SHARED.set(name, cls.prototype);
+}
+/** The class a structurally-copied object carries: a stamped name, or "!<BuiltinError>". */
+function classOf(v: object): { cls: string; err: boolean } | null {
+  const p = Object.getPrototypeOf(v);
+  if (p === Object.prototype || p === null) return null;
+  const err = v instanceof Error;
+  const stamp = Object.prototype.hasOwnProperty.call(p, "__tierless_cls") ? (p as { __tierless_cls?: unknown }).__tierless_cls : undefined;
+  if (typeof stamp === "string") return { cls: stamp, err };
+  if (err) { const n = (v as Error).constructor?.name; return { cls: "!" + (n && BUILTIN_ERRORS.has(n) ? n : "Error"), err }; }
+  return null;
+}
+export function protoFor(cls: string, err: boolean): object | undefined {
+  if (cls.startsWith("!")) { const n = cls.slice(1); return BUILTIN_ERRORS.has(n) ? (globalThis as unknown as Record<string, { prototype: object }>)[n].prototype : Error.prototype; }
+  return SHARED.get(cls) ?? (err ? Error.prototype : undefined);
+}
+
 export function isHandle(x: unknown): x is Handle {
   return x !== null && typeof x === "object" && (x as Handle).__tierless_handle__ === true;
 }
@@ -185,6 +216,7 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
     if (v instanceof Set) { const slot: any = { k: "set", e: [] }; objs.push(slot); if (cah !== undefined) slot.cah = cah; for (const sv of v) slot.e.push(enc(sv)); return { k: "r", id }; }
     if (Array.isArray(v)) { const slot: any = { k: "a", e: [] }; objs.push(slot); if (cah !== undefined) slot.cah = cah; for (let i = 0; i < v.length; i++) slot.e.push(enc(v[i])); return { k: "r", id }; } // by index: holes -> undefined
     const slot: any = { k: "o", f: {} }; objs.push(slot); if (cah !== undefined) slot.cah = cah;
+    const kc = classOf(v as object); if (kc) { slot.cls = kc.cls; if (kc.err) slot.err = 1; }
     for (const key of Object.getOwnPropertyNames(v)) {           // include non-enumerable (instance methods/tags) so behavior survives the wire
       const desc = Object.getOwnPropertyDescriptor(v, key)!;
       if (!("value" in desc)) continue;                          // skip host getters/setters (not our data)
@@ -220,7 +252,7 @@ export function decodeGraph({ roots, objs }: EncodedGraph, { content = null, tie
   const dec = (n: any): any => (n.k === "u" ? undefined : n.k === "big" ? toBigInt(n.v) : n.k === "glob" ? GLOBALS[n.name] : n.k === "symw" ? (Symbol as any)[n.name] : n.k === "symf" ? Symbol.for(n.key) : n.k === "p" ? n.v : built[n.id]);
   (objs as any[]).forEach((s, i) => {
     if (s.k === "a") for (const n of s.e) built[i].push(dec(n));
-    else if (s.k === "o") { for (const key in s.f) { if (key === "__proto__") continue; const val = dec(s.f[key]); if (s.h && s.h[key]) Object.defineProperty(built[i], key, { value: val, writable: true, enumerable: false, configurable: true }); else built[i][key] = val; } if (s.sf) for (const [kn, vn, en] of s.sf) { const key = dec(kn), val = dec(vn); if (en) built[i][key] = val; else Object.defineProperty(built[i], key, { value: val, writable: true, enumerable: false, configurable: true }); } }   // drop a hostile __proto__ key (our encoder strips it), consistent with wire-binary/wire-delta — never reconstruct it, even as an own property
+    else if (s.k === "o") { if (s.cls) { const p = protoFor(s.cls, !!s.err); if (p) Object.setPrototypeOf(built[i], p); } for (const key in s.f) { if (key === "__proto__") continue; const val = dec(s.f[key]); if (s.h && s.h[key]) Object.defineProperty(built[i], key, { value: val, writable: true, enumerable: false, configurable: true }); else built[i][key] = val; } if (s.sf) for (const [kn, vn, en] of s.sf) { const key = dec(kn), val = dec(vn); if (en) built[i][key] = val; else Object.defineProperty(built[i], key, { value: val, writable: true, enumerable: false, configurable: true }); } }   // drop a hostile __proto__ key (our encoder strips it), consistent with wire-binary/wire-delta — never reconstruct it, even as an own property
     else if (s.k === "map") for (const [kn, vn] of s.e) built[i].set(dec(kn), dec(vn));
     else if (s.k === "set") for (const vn of s.e) built[i].add(dec(vn));
     // k:"H" -> built[i] is already the handle object; k:"c" -> already resolved to the held subgraph

@@ -17,6 +17,12 @@ export interface Handle {
      *  mirror of the twin deltas that carry the twin's writes back. */
     mstate?: Record<string, string>;
 }
+/** Stamp a class's identity and register it on THIS tier, so its instances keep their class
+ *  when copied across tiers — and, as a §5 handle's `cls`, can dispatch to a session twin. */
+export declare function shareClass(name: string, cls: {
+    prototype: object;
+}): void;
+export declare function protoFor(cls: string, err: boolean): object | undefined;
 export declare function isHandle(x: unknown): x is Handle;
 export declare const GLOBALS: Record<string, unknown>;
 /** `claimed` (the encoder's excise predicate) marks values that ship as a handle whatever

@@ -21,7 +21,7 @@
      {
 --- /dev/null
 +++ b/js/apps/admin-ui/src/tierless-twins.ts
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,31 @@
 +// The tierless port's session twin of the admin client (docs/migrate-arm.md "twins").
 +//
 +// A compiled component loader borrows `adminClient` from useAdminClient() and awaits
@@ -34,9 +34,14 @@
 +// session: the backend URL is the gateway's own, the realm comes from the live client's
 +// fields as the stack shipped (it changes as the user navigates), and the token is the
 +// latest bearer this session's crossings carried (keycloak-js refreshes it browser-side).
-+import KeycloakAdminClient from "@keycloak/keycloak-admin-client";
++import KeycloakAdminClient, { NetworkError } from "@keycloak/keycloak-admin-client";
++import { shareClass } from "tierless/graph";
 +
-+(KeycloakAdminClient.prototype as unknown as { __tierless_cls: string }).__tierless_cls = "KeycloakAdminClient";
++// Shared on BOTH tiers (the browser build and the gateway each load this module): the admin
++// client, so a borrowed adminClient can be twinned; NetworkError, so a 409 a twin hits is
++// still `instanceof NetworkError` when the app's catch reads it at home (getErrorMessage).
++shareClass("KeycloakAdminClient", KeycloakAdminClient);
++shareClass("NetworkError", NetworkError);
 +
 +export function makeTwins({ apiUrl, bearer }: { apiUrl: string; bearer: () => string | null }) {
 +  const client = new KeycloakAdminClient({ baseUrl: apiUrl });

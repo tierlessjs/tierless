@@ -332,6 +332,10 @@ export default function tierless(opts = {}) {
                     bundle: true, format: "esm", platform: "node", target: "es2022",
                     banner: { js: 'import { createRequire as __tlCreateRequire } from "node:module"; const require = __tlCreateRequire(import.meta.url);' },
                     outfile: path.join(outDir, twinsOut),
+                    // tierless stays EXTERNAL: the gateway must see the same runtime instance the twins
+                    // module registers into (shareClass). A bundled copy kept its own class registry,
+                    // so a shared class never regained its prototype on the gateway's codec.
+                    external: ["tierless", "tierless/*"],
                     alias: { ...aliases, ...Object.fromEntries(twinsStubs.map((id) => [id, stubPath])) }, // exact ids beat the '@' prefix: esbuild prefers the longest alias match
                     logLevel: "silent",
                 });

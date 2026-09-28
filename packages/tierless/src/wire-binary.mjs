@@ -131,7 +131,9 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
     for (let i = 0; i < graph.objs.length; i++) {
         const s = graph.objs[i];
         if (s.cah !== undefined)
-            intern(s.cah); // a content-addressed subgraph shipped inline once: intern its hash so the receiver caches it
+            intern(s.cah);
+        if (s.cls !== undefined)
+            intern(s.cls); // a content-addressed subgraph shipped inline once: intern its hash so the receiver caches it
         if (s.k === "c") {
             intern(s.h);
         } // a content-ref leaf: just the hash crosses
@@ -214,6 +216,11 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
             w.u8(8);
             w.varu(intern(s.cah));
         } // wrap: cache the slot that follows under this hash (shipped inline once)
+        if (s.cls !== undefined) {
+            w.u8(9);
+            w.varu(intern(s.cls));
+            w.u8(s.err ? 1 : 0);
+        } // wrap: the object that follows carries this class (graph.mts shareClass)
         if (s.k === "a") {
             // typed-array fast path: an array of only number primitives pays no per-element tag.
             const nums = s.e.length && s.e.every((n) => n.k === "p" && typeof n.v === "number") ? s.e.map((n) => n.v) : null;
@@ -349,8 +356,14 @@ export function decodeWireBinary(bytes, { content = null, tier = null } = {}) {
     const readSlot = () => {
         let t = r.u8();
         let cah;
-        while (t === 8) {
-            cah = S(r.varu());
+        let cls, err = 0;
+        while (t === 8 || t === 9) {
+            if (t === 8)
+                cah = S(r.varu());
+            else {
+                cls = S(r.varu());
+                err = r.u8();
+            }
             t = r.u8();
         } // content-cache wrapper — unwrapped ITERATIVELY so a hostile 0x08 chain can't blow the stack
         let slot;
@@ -454,6 +467,11 @@ export function decodeWireBinary(bytes, { content = null, tier = null } = {}) {
             throw new RangeError("wire-binary: bad slot tag " + t);
         if (cah !== undefined)
             slot.cah = cah;
+        if (cls !== undefined && slot.k === "o") {
+            slot.cls = cls;
+            if (err)
+                slot.err = 1;
+        }
         return slot;
     };
     const objs = [];

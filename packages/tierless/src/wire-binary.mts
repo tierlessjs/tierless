@@ -85,7 +85,8 @@ export function encodeWireBinary(stack: DeltaFrame[], request: DeltaRequest | nu
   for (const n of graph.roots) internNode(n);
   for (let i = 0; i < graph.objs.length; i++) {
     const s: any = graph.objs[i];
-    if (s.cah !== undefined) intern(s.cah);                      // a content-addressed subgraph shipped inline once: intern its hash so the receiver caches it
+    if (s.cah !== undefined) intern(s.cah);
+    if (s.cls !== undefined) intern(s.cls);                      // a content-addressed subgraph shipped inline once: intern its hash so the receiver caches it
     if (s.k === "c") { intern(s.h); }                            // a content-ref leaf: just the hash crosses
     else if (s.k === "a" || s.k === "set") { for (const e of s.e) internNode(e); }
     else if (s.k === "map") { for (const [kn, vn] of s.e) { internNode(kn); internNode(vn); } }
@@ -112,6 +113,7 @@ export function encodeWireBinary(stack: DeltaFrame[], request: DeltaRequest | nu
     const s: any = graph.objs[i];
     if (s.k === "c") { w.u8(7); w.varu(intern(s.h)); continue; }        // content-ref leaf: the peer holds it, so only the hash crosses
     if (s.cah !== undefined) { w.u8(8); w.varu(intern(s.cah)); }        // wrap: cache the slot that follows under this hash (shipped inline once)
+    if (s.cls !== undefined) { w.u8(9); w.varu(intern(s.cls)); w.u8(s.err ? 1 : 0); }   // wrap: the object that follows carries this class (graph.mts shareClass)
     if (s.k === "a") {
       // typed-array fast path: an array of only number primitives pays no per-element tag.
       const nums: any = s.e.length && s.e.every((n: any) => n.k === "p" && typeof n.v === "number") ? s.e.map((n: any) => n.v) : null;
@@ -149,7 +151,8 @@ export function decodeWireBinary(bytes: Uint8Array | ArrayBufferLike, { content 
   const readSlot = (): any => {
     let t = r.u8();
     let cah: string | undefined;
-    while (t === 8) { cah = S(r.varu()); t = r.u8(); }                                      // content-cache wrapper — unwrapped ITERATIVELY so a hostile 0x08 chain can't blow the stack
+    let cls: string | undefined, err = 0;
+    while (t === 8 || t === 9) { if (t === 8) cah = S(r.varu()); else { cls = S(r.varu()); err = r.u8(); } t = r.u8(); }                                      // content-cache wrapper — unwrapped ITERATIVELY so a hostile 0x08 chain can't blow the stack
     let slot: any;
     if (t === 7) slot = { k: "c", h: S(r.varu()) };                                         // content-ref leaf — decodeGraph resolves it against the content store
     else if (t === 0) { const c = r.count(), e: any[] = []; for (let j = 0; j < c; j++) e.push(readNode(r, S)); slot = { k: "a", e }; }
@@ -166,6 +169,7 @@ export function decodeWireBinary(bytes: Uint8Array | ArrayBufferLike, { content 
       slot = { k: "a", e }; }
     else throw new RangeError("wire-binary: bad slot tag " + t);
     if (cah !== undefined) slot.cah = cah;
+    if (cls !== undefined && slot.k === "o") { slot.cls = cls; if (err) slot.err = 1; }
     return slot;
   };
   const objs: any[] = []; { const n = r.count(); for (let i = 0; i < n; i++) objs.push(readSlot()); }

@@ -25,6 +25,44 @@ function holdsFunction(v, depth = 0) {
         return true;
     return Object.values(v).some((x) => holdsFunction(x, depth + 1));
 }
+// ---- classes that cross by value --------------------------------------------------------
+// A value copied across tiers loses its prototype: an error thrown by a twin on the gateway
+// and caught by compiled code that finishes at home arrived as a plain object, so the app's
+// `instanceof NetworkError` (and even `instanceof Error`) said no — Keycloak's console then
+// showed no alert at all. Built-in errors keep their prototype by name; an app class keeps
+// its own when BOTH tiers registered it with shareClass (a port's twins module does, since
+// the browser and the gateway each load it). An unregistered Error subclass still decodes
+// as an Error. Nothing else changes prototype: only registered classes are ever restored.
+const SHARED = new Map();
+const BUILTIN_ERRORS = new Set(["Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError", "URIError"]);
+/** Stamp a class's identity and register it on THIS tier, so its instances keep their class
+ *  when copied across tiers — and, as a §5 handle's `cls`, can dispatch to a session twin. */
+export function shareClass(name, cls) {
+    cls.prototype.__tierless_cls = name;
+    SHARED.set(name, cls.prototype);
+}
+/** The class a structurally-copied object carries: a stamped name, or "!<BuiltinError>". */
+function classOf(v) {
+    const p = Object.getPrototypeOf(v);
+    if (p === Object.prototype || p === null)
+        return null;
+    const err = v instanceof Error;
+    const stamp = Object.prototype.hasOwnProperty.call(p, "__tierless_cls") ? p.__tierless_cls : undefined;
+    if (typeof stamp === "string")
+        return { cls: stamp, err };
+    if (err) {
+        const n = v.constructor?.name;
+        return { cls: "!" + (n && BUILTIN_ERRORS.has(n) ? n : "Error"), err };
+    }
+    return null;
+}
+export function protoFor(cls, err) {
+    if (cls.startsWith("!")) {
+        const n = cls.slice(1);
+        return BUILTIN_ERRORS.has(n) ? globalThis[n].prototype : Error.prototype;
+    }
+    return SHARED.get(cls) ?? (err ? Error.prototype : undefined);
+}
 export function isHandle(x) {
     return x !== null && typeof x === "object" && x.__tierless_handle__ === true;
 }
@@ -221,6 +259,12 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024, conten
         objs.push(slot);
         if (cah !== undefined)
             slot.cah = cah;
+        const kc = classOf(v);
+        if (kc) {
+            slot.cls = kc.cls;
+            if (kc.err)
+                slot.err = 1;
+        }
         for (const key of Object.getOwnPropertyNames(v)) { // include non-enumerable (instance methods/tags) so behavior survives the wire
             const desc = Object.getOwnPropertyDescriptor(v, key);
             if (!("value" in desc))
@@ -268,6 +312,11 @@ export function decodeGraph({ roots, objs }, { content = null, tier = null } = {
             for (const n of s.e)
                 built[i].push(dec(n));
         else if (s.k === "o") {
+            if (s.cls) {
+                const p = protoFor(s.cls, !!s.err);
+                if (p)
+                    Object.setPrototypeOf(built[i], p);
+            }
             for (const key in s.f) {
                 if (key === "__proto__")
                     continue;

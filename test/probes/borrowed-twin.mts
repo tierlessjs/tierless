@@ -12,7 +12,8 @@
 //     "dyn:client.scopes.a"), the server resolves caps.client to its session twin through
 //     the handle's member classes, serves all three dependent calls, ONE crossing
 //   - the twin's data-field writes land on the live client (member-path delta)
-//   - a twin call that throws unwinds into the compiled catch on the server
+//   - a twin call that throws unwinds into the compiled catch on the server, and an error of
+//     a shared class keeps that class when the catch finishes at home
 //   - traced fetch-arm runs record the borrowed calls, and a profile built from them
 //     migrates the chain (the run protocol) while leaving a one-call function alone
 //   - a server without a twin sends the call home with its path: correct, just unbatched
@@ -26,6 +27,7 @@ import { pathToFileURL } from "node:url";
 import { makeHost } from "tierless";
 import { makePeer, encodeMessage, decodeMessage, type Port } from "tierless/transport";
 import { memorySink, buildProfile, loadProfile, methodMigrate } from "tierless/trace";
+import { shareClass } from "tierless/graph";
 
 const require = createRequire(import.meta.url);
 const { compile } = require("../../packages/tierless/src/transform.cjs");
@@ -35,6 +37,14 @@ const check = (name: string, ok: boolean, detail = ""): void => {
   console.log(`${ok ? "ok" : "FAIL"}  ${name}${ok || !detail ? "" : " — " + detail}`);
   if (!ok) failed++;
 };
+
+// the library's own error class (keycloak-admin-client's NetworkError): shared, so an error a
+// twin throws on the gateway is still `instanceof NetErr` when the app's catch runs at home
+class NetErr extends Error {
+  status: number;
+  constructor(message: string, status: number) { super(message); this.status = status; }
+}
+shareClass("NetErr", NetErr);
 
 // a LIBRARY client, never compiled: resources hang off sub-objects (keycloak-admin-client's
 // shape — adminClient.clientScopes.find()). The port opts it into twinning by stamping it.
@@ -49,7 +59,7 @@ class Client {
       a: (x) => io("a", x + 1),
       b: (x) => io("b", x * 10),
       c: (x) => io("c", x - 3),
-      fail: async () => { this.calls++; log.push(this.where + ":fail"); throw new Error("nope"); },
+      fail: async () => { this.calls++; log.push(this.where + ":fail"); throw new NetErr("nope", 409); },
     };
   }
 }
@@ -66,11 +76,16 @@ export const useScopes = defineStore("scopes", () => {
     const c = await client.scopes.c(b);
     return label + ":" + [a, b, c].join(",");
   }
+  const onError = globalThis.__probeOnError;     // the app's alert helper: a borrowed function
+  async function report() {
+    try { await client.scopes.fail(); return "no"; }
+    catch (e) { return onError(e); }              // touches caps: this catch finishes at HOME
+  }
   async function guarded() {
     try { await client.scopes.fail(); return "no"; }
     catch (e) { return "caught:" + e.message; }
   }
-  return { load, guarded };
+  return { load, guarded, report };
 });`;
 
 const { code, meta } = compile(SRC, { filename: "scopes.js" });
@@ -173,6 +188,15 @@ const noTwin = connect(bundle);
   reset();
   const r1 = await bhost.runLocal(withTwin, "scopes$guarded", [{ client: new Client("browser", log) }], { migrate: mig });
   check("profiled: a one-call function the profile never saw chain stays on the fetch arm", r1 === "caught:nope" && !counts.resume && log.join(",") === "browser:fail", JSON.stringify({ r1, log, counts }));
+}
+
+// ---- an error the twin throws keeps its class when the catch finishes at home ---------
+{
+  (globalThis as Record<string, unknown>).__probeOnError = (e: unknown) =>
+    (e instanceof NetErr ? `net:${e.status}:${e.message}` : `other:${e instanceof Error}`);
+  reset();
+  const r = await bhost.runLocal(withTwin, "scopes$report", [{ client: new Client("browser", log), onError: (globalThis as Record<string, unknown>).__probeOnError }], { migrate: () => true });
+  check("error class: the twin's NetErr reaches the app's catch at home as a NetErr (status, message intact)", r === "net:409:nope" && log.join(",") === "server:fail", JSON.stringify({ r, log }));
 }
 
 // ---- no twin on the server: the call goes home with its path ---------------------------
