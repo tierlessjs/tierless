@@ -33,6 +33,46 @@ compression the stock server skips, not per-request overhead, and session bytes 
 counter, so serverinfo's share of the 24 MB can't be split out. The fair comparison is a
 gzip-baseline arm (nocodb's `drive-apples.sh`); it has not been run.
 
+## Chain migration: fewer round trips, measured
+
+The numbers above move one call per crossing. This measures the thing Tierless is for:
+several calls in a row running as ONE crossing.
+
+The client-scopes page's loader (`ClientScopesSection.tsx`) is one async function inside
+a React component, making three `await adminClient.clientScopes…` calls in a row; the
+client's scopes tab (`clients/scopes/ClientScopes.tsx`) has the same shape. Patch 0004
+compiles them (`compile: 'auto'` + `closures`), and a session twin of the admin client
+serves the calls on the gateway. A profiling run over the two specs that exercise these
+pages learned the chains; on that locked profile, each loader run is one crossing instead
+of three: 71 migrations over the two specs, still 21/21 passing.
+
+Timed at 80 ms injected RTT, three rounds per arm, arms interleaved within each round
+(`drive-chains.sh`, rows in `results/chains/`):
+
+| round | stock | ported, nothing migrates | ported, chains migrate |
+|---|---|---|---|
+| 1 | 152.4 s | 156.1 s | **146.0 s** |
+| 2 | 151.9 s | 154.6 s | **145.3 s** |
+| 3 | 151.2 s | 151.2 s | **146.8 s** |
+
+Migration alone (same build, one variable): **−5% total (152.9 → 144.9 s, per-test medians
+summed), 17 of 21 tests faster, median −170 ms per test.** The client-scopes list tests, whose filters re-run the loader, gain
+0.5–1.2 s each; each loader run saves 2 round trips (160 ms at this RTT). The 4 slower
+tests make no chained calls and move by under 100 ms. Against stock: −4% (150.9 → 144.9 s). The
+ported build without migration is ~1% slower than stock — the compiled loaders' cost
+when they run in the browser.
+
+What this does and doesn't show:
+- These three calls don't depend on each other, so `Promise.all` in the app would save
+  the same round trips. The result shows the mechanism working on unmodified real code,
+  not a win the app couldn't get otherwise.
+- The case only Tierless can collapse — a call that needs the previous one's result — is
+  the permissions tab (list permissions, then fetch each one's policies). Its chain sits
+  in an anonymous `useFetch(async () => …)` callback and maps an async function over the
+  list; neither compiles yet.
+- Two specs, one RTT. The suite-wide effect isn't measured: few other pages carry
+  compiled chains.
+
 ## Running it
 
 ```sh

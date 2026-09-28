@@ -356,6 +356,12 @@ predictor: 138 of its 159 MB is `/admin/serverinfo`, which stock Keycloak sends
 uncompressed, so most of the win is the session's deflate against uncompressed HTTP. A
 gzip-baseline arm would separate the two; it has not been run.
 
+Keycloak is also the first corpus app where chain MIGRATION is measured on unmodified
+code: its client-scope loaders (three awaited admin-client calls in one component
+function) compile with `closures` and run on a session twin as one crossing. At 80 ms RTT
+over the two specs that exercise them, the same build is 5% faster with chains migrating
+than without (3 rounds, 17 of 21 tests faster); details in the port README.
+
 How a ported bundle is served by `kc.sh` rather than Vite, settled by reading the tree:
 
 - `test/utils/constants.ts` pins `SERVER_URL = http://localhost:8080`: the suite drives a
