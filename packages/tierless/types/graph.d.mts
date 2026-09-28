@@ -6,6 +6,11 @@ export interface Handle {
     /** Class identity of an excised compiled-class instance (the __tierless_cls stamp):
      *  what a dynamic call park dispatches on without the live object (migrate-arm.md). */
     cls?: string;
+    /** For an excised PLAIN object: the class of each own member that is a direct instance
+     *  of a stamped class. A captured-variables object (a compiled closure's __caps) excises
+     *  whole — so writes to shared state stay on the live object at home — and this is what
+     *  lets the far side still reach a TWIN of one member (caps.adminClient) by path. */
+    mcls?: Record<string, string>;
 }
 export declare function isHandle(x: unknown): x is Handle;
 export declare const GLOBALS: Record<string, unknown>;

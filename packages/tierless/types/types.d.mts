@@ -24,6 +24,7 @@ export type MachineResult = {
 } | {
     op: "dyn";
     recv: unknown;
+    path?: string[];
     member: string;
     args: unknown[];
 };
@@ -67,6 +68,9 @@ export type Exec = (req: ResourceRequest) => unknown | Promise<unknown>;
 export interface TwinDelta {
     owner: string;
     id: string;
+    /** Set when the twin stood in for a MEMBER of the handle's object (caps.adminClient):
+     *  the home tier applies the fields to heapGet(id)[path[0]]... instead. */
+    path?: string[];
     fields: Record<string, unknown>;
     /** Own data fields the twin DELETED during the call — Object.assign can't express
      *  removal, so the home tier deletes these keys explicitly. */
@@ -75,7 +79,14 @@ export interface TwinDelta {
 /** Runs a continuation on the local tier until it finishes or parks at a foreign resource. */
 export type Pump = (stack: Frame[], ownsHere: (tier: string) => boolean, execHere: Exec, incoming?: PumpRequest | null, sink?: {
     twinDelta(d: TwinDelta): void;
-}) => Promise<{
+}, 
+/** Consulted at a dynamic park whose receiver is reached through a stamped member of a
+ *  plain object (a borrowed service in a closure's caps): true ships the stack to the
+ *  peer, where a session twin of that member can serve this call and the ones after it. */
+offer?: (req: {
+    name: string;
+    args: unknown[];
+}) => boolean) => Promise<{
     done: true;
     value: unknown;
 } | {

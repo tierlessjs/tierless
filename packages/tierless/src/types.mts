@@ -23,7 +23,7 @@ export type MachineResult =
   // meaning the PUMP resolves — a session twin's method (class-stamped handle), a
   // nested machine (stamped stub), or a plain promise settled in place. Never crosses
   // a wire as-is; only its consequences do.
-  | { op: "dyn"; recv: unknown; member: string; args: unknown[] };
+  | { op: "dyn"; recv: unknown; path?: string[]; member: string; args: unknown[] };
 
 /** A compiled bundle (transform.cjs output): named state machines + the frame unwinder. */
 export interface Bundle {
@@ -70,6 +70,9 @@ export type Exec = (req: ResourceRequest) => unknown | Promise<unknown>;
 export interface TwinDelta {
   owner: string;
   id: string;
+  /** Set when the twin stood in for a MEMBER of the handle's object (caps.adminClient):
+   *  the home tier applies the fields to heapGet(id)[path[0]]... instead. */
+  path?: string[];
   fields: Record<string, unknown>;
   /** Own data fields the twin DELETED during the call — Object.assign can't express
    *  removal, so the home tier deletes these keys explicitly. */
@@ -83,6 +86,10 @@ export type Pump = (
   execHere: Exec,
   incoming?: PumpRequest | null,
   sink?: { twinDelta(d: TwinDelta): void },
+  /** Consulted at a dynamic park whose receiver is reached through a stamped member of a
+   *  plain object (a borrowed service in a closure's caps): true ships the stack to the
+   *  peer, where a session twin of that member can serve this call and the ones after it. */
+  offer?: (req: { name: string; args: unknown[] }) => boolean,
 ) => Promise<{ done: true; value: unknown } | { done: false; request: PumpRequest; stack: Frame[] }>;
 
 /** The RPC peer from tierless/transport (structural — anything with request/on works). */

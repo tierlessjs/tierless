@@ -294,7 +294,13 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
         const onceBase: Exec = (r) => { if (c) return "error" in c ? (() => { throw c.error; })() : c.value; return localExec(r); };
         const s = stack;
         const onceExec: Exec = !rec ? onceBase : async (r) => { const v = await onceBase(r); rec.res(s, r, v); return v; };
-        const res = await pump(stack, ownsHere, onceExec, request);
+        // a borrowed service's call (caps.adminClient.x.m()) is a migrate point too: the
+        // same per-site decision as a resource park, asked by the pump at the dyn park
+        const offer = migrate ? (r: { name: string; args: unknown[] }): boolean => {
+          const t = stack[stack.length - 1];
+          return migrate({ op: "resource", tier: "peer", name: r.name, args: r.args } as ResourceRequest, { fn: t.fn, pc: t.pc, entry });
+        } : undefined;
+        const res = await pump(stack, ownsHere, onceExec, request, undefined, offer);
         if (res.done) { rec?.end(flag, "done"); return res.value; }
         request = res.request;
         // a HOME park (§5 stop rule) is not a resource: the stack can only continue
@@ -335,7 +341,8 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
           // real, exactly as they would be had the method run here.
           for (const d of (reply.obj.twinDeltas as import("./types.mjs").TwinDelta[] | undefined) ?? []) {
             if (d.owner !== tier) continue;
-            const live = heapTier.heapGet(d.id);
+            let live = heapTier.heapGet(d.id);
+            for (const k of d.path ?? []) live = (live as Record<string, unknown> | null | undefined)?.[k];
             if (live && typeof live === "object") {
               Object.assign(live, d.fields);
               for (const k of d.gone ?? []) delete (live as Record<string, unknown>)[k];

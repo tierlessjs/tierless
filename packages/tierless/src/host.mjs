@@ -286,7 +286,13 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                     return "error" in c ? (() => { throw c.error; })() : c.value; return localExec(r); };
                 const s = stack;
                 const onceExec = !rec ? onceBase : async (r) => { const v = await onceBase(r); rec.res(s, r, v); return v; };
-                const res = await pump(stack, ownsHere, onceExec, request);
+                // a borrowed service's call (caps.adminClient.x.m()) is a migrate point too: the
+                // same per-site decision as a resource park, asked by the pump at the dyn park
+                const offer = migrate ? (r) => {
+                    const t = stack[stack.length - 1];
+                    return migrate({ op: "resource", tier: "peer", name: r.name, args: r.args }, { fn: t.fn, pc: t.pc, entry });
+                } : undefined;
+                const res = await pump(stack, ownsHere, onceExec, request, undefined, offer);
                 if (res.done) {
                     rec?.end(flag, "done");
                     return res.value;
@@ -351,7 +357,9 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                     for (const d of reply.obj.twinDeltas ?? []) {
                         if (d.owner !== tier)
                             continue;
-                        const live = heapTier.heapGet(d.id);
+                        let live = heapTier.heapGet(d.id);
+                        for (const k of d.path ?? [])
+                            live = live?.[k];
                         if (live && typeof live === "object") {
                             Object.assign(live, d.fields);
                             for (const k of d.gone ?? [])

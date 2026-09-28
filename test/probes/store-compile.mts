@@ -86,7 +86,8 @@ check("plain stays out entirely (no tier-reaching awaits)", !storeEntries.some((
 check("optional-chain property shadowing a frame local compiles (the shape was convicted then acquitted — the real bug was twin auth, see transform.cts)",
   storeEntries.some((m: any) => m.method === "shadowed" && m.program === "things$shadowed"),
   JSON.stringify(storeEntries.find((m: any) => m.method === "shadowed")));
-check("machine rewrites captures through the caps frame slot", code.includes("F.args[0].state") && code.includes("F.args[0].svc"), "");
+check("machine rewrites captures through the caps frame slot (a call through a borrowed service ships as slot + path)",
+  code.includes("F.args[0].state") && code.includes('recv: F.args[0], path: ["svc"]'), "");
 
 const dir = mkdtempSync(join(tmpdir(), "tlstore-"));
 writeFileSync(join(dir, "store.mjs"), code);

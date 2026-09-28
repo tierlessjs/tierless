@@ -12,6 +12,7 @@ export interface PumpOpts {
     twins?: (cls: string, handle?: {
         id: string;
         owner: string;
+        path?: string[];
     }) => object | undefined;
 }
 export declare function makePump(bundle: Bundle, { twins }?: PumpOpts): Pump;

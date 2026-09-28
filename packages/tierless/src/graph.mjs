@@ -79,12 +79,25 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024, conten
     // may override the very method a far-side dispatch would resolve to the BASE machine,
     // silently running the wrong code. Subclass instances stay unstamped — their calls
     // park home (or hit a session twin, which constructs the real subclass and is exact).
+    const stampOf = (v) => {
+        const proto = v && typeof v === "object" ? Object.getPrototypeOf(v) : null;
+        const cls = proto && Object.prototype.hasOwnProperty.call(proto, "__tierless_cls") ? proto.__tierless_cls : undefined;
+        return typeof cls === "string" ? cls : undefined;
+    };
     const exciseTo = (v) => {
         const id = objs.length;
         idOf.set(v, id);
-        const proto = v && typeof v === "object" ? Object.getPrototypeOf(v) : null;
-        const cls = proto && Object.prototype.hasOwnProperty.call(proto, "__tierless_cls") ? proto.__tierless_cls : undefined;
-        objs.push({ k: "H", h: { __tierless_handle__: true, owner: tier.id, id: tier.heapPut(v), kind: Array.isArray(v) ? "array" : "object", ...(typeof cls === "string" ? { cls } : {}) } });
+        const cls = stampOf(v);
+        let mcls;
+        const proto = v && typeof v === "object" ? Object.getPrototypeOf(v) : undefined;
+        if (proto === Object.prototype || proto === null) {
+            for (const [k, x] of Object.entries(v)) {
+                const c = stampOf(x);
+                if (c)
+                    (mcls ??= {})[k] = c;
+            }
+        }
+        objs.push({ k: "H", h: { __tierless_handle__: true, owner: tier.id, id: tier.heapPut(v), kind: Array.isArray(v) ? "array" : "object", ...(cls ? { cls } : {}), ...(mcls ? { mcls } : {}) } });
         return { k: "r", id };
     };
     function enc(v) {

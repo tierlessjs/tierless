@@ -12,6 +12,21 @@
 // socket by the binary wire codec (wire-binary.mjs); host.mjs assembles that loop.
 import { isHandle } from "./graph.mjs";
 export const initialStack = (fn, args = []) => [{ fn, pc: 0, args }];
+/** The tier an OFFERED park ships to: whichever peer answers this host's runLocal.
+ *  Never a tier any host owns, so the pump always hands it back to the caller. */
+const PEER = "peer";
+const isPlain = (v) => {
+    if (v === null || typeof v !== "object")
+        return false;
+    const p = Object.getPrototypeOf(v);
+    return p === Object.prototype || p === null;
+};
+/** The __tierless_cls stamp of a DIRECT instance of a stamped class (the codec's rule). */
+const stampOf = (v) => {
+    const p = v !== null && typeof v === "object" ? Object.getPrototypeOf(v) : null;
+    const c = p && Object.prototype.hasOwnProperty.call(p, "__tierless_cls") ? p.__tierless_cls : undefined;
+    return typeof c === "string" ? c : undefined;
+};
 export function makePump(bundle, { twins } = {}) {
     const { PROGRAMS, __unwind } = bundle;
     const slots = bundle.__slots;
@@ -101,7 +116,7 @@ export function makePump(bundle, { twins } = {}) {
                 out[k] = v;
         return out;
     };
-    return async function pump(stack, ownsHere, execHere, incoming = null, sink) {
+    return async function pump(stack, ownsHere, execHere, incoming = null, sink, offer) {
         // the dynamic call park (docs/migrate-arm.md slice 3), resolved in dispatch order:
         // twin method on a class-stamped handle / nested machine / plain promise settled
         // here. Settled promises route rejections like any resource error; a handle with no
@@ -110,9 +125,8 @@ export function makePump(bundle, { twins } = {}) {
         // (name "dyn:<member>", args [recv, ...callArgs]) and the owner re-dispatches it
         // here before stepping on, or the resume would read a stale ret.
         // Returns a park to ship, or null when the call settled (ret set / frame pushed / unwound).
-        const dispatchDyn = async (stack, r) => {
+        const dispatchDyn = async (stack, r, offer) => {
             const top = stack[stack.length - 1];
-            const recv = r.recv;
             // a THUNK, invoked inside the try: a synchronous throw from the member call
             // itself (a getter, a sync method body) unwinds exactly like a rejection —
             // the compiled try/catch around the await must see both
@@ -125,45 +139,92 @@ export function makePump(bundle, { twins } = {}) {
                         throw err;
                 }
             };
+            // run the member on a twin (or on an object reached through one), and ship the
+            // twin's own data-field changes home so the awaiting code reads its writes
+            const onTwin = async (twin, target, where) => {
+                // snapshot JSON IMAGES, not references: this.items.push(x) mutates in place,
+                // so Object.is(pre, post) is true and a reference diff ships nothing
+                const image = (v) => { try {
+                    return JSON.stringify(v);
+                }
+                catch {
+                    return undefined;
+                } };
+                const pre = {};
+                for (const [k, v] of Object.entries(dataFields(twin)))
+                    pre[k] = image(v);
+                try {
+                    await settle(() => target[r.member](...r.args));
+                }
+                finally {
+                    // diff in a FINALLY: plain JS keeps mutations made before a throw, so an
+                    // uncaught error (settle rethrows) must still ship them home
+                    if (sink) {
+                        const fields = {};
+                        const post = dataFields(twin);
+                        for (const [k, v] of Object.entries(post)) {
+                            const img = image(v);
+                            // ship the JSON IMAGE's value, not the live reference: the delta rides a
+                            // JSON-encoded reply, so a circular/unserializable field would crash the
+                            // whole session at encode time — unserializable changes can't cross, skip
+                            if (img !== undefined && img !== pre[k])
+                                fields[k] = JSON.parse(img);
+                        }
+                        const gone = Object.keys(pre).filter((k) => !(k in post)); // deletions: assignment can't express them
+                        if (Object.keys(fields).length || gone.length)
+                            sink.twinDelta({ owner: where.owner, id: where.id, ...(where.path ? { path: where.path } : {}), fields, ...(gone.length ? { gone } : {}) });
+                    }
+                }
+            };
+            // a receiver PATH off a frame slot (compiler: caps.adminClient.clientScopes): walk
+            // it live. Meeting a handle midway means the object lives on another tier — its
+            // member may still have a session twin here (the handle's mcls), otherwise the
+            // call goes home WITH its path so the owner walks it live.
+            const path = r.path ?? [];
+            let recv = r.recv;
+            let i = 0;
+            try {
+                for (; i < path.length && !isHandle(recv); i++)
+                    recv = recv?.[path[i]];
+            }
+            catch (err) {
+                if (!__unwind(stack, err))
+                    throw err;
+                return null;
+            }
+            if (i < path.length) {
+                const h = recv, k = path[i];
+                const cls = h.mcls?.[k];
+                const twin = cls && twins ? twins(cls, { id: h.id, owner: h.owner, path: [k] }) : undefined;
+                if (!twin)
+                    return { op: "home", tier: h.owner, name: "dyn:" + [...path.slice(i), r.member].join("."), args: [h, ...r.args] };
+                let target = twin;
+                try {
+                    for (const p of path.slice(i + 1))
+                        target = target?.[p];
+                }
+                catch (err) {
+                    if (!__unwind(stack, err))
+                        throw err;
+                    return null;
+                }
+                await onTwin(twin, target, { owner: h.owner, id: h.id, path: [k] });
+                return null;
+            }
+            // HOME with the live object in hand: a borrowed STAMPED member of a plain object
+            // is exactly what a peer's session twin can stand in for, so the caller may ship
+            // the stack there instead of settling this call (and the chain behind it) here.
+            if (offer && path.length && !isHandle(r.recv) && isPlain(r.recv) && stampOf(r.recv[path[0]])) {
+                const name = "dyn:" + [...path, r.member].join(".");
+                if (offer({ name, args: r.args }))
+                    return { op: "home", tier: PEER, name, args: [r.recv, ...r.args] };
+            }
             if (isHandle(recv)) {
                 const cls = recv.cls;
                 const twin = cls && twins ? twins(cls, { id: recv.id, owner: recv.owner }) : undefined;
                 const prog = cls && PROGRAMS[cls + "$" + r.member] ? cls + "$" + r.member : null;
-                if (twin) {
-                    // snapshot JSON IMAGES, not references: this.items.push(x) mutates in place,
-                    // so Object.is(pre, post) is true and a reference diff ships nothing
-                    const image = (v) => { try {
-                        return JSON.stringify(v);
-                    }
-                    catch {
-                        return undefined;
-                    } };
-                    const pre = {};
-                    for (const [k, v] of Object.entries(dataFields(twin)))
-                        pre[k] = image(v);
-                    try {
-                        await settle(() => twin[r.member](...r.args));
-                    }
-                    finally {
-                        // diff in a FINALLY: plain JS keeps mutations made before a throw, so an
-                        // uncaught error (settle rethrows) must still ship them home
-                        if (sink) {
-                            const fields = {};
-                            const post = dataFields(twin);
-                            for (const [k, v] of Object.entries(post)) {
-                                const img = image(v);
-                                // ship the JSON IMAGE's value, not the live reference: the delta rides a
-                                // JSON-encoded reply, so a circular/unserializable field would crash the
-                                // whole session at encode time — unserializable changes can't cross, skip
-                                if (img !== undefined && img !== pre[k])
-                                    fields[k] = JSON.parse(img);
-                            }
-                            const gone = Object.keys(pre).filter((k) => !(k in post)); // deletions: assignment can't express them
-                            if (Object.keys(fields).length || gone.length)
-                                sink.twinDelta({ owner: recv.owner, id: recv.id, fields, ...(gone.length ? { gone } : {}) });
-                        }
-                    }
-                }
+                if (twin)
+                    await onTwin(twin, twin, { owner: recv.owner, id: recv.id });
                 else if (prog)
                     stack.push({ fn: prog, pc: 0, args: [recv, ...r.args] });
                 else
@@ -200,7 +261,9 @@ export function makePump(bundle, { twins } = {}) {
             await service(stack, incoming, execHere);
         else if (incoming && incoming.op === "home" && incoming.name.startsWith("dyn:")) {
             const [recv, ...args] = incoming.args;
-            const park = await dispatchDyn(stack, { recv, member: incoming.name.slice(4), args });
+            const path = incoming.name.slice(4).split(".");
+            const member = path.pop();
+            const park = await dispatchDyn(stack, { recv, ...(path.length ? { path } : {}), member, args });
             if (park)
                 return { done: false, request: park, stack }; // still no meaning here: park onward (misrouted stack)
         }
@@ -220,7 +283,7 @@ export function makePump(bundle, { twins } = {}) {
                 stack.push({ fn: r.fn, pc: 0, args: r.args }); // suspendable call: push a sub-frame and run it
             }
             else if (r.op === "dyn") {
-                const park = await dispatchDyn(stack, r);
+                const park = await dispatchDyn(stack, r, offer);
                 if (park) {
                     // a handle owned HERE that still has no local meaning cannot be dispatched
                     // anywhere — parking it to ourselves would loop, so fail with the member name

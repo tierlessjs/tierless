@@ -144,9 +144,31 @@ function suspInfo(s) {
         // The machine only DESCRIBES the call; the pump dispatches it (twin instance on a
         // class-stamped handle / nested machine on a stamped stub / promise settled in
         // place), because only the pump holds PROGRAMS, isHandle, and the twin registry.
+        // A receiver that is a static member PATH off a frame slot (F.args[0].adminClient.
+        // clientScopes — a borrowed service reached through a closure's caps) ships as the
+        // slot plus the path. The pump walks it: live all the way at home, and on a tier
+        // where the slot is a handle it can resolve the first member to a session twin
+        // instead of parking the whole segment home to evaluate it.
+        const path = [];
+        let root = a[0];
+        while (t.isMemberExpression(root) && !root.computed && t.isIdentifier(root.property) && !isSlotRef(root)) {
+            path.unshift(root.property.name);
+            root = root.object;
+        }
+        if (path.length && isSlotRef(root)) {
+            return { assign, op: `{ op: "dyn", recv: ${gen(root)}, path: ${JSON.stringify(path)}, member: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` };
+        }
         return { assign, op: `{ op: "dyn", recv: ${gen(a[0])}, member: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` };
     }
     return { assign, op: `{ op: "resource", tier: ${gen(a[0])}, name: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` }; // R(tier, name, ...args)
+}
+// a frame slot as lowering spells it: F.x, or F.args[i]
+function isSlotRef(n) {
+    if (!t.isMemberExpression(n) || !t.isIdentifier(n.object, { name: "F" }) || n.computed) {
+        return t.isMemberExpression(n) && n.computed && t.isNumericLiteral(n.property)
+            && t.isMemberExpression(n.object) && !n.object.computed && t.isIdentifier(n.object.object, { name: "F" }) && t.isIdentifier(n.object.property, { name: "args" });
+    }
+    return t.isIdentifier(n.property) && n.property.name !== "args" && n.property.name !== "pc";
 }
 // a statement that calls another suspendable (compiled) function -> push a sub-frame
 function callSusp(s) {
@@ -730,9 +752,10 @@ function compileFn(node) {
         // keep that precision, or one excised instance would park every param-using segment.
         // A dyn park whose RECEIVER is a DIRECT slot (F.x / F.args[i]) is exempted first:
         // the pump's dispatch is handle-aware by construction (twin / machine / home), so a
-        // handle IN that slot must not trip the stop rule. A receiver that is a PATH through
-        // a slot (F.args[0].svc) stays scanned — evaluating it on a handle would misread,
-        // so the segment correctly parks home. Argument expressions always stay scanned.
+        // handle IN that slot must not trip the stop rule. A static PATH off a slot
+        // (F.args[0].svc) is emitted as the slot plus `path` (suspInfo), so it is exempt the
+        // same way: the pump walks the path and parks home itself when it meets a handle it
+        // can't resolve. Argument expressions always stay scanned.
         const refsOf = (id) => {
             const out = new Set();
             const text = caseText.get(id).replace(/\bop: "dyn", recv: F\.(?:args\[\d+\]|[A-Za-z_$][\w$]*)(?=,)/g, 'op: "dyn"');

@@ -75,6 +75,7 @@ const cases: Case[] = [
   { file: "test/probes/migrate-arm.mts",   needs: ["a chain migrates in one crossing; the stop rule, identity, and unwind hold; the profile decides"] },
   { file: "test/e2e/migrate-live.mts",     needs: ["the migrate arm runs live: a chain is one crossing, home segments see the real instance"] },
   { file: "test/probes/store-compile.mts", needs: ["setup-store functions compile with call-time caps; captures rewrite precisely; the chain still batches"] },
+  { file: "test/probes/borrowed-twin.mts", needs: ["a chain through a borrowed service runs on a session twin in one crossing"] },
 ];
 
 let failed = 0;
