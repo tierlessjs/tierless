@@ -18,7 +18,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { bootVikunja, TESTING_TOKEN } from "./boot.mts";
-import { delayProxy, type WireCounter } from "../latency-proxy.mts";
+import { delayProxy, makeLink, type WireCounter } from "../latency-proxy.mts";
 
 const VARIANT = process.argv.includes("--baseline") ? "vikunja-baseline" : "vikunja";
 const TRUTH = !!process.env.TIERLESS_WIRE_TRUTH;
@@ -68,8 +68,9 @@ if (TRUTH) {
   console.log("wire truth: browser api via counting relay :23456, counters :14990, ws bytes at /__tierless/wire");
 }
 if (RTT) {
-  delayProxy(14173, 4173, RTT / 2, undefined, BPS || undefined).unref();   // frontend origin (SPA + tierless ws)
-  delayProxy(13456, 3456, RTT / 2, undefined, BPS || undefined).unref();   // API origin (XHR + CORS preflights)
+  const link = BPS ? makeLink(BPS) : undefined;                             // one line, shared by both origins
+  delayProxy(14173, 4173, RTT / 2, undefined, link).unref();   // frontend origin (SPA + tierless ws)
+  delayProxy(13456, 3456, RTT / 2, undefined, link).unref();   // API origin (XHR + CORS preflights)
   console.log(`RTT injection: ${RTT} ms via 127.0.0.1:14173 -> 4173, 127.0.0.1:13456 -> 3456${BPS ? ` at ${BPS / 1e6} Mbps` : ""}`);
 }
 // spawn, NOT execFileSync: the delay relays run in THIS process, and a synchronous

@@ -13,7 +13,7 @@ import { createServer } from "node:http";
 import { appendFileSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { delayProxy, type WireCounter } from "../latency-proxy.mts";
+import { delayProxy, makeLink, type WireCounter } from "../latency-proxy.mts";
 import { httpLogProxy } from "../http-log-proxy.mts";
 import { writeSuiteConfig } from "../pw-wrapper.mts";
 import { assertFreshBuild } from "../assert-fresh.mts";
@@ -27,7 +27,7 @@ if (TRUTH && RTT) { console.error("pick one: TIERLESS_WIRE_TRUTH (bytes) or TIER
 if (BUDGET && !TRUTH) { console.error("TIERLESS_WIRE_BUDGET composes with TIERLESS_WIRE_TRUTH=1 — set both"); process.exit(2); }
 const WORK = fileURLToPath(new URL(`../work/${VARIANT}/`, import.meta.url));
 const SRC = path.join(WORK, "src/js/apps/admin-ui/");
-const OUT = path.join(WORK, `measure${TRUTH ? "-truth" : ""}${RTT ? `-rtt${RTT}` : ""}.jsonl`);
+const OUT = path.join(WORK, `measure${TRUTH ? "-truth" : ""}${RTT ? `-rtt${RTT}` : ""}${process.env.TIERLESS_BPS ? `-bps${process.env.TIERLESS_BPS}` : ""}.jsonl`);
 
 // RUN PROTOCOL (docs/corpus.md): TIERLESS_PROFILE_RUN=1 is a PROFILING run — the browser
 // traces every compiled method run to trace.jsonl; TIERLESS_PROFILE=<profile.json> is a
@@ -94,9 +94,14 @@ if (TRUTH) {
   wireUrls.push("http://127.0.0.1:14992", "http://localhost:8180/__tierless/wire");
   console.log("wire truth: app origin via counting relay :28080 -> :8080, counters :14992, ws bytes :8180/__tierless/wire");
 }
+// TIERLESS_BPS=<bits/s>: one modeled access link, shared by the page relay and the
+// session relay (every connection of both arms queues on it, as on a user's line)
+const BPS = Number(process.env.TIERLESS_BPS || 0);
+if (BPS && !RTT) { console.error("TIERLESS_BPS shapes the RTT relays: set TIERLESS_RTT_MS too"); process.exit(2); }
 if (RTT) {
-  delayProxy(18080, 8080, RTT / 2).unref();
-  delayProxy(18180, 8180, RTT / 2, undefined, undefined, wsIoTap).unref();   // the session socket: crossings timed here
+  const link = BPS ? makeLink(BPS) : undefined;
+  delayProxy(18080, 8080, RTT / 2, undefined, link).unref();
+  delayProxy(18180, 8180, RTT / 2, undefined, link, wsIoTap).unref();   // the session socket: crossings timed here
   pageUrl = "http://localhost:18080";
   process.env.TIERLESS_WS_URL = "ws://localhost:18180/__tierless";
   console.log(`RTT injection: ${RTT} ms via 18080->8080, 18180->8180`);
