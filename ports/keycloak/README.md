@@ -62,11 +62,15 @@ in the nothing-migrating arm).
 The ported build with nothing migrating waits +0.8% (client scopes) / +2.4% (flows) more
 than stock. Per call a crossing costs the same as HTTP (median per-endpoint difference 0–1
 ms over 25 and 35 endpoints). The measurable extra is `/admin/serverinfo`: 323 KB on
-every console load, 136–137 ms per load against 122–125 ms stock, because the gateway
-receives the whole body before forwarding it (locally, a 456 KB body takes 20.8 ms over a
-crossing against 9.2 ms over HTTP). The gateway itself adds under 1 ms per call (request
-in to reply out: 14 ms, of which Keycloak 14 ms). On flows that cost cancels the gain, so
-there is no net improvement over stock there.
+every console load, 136–137 ms per load against 122–125 ms stock. Measured against the real
+server, the ~13 ms is: deflating the reply to 48 KB (4.5 ms at level 6), Node's HTTP
+client reading the body (36 ms against curl's 32 ms), and encode/forward/inflate (~3 ms,
+measured locally). These runs shape latency but not bandwidth, so the 275 KB saved count for
+nothing here; on a capped link they would outweigh it (at 20 Mbit/s, 323 KB takes ~130 ms
+to transfer, 48 KB ~20 ms). The gateway itself adds under 1 ms per call (request in to
+reply out: 14 ms, of which Keycloak 14 ms). On flows the serverinfo cost cancels the
+migration gain, so there is no net improvement over stock at this RTT with unlimited
+bandwidth.
 
 **Client scopes: independent calls.** The client-scopes page's loader
 (`ClientScopesSection.tsx`) and the client's scopes tab (`clients/scopes/ClientScopes.tsx`)
