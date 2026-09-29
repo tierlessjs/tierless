@@ -111,7 +111,7 @@ async function serveSessionOn(peer, req, cfg) {
     } // full-tierless mode: the server starts the session
 }
 // TIERLESS_WIRE_LOG=<file>: per-message wire anatomy, appended as JSON lines
-// {d:in|out, n:<plaintext frame bytes>, k:kind, t:payload type, p:<api path>}. Byte
+// {d:in|out, n:<plaintext frame bytes>, k:kind, id, t:payload type, p:<api path>}. Byte
 // counts are PRE-deflate (the shared compression window makes true per-message
 // compressed sizes unobservable); pair with the TCP-true totals from --wire-truth to
 // see what content a session's bytes actually are. Debug instrument: measurable
@@ -161,7 +161,7 @@ const wireLogPort = (port) => {
         catch { /* anatomy only — never let the instrument drop a frame */ }
         const n = 12 + Buffer.byteLength(JSON.stringify(obj)) + (bin?.length ?? 0); // 12 = magic+version, jsonLen, binLen
         try {
-            fs.appendFileSync(file, JSON.stringify({ ts: Date.now(), d, n, k: obj?.kind, t: obj?.payload?.type, ...(p !== undefined ? { p } : {}) }) + "\n");
+            fs.appendFileSync(file, JSON.stringify({ ts: Date.now(), d, n, k: obj?.kind, id: obj?.id, t: obj?.payload?.type, ...(p !== undefined ? { p } : {}) }) + "\n");
         }
         catch { /* full disk etc. */ }
     };
