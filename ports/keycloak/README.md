@@ -66,12 +66,39 @@ What this does and doesn't show:
 - These three calls don't depend on each other, so `Promise.all` in the app would save
   the same round trips. The result shows the mechanism working on unmodified real code,
   not a win the app couldn't get otherwise.
-- The case only Tierless can collapse — a call that needs the previous one's result — is
-  the permissions tab (list permissions, then fetch each one's policies). Its chain sits
-  in an anonymous `useFetch(async () => …)` callback and maps an async function over the
-  list; neither compiles yet.
 - Two specs, one RTT. The suite-wide effect isn't measured: few other pages carry
   compiled chains.
+
+### Dependent chains
+
+`Promise.all` can't collapse a call that needs the previous call's result. The flow details
+page's loader (`FlowDetails.tsx`) is one: `getFlows()`, find the flow by the route's `id`,
+throw `new Error(t("notFound"))` if missing, then `getExecutions({ flow: flow.alias })`.
+It reads borrowed variables between the calls. The borrowed `id` is a string and travels
+with the run; the borrowed `t()` sits on a branch not taken, which the stop rule now
+skips. The flows spec's locked profile migrates it, and it runs in one crossing: 17
+migrations over the spec, all 17 finished on the gateway (none went back to the browser
+mid-chain), and the browser fetched `/executions` 0 times.
+
+Timed at 80 ms RTT, three rounds per arm (`SPECS=test/autentication/flows.spec.ts
+OUT=ports/keycloak/results/flows PROFILE=… drive-chains.sh`):
+
+- **Wall clock: no measurable change.** Migration alone: 139.6 → 140.0 s over 23 tests
+  passing in every run, 11 faster. The expected saving is ~1.4 s (17 × 80 ms), under the
+  run-to-run spread (fetch rounds: 156.8–158.9 s).
+- **One test changes outcome.** `flows.spec.ts:217 › edits flow details` fails in all 6
+  stock and fetch runs and passes in all 3 migrating runs. `EditFlowModal` is rendered
+  with `flow!`, which stays undefined until this loader finishes; at 80 ms RTT the test
+  clicks "Edit info" first and the submit throws reading `flow.id`. The migrating loader
+  finishes one round trip sooner. This is a race, so it shows the latency moved, not a
+  fix.
+
+Of the 6 dependent chains in the console, 3 now run in one crossing (this loader,
+`identity-providers/add/AdvancedSettings.tsx`'s loader, `DuplicateFlowModal`'s submit). The
+other 3 return to the browser mid-chain: a translated string as a call argument
+(`ResetPasswordDialog`), a nested borrowed object (`user.id`), and an imported helper
+(`convertFormValuesToObject` in `LinkIdentityProviderModal`). The permissions tab maps an
+async function over a list, which doesn't compile yet.
 
 ## Running it
 
