@@ -78,6 +78,13 @@ both reports):
 only component transport can move — and compares it across arms. A port whose numbers
 are quoted without the network-wait decomposition is quoted incomplete.
 
+`report-time.mts`'s subtraction is a proxy: it leaves server time in the floor, and
+Playwright's 100/250/500/1000 ms retry polling quantizes durations far coarser than one
+round trip. The direct measure is per-test **I/O wait** (`ioWaitMs`): the union of the
+page's in-flight fetches and session crossings, recorded by `installIoWait`
+(`tierless/playwright`) and read by `ports/report-io.mts`. Keycloak is the first port
+measured this way; the earlier ports were not re-measured.
+
 **Test accommodations.** Some upstream tests assert the transport, not the UI —
 `waitForResponse(...)` for a request the port eliminates can never fire. The MECHANICAL
 case is now generic: `installTransportWaits(page)` (`tierless/playwright`, proven by

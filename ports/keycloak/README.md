@@ -38,64 +38,55 @@ gzip-baseline arm (nocodb's `drive-apples.sh`); it has not been run.
 The numbers above move one call per crossing. This measures the thing Tierless is for:
 several calls in a row running as ONE crossing.
 
-The client-scopes page's loader (`ClientScopesSection.tsx`) is one async function inside
-a React component, making three `await adminClient.clientScopes…` calls in a row; the
-client's scopes tab (`clients/scopes/ClientScopes.tsx`) has the same shape. Patch 0004
-compiles them (`compile: 'auto'` + `closures`), and a session twin of the admin client
-serves the calls on the gateway. A profiling run over the two specs that exercise these
-pages learned the chains; on that locked profile, each loader run is one crossing instead
-of three: 71 migrations over the two specs, still 21/21 passing.
+**The measure is I/O wait**: per test, the time the page has at least one fetch or
+session crossing in flight, the union of those intervals (`installIoWait`, test patch
+0005 on both arms; `ports/report-io.mts`). Wall clock also carries render, fixtures and
+Playwright's 100/250/500/1000 ms retry polling, which quantizes it far coarser than one
+round trip, so it's shown for reference only.
 
-Timed at 80 ms injected RTT, three rounds per arm, arms interleaved within each round
-(`drive-chains.sh`, rows in `results/chains/`):
+All runs: 80 ms injected RTT, three rounds per arm, arms interleaved within each round
+(`drive-chains.sh`), per-test medians summed over tests passing in every run of both arms.
+Arms: stock; ported with nothing migrating; ported migrating on a locked profile from a
+profiling run over the same specs.
 
-| round | stock | ported, nothing migrates | ported, chains migrate |
+| | migration alone (same build) | against stock | wall, migration alone |
 |---|---|---|---|
-| 1 | 152.4 s | 156.1 s | **146.0 s** |
-| 2 | 151.9 s | 154.6 s | **145.3 s** |
-| 3 | 151.2 s | 151.2 s | **146.8 s** |
+| client scopes (2 specs, 21 tests) | **−17.5%** (37.6 → 31.0 s), 18 of 21 less, median −315 ms | −14.4% (36.2 → 31.0 s) | −6.8% |
+| flows (1 spec, 23–24 tests) | **−3.8%** (29.3 → 28.2 s), 17 of 23 less, median −27 ms | +0.5% (30.0 → 30.1 s) | −0.7% |
 
-Migration alone (same build, one variable): **−5% total (152.9 → 144.9 s, per-test medians
-summed), 17 of 21 tests faster, median −170 ms per test.** The client-scopes list tests, whose filters re-run the loader, gain
-0.5–1.2 s each; each loader run saves 2 round trips (160 ms at this RTT). The 4 slower
-tests make no chained calls and move by under 100 ms. Against stock: −4% (150.9 → 144.9 s). The
-ported build without migration is ~1% slower than stock — the compiled loaders' cost
-when they run in the browser.
+The ported build with nothing migrating waits **+3.7% / +4.7%** more than stock on these
+specs; not yet explained. On flows that cost cancels the gain, so there is no net
+improvement over stock.
 
-What this does and doesn't show:
-- These three calls don't depend on each other, so `Promise.all` in the app would save
-  the same round trips. The result shows the mechanism working on unmodified real code,
-  not a win the app couldn't get otherwise.
-- Two specs, one RTT. The suite-wide effect isn't measured: few other pages carry
-  compiled chains.
+**Client scopes: independent calls.** The client-scopes page's loader
+(`ClientScopesSection.tsx`) and the client's scopes tab (`clients/scopes/ClientScopes.tsx`)
+each make three `await adminClient.clientScopes…` calls in a row inside a React component.
+Patch 0004 compiles them (`compile: 'auto'` + `closures`); a session twin of the admin
+client serves the calls on the gateway, so each loader run is one crossing instead of
+three. The scopes-tab and modification tests gain 420–740 ms of I/O wait each. These calls don't depend on
+each other, so `Promise.all` in the app would save the same round trips: this shows the
+mechanism on unmodified code, not a win the app couldn't get otherwise.
 
-### Dependent chains
+**Flows: dependent calls.** `Promise.all` can't collapse a call that needs the previous
+one's result. The flow details page's loader (`FlowDetails.tsx`) is one: `getFlows()`,
+find the flow by the route's `id`, throw `new Error(t("notFound"))` if missing, then
+`getExecutions({ flow: flow.alias })`. It reads borrowed variables between the calls: `id`
+is a string and travels with the run, and `t()` sits on a branch not taken, which the stop
+rule skips. On a verification run over the spec, all 17 migrations finished on the gateway
+(none went back to the browser mid-chain) and the browser fetched `/executions` 0 times.
+The flow-details tests gain 150–250 ms of I/O wait each; the spec's other tests don't
+load that page.
 
-`Promise.all` can't collapse a call that needs the previous call's result. The flow details
-page's loader (`FlowDetails.tsx`) is one: `getFlows()`, find the flow by the route's `id`,
-throw `new Error(t("notFound"))` if missing, then `getExecutions({ flow: flow.alias })`.
-It reads borrowed variables between the calls. The borrowed `id` is a string and travels
-with the run; the borrowed `t()` sits on a branch not taken, which the stop rule now
-skips. The flows spec's locked profile migrates it, and it runs in one crossing: 17
-migrations over the spec, all 17 finished on the gateway (none went back to the browser
-mid-chain), and the browser fetched `/executions` 0 times.
-
-Timed at 80 ms RTT, three rounds per arm (`SPECS=test/autentication/flows.spec.ts
-OUT=ports/keycloak/results/flows PROFILE=… drive-chains.sh`):
-
-- **Wall clock: no measurable change.** Migration alone: 139.6 → 140.0 s over 23 tests
-  passing in every run, 11 faster. The expected saving is ~1.4 s (17 × 80 ms), under the
-  run-to-run spread (fetch rounds: 156.8–158.9 s).
-- **One test changes outcome.** `flows.spec.ts:217 › edits flow details` fails in all 6
-  stock and fetch runs and passes in all 3 migrating runs. `EditFlowModal` is rendered
-  with `flow!`, which stays undefined until this loader finishes; at 80 ms RTT the test
-  clicks "Edit info" first and the submit throws reading `flow.id`. The migrating loader
-  finishes one round trip sooner. This is a race, so it shows the latency moved, not a
-  fix.
+One test changes outcome: `flows.spec.ts:217 › edits flow details` failed in 9 of 12 stock
+and nothing-migrating runs across both batches, and in 0 of 6 migrating runs.
+`EditFlowModal` is rendered with `flow!`, which stays undefined until this loader
+finishes; at 80 ms RTT the test clicks "Edit info" first and the submit throws reading
+`flow.id`. The migrating loader finishes one round trip sooner. It's a race, so this
+shows the latency moved, not a fix.
 
 Of the 6 dependent chains in the console, 3 now run in one crossing (this loader,
-`identity-providers/add/AdvancedSettings.tsx`'s loader, `DuplicateFlowModal`'s submit). The
-other 3 return to the browser mid-chain: a translated string as a call argument
+`identity-providers/add/AdvancedSettings.tsx`'s loader, `DuplicateFlowModal`'s submit).
+The other 3 return to the browser mid-chain: a translated string as a call argument
 (`ResetPasswordDialog`), a nested borrowed object (`user.id`), and an imported helper
 (`convertFormValuesToObject` in `LinkIdentityProviderModal`). The permissions tab maps an
 async function over a list, which doesn't compile yet.
