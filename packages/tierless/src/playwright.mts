@@ -32,6 +32,7 @@
 // seam), or a wait whose removal reorders the app (semantic accommodations, each with
 // its own why-comment in the recipe's testPatches).
 import { Buffer } from "node:buffer";
+import { appendFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 
@@ -524,4 +525,96 @@ export function anchorPlaywrightConfig<T extends Record<string, unknown>>(config
   const out = anchor(config);
   if (Array.isArray(out.projects)) out.projects = (out.projects as Record<string, unknown>[]).map(anchor);
   return out as T;
+}
+
+// ------------------------------------------------------------------------ I/O wait ----
+// Per-test I/O WAIT: the time the page has at least one network operation outstanding —
+// the union of in-flight intervals, not their sum (parallel requests overlap). It reads
+// the wait directly, server time included, with no floor run to subtract and no
+// dependence on Playwright's retry polling (100/250/500/1000 ms), which quantizes
+// wall-clock differences far coarser than one round trip.
+//
+// Observed from Playwright's side, identically on both arms (nothing in the page):
+// - HTTP fetch/XHR: request.timing() — browser-clock start to response end.
+// - session crossings: a browser `request` frame to the `reply` with its id.
+// - the session socket's opening: creation to its first received frame (the gateway's
+//   hello is sent the instant the pipe is up), since a crossing queued behind it waits.
+// Documents, scripts and images are not counted: they are the bundle, not the app's I/O.
+//
+// TIERLESS_IO_FILE=<file>: each interval is appended as "<startMs> <endMs>" (epoch); the
+// measure reporter unions the ones inside each test's own time window (ioWaitMs).
+// TIERLESS_IO_IGNORE=<prefix,…>: URL prefixes that are harness, not app (a profile server).
+const IO_WIRED = new WeakSet<object>();
+interface IoRequest { url(): string; resourceType(): string; timing(): { startTime: number; responseEnd: number } }
+interface IoSocket { on(event: "framesent" | "framereceived", cb: (f: { payload: string | Buffer }) => void): unknown }
+export interface IoPage { on(event: "requestfinished" | "requestfailed", cb: (r: IoRequest) => void): unknown; on(event: "websocket", cb: (ws: IoSocket) => void): unknown }
+export interface IoContext { pages(): IoPage[]; on(event: "page", cb: (p: IoPage) => void): unknown }
+
+const HEADER = 12;   // transport.mts HEADER_BYTES: magic+version, jsonLen, binLen
+// {"kind":"request"|"reply","id":…} leads every frame's JSON (transport.mts builds the
+// object in that order); read only the prefix, never the (possibly large) payload
+const FRAME_HEAD = /^\{"kind":"(request|reply)","id":("[^"]*"|-?\d+)/;
+export function frameHead(payload: string | Uint8Array): { kind: string; id: string } | null {
+  if (typeof payload === "string" || payload.length < HEADER) return null;
+  const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  if ((dv.getUint32(0) & 0xffffff00) !== 0x544c5700) return null;   // not a tierless frame
+  const json = Buffer.from(payload.buffer, payload.byteOffset + HEADER, Math.min(dv.getUint32(4), 64)).toString("utf8");
+  const m = FRAME_HEAD.exec(json);
+  return m ? { kind: m[1], id: m[2] } : null;
+}
+function ioPage(page: IoPage, record: (s: number, e: number) => void, ignore: string[]): void {
+  if (IO_WIRED.has(page)) return;
+  IO_WIRED.add(page);
+  const http = (r: IoRequest): void => {
+    const type = r.resourceType();
+    if (type !== "fetch" && type !== "xhr") return;
+    if (ignore.some((p) => r.url().startsWith(p))) return;
+    const t = r.timing();
+    record(t.startTime, t.responseEnd >= 0 ? t.startTime + t.responseEnd : Date.now());   // a failed request has no responseEnd
+  };
+  page.on("requestfinished", http);
+  page.on("requestfailed", http);
+  page.on("websocket", (ws: IoSocket) => {
+    const opened = Date.now();
+    let first = true;
+    const out = new Map<string, number>();
+    ws.on("framesent", ({ payload }) => {
+      const h = frameHead(payload as Uint8Array);
+      if (h?.kind === "request") out.set(h.id, Date.now());
+    });
+    ws.on("framereceived", ({ payload }) => {
+      const now = Date.now();
+      const h = frameHead(payload as Uint8Array);
+      if (!h) return;
+      if (first) { first = false; record(opened, now); }
+      const t0 = h.kind === "reply" ? out.get(h.id) : undefined;
+      if (t0 !== undefined) { out.delete(h.id); record(t0, now); }
+    });
+  });
+}
+
+/** Record this page's (or every page of this context's) I/O intervals to
+ *  TIERLESS_IO_FILE for the measure reporter's `ioWaitMs`. No-op when unset. Idempotent. */
+export function installIoWait(target: IoPage | IoContext): void {
+  const file = process.env.TIERLESS_IO_FILE;
+  if (!file) return;
+  const ignore = (process.env.TIERLESS_IO_IGNORE || "").split(",").filter(Boolean);
+  const record = (s: number, e: number): void => { if (e > s) appendFileSync(file, `${Math.round(s)} ${Math.round(e)}\n`); };
+  if (typeof (target as IoContext).pages === "function") {
+    const ctx = target as IoContext;
+    for (const p of ctx.pages()) ioPage(p, record, ignore);
+    ctx.on("page", (p) => ioPage(p, record, ignore));
+  } else ioPage(target as IoPage, record, ignore);
+}
+
+/** Total length of the union of [s, e) intervals, clipped to [from, to). */
+export function unionMs(intervals: Array<[number, number]>, from: number, to: number): number {
+  const xs = intervals.map(([s, e]) => [Math.max(s, from), Math.min(e, to)] as [number, number]).filter(([s, e]) => e > s).sort((a, b) => a[0] - b[0]);
+  let total = 0, cs = -Infinity, ce = -Infinity;
+  for (const [s, e] of xs) {
+    if (s > ce) { if (ce > cs) total += ce - cs; cs = s; ce = e; }
+    else if (e > ce) ce = e;
+  }
+  if (ce > cs) total += ce - cs;
+  return total;
 }

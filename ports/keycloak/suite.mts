@@ -57,6 +57,13 @@ if (PROFILE_RUN || PROFILE) {
   console.log(PROFILE_RUN ? `profiling run: traces -> ${TRACE_OUT}` : `comparison run: locked profile ${PROFILE}`);
 }
 
+// per-test I/O wait (tierless/playwright installIoWait, test patch 0005 on both arms): the
+// page's in-flight intervals, unioned per test by the measure reporter into ioWaitMs.
+// The profile/trace server above is harness, not app.
+process.env.TIERLESS_IO_FILE = path.join(WORK, "io.txt");
+process.env.TIERLESS_IO_IGNORE = "http://127.0.0.1:14993/";
+rmSync(process.env.TIERLESS_IO_FILE, { force: true });
+
 let pageUrl = "http://localhost:8080";
 const wireUrls: string[] = [];
 // TIERLESS_WIRE_BUDGET: per-path HTTP attribution + the gateway's per-path session log.

@@ -54,6 +54,7 @@ const cases: Case[] = [
   { file: "test/e2e/ws-auth-live.mts",   needs: ["the session token rides a bearer subprotocol — read by the gateway, absent from URLs, never echoed — and protocol-less clients connect unchanged"] },
   { file: "test/e2e/preboot-live.mts",   needs: ["the ws-upgrade hello folded the reseal round trip into the handshake and pre-delivered a boot GET the first crossing joined"] },
   { file: "test/e2e/pw-waits-live.mts",  needs: ["installTransportWaits made UNMODIFIED upstream waits transport-agnostic"] },
+  { file: "test/e2e/io-wait-live.mts",   needs: ["I/O wait: the union of a page's in-flight fetches and crossings, not its CPU"] },
   { file: "test/probes/adapt-fetch.mts", needs: ["the fetch adapter's crossability policy is framework-owned"] },
   { file: "test/probes/url-glob.mts", needs: ["force-browser globs match with Playwright's baseURL-relative semantics"] },
   { file: "test/probes/adapt-cache.mts", needs: ["storage is advisory: no crossing ever waits on a write", "replays present to harnesses as the 200 the app saw"] },

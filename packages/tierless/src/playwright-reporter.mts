@@ -24,21 +24,28 @@
 // magnitude larger than the arm difference being measured, and it showed up as tests
 // reporting a flat 0 bytes after loading a full app page.
 //
+// With TIERLESS_IO_FILE set (the intervals installIoWait records), each row also gets
+// ioWaitMs: the union of the page's in-flight I/O inside the attempt's own time window
+// [startTime, startTime + duration] — attributed by time, so no jitter between tests.
+//
 // A failed read keeps the previous snapshot and flags the row (wireError: true) rather
 // than resetting: the next successful read then covers both tests, so the bytes are
 // merged into a neighbour instead of vanishing. ports/report.mts excludes flagged rows.
-import { appendFileSync } from "node:fs";
+import { appendFileSync, closeSync, fstatSync, openSync, readSync } from "node:fs";
 import path from "node:path";
+import { Buffer } from "node:buffer";
+import { unionMs } from "./playwright.mjs";
 
 // Structural slices of @playwright/test/reporter — the suite brings its own Playwright;
 // this package must not depend on it.
 interface TestLocation { file: string; line: number }
 interface TestCaseLike { location: TestLocation; titlePath(): string[] }
-interface TestResultLike { status: string; retry: number; duration: number }
+interface TestResultLike { status: string; retry: number; duration: number; startTime: Date }
 interface FullConfigLike { rootDir: string; projects?: { name: string }[] }
 
 const OUT = process.env.TIERLESS_MEASURE_OUT;
 const WIRE = (process.env.TIERLESS_WIRE_URLS || "").split(",").filter(Boolean);
+const IO_FILE = process.env.TIERLESS_IO_FILE;
 
 // null = a configured endpoint was unreachable or non-2xx: this attempt has no valid deltas
 async function counters(): Promise<Record<string, number> | null> {
@@ -65,6 +72,22 @@ export default class TierlessMeasureReporter {
   /** Serializes counter reads and row appends: reporter hooks are not awaited, so without
    *  this two reads could interleave and the chain's ordering guarantee would be lost. */
   private chain: Promise<void> = Promise.resolve();
+  /** installIoWait's intervals read so far, and how far into the file. */
+  private io: Array<[number, number]> = [];
+  private ioAt = 0;
+  private ioWait(from: number, to: number): number {
+    try {
+      const fd = openSync(IO_FILE!, "r");
+      try {
+        const size = fstatSync(fd).size, buf = Buffer.alloc(size - this.ioAt);
+        readSync(fd, buf, 0, buf.length, this.ioAt);
+        const text = buf.toString("utf8"), end = text.lastIndexOf("\n") + 1;   // whole lines only
+        this.ioAt += Buffer.byteLength(text.slice(0, end));
+        for (const line of text.slice(0, end).split("\n")) { const [s, e] = line.split(" ").map(Number); if (e > s) this.io.push([s, e]); }
+      } finally { closeSync(fd); }
+    } catch { /* no intervals yet: the page made no I/O */ }
+    return unionMs(this.io, from, to);
+  }
   onBegin(config: FullConfigLike): void {
     this.rootDir = config?.rootDir || "";
     this.projectNames = new Set((config?.projects || []).map((p) => p.name).filter(Boolean));
@@ -89,7 +112,9 @@ export default class TierlessMeasureReporter {
     // the same test must produce the same id on both arms) — report.mts's join key
     const file = this.rootDir ? path.relative(this.rootDir, test.location.file) : test.location.file;
     const titles = test.titlePath().filter((t) => t && !/\.(spec|test)\.[cm]?[jt]sx?$/.test(t) && t !== file && !this.projectNames.has(t));
-    appendFileSync(OUT, JSON.stringify({ id: `${file}:${test.location.line} › ${titles.join(" › ")}`, status: result.status, retry: result.retry, durationMs: result.duration, ...wire }) + "\n");
+    const start = result.startTime.getTime();
+    const io = IO_FILE ? { ioWaitMs: this.ioWait(start, start + result.duration) } : {};
+    appendFileSync(OUT, JSON.stringify({ id: `${file}:${test.location.line} › ${titles.join(" › ")}`, status: result.status, retry: result.retry, durationMs: result.duration, ...io, ...wire }) + "\n");
   }
   printsToStdio(): boolean {
     return false;

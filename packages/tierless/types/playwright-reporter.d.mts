@@ -10,6 +10,7 @@ interface TestResultLike {
     status: string;
     retry: number;
     duration: number;
+    startTime: Date;
 }
 interface FullConfigLike {
     rootDir: string;
@@ -26,6 +27,10 @@ export default class TierlessMeasureReporter {
     /** Serializes counter reads and row appends: reporter hooks are not awaited, so without
      *  this two reads could interleave and the chain's ordering guarantee would be lost. */
     private chain;
+    /** installIoWait's intervals read so far, and how far into the file. */
+    private io;
+    private ioAt;
+    private ioWait;
     onBegin(config: FullConfigLike): void;
     onTestEnd(test: TestCaseLike, result: TestResultLike): void;
     private record;

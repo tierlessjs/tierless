@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 interface FrameLike {
     url(): string;
 }
@@ -78,3 +79,33 @@ export declare function patchPlaywrightPages({ Page, BrowserContext }: SuitePlay
  *  came from — what a `--config` wrapper OUTSIDE the suite tree needs, since Playwright
  *  resolves these against the wrapper's own location. Projects are anchored too. */
 export declare function anchorPlaywrightConfig<T extends Record<string, unknown>>(config: T, dir: string): T;
+interface IoRequest {
+    url(): string;
+    resourceType(): string;
+    timing(): {
+        startTime: number;
+        responseEnd: number;
+    };
+}
+interface IoSocket {
+    on(event: "framesent" | "framereceived", cb: (f: {
+        payload: string | Buffer;
+    }) => void): unknown;
+}
+export interface IoPage {
+    on(event: "requestfinished" | "requestfailed", cb: (r: IoRequest) => void): unknown;
+    on(event: "websocket", cb: (ws: IoSocket) => void): unknown;
+}
+export interface IoContext {
+    pages(): IoPage[];
+    on(event: "page", cb: (p: IoPage) => void): unknown;
+}
+export declare function frameHead(payload: string | Uint8Array): {
+    kind: string;
+    id: string;
+} | null;
+/** Record this page's (or every page of this context's) I/O intervals to
+ *  TIERLESS_IO_FILE for the measure reporter's `ioWaitMs`. No-op when unset. Idempotent. */
+export declare function installIoWait(target: IoPage | IoContext): void;
+/** Total length of the union of [s, e) intervals, clipped to [from, to). */
+export declare function unionMs(intervals: Array<[number, number]>, from: number, to: number): number;

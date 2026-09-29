@@ -2,11 +2,12 @@
 // (docs/corpus.md; each port used to carry a copy). This probe drives the reporter's
 // hooks directly: JSONL rows keyed suite-relative (same id on both arms), wire counter
 // deltas around each attempt, and the honesty rule — a failed counter read INVALIDATES
-// the row (wireError) instead of shipping wrong deltas.
+// the row (wireError) instead of shipping wrong deltas. With TIERLESS_IO_FILE, ioWaitMs is
+// the union of recorded I/O intervals inside each attempt's own time window.
 //
 // Run:  node test/probes/playwright-reporter.mts
 import { createServer } from "node:http";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { makeCounter } from "../lib/check.mts";
@@ -22,8 +23,13 @@ const counter = createServer((_req, res) => {
 });
 await new Promise<void>((r) => counter.listen(0, r));
 
-const OUT = path.join(mkdtempSync(path.join(tmpdir(), "tierless-reporter-")), "measure.jsonl");
+const DIR = mkdtempSync(path.join(tmpdir(), "tierless-reporter-"));
+const OUT = path.join(DIR, "measure.jsonl"), IO = path.join(DIR, "io.txt");
 process.env.TIERLESS_MEASURE_OUT = OUT;
+process.env.TIERLESS_IO_FILE = IO;
+// installIoWait's intervals (epoch ms): two overlapping inside t1's window [1000, 1123),
+// one straddling t1's end, one after; the last line is still being written
+appendFileSync(IO, "1000 1050\n1040 1100\n1110 1200\n1200 1300\n5000 50");
 process.env.TIERLESS_WIRE_URLS = "http://127.0.0.1:" + (counter.address() as { port: number }).port + "/__tierless/wire";
 // env is read at import time — set it BEFORE the module loads (as a suite config would)
 const { default: Reporter } = await import("tierless/playwright-reporter");
@@ -49,25 +55,26 @@ await settle();               // onBegin's opening snapshot lands
 
 // attempt 1: counters move by (23, 45) during the test
 wsIn += 23; wsOut += 45;
-reporter.onTestEnd(t1, { status: "passed", retry: 0, duration: 123 });
+reporter.onTestEnd(t1, { status: "passed", retry: 0, duration: 123, startTime: new Date(1000) });
 await settle();
 
 // attempt 2: the counter endpoint dies — the row must be flagged, not wrong
 up = false;
-reporter.onTestEnd(t2, { status: "failed", retry: 1, duration: 55 });
+reporter.onTestEnd(t2, { status: "failed", retry: 1, duration: 55, startTime: new Date(3000) });
 await settle();
 
 // attempt 3: the endpoint recovers; the ledger must still balance across the outage
 up = true;
 wsIn += 7; wsOut += 11;
-reporter.onTestEnd(t3, { status: "passed", retry: 0, duration: 60 });
+appendFileSync(IO, "10\n");   // the half-written line completes: [5000, 5010)
+reporter.onTestEnd(t3, { status: "passed", retry: 0, duration: 60, startTime: new Date(1150) });
 await settle();
 
 // attempt 4: traffic BETWEEN tests (fixture setup, teardown). Two independent reads per
 // test would drop it on the floor; chaining hands it to the next test.
 wsIn += 100; wsOut += 200;   // <- after t3 closed, before t4 "runs"
 wsIn += 5;   wsOut += 5;     // <- during t4
-reporter.onTestEnd(t4, { status: "passed", retry: 0, duration: 20 });
+reporter.onTestEnd(t4, { status: "passed", retry: 0, duration: 20, startTime: new Date(4995) });
 await settle();
 const rows = readFileSync(OUT, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>);
 check("one JSONL row per attempt, in order, without the caller awaiting the hooks", rows.length === 4 && String(rows[3].id).includes("qux"), rows.length + " rows");
@@ -84,6 +91,10 @@ check("id is suite-relative file:line › titles (project and file segments drop
 check("status/retry/duration recorded", rows[0].status === "passed" && rows[0].retry === 0 && rows[0].durationMs === 123);
 check("wire deltas are the counter movement across the attempt", rows[0].wireWsIn === 23 && rows[0].wireWsOut === 45, JSON.stringify(rows[0]));
 check("a failed counter read flags the row instead of shipping wrong deltas", rows[1].wireError === true && !("wireWsIn" in rows[1]), JSON.stringify(rows[1]));
+check("ioWaitMs: the UNION of intervals inside the window (overlap counted once, the straddler clipped)", rows[0].ioWaitMs === 113, JSON.stringify(rows[0]));
+check("ioWaitMs: a window with no I/O reads 0", rows[1].ioWaitMs === 0, JSON.stringify(rows[1]));
+check("ioWaitMs: attribution is by time, not read order (a later row can claim an earlier interval)", rows[2].ioWaitMs === 60, JSON.stringify(rows[2]));
+check("ioWaitMs: a half-written line is read only once complete", rows[3].ioWaitMs === 10, JSON.stringify(rows[3]));
 check("reporter stays out of the suite's own stdout", new Reporter().printsToStdio() === false);
 
 counter.close();

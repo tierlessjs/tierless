@@ -23,6 +23,7 @@
 	],
 	"testPatches": [
 		"patches/0002-server-url-env.patch",
-		"patches/0003-transport-waits.patch"
+		"patches/0003-transport-waits.patch",
+		"patches/0005-io-wait.patch"
 	]
 }

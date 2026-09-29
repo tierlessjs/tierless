@@ -1,0 +1,14 @@
+--- a/js/apps/admin-ui/test/utils/login.ts
++++ b/js/apps/admin-ui/test/utils/login.ts
+@@ -52,6 +52,11 @@
+     url.hash = to.pathname;
+   }
+ 
++  // tierless corpus harness (test patch, both arms): per-test I/O wait — the union of
++  // the page's in-flight fetches and session crossings, recorded when TIERLESS_IO_FILE
++  // is set (no-op otherwise). Every spec reaches this through login(). Idempotent.
++  const { installIoWait } = await import("tierless/playwright");
++  installIoWait(page.context());
+   await page.goto(url.toString());
+ }
+ 
