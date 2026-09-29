@@ -622,9 +622,10 @@ export function installIoWait(target: IoPage | IoContext): void {
  *  arrived, `down` (gateway -> browser) with the time the relay DELIVERS it. It follows
  *  the WebSocket upgrade and frames (permessage-deflate with context takeover included),
  *  pairs each browser request with its reply by id, and records "cross" and "open"
- *  intervals to TIERLESS_IO_FILE. Returns null when that is unset. A connection that
- *  isn't a WebSocket upgrade is ignored. */
-export function wsIoTap(): { up(chunk: Buffer, at: number): void; down(chunk: Buffer, at: number): void } | null {
+ *  intervals to TIERLESS_IO_FILE (`close` records requests still unanswered when the
+ *  connection closes). Returns null when that is unset. A connection that isn't a
+ *  WebSocket upgrade is ignored. */
+export function wsIoTap(): { up(chunk: Buffer, at: number): void; down(chunk: Buffer, at: number): void; close(at: number): void } | null {
   const record = ioRecorder();
   if (!record) return null;
   const TAIL = Buffer.from([0x00, 0x00, 0xff, 0xff]);
@@ -683,6 +684,9 @@ export function wsIoTap(): { up(chunk: Buffer, at: number): void; down(chunk: Bu
   });
   return {
     up: (chunk, at) => { if (opened < 0) opened = at; up(chunk, at); },
+    // a request the socket closed on was waited on until then: record it, or a lost
+    // reply would read as zero wait
+    close: (at) => { for (const [start, label] of pending.values()) record(start, at, "cross", label + ":unanswered"); pending.clear(); },
     down: (chunk, at) => down(chunk, at, (head) => {
       if (!/^HTTP\/1\.1 101/.test(head)) { dead = true; return; }
       deflate = /sec-websocket-extensions:[^\r\n]*permessage-deflate/i.test(head);

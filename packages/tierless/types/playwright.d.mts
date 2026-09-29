@@ -108,11 +108,13 @@ export declare function installIoWait(target: IoPage | IoContext): void;
  *  arrived, `down` (gateway -> browser) with the time the relay DELIVERS it. It follows
  *  the WebSocket upgrade and frames (permessage-deflate with context takeover included),
  *  pairs each browser request with its reply by id, and records "cross" and "open"
- *  intervals to TIERLESS_IO_FILE. Returns null when that is unset. A connection that
- *  isn't a WebSocket upgrade is ignored. */
+ *  intervals to TIERLESS_IO_FILE (`close` records requests still unanswered when the
+ *  connection closes). Returns null when that is unset. A connection that isn't a
+ *  WebSocket upgrade is ignored. */
 export declare function wsIoTap(): {
     up(chunk: Buffer, at: number): void;
     down(chunk: Buffer, at: number): void;
+    close(at: number): void;
 } | null;
 /** Total length of the union of [s, e) intervals, clipped to [from, to). */
 export declare function unionMs(intervals: Array<[number, number]>, from: number, to: number): number;

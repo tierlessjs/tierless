@@ -5,9 +5,8 @@
 // claims from a run without one are "elapsed under injected RTT, unbounded bandwidth"
 // and say so.
 //
-// setTimeout with a constant delay preserves per-socket FIFO ordering, so the stream
-// arrives intact, just late. Chunks buffer in memory during the delay window — fine at
-// e2e-suite volumes.
+// Each direction delivers through one ordered queue, so the stream arrives intact, just
+// late. Chunks buffer in memory during the delay window — fine at e2e-suite volumes.
 import net from "node:net";
 
 export interface WireCounter { toServer: number; toClient: number }
@@ -28,7 +27,7 @@ export const makeLink = (bps: number): Link => ({ bps, toServer: 0, toClient: 0 
 // tap (optional): a per-connection observer of the relayed bytes — wsIoTap from
 // tierless/playwright times session crossings at the network level here, where a
 // browser-side frame event would wait for the page's main thread.
-type Tap = { up(chunk: Buffer, at: number): void; down(chunk: Buffer, at: number): void } | null;
+type Tap = { up(chunk: Buffer, at: number): void; down(chunk: Buffer, at: number): void; close(at: number): void } | null;
 export function delayProxy(listen: number, target: number, oneWayMs: number, onWire?: WireCounter, link?: Link, tap?: () => Tap): net.Server {
   const srv = net.createServer((cli) => {
     const up = net.connect(target, "127.0.0.1");
@@ -38,27 +37,43 @@ export function delayProxy(listen: number, target: number, oneWayMs: number, onW
     // must add exactly the modeled delays and nothing else.
     cli.setNoDelay(true); up.setNoDelay(true);
     const relay = (from: net.Socket, to: net.Socket, dir: "toServer" | "toClient"): void => {
+      // ONE ordered delivery queue per direction, drained by one timer: a setTimeout per
+      // chunk keeps a stream in order only while every chunk has the same delay — with a
+      // bandwidth link, delays differ per chunk, and timers of different durations don't
+      // fire in submission order (a shared link reordered thousands of small writes and
+      // truncated streams). EOF queues behind the data.
+      const q: { due: number; chunk: Buffer | null }[] = [];     // null = end
+      let timer: NodeJS.Timeout | null = null;
+      const drain = (): void => {
+        timer = null;
+        const now = Date.now();
+        while (q.length && q[0].due <= now) {
+          const { chunk } = q.shift()!;
+          if (chunk === null) to.end();
+          else if (to.writable) to.write(chunk);
+        }
+        if (q.length) timer = setTimeout(drain, q[0].due - now);
+      };
+      const deliver = (due: number, chunk: Buffer | null): void => {
+        q.push({ due: Math.max(due, q.length ? q[q.length - 1].due : 0), chunk });   // never before an earlier chunk
+        if (!timer) drain();
+      };
       from.on("data", (chunk: Buffer) => {
         if (onWire) onWire[dir] += chunk.length;
         const now = Date.now();
-        let wait = oneWayMs;
+        let due = now + oneWayMs;
         if (link) {                                                      // chunks queue on the shared link
           link[dir] = Math.max(link[dir], now) + (chunk.length * 8 * 1000) / link.bps;
-          wait += link[dir] - now;                                       // finish serializing, then propagate
+          due = link[dir] + oneWayMs;                                    // finish serializing, then propagate
         }
-        if (t) { if (dir === "toServer") t.up(chunk, now); else t.down(chunk, now + Math.max(wait, 0)); }   // down: when the browser gets it
-        if (wait > 0) setTimeout(() => { if (to.writable) to.write(chunk); }, wait);
-        else if (to.writable) to.write(chunk);
+        due = Math.max(due, q.length ? q[q.length - 1].due : 0);
+        if (t) { if (dir === "toServer") t.up(chunk, now); else t.down(chunk, due); }   // down: when the browser gets it
+        deliver(due, chunk);
       });
-      from.on("end", () => {
-        // EOF rides behind any chunks still serializing on the modeled link — ending
-        // after only the propagation delay would truncate a bps-shaped stream.
-        const wait = Math.max((link ? link[dir] : 0) - Date.now(), 0) + oneWayMs;
-        if (wait > 0) setTimeout(() => to.end(), wait);
-        else to.end();
-      });
+      from.on("end", () => deliver(Date.now() + oneWayMs, null));
       from.on("error", () => to.destroy());
     };
+    if (t) cli.on("close", () => t.close(Date.now()));
     relay(cli, up, "toServer");
     relay(up, cli, "toClient");
     up.on("error", () => cli.destroy());

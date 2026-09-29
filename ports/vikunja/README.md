@@ -124,7 +124,10 @@ through TCP delay relays (TCP_NODELAY set — Nagle + delayed ACK otherwise read
 ~40 ms per small ws frame and once masqueraded as a ported regression). RTT 20 ms
 models residential latency; TIERLESS_BPS adds link bandwidth (1 Gbps, re-measured
 2026-07-17: arm deltas within ±0.3 min in OPPOSITE directions — no consistent
-effect at this app's payload sizes, results/rtt20-bps1g-*.jsonl).
+effect at this app's payload sizes, results/rtt20-bps1g-*.jsonl). That run predates two
+relay fixes: the cap was per connection (now one shared link), and per-chunk timers
+could reorder a stream once delays differed (now one ordered queue per direction). Not
+re-run.
 
 Measured 2026-07-17 on the `compile: 'auto'` build, three runs per arm with
 per-test medians (results/rtt20-{baseline,ported}*.jsonl; single runs on heavy

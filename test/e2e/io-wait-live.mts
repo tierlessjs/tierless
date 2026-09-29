@@ -12,6 +12,7 @@
 //   the socket's opening counts, from connection to its first frame
 //   a busy main thread does not stretch a crossing (network completion, not dispatch)
 //   compressed replies decode in sequence (permessage-deflate context takeover)
+//   a request still unanswered when the socket closes counts until the close
 //
 // Run:  node test/e2e/io-wait-live.mts        (needs Playwright Chromium)
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -59,6 +60,7 @@ const relay = net.createServer((cli) => {
   cli.on("data", (c: Buffer) => { tap.up(c, Date.now()); up.write(c); });
   up.on("data", (c: Buffer) => { tap.down(c, Date.now()); cli.write(c); });
   cli.on("end", () => up.end()); up.on("end", () => cli.end());
+  cli.on("close", () => tap.close(Date.now()));
   cli.on("error", () => up.destroy()); up.on("error", () => cli.destroy());
 });
 await new Promise<void>((r) => relay.listen(0, r));
@@ -135,6 +137,20 @@ const before = intervals().length;
 await measure("(async () => { for (let k = 0; k < 5; k++) await crossPath('/big'); })()");
 const bigs = readFileSync(IO, "utf8").trim().split("\n").slice(before).filter((l) => l.includes("cross exec:api.get(/big)"));
 check("five large compressed replies in a row each pair with their request (context takeover decodes)", bigs.length === 5, bigs.length + " recorded");
+
+{
+  const p2 = await context.newPage();
+  await p2.goto(pageUrl + "/");
+  await p2.evaluate("window.cross(0)");                          // socket up
+  const t0 = Date.now();
+  void p2.evaluate("window.cross(60000)").catch(() => {});       // a reply that never comes
+  await new Promise((r) => setTimeout(r, 300));
+  await p2.close();
+  await settle();
+  const lost = intervals().filter(([s0]) => s0 >= t0 - 5);
+  const un = readFileSync(IO, "utf8").trim().split("\n").filter((l) => l.includes(":unanswered")).map((l) => { const [s0, e0] = l.split(" ").map(Number); return e0 - s0; });
+  check("a request the socket closed on counts until the close (~300 ms), not as zero", un.some((ms) => ms >= 280 && ms <= 400) && lost.length > 0, JSON.stringify(un));
+}
 
 await browser.close();
 for (const s of [backend, gwHttp, relay, pages, harness]) s.close();
