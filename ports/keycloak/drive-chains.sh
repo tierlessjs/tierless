@@ -6,6 +6,8 @@
 #     PROFILE=ports/work/keycloak/profile-flows.json bash ports/keycloak/drive-chains.sh
 #
 # Defaults: the two client-scope specs, results/chains, ports/work/keycloak/profile.json.
+# RTT_MS=0 is the FLOOR (no relay): ports/report-time.mts subtracts it from the RTT run per
+# test, leaving the time spent waiting on the network.
 #
 #   baseline  stock build
 #   fetch     ported build, no profile: compiled loaders run, nothing migrates
@@ -30,7 +32,8 @@ for r in $(seq 1 "$ROUNDS"); do
     [ "$arm" = profile ] && extra=(TIERLESS_PROFILE="$PROFILE")
     echo "== round $r: $arm (RTT $RTT ms)"
     env "${extra[@]}" TIERLESS_RTT_MS="$RTT" TIERLESS_SPEC="$SPECS" timeout 1800 node ports/keycloak/suite.mts $flag > "$OUT/$arm-r$r.log" 2>&1
-    cp "ports/work/$work/measure-rtt$RTT.jsonl" "$OUT/$arm-r$r.jsonl"
+    src="ports/work/$work/measure.jsonl"; [ "$RTT" != 0 ] && src="ports/work/$work/measure-rtt$RTT.jsonl"
+    cp "$src" "$OUT/$arm-r$r.jsonl"
     grep -oE "[0-9]+ (passed|failed|flaky)" "$OUT/$arm-r$r.log" | tail -2 | tr '\n' ' '; echo
   done
 done
