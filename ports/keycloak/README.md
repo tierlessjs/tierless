@@ -54,9 +54,13 @@ profiling run over the same specs.
 | client scopes (2 specs, 21 tests) | **−17.5%** (37.6 → 31.0 s), 18 of 21 less, median −315 ms | −14.4% (36.2 → 31.0 s) | −6.8% |
 | flows (1 spec, 23–24 tests) | **−3.8%** (29.3 → 28.2 s), 17 of 23 less, median −27 ms | +0.5% (30.0 → 30.1 s) | −0.7% |
 
-The ported build with nothing migrating waits **+3.7% / +4.7%** more than stock on these
-specs; not yet explained. On flows that cost cancels the gain, so there is no net
-improvement over stock.
+**These numbers overstate crossings; being re-measured.** The recorder timed a crossing
+until the page's main thread dispatched the reply, while HTTP ends at network completion:
+a 100 ms crossing during 300 ms of page CPU recorded 321 ms, the same HTTP call 105 ms
+(Chromium's DevTools frame timestamps behave the same way). That biases stock vs ported
+against ported, and is the likely source of the +3.7% / +4.7% the ported build showed
+over stock with nothing migrating. The gateway itself adds under 1 ms per call (request in
+to reply out: 14 ms, of which Keycloak 14 ms).
 
 **Client scopes: independent calls.** The client-scopes page's loader
 (`ClientScopesSection.tsx`) and the client's scopes tab (`clients/scopes/ClientScopes.tsx`)
