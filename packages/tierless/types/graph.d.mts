@@ -6,16 +6,17 @@ export interface Handle {
     /** Class identity of an excised compiled-class instance (the __tierless_cls stamp):
      *  what a dynamic call park dispatches on without the live object (migrate-arm.md). */
     cls?: string;
-    /** For an excised PLAIN object: the class of each own member that is a direct instance
-     *  of a stamped class. A captured-variables object (a compiled closure's __caps) excises
-     *  whole — so writes to shared state stay on the live object at home — and this is what
-     *  lets the far side still reach a TWIN of one member (caps.adminClient) by path. */
-    mcls?: Record<string, string>;
-    /** For each mcls member: a JSON image of its own data fields (functions and
-     *  unserializable values stay home). The twin factory applies what it trusts, so a
-     *  twin serves the call with the live object's state at the moment it shipped — the
-     *  mirror of the twin deltas that carry the twin's writes back. */
-    mstate?: Record<string, string>;
+    /** An ownership-excised PLAIN object (a compiled closure's caps): how the far side may see
+     *  it, as JSON { p: primitive members by value, c: stamped members' classes, s: those
+     *  members' data fields, o: every other member's name }. The object still excises whole —
+     *  writes to its members only ever happen at home — but off-tier it decodes as a VIEW
+     *  (decodeGraph): primitives readable in place, other members as member handles. */
+    view?: string;
+    /** A MEMBER handle (one of a view's non-primitive members): its path from the handle's
+     *  object. Resolves at home to heapGet(id)[path…]. */
+    path?: string[];
+    /** A stamped member handle's data fields as they shipped, for its twin. Not re-encoded. */
+    state?: Record<string, unknown>;
 }
 /** Stamp a class's identity and register it on THIS tier, so its instances keep their class
  *  when copied across tiers — and, as a §5 handle's `cls`, can dispatch to a session twin. */
@@ -23,6 +24,7 @@ export declare function shareClass(name: string, cls: {
     prototype: object;
 }): void;
 export declare function protoFor(cls: string, err: boolean): object | undefined;
+export declare const VIEW: unique symbol;
 export declare function isHandle(x: unknown): x is Handle;
 export declare const GLOBALS: Record<string, unknown>;
 /** `claimed` (the encoder's excise predicate) marks values that ship as a handle whatever

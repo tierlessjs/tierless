@@ -30,6 +30,7 @@ const drive = (mod: any, entry: string, args: unknown[], exec: (r: any) => unkno
     const r = mod.PROGRAMS[top.fn](top);
     if (r.op === "return") { stack.pop(); if (!stack.length) return r.value; (stack[stack.length - 1] as any).ret = r.value; }
     else if (r.op === "call") stack.push({ fn: r.fn, pc: 0, args: r.args });
+    else if (r.op === "check") continue;
     else if (r.op === "throw") throw r.value;
     else top.ret = exec(r);
   }

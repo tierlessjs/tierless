@@ -32,6 +32,7 @@ function runToResource(stack: Frame[]): { done: true; value: unknown } | { done:
     if (r.op === "return") { stack.pop(); if (!stack.length) return { done: true, value: r.value }; stack[stack.length - 1].ret = r.value; }
     else if (r.op === "call") { stack.push({ fn: r.fn, pc: 0, args: r.args }); }
     else if (r.op === "resource") return { done: false, request: r, stack };
+    else if (r.op === "check") continue;
     else throw new Error("unexpected op " + r.op);
   }
 }

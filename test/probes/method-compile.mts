@@ -57,6 +57,7 @@ const drive = (entry: string, args: unknown[]): unknown => {
     if (r.op === "return") { stack.pop(); if (!stack.length) return r.value; (stack[stack.length - 1] as { ret?: unknown }).ret = r.value; }
     else if (r.op === "call") stack.push({ fn: r.fn, pc: 0, args: r.args });
     else if (r.op === "throw") throw r.value;
+    else if (r.op === "check") continue;
     else { seen.push({ name: r.name, args: r.args }); (stack[stack.length - 1] as { ret?: unknown }).ret = ENVELOPE; }
   }
   throw new Error("did not terminate");

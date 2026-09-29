@@ -76,6 +76,7 @@ function runTierless(fn: string, args: unknown[]): RunResult {
     const r = PROGRAMS[top.fn](top);
     if (r.op === "return") { stack.pop(); if (!stack.length) return { done: true, value: r.value }; stack[stack.length - 1].ret = r.value; }
     else if (r.op === "call") { stack.push({ fn: r.fn, pc: 0, args: r.args }); }
+    else if (r.op === "check") continue;
     else {
       // these benchmark programs never throw across a resource boundary — every non-return/call
       // result here is a real resource request.

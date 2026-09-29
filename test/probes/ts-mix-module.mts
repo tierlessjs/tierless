@@ -41,6 +41,7 @@ function drive(mod: any, entry: string, args: unknown[], service: (name: string,
     const r: MachineResult = mod.PROGRAMS[top.fn](top);
     if (r.op === "return") { stack.pop(); if (!stack.length) return r.value; stack[stack.length - 1].ret = r.value; }
     else if (r.op === "call") { stack.push({ fn: r.fn, pc: 0, args: r.args }); }
+    else if (r.op === "check") continue;
     else if (r.op === "resource") { stack = JSON.parse(JSON.stringify(stack)); stack[stack.length - 1].ret = service(r.name, r.args); }
     else throw new Error("unexpected op " + r.op);
   }

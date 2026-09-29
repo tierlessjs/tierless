@@ -9,8 +9,8 @@
 //   - the compiler ships `client.scopes.a()` as slot + path, not a scanned path read
 //   - fetch arm: nothing migrates, the live client serves every call
 //   - migrate: the browser offers at the first borrowed call (the migrate decision sees
-//     "dyn:client.scopes.a"), the server resolves caps.client to its session twin through
-//     the handle's member classes, serves all three dependent calls, ONE crossing
+//     "dyn:client.scopes.a"), the caps arrive as a view whose `client` is a member handle
+//     of class Client, the server's twin serves all three dependent calls, ONE crossing
 //   - the twin's data-field writes land on the live client (member-path delta)
 //   - a twin call that throws unwinds into the compiled catch on the server, and an error of
 //     a shared class keeps that class when the catch finishes at home
@@ -19,6 +19,9 @@
 //   - a server without a twin sends the call home with its path: correct, just unbatched
 //   - with the `closures` option, a component's `const loader = async () => {...}` and a
 //     hook's `async function` compile (2+ awaits only) and run the same way
+//   - a dependent chain that reads borrowed PRIMITIVES between calls, with a branch not
+//     taken that calls a borrowed function, still runs in ONE crossing (member-precise
+//     stop rule + checkpoint branches); taking that branch goes home and is still right
 import { createRequire } from "node:module";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -237,6 +240,18 @@ export function Fetched() {
   const { client } = useClient();
   useFetch(async () => { const a = await client.scopes.a(2); return await client.scopes.b(a); });
   useFetch(async () => await client.scopes.a(9));
+}
+function useT() { return { t: (k) => "t:" + k }; }
+export function Details(props) {
+  const { client } = useClient();
+  const { id, step } = props;
+  const { t } = useT();
+  useFetch(async () => {                         // FlowDetails: the second call needs the first's result
+    const a = await client.scopes.a(id);         // and borrowed primitives between the calls
+    const b = await client.scopes.b(a + step);
+    if (b < 0) throw new Error(t("notFound"));   // a borrowed FUNCTION, on a branch not taken
+    return await client.scopes.c(b);
+  });
 }`;
   const off = compile(COMP, { filename: "comp.js" });
   check("closures off: component functions stay plain", !(off.meta.methods as any[]).some((m) => m.class.startsWith("fn:")), JSON.stringify(off.meta.methods));
@@ -249,6 +264,11 @@ export function Fetched() {
   check("server code carries the program, not the component it was declared in (Section$loader is not a use of Section)",
     typeof cmeta.serverCode === "string" && cmeta.serverCode.includes("Section$loader") && !/function Section\(/.test(cmeta.serverCode), String(cmeta.serverCode).slice(0, 200));
   writeFileSync(join(dir, "comp.mjs"), ccode);
+  const dslots = (await import(pathToFileURL(join(dir, "comp.mjs")).href)).__slots["Details$useFetch0"] as Record<string, string[]>;
+  const dall = Object.values(dslots).flat();
+  check("stop rule: borrowed primitives are recorded by member, and the throw branch is a checkpoint (its t() call needs the whole caps only on that side)",
+    dall.includes("args[0].id") && dall.includes("args[0].step") && /if \(F\.b < 0\) \{ F\.pc = \d+; \} else \{ F\.pc = \d+; \} return \{ op: "check" \};/.test(ccode)
+      && Object.values(dslots).filter((r) => r.includes("args[0]")).length === 1, JSON.stringify(dslots));
   const cmod = await import(pathToFileURL(join(dir, "comp.mjs")).href);
   const cbundle = { PROGRAMS: cmod.PROGRAMS, __unwind: cmod.__unwind, __slots: cmod.__slots };
   const cpeer = connect(cbundle, (cls) => (cls === "Client" ? twin : undefined));
@@ -271,6 +291,21 @@ export function Fetched() {
   check("bound + migrate: the component loader's three calls ran on the twin in ONE crossing",
     r1 === "n:2,20,17" && log.slice(0, 3).join(",") === "server:a,server:b,server:c", JSON.stringify({ r1, log, counts }));
   check("bound + migrate: the hook declaration form and the anonymous hook callback too (one crossing each run)", r2 === 10 && r3 === 30 && counts.resume === 3, JSON.stringify({ r2, r3, counts }));
+
+  cmod.__bindTierlessMethods((prog: string, caps: object, args: unknown[]) => chost.runLocal(cpeer, prog, [caps, ...args], { migrate: () => true }));
+  reset();
+  cmod.Details({ id: 1, step: 5 });
+  const r4 = await ((globalThis as Record<string, unknown>).__probeFetches as Array<() => Promise<number>>)[2]();
+  const dcounts = { ...counts };
+  reset();
+  cmod.Details({ id: -9, step: 5 });
+  let r5: unknown;
+  try { await ((globalThis as Record<string, unknown>).__probeFetches as Array<() => Promise<number>>)[3](); } catch (e) { r5 = (e as Error).message; }
+  cmod.__bindTierlessMethods(null);
+  check("dependent chain reading borrowed primitives: all three calls on the twin in ONE crossing",
+    r4 === 67 && dcounts.resume === 1, JSON.stringify({ r4, dcounts }));
+  check("the branch that calls a borrowed function still runs it at home: right error",
+    r5 === "t:notFound", JSON.stringify({ r5, log, counts }));
 }
 
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }

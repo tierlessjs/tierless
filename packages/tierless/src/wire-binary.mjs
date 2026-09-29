@@ -172,16 +172,10 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
                 intern(s.h.kind);
             if (s.h.cls)
                 intern(s.h.cls);
-            if (s.h.mcls)
-                for (const [k, c] of Object.entries(s.h.mcls)) {
-                    intern(k);
-                    intern(c);
-                }
-            if (s.h.mstate)
-                for (const [k, j] of Object.entries(s.h.mstate)) {
-                    intern(k);
-                    intern(j);
-                }
+            if (s.h.view)
+                intern(s.h.view);
+            for (const k of s.h.path ?? [])
+                intern(k);
         }
         else if (s.k === "symu") {
             if (s.d !== undefined)
@@ -292,26 +286,17 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
             w.u8(4);
             w.varu(intern(s.h.owner));
             w.varu(intern(String(s.h.id)));
-            w.u8((s.h.kind ? 1 : 0) | (s.h.cls ? 2 : 0) | (s.h.mcls ? 4 : 0) | (s.h.mstate ? 8 : 0));
+            w.u8((s.h.kind ? 1 : 0) | (s.h.cls ? 2 : 0) | (s.h.view ? 4 : 0) | (s.h.path ? 8 : 0));
             if (s.h.kind)
                 w.varu(intern(s.h.kind));
             if (s.h.cls)
                 w.varu(intern(s.h.cls));
-            if (s.h.mcls) {
-                const m = Object.entries(s.h.mcls);
-                w.varu(m.length);
-                for (const [k, c] of m) {
+            if (s.h.view)
+                w.varu(intern(s.h.view));
+            if (s.h.path) {
+                w.varu(s.h.path.length);
+                for (const k of s.h.path)
                     w.varu(intern(k));
-                    w.varu(intern(c));
-                }
-            }
-            if (s.h.mstate) {
-                const m = Object.entries(s.h.mstate);
-                w.varu(m.length);
-                for (const [k, j] of m) {
-                    w.varu(intern(k));
-                    w.varu(intern(j));
-                }
             }
         }
         else if (s.k === "symu") {
@@ -419,23 +404,13 @@ export function decodeWireBinary(bytes, { content = null, tier = null } = {}) {
                 h.kind = S(r.varu());
             if (fl & 2)
                 h.cls = S(r.varu());
-            if (fl & 4) {
-                const m = {};
-                const c = r.varu();
-                for (let j = 0; j < c; j++) {
-                    const k = S(r.varu());
-                    m[k] = S(r.varu());
-                }
-                h.mcls = m;
-            }
+            if (fl & 4)
+                h.view = S(r.varu());
             if (fl & 8) {
-                const m = {};
                 const c = r.varu();
-                for (let j = 0; j < c; j++) {
-                    const k = S(r.varu());
-                    m[k] = S(r.varu());
-                }
-                h.mstate = m;
+                h.path = [];
+                for (let j = 0; j < c; j++)
+                    h.path.push(S(r.varu()));
             }
             slot = { k: "H", h };
         }

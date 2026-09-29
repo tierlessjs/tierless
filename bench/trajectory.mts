@@ -61,6 +61,7 @@ function pumpLocal(bundle: Bundle, stack: Frame[], incoming: Req | null = null):
     const r = bundle.PROGRAMS[top.fn](top);
     if (r.op === "return") { stack.pop(); if (!stack.length) return { done: true, value: r.value }; stack[stack.length - 1].ret = r.value; }
     else if (r.op === "call") { stack.push({ fn: r.fn, pc: 0, args: r.args }); }
+    else if (r.op === "check") continue;
     else if ((r as Req).tier === "server") { if (SERVER) stack[stack.length - 1].ret = apiExec(r as Req); else return { done: false, request: r as Req, stack }; }
     else throw new Error("unexpected step " + r.op);
   }

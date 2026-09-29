@@ -42,6 +42,7 @@ function pumpTier(
     const r = PROGRAMS[top.fn](top);
     if (r.op === "return") { stack.pop(); if (!stack.length) return { done: true, value: r.value }; stack[stack.length - 1].ret = r.value; }
     else if (r.op === "call") { stack.push({ fn: r.fn, pc: 0, args: r.args }); }
+    else if (r.op === "check") continue;
     else if (r.op === "resource" && r.name === "deref") { stack[stack.length - 1].ret = host.deref(r.args[0]); }         // §5 read: master or fetch
     else if (r.op === "resource" && r.name === "writeback") { stack[stack.length - 1].ret = host.writeBack(r.args[0]); } // §5 write: optimistic CAS to the owner
     else if (r.op === "resource" && ownsHere(r.tier)) { stack[stack.length - 1].ret = execHere(r); }

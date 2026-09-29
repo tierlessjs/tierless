@@ -86,10 +86,19 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
   const parkHome = (top: Frame): HomePark | null => {
     const need = slots?.[top.fn]?.[top.pc];
     if (!need) return null;
-    for (const k of need) {
-      const v = k === "args" ? top.args
+    for (const ref of need) {
+      // "slot" or "slot.member" (the compiler records a plain member read precisely, so a
+      // caps VIEW's primitive members don't send the run home — graph.mts "views")
+      const dot = ref.indexOf("."), k = dot < 0 ? ref : ref.slice(0, dot);
+      let v = k === "args" ? top.args
         : k.startsWith("args[") ? (Array.isArray(top.args) ? top.args[Number(k.slice(5, -1))] : top.args)
         : (top as Record<string, unknown>)[k];
+      if (dot >= 0 && v !== null && typeof v === "object" && !isHandle(v)) {
+        // an own DATA member is exactly what the read gets; a getter or inherited member
+        // could reach anything, so those check the whole object
+        const d = Object.getOwnPropertyDescriptor(v, ref.slice(dot + 1));
+        if (d && "value" in d) v = d.value;
+      }
       const h = findHandle(v);
       if (h) return { op: "home", tier: h.owner, name: k, args: [] };
     }
@@ -160,28 +169,15 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
         }
       };
       // a receiver PATH off a frame slot (compiler: caps.adminClient.clientScopes): walk
-      // it live. Meeting a handle midway means the object lives on another tier — its
-      // member may still have a session twin here (the handle's mcls), otherwise the
-      // call goes home WITH its path so the owner walks it live.
+      // it live. Meeting a handle (a view's member handle, or an excised object) means the
+      // object lives on another tier: a stamped one may have a session twin here that
+      // takes the rest of the path, otherwise the call goes home WITH the rest of its path
+      // so the owner walks it live.
       const path = r.path ?? [];
       let recv = r.recv;
       let i = 0;
       try { for (; i < path.length && !isHandle(recv); i++) recv = (recv as Record<string, unknown> | null | undefined)?.[path[i]]; }
       catch (err) { if (!__unwind(stack, err)) throw err; return null; }
-      if (i < path.length) {
-        const h = recv as Handle, k = path[i];
-        const cls = h.mcls?.[k];
-        // the member's data fields as they were when the stack shipped: the registry
-        // applies what it trusts (realmName yes; a browser-side baseUrl no)
-        const state = h.mstate?.[k] ? JSON.parse(h.mstate[k]) as Record<string, unknown> : undefined;
-        const twin = cls && twins ? twins(cls, { id: h.id, owner: h.owner, path: [k], ...(state ? { state } : {}) }) : undefined;
-        if (!twin) return { op: "home", tier: h.owner, name: "dyn:" + [...path.slice(i), r.member].join("."), args: [h, ...r.args] };
-        let target: unknown = twin;
-        try { for (const p of path.slice(i + 1)) target = (target as Record<string, unknown> | null | undefined)?.[p]; }
-        catch (err) { if (!__unwind(stack, err)) throw err; return null; }
-        await onTwin(twin, target, { owner: h.owner, id: h.id, path: [k] });
-        return null;
-      }
       // HOME with the live object in hand: a borrowed STAMPED member of a plain object
       // is exactly what a peer's session twin can stand in for, so the caller may ship
       // the stack there instead of settling this call (and the chain behind it) here.
@@ -190,12 +186,20 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
         if (offer({ name, args: r.args })) return { op: "home", tier: PEER, name, args: [r.recv, ...r.args] };
       }
       if (isHandle(recv)) {
-        const cls = (recv as { cls?: string }).cls;
-        const twin = cls && twins ? twins(cls, { id: recv.id, owner: recv.owner }) : undefined;
-        const prog = cls && PROGRAMS[cls + "$" + r.member] ? cls + "$" + r.member : null;
-        if (twin) await onTwin(twin, twin, { owner: recv.owner, id: recv.id });
-        else if (prog) stack.push({ fn: prog, pc: 0, args: [recv, ...r.args] });
-        else return { op: "home", tier: recv.owner, name: "dyn:" + r.member, args: [recv, ...r.args] };
+        const h = recv, rest = path.slice(i);
+        // the member's data fields as they were when the stack shipped (h.state): the
+        // registry applies what it trusts (realmName yes; a browser-side baseUrl no)
+        const twin = h.cls && twins ? twins(h.cls, { id: h.id, owner: h.owner, ...(h.path ? { path: h.path } : {}), ...(h.state ? { state: h.state } : {}) }) : undefined;
+        if (twin) {
+          let target: unknown = twin;
+          try { for (const p of rest) target = (target as Record<string, unknown> | null | undefined)?.[p]; }
+          catch (err) { if (!__unwind(stack, err)) throw err; return null; }
+          await onTwin(twin, target, { owner: h.owner, id: h.id, ...(h.path ? { path: h.path } : {}) });
+          return null;
+        }
+        const prog = !rest.length && h.cls && PROGRAMS[h.cls + "$" + r.member] ? h.cls + "$" + r.member : null;
+        if (prog) stack.push({ fn: prog, pc: 0, args: [h, ...r.args] });
+        else return { op: "home", tier: h.owner, name: "dyn:" + [...rest, r.member].join("."), args: [h, ...r.args] };
       } else {
         // the member LOOKUP itself can throw (a getter) — that's part of the awaited
         // expression, so it unwinds into the compiled catch exactly like the call would
@@ -242,6 +246,8 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
           if (ownsHere(park.tier)) throw new Error("tierless: dynamic call on a handle owned here has no local meaning: " + park.name);
           return { done: false, request: park, stack };
         }
+      } else if (r.op === "check") {
+        continue;
       } else if (r.op === "throw") {
         stack.pop();
         if (!__unwind(stack, r.value)) throw r.value;     // uncaught after unwinding all frames

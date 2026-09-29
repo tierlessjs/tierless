@@ -38,6 +38,7 @@ async function pumpLocal(stack: Frame[], ownsHere: (tier: string) => boolean, ex
     const r = PROGRAMS[top.fn](top);
     if (r.op === "return") { stack.pop(); if (!stack.length) return { done: true, value: r.value }; stack[stack.length - 1].ret = r.value; }
     else if (r.op === "call") { stack.push({ fn: r.fn, pc: 0, args: r.args }); }
+    else if (r.op === "check") continue;
     else if (ownsHere((r as Req).tier)) { stack[stack.length - 1].ret = await execHere(r as Req); }  // see the Req/PumpResult note above — r is never "throw" here
     else return { done: false, request: r as Req, stack };
   }

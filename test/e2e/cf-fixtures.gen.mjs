@@ -47,11 +47,11 @@ F.sum = F.sum + F.x;
       case 2:
         return { op: "return", value: F.acc };
       case 3:
-        if (F.n < 100) { F.pc = 9; } else { F.pc = 2; } break;
+        if (F.n < 100) { F.pc = 9; } else { F.pc = 2; } return { op: "check" };
       case 4:
         F.pc = 2; break;
       case 5:
-        if (F.acc >= 10) { F.pc = 4; } else { F.pc = 3; } break;
+        if (F.acc >= 10) { F.pc = 4; } else { F.pc = 3; } return { op: "check" };
       case 6:
         // suspend inside the loop
 F.acc = F.acc + F.v;
@@ -230,7 +230,7 @@ F.log = F.log + F.v;
         F.i = 1;
         F.pc = 4; break;
       case 4:
-        if (F.i <= 3) { F.pc = 8; } else { F.pc = 2; } break;
+        if (F.i <= 3) { F.pc = 8; } else { F.pc = 2; } return { op: "check" };
       case 5:
         F.i = F.i + 1;
         F.pc = 4; break;
@@ -415,7 +415,7 @@ F.sum = F.sum + F.i;
       case 6:
         F.pc = 2; break;
       case 7:
-        if (!F.__t0) { F.pc = 6; } else { F.pc = 5; } break;
+        if (!F.__t0) { F.pc = 6; } else { F.pc = 5; } return { op: "check" };
       case 8:
         F.__t0 = F.ret;
         F.pc = 7; break;
@@ -523,7 +523,7 @@ F.b = F.__t1; // && short-circuits: api.fail never runs
       case 6:
         F.pc = 5; return { op: "resource", tier: "server", name: "api.fail", args: [1] };
       case 7:
-        if (F.__t1) { F.pc = 6; } else { F.pc = 3; } break;
+        if (F.__t1) { F.pc = 6; } else { F.pc = 3; } return { op: "check" };
       case 8:
         F.__t1 = F.off;
         F.pc = 7; break;
@@ -539,7 +539,7 @@ F.b = F.__t1; // && short-circuits: api.fail never runs
       case 12:
         F.pc = 11; return { op: "resource", tier: "server", name: "api.get", args: [5] };
       case 13:
-        if (!F.__t0) { F.pc = 12; } else { F.pc = 9; } break;
+        if (!F.__t0) { F.pc = 12; } else { F.pc = 9; } return { op: "check" };
       case 14:
         F.__t0 = F.off;
         F.pc = 13; break;
@@ -588,7 +588,7 @@ F.b = F.__t1; // && short-circuits: api.fail never runs
       case 14:
         if (F.k === 2) { F.pc = 9; } else { F.pc = 5; } break;
       case 15:
-        if (F.k === 1) { F.pc = 13; } else { F.pc = 14; } break;
+        if (F.k === 1) { F.pc = 13; } else { F.pc = 14; } return { op: "check" };
       case 16:
         F.out = "none";
         F.pc = 15; break;
@@ -633,11 +633,11 @@ F.b = F.__t1; // && short-circuits: api.fail never runs
       case 12:
         F.pc = 11; return { op: "resource", tier: "server", name: "api.get", args: [1] };
       case 13:
-        if (F.k === 3) { F.pc = 5; } else { F.pc = 2; } break;
+        if (F.k === 3) { F.pc = 5; } else { F.pc = 2; } return { op: "check" };
       case 14:
-        if (F.k === 2) { F.pc = 9; } else { F.pc = 13; } break;
+        if (F.k === 2) { F.pc = 9; } else { F.pc = 13; } return { op: "check" };
       case 15:
-        if (F.k === 1) { F.pc = 12; } else { F.pc = 14; } break;
+        if (F.k === 1) { F.pc = 12; } else { F.pc = 14; } return { op: "check" };
       case 16:
         F.acc = 0;
         F.pc = 15; break;
@@ -677,7 +677,7 @@ F.b = F.__t1; // && short-circuits: api.fail never runs
         F.found = F.v;
         F.pc = 9; break;
       case 11:
-        if (F.v === 4) { F.pc = 10; } else { F.pc = 8; } break;
+        if (F.v === 4) { F.pc = 10; } else { F.pc = 8; } return { op: "check" };
       case 12:
         F.v = F.ret;
         F.pc = 11; break;
@@ -700,7 +700,7 @@ F.b = F.__t1; // && short-circuits: api.fail never runs
       case 3:
         F.pc = 8; break;
       case 4:
-        if (F.i < 3) { F.pc = 3; } else { F.pc = 2; } break;
+        if (F.i < 3) { F.pc = 3; } else { F.pc = 2; } return { op: "check" };
       case 5:
         F.i = F.i + 1;
         F.pc = 4; break;
@@ -795,7 +795,7 @@ F.sum = F.sum + F.i;
         F.i = 1;
         F.pc = 4; break;
       case 4:
-        if (F.i <= 5) { F.pc = 6; } else { F.pc = 2; } break;
+        if (F.i <= 5) { F.pc = 6; } else { F.pc = 2; } return { op: "check" };
       case 5:
         F.i = F.i + 1;
         F.pc = 4; break;
@@ -815,7 +815,7 @@ F.sum = F.sum + F.v;
         F.__h.pop();
         F.pc = 2; break;
       case 11:
-        if (F.v === 3) { F.pc = 10; } else { F.pc = 9; } break;
+        if (F.v === 3) { F.pc = 10; } else { F.pc = 9; } return { op: "check" };
       case 12:
         F.v = F.ret;
         F.pc = 11; break;
@@ -887,7 +887,7 @@ F.sum = F.sum + F.i;
       case 5:
         F.pc = 2; break;
       case 6:
-        if (!(F.i <= 3)) { F.pc = 5; } else { F.pc = 4; } break;
+        if (!(F.i <= 3)) { F.pc = 5; } else { F.pc = 4; } return { op: "check" };
       case 7:
         F.__t0 = false;
         F.pc = 6; break;
@@ -895,7 +895,7 @@ F.sum = F.sum + F.i;
         F.i = F.__t1;
         F.pc = 6; break;
       case 9:
-        if (F.__t0) { F.pc = 7; } else { F.pc = 8; } break;
+        if (F.__t0) { F.pc = 7; } else { F.pc = 8; } return { op: "check" };
       case 10:
         F.__t1 = F.ret;
         F.pc = 9; break;
@@ -996,7 +996,7 @@ F.sum = F.sum + F.i;
       case 12:
         if (F.route === "b") { F.pc = 8; } else { F.pc = 11; } break;
       case 13:
-        if (F.route === "a") { F.pc = 5; } else { F.pc = 12; } break;
+        if (F.route === "a") { F.pc = 5; } else { F.pc = 12; } return { op: "check" };
       case 14:
         F.out = 0;
         F.pc = 13; break;
@@ -1039,7 +1039,7 @@ F.sum = F.sum + F.i;
     }
   }
 };
-export const __slots = {"forContinue":{"0":["i","sum"],"2":["sum"],"3":["i","sum"],"4":["i","sum"],"5":["i","sum"],"6":["i","sum","x"],"7":["i","ret","sum","x"],"8":["i"],"9":["i","sum"],"10":["i","sum"],"11":["i","sum"]},"whileBreak":{"0":["acc","n"],"2":["acc"],"3":["acc","n"],"4":["acc"],"5":["acc","n"],"6":["acc","n","v"],"7":["acc","n","ret","v"],"8":["n"],"9":["n"],"10":["acc","n"],"11":["acc","n"]},"catchAcrossTier":{"0":["__h","r"],"2":["r"],"3":["__h"],"4":["__err","__h","e","r"],"5":["__h","r"],"6":["__h","r","v"],"7":["__h","r","ret","v"],"9":["__h","r"],"10":["__h","e","r"],"11":["__h","r"]},"finallyRuns":{"0":["__h","log"],"2":["log"],"3":["__h","log"],"4":["__c","__h","log"],"5":["__c","__h","log"],"6":["__c","__h","log","v"],"7":["__c","__h","log","ret","v"],"9":["log"],"10":["__c","__h","log"],"11":["__c","__h","log"],"12":["__h","log"]},"catchFinally":{"0":["__h","log"],"2":["log"],"3":["__h","log"],"4":["__c","__err","__h","e","log"],"5":["__c","__err","__h","e","log"],"6":["__h","log"],"7":["__c","__err","__h","e","log"],"8":["__c","__err","__h","e","log"],"9":["__c","__err","__h","e","log","v"],"10":["__c","__err","__h","e","log","ret","v"],"12":["log"],"13":["__c","__err","__h","e","log"],"14":["__c","__err","__h","e","log"],"15":["__c","__err","__h","e","log"],"16":["__c","__err","__h","e","log"],"17":["__h","log"]},"fetchDouble":{"0":["args[0]"],"2":["row"],"3":["ret","row"],"4":["args[0]"]},"sumViaHelper":{"0":["i","total"],"2":["total"],"3":["i","total"],"4":["i","total"],"5":["i","total"],"6":["i","r","total"],"7":["i","r","ret","total"],"8":["i"],"9":["i","total"]},"failingFetch":{"2":["v"],"3":["ret","v"]},"callerCatches":{"0":["__h","r"],"2":["r"],"3":["__h"],"4":["__err","__h","e","r"],"5":["__h","r"],"6":["__h","r","v"],"7":["__h","r","ret","v"],"9":["__h","r"],"10":["__h","e","r"],"11":["__h","r"]},"throwInMachine":{"2":["out"],"3":["__err","__h","e","out"],"4":["__err","__h","e","out"],"5":["__h","out"],"6":["__err","__h","e","out"],"7":["__err","__h","e","out"],"8":["__h","out"],"9":["__h","e","out"],"10":["__err","__h","e","out","ret"]},"returnExpr":{"2":["__t0"],"3":["__t0","ret"]},"assignRhs":{"0":["out"],"2":["out"],"3":["__t0","out"],"4":["__t0","out","ret"],"6":["out"]},"ifTest":{"4":["__t0"],"5":["__t0","ret"]},"whileTestSusp":{"0":["i","sum"],"2":["sum"],"3":["i"],"4":["i"],"5":["i","sum"],"6":["sum"],"7":["__t0","i","sum"],"8":["__t0","i","ret","sum"],"9":["i"],"10":["i","sum"],"11":["i","sum"]},"nestedArgs":{"2":["__t0","__t1"],"3":["__t0","__t1","ret"],"5":["__t0","ret"]},"callInExpr":{"2":["__t0"],"3":["__t0","ret"]},"ternaryPick":{"0":["hi"],"2":["x"],"3":["__t0","x"],"4":["__t0","__t1","x"],"5":["__t0","__t1","ret","x"],"7":["__t0","__t2","x"],"8":["__t0","__t2","ret","x"],"10":["hi"],"11":["hi"]},"shortCircuit":{"0":["__t0","__t1","a","b","off"],"2":["a","b"],"3":["__t1","a","b"],"4":["__t1","__t3","a","b"],"5":["__t1","__t3","a","b","ret"],"7":["__t1","a","b"],"8":["__t1","a","b","off"],"9":["__t0","__t1","a","b","off"],"10":["__t0","__t1","__t2","a","b","off"],"11":["__t0","__t1","__t2","a","b","off","ret"],"13":["__t0","__t1","a","b","off"],"14":["__t0","__t1","a","b","off"],"15":["__t0","__t1","a","b","off"]},"switchPick":{"0":["k","out"],"2":["out"],"3":["__t2","out"],"4":["__t2","out","ret"],"6":["out"],"7":["__t1","out"],"8":["__t1","out","ret"],"10":["out"],"11":["__t0","out"],"12":["__t0","out","ret"],"14":["k"],"15":["k"],"16":["k","out"],"17":["k","out"]},"switchFall":{"0":["acc","k"],"2":["acc"],"3":["__t2","acc"],"4":["__t2","acc","ret"],"6":["acc"],"7":["__t1","acc"],"8":["__t1","acc","ret"],"10":["__t0","acc"],"11":["__t0","acc","ret"],"13":["acc","k"],"14":["acc","k"],"15":["acc","k"],"16":["acc","k"],"17":["acc","k"]},"labeledBreak":{"0":["found","i","j"],"2":["found"],"3":["found","i","j"],"4":["found","i","j"],"5":["found","i","j"],"6":["found","i","j"],"7":["found","i","j"],"8":["found","i","j"],"9":["found"],"10":["found","v"],"11":["found","i","j","v"],"12":["found","i","j","ret","v"],"13":["i","j"],"14":["found","i","j"]},"doWhileSusp":{"0":["i","sum"],"2":["sum"],"3":["i"],"4":["i","sum"],"5":["i","sum"],"6":["i","sum","v"],"7":["i","ret","sum","v"],"8":["i"],"9":["i","sum"],"10":["i","sum"]},"forHeaderSusp":{"0":["sum"],"2":["sum"],"3":["i","sum"],"4":["i","sum"],"5":["i","sum"],"6":["i","sum"],"7":["i","ret","sum"],"9":["sum"]},"returnInTry":{"0":["__h"],"2":["__h"],"3":["__err","__h","e"],"4":["__h"],"5":["__h","v"],"6":["__h","ret","v"],"8":["__h"],"9":["__h"]},"breakOutOfTry":{"0":["__h","i","sum"],"2":["sum"],"3":["__h","i","sum"],"4":["__h","i","sum"],"5":["__h","i","sum"],"6":["__h","i"],"7":["__err","__h","e","i","sum"],"8":["__h","i","sum"],"9":["__h","i","sum","v"],"10":["__h","sum"],"11":["__h","i","sum","v"],"12":["__h","i","ret","sum","v"],"13":["i"],"14":["__h","i","sum"],"15":["__h","i","sum"],"16":["__h","i","sum"]},"returnThroughFinally":{"0":["__h","log"],"2":["__h"],"4":["__c","__h"],"5":["__c","v"],"6":["__c","ret","v"],"8":["__c","__h"],"9":["__c","__h","__t0","log"],"10":["__c","__h","__t0","log","ret"],"12":["__h","log"]},"forUpdateSusp":{"0":["__t0","i","sum"],"2":["sum"],"3":["i"],"4":["i","sum"],"5":["sum"],"6":["i","sum"],"7":["__t0","i","sum"],"8":["__t1","i","sum"],"9":["__t0","__t1","i","sum"],"10":["__t0","__t1","i","ret","sum"],"11":["i"],"12":["__t0","i"],"13":["__t0","i"],"14":["__t0","i","sum"]},"doWhileTestSusp":{"0":["__t0","__t1","i","sum"],"2":["sum"],"3":["__t0","__t1","i","sum"],"4":["__t0","__t1","i","sum"],"5":["__t0","__t1","i","sum"],"6":["__t0","__t1","i","sum"],"7":["sum"],"8":["__t0","__t1","i","sum"],"9":["__t0","__t1","__t2","i","sum"],"10":["__t0","__t1","__t2","i","ret","sum"],"11":["i"],"12":["__t0","__t1","i","sum"],"13":["__t0","__t1","i","sum"],"14":["__t0","__t1","i","sum"],"15":["__t0","__t1","i","sum"],"16":["__t0","__t1","i","sum"]},"unbracedBranchSusp":{"0":["out","route"],"2":["out"],"3":["__t0","out"],"4":["__t0","out","ret"],"6":["__t1","out"],"7":["__t1","out","ret"],"9":["__t2","out"],"10":["__t2","out","ret"],"12":["route"],"13":["route"],"14":["out","route"],"15":["out","route"]},"unbracedLoopBodySusp":{"0":["i","sum"],"2":["sum"],"3":["i","sum"],"4":["i","sum"],"5":["i","sum"],"6":["__t0","i","sum"],"7":["__t0","i","ret","sum"],"9":["i","sum"],"10":["i","sum"]}};
+export const __slots = {"forContinue":{"0":["i","sum"],"2":["sum"],"3":["i","sum"],"4":["i","sum"],"5":["i","sum"],"6":["i","sum","x"],"7":["i","ret","sum","x"],"8":["i"],"9":["i","sum"],"10":["i","sum"],"11":["i","sum"]},"whileBreak":{"0":["acc","n"],"2":["acc"],"3":["n"],"4":["acc"],"5":["acc"],"6":["acc","v"],"7":["acc","ret","v"],"8":["n"],"9":["n"],"10":["acc","n"],"11":["acc","n"]},"catchAcrossTier":{"0":["__h","r"],"2":["r"],"3":["__h"],"4":["__err","__h","e","e.message","r"],"5":["__h","r"],"6":["__h","r","v"],"7":["__h","r","ret","v"],"9":["__h","r"],"10":["__h","e.message","r"],"11":["__h","r"]},"finallyRuns":{"0":["__h","log"],"2":["log"],"3":["__h","log"],"4":["__c","__h","log"],"5":["__c","__h","__h.length","log"],"6":["__c","__h","__h.length","log","v"],"7":["__c","__h","__h.length","log","ret","v"],"9":["log"],"10":["__c","__h","log"],"11":["__c","__h","log"],"12":["__h","log"]},"catchFinally":{"0":["__h","log"],"2":["log"],"3":["__h","log"],"4":["__c","__err","__h","__h.length","e","log"],"5":["__c","__err","__h","__h.length","e","log"],"6":["__h","log"],"7":["__c","__err","__h","__h.length","e","log"],"8":["__c","__err","__h","__h.length","e","log"],"9":["__c","__err","__h","__h.length","e","log","v"],"10":["__c","__err","__h","__h.length","e","log","ret","v"],"12":["log"],"13":["__c","__err","__h","__h.length","e","log"],"14":["__c","__err","__h","__h.length","e","log"],"15":["__c","__err","__h","__h.length","e","log"],"16":["__c","__err","__h","__h.length","e","log"],"17":["__h","log"]},"fetchDouble":{"0":["args[0]"],"2":["row"],"3":["ret","row"],"4":["args[0]"]},"sumViaHelper":{"0":["i","total"],"2":["total"],"3":["i"],"4":["i"],"5":["i"],"6":["i","r","total"],"7":["i","r","ret","total"],"8":["i"],"9":["i","total"]},"failingFetch":{"2":["v"],"3":["ret","v"]},"callerCatches":{"0":["__h","r"],"2":["r"],"3":["__h"],"4":["__err","__h","e","e.message","r"],"5":["__h","r"],"6":["__h","r","v"],"7":["__h","r","ret","v"],"9":["__h","r"],"10":["__h","e.message","r"],"11":["__h","r"]},"throwInMachine":{"2":["out"],"3":["__err","__h","e","out"],"4":["__err","__h","e","out"],"5":["__h","out"],"6":["__err","__h","e","out"],"7":["__err","__h","e","out"],"8":["__h","out"],"9":["__h","e","out"],"10":["__err","__h","e","out","ret"]},"returnExpr":{"2":["__t0"],"3":["__t0","ret"]},"assignRhs":{"0":["out"],"2":["out"],"3":["__t0","out"],"4":["__t0","out","ret"],"6":["out"]},"ifTest":{"4":["__t0"],"5":["__t0","ret"]},"whileTestSusp":{"0":["i","sum"],"2":["sum"],"3":["i"],"4":["i"],"5":["i","sum"],"6":["sum"],"7":["__t0"],"8":["__t0","ret"],"9":["i"],"10":["i","sum"],"11":["i","sum"]},"nestedArgs":{"2":["__t0","__t1"],"3":["__t0","__t1","ret"],"5":["__t0","ret"]},"callInExpr":{"2":["__t0"],"3":["__t0","ret"]},"ternaryPick":{"0":["hi"],"2":["x"],"3":["__t0","x"],"4":["__t0","__t1","x"],"5":["__t0","__t1","ret","x"],"7":["__t0","__t2","x"],"8":["__t0","__t2","ret","x"],"10":["hi"],"11":["hi"]},"shortCircuit":{"0":["__t0","off"],"2":["a","b"],"3":["__t1","a","b"],"4":["__t1","__t3","a","b"],"5":["__t1","__t3","a","b","ret"],"7":["__t1"],"8":["__t1","off"],"9":["__t0","__t1","a","off"],"10":["__t0","__t1","__t2","a","off"],"11":["__t0","__t1","__t2","a","off","ret"],"13":["__t0"],"14":["__t0","off"],"15":["__t0","off"]},"switchPick":{"0":["k","out"],"2":["out"],"3":["__t2","out"],"4":["__t2","out","ret"],"6":["out"],"7":["__t1","out"],"8":["__t1","out","ret"],"10":["out"],"11":["__t0","out"],"12":["__t0","out","ret"],"14":["k"],"15":["k"],"16":["k","out"],"17":["k","out"]},"switchFall":{"0":["acc","k"],"2":["acc"],"3":["__t2","acc"],"4":["__t2","acc","ret"],"6":["acc"],"7":["__t1","acc"],"8":["__t1","acc","ret"],"10":["__t0","acc"],"11":["__t0","acc","ret"],"13":["k"],"14":["k"],"15":["k"],"16":["acc","k"],"17":["acc","k"]},"labeledBreak":{"0":["found","i","j"],"2":["found"],"3":["found","i","j"],"4":["found","i","j"],"5":["found","i","j"],"6":["found","i","j"],"7":["found","i","j"],"8":["found","i","j"],"9":["found"],"10":["found","v"],"11":["v"],"12":["ret","v"],"13":["i","j"],"14":["found","i","j"]},"doWhileSusp":{"0":["i","sum"],"2":["sum"],"3":["i"],"4":["i"],"5":["i"],"6":["i","sum","v"],"7":["i","ret","sum","v"],"8":["i"],"9":["i","sum"],"10":["i","sum"]},"forHeaderSusp":{"0":["sum"],"2":["sum"],"3":["i","sum"],"4":["i","sum"],"5":["i","sum"],"6":["i","sum"],"7":["i","ret","sum"],"9":["sum"]},"returnInTry":{"0":["__h"],"2":["__h"],"3":["__err","__h","e"],"4":["__h"],"5":["__h","v"],"6":["__h","ret","v"],"8":["__h"],"9":["__h"]},"breakOutOfTry":{"0":["i","sum"],"2":["sum"],"3":["i"],"4":["i"],"5":["i"],"6":["__h","i"],"7":["__err","__h","e","i","sum"],"8":["__h","i"],"9":["__h","i","sum","v"],"10":["__h","sum"],"11":["v"],"12":["ret","v"],"13":["i"],"14":["__h","i"],"15":["__h","i","sum"],"16":["i","sum"]},"returnThroughFinally":{"0":["__h","log"],"2":["__h"],"4":["__c","__h","__h.length"],"5":["__c","v"],"6":["__c","ret","v"],"8":["__c","__h"],"9":["__c","__h","__t0","log"],"10":["__c","__h","__t0","log","ret"],"12":["__h","log"]},"forUpdateSusp":{"0":["__t0","i","sum"],"2":["sum"],"3":["i"],"4":["i","sum"],"5":["sum"],"6":["i"],"7":["__t0","i"],"8":["__t1","i"],"9":["__t0"],"10":["__t0","__t1","ret"],"11":["i"],"12":["__t0","i"],"13":["__t0","i"],"14":["__t0","i","sum"]},"doWhileTestSusp":{"0":["__t0","__t1","i","sum"],"2":["sum"],"3":["__t0","__t1","i","sum"],"4":["__t0","__t1","i","sum"],"5":["__t0","__t1","i","sum"],"6":["__t0","__t1","i","sum"],"7":["sum"],"8":["__t0","__t1","i","sum"],"9":["__t0","__t1","__t2","i","sum"],"10":["__t0","__t1","__t2","i","ret","sum"],"11":["i"],"12":["__t0","__t1","i","sum"],"13":["__t0","__t1","i","sum"],"14":["__t0","__t1","i","sum"],"15":["__t0","__t1","i","sum"],"16":["__t0","__t1","i","sum"]},"unbracedBranchSusp":{"0":["out","route"],"2":["out"],"3":["__t0","out"],"4":["__t0","out","ret"],"6":["__t1","out"],"7":["__t1","out","ret"],"9":["__t2","out"],"10":["__t2","out","ret"],"12":["route"],"13":["route"],"14":["out","route"],"15":["out","route"]},"unbracedLoopBodySusp":{"0":["i","sum"],"2":["sum"],"3":["i","sum"],"4":["i","sum"],"5":["i","sum"],"6":["__t0","i","sum"],"7":["__t0","i","ret","sum"],"9":["i","sum"],"10":["i","sum"]}};
 
 // A §5 handle — a big local that stayed on its owning tier (see ../heap.mjs). With
 // --auto-deref the machine guards reads of remotable locals with this check.
@@ -1091,4 +1091,4 @@ export function run(stack) {
   }
 }
 export const start = (fn, args = []) => run([{ fn, pc: 0, args }]);
-export const BUNDLE_HASH = "6735b410";
+export const BUNDLE_HASH = "05501a7e";

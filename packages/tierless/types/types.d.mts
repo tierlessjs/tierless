@@ -17,6 +17,8 @@ export type MachineResult = {
     op: "throw";
     value: unknown;
 } | {
+    op: "check";
+} | {
     op: "resource";
     tier: string;
     name: string;

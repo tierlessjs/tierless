@@ -49,7 +49,7 @@ export const useThings = defineStore("things", () => {
     state.items = items;
     return created.id + ":" + items.length;
   }
-  async function viaCaptured(item) {             // captured service: correct, fence-per-call
+  async function viaCaptured(item) {             // captured service
     const created = await svc.create(item);
     const items = await svc.reload();
     return created.id + ":" + items.length;
@@ -158,13 +158,12 @@ check("migrate: both calls served server-side; live state still mutated at home"
     r5 === "42:n=3" && store5.state.items.length === 3 && counts.exec === 2, JSON.stringify({ r5, state: store5.state, counts }));
 }
 
-// captured-service receivers are PATHS through the caps handle: every dispatch fences
-// home — correct (value, no divergence), just unbatched. Their stores construct services
-// fn-locally, so this is the exception path, asserted for the record.
+// a captured COMPILED service: the caps arrive as a view, `svc` as a member handle of
+// class Svc, so its methods push as machines on the server — one crossing for the chain
 reset();
 const store4 = mod.useThings();
 const r4 = await bhost.runLocal(peer, "things$viaCaptured", [{ svc: store4.svc }, { t: "w" }], { migrate: () => true });
-check("captured-service chain: correct but fenced (one crossing per method)", r4 === "42:3" && (counts.resume || 0) >= 2 && !counts.exec, JSON.stringify({ r4, counts }));
+check("captured-service chain: correct, both calls served server-side in ONE crossing", r4 === "42:3" && counts.resume === 1 && !counts.exec && twinServed.join(",") === "http.put:/things,http.get:/things", JSON.stringify({ r4, counts, twinServed }));
 
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
 console.log("\nsetup-store functions compile with call-time caps; captures rewrite precisely; the chain still batches");

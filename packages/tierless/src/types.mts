@@ -18,6 +18,8 @@ export type MachineResult =
   | { op: "return"; value: unknown }
   | { op: "call"; fn: string; args: unknown[] }
   | { op: "throw"; value: unknown }
+  // a checkpoint branch decided its side: the pump re-checks the stop rule, then steps on
+  | { op: "check" }
   | { op: "resource"; tier: string; name: string; args: unknown[] }
   // the DYNAMIC call park (docs/migrate-arm.md slice 3): an awaited member call whose
   // meaning the PUMP resolves — a session twin's method (class-stamped handle), a

@@ -612,7 +612,8 @@ function compileFn(node: t.FunctionDeclaration): string {
     throw new Error("bad terminator " + (tm as { kind: string }).kind);
   };
   const caseText = new Map<number, string>();   // raw id -> the case's full emitted text (lines + term)
-  const cases = ids.map((id) => { const blk = blocks[id]; const lines = blk.lines.slice(); lines.push(emitTerm(blk.term!)); caseText.set(id, lines.join("\n")); return `      case ${R(id)}:\n        ${lines.join("\n        ")}`; }).join("\n");
+  const caseLines = new Map(ids.map((id) => [id, [...blocks[id].lines, emitTerm(blocks[id].term!)]]));
+  for (const [id, lines] of caseLines) caseText.set(id, lines.join("\n"));
   if (SOURCE_MAP) { const sites: Record<number, number | undefined> = {}; for (const id of ids) sites[R(id)] = blocks[id].line; fnSites[fnName] = sites; }  // pc -> source line
 
   // §5 stop-rule metadata (docs/migrate-arm.md): per resume state, the frame slots the
@@ -649,21 +650,53 @@ function compileFn(node: t.FunctionDeclaration): string {
     const refsOf = (id: number): Set<string> => {
       const out = new Set<string>();
       const text = caseText.get(id)!.replace(/\bop: "dyn", recv: F\.(?:args\[\d+\]|[A-Za-z_$][\w$]*)(?=,)/g, 'op: "dyn"');
-      for (const m of text.matchAll(/\bF\.([A-Za-z_$][\w$]*)(\[(\d+)\])?/g)) {
+      for (const m of text.matchAll(/\bF\.([A-Za-z_$][\w$]*)(\[(\d+)\])?(?:\.([A-Za-z_$][\w$]*))?/g)) {
         if (m[1] === "pc") continue;
-        out.add(m[1] === "args" && m[3] !== undefined ? `args[${m[3]}]` : m[1]);
+        const slot = m[1] === "args" && m[3] !== undefined ? `args[${m[3]}]` : m[1];
+        // a plain READ of one member records the member ("args[0].id"): a caps VIEW's
+        // primitive members may be read off-tier (graph.mts "views"). A call (the method
+        // sees the whole object as `this`), a write or a delete (it must land on the home
+        // object) records the whole slot.
+        const after = text.slice(m.index! + m[0].length), before = text.slice(0, m.index!);
+        const whole = m[4] === undefined || /^\s*(?:\(|\+\+|--|(?:\*\*|<<|>>>?|&&|\|\||\?\?|[-+*\/%&|^])?=(?!=))/.test(after) || /(?:\+\+|--|\bdelete)\s*$/.test(before);
+        out.add(whole ? slot : `${slot}.${m[4]}`);
       }
       return out;
     };
-    const table: Record<number, string[]> = {};
-    for (const id of ids) {
+    const own = new Map(ids.map((id) => [id, refsOf(id)]));
+    // a CHECKPOINT branch ends the step once its condition is decided (op "check"), so the
+    // pump checks the stop rule for the side actually taken. Without it, a slot read only on
+    // a side not taken (FlowDetails: `if (!flow) throw new Error(t("notFound"))`) sends
+    // every run home. Only where the two sides' refs differ, and never inside an in-step
+    // cycle (a loop head would return to the pump every iteration).
+    const closure = (id: number, stop: Set<number>): { refs: Set<string>; seen: Set<number> } => {
       const seen = new Set<number>([id]), refs = new Set<string>();
       const walk = [id];
-      while (walk.length) { const b = walk.pop()!; for (const r of refsOf(b)) refs.add(r); for (const s of succs(b)) if (!seen.has(s)) { seen.add(s); walk.push(s); } }
+      while (walk.length) {
+        const b = walk.pop()!;
+        for (const r of own.get(b)!) refs.add(r);
+        if (stop.has(b)) continue;                      // a checkpoint returns to the pump: its sides are checked there
+        for (const s of succs(b)) if (!seen.has(s)) { seen.add(s); walk.push(s); }
+      }
+      return { refs, seen };
+    };
+    const none = new Set<number>(), checks = new Set<number>();
+    const key = (x: Set<string>): string => [...x].sort().join(",");
+    for (const id of ids) {
+      const tm = blocks[id].term!;
+      if (tm.kind !== "branch") continue;
+      const a = closure(tm.then, none), b = closure(tm.else, none);
+      if (key(a.refs) !== key(b.refs) && !a.seen.has(id) && !b.seen.has(id)) checks.add(id);
+    }
+    for (const id of checks) { const lines = caseLines.get(id)!; lines[lines.length - 1] = lines[lines.length - 1].replace(/ break;$/, ' return { op: "check" };'); }
+    const table: Record<number, string[]> = {};
+    for (const id of ids) {
+      const refs = closure(id, checks).refs;
       if (refs.size) table[R(id)] = [...refs].sort();
     }
     fnSlots[fnName] = table;
   }
+  const cases = ids.map((id) => `      case ${R(id)}:\n        ${caseLines.get(id)!.join("\n        ")}`).join("\n");
   // default: every reachable pc has a case, so landing here means a corrupt frame — a transform bug, or
   // a continuation mangled in transit. Hard-error at once instead of letting `while (true)` spin forever:
   // fail fast and loud rather than hang. (No valid run reaches it; this is a safety net, not control flow.)

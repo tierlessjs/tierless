@@ -31,6 +31,7 @@ function drive(fn: string, n: number): unknown {
     const r = PROGRAMS[top.fn](top);
     if (r.op === "return") { stack.pop(); if (!stack.length) return r.value; stack[stack.length - 1].ret = r.value; }
     else if (r.op === "call") { stack.push({ fn: r.fn, pc: 0, args: r.args }); }
+    else if (r.op === "check") continue;
     else stack[stack.length - 1].ret = SEED;   // api.seed, owned here -> inline, no serialize
   }
 }

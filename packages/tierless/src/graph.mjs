@@ -63,6 +63,66 @@ export function protoFor(cls, err) {
     }
     return SHARED.get(cls) ?? (err ? Error.prototype : undefined);
 }
+// ---- views: a caps object off its home tier -------------------------------------------
+// A compiled closure's caps excise whole (writes stay home), which used to make EVERY caps
+// read a reason to go home — so a dependent chain that reads a borrowed `id` between calls
+// bounced back to the browser mid-chain. Primitives are immutable, so they can travel: off
+// its home tier an excised caps decodes as a VIEW — primitive members in place, every
+// other member a MEMBER handle (stamped ones carry their class and state, for twins). The
+// stop rule reads members precisely (compiler slot refs "args[0].id"), so touching a
+// primitive stays put and touching anything else still goes home.
+export const VIEW = Symbol("tierless.view");
+function isPrimitive(x) {
+    return x === null || typeof x === "string" || typeof x === "boolean" || (typeof x === "number" && Number.isFinite(x));
+}
+function viewOf(v) {
+    const p = {}, c = {}, s = {}, o = [];
+    for (const [k, x] of Object.entries(v)) {
+        if (x === undefined)
+            continue; // absent and undefined read the same
+        if (isPrimitive(x)) {
+            p[k] = x;
+            continue;
+        }
+        const cls = stampOf(x);
+        if (!cls) {
+            o.push(k);
+            continue;
+        }
+        c[k] = cls;
+        const data = {};
+        for (const [f, fv] of Object.entries(x)) {
+            if (holdsFunction(fv))
+                continue; // behavior, not state: {} after JSON would clobber the twin's own
+            try {
+                const j = JSON.stringify(fv);
+                if (j !== undefined)
+                    data[f] = JSON.parse(j);
+            }
+            catch { /* circular or unserializable: stays home */ }
+        }
+        s[k] = data;
+    }
+    return JSON.stringify({ p, c, s, o });
+}
+function viewFrom(h) {
+    const d = JSON.parse(h.view);
+    const v = {};
+    Object.defineProperty(v, VIEW, { value: h });
+    for (const [k, x] of Object.entries(d.p))
+        v[k] = x;
+    const member = (k) => ({ __tierless_handle__: true, owner: h.owner, id: h.id, path: [k] });
+    for (const [k, cls] of Object.entries(d.c))
+        v[k] = { ...member(k), cls, ...(d.s[k] ? { state: d.s[k] } : {}) };
+    for (const k of d.o)
+        v[k] = member(k);
+    return v;
+}
+function stampOf(v) {
+    const proto = v && typeof v === "object" ? Object.getPrototypeOf(v) : null;
+    const cls = proto && Object.prototype.hasOwnProperty.call(proto, "__tierless_cls") ? proto.__tierless_cls : undefined;
+    return typeof cls === "string" ? cls : undefined;
+}
 export function isHandle(x) {
     return x !== null && typeof x === "object" && x.__tierless_handle__ === true;
 }
@@ -139,38 +199,15 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024, conten
     // may override the very method a far-side dispatch would resolve to the BASE machine,
     // silently running the wrong code. Subclass instances stay unstamped — their calls
     // park home (or hit a session twin, which constructs the real subclass and is exact).
-    const stampOf = (v) => {
-        const proto = v && typeof v === "object" ? Object.getPrototypeOf(v) : null;
-        const cls = proto && Object.prototype.hasOwnProperty.call(proto, "__tierless_cls") ? proto.__tierless_cls : undefined;
-        return typeof cls === "string" ? cls : undefined;
-    };
-    const exciseTo = (v) => {
+    const exciseTo = (v, owned) => {
         const id = objs.length;
         idOf.set(v, id);
         const cls = stampOf(v);
-        let mcls, mstate;
         const proto = v && typeof v === "object" ? Object.getPrototypeOf(v) : undefined;
-        if (proto === Object.prototype || proto === null) {
-            for (const [k, x] of Object.entries(v)) {
-                const c = stampOf(x);
-                if (!c)
-                    continue;
-                (mcls ??= {})[k] = c;
-                const data = {};
-                for (const [f, fv] of Object.entries(x)) {
-                    if (holdsFunction(fv))
-                        continue; // behavior, not state: {} after JSON would clobber the twin's own
-                    try {
-                        const j = JSON.stringify(fv);
-                        if (j !== undefined)
-                            data[f] = JSON.parse(j);
-                    }
-                    catch { /* circular or unserializable: stays home */ }
-                }
-                (mstate ??= {})[k] = JSON.stringify(data);
-            }
-        }
-        objs.push({ k: "H", h: { __tierless_handle__: true, owner: tier.id, id: tier.heapPut(v), kind: Array.isArray(v) ? "array" : "object", ...(cls ? { cls } : {}), ...(mcls ? { mcls } : {}), ...(mstate ? { mstate } : {}) } });
+        // an OWNED plain object (not one excised for size — that one's contents are the point
+        // of keeping it home) describes its members for the far side's view
+        const view = owned && (proto === Object.prototype || proto === null) ? viewOf(v) : undefined;
+        objs.push({ k: "H", h: { __tierless_handle__: true, owner: tier.id, id: tier.heapPut(v), kind: Array.isArray(v) ? "array" : "object", ...(cls ? { cls } : {}), ...(view ? { view } : {}) } });
         return { k: "r", id };
     };
     function enc(v) {
@@ -182,7 +219,7 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024, conten
         if (typeof v === "function" && tier && excise && excise(v)) { // a function's effect lives in this heap — keep its identity home
             if (idOf.has(v))
                 return { k: "r", id: idOf.get(v) };
-            return exciseTo(v);
+            return exciseTo(v, true);
         }
         if (typeof v === "symbol") { // well-known by name; Symbol.for by key; unique by graph node (identity within a round-trip)
             if (WELLKNOWN.has(v))
@@ -206,7 +243,19 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024, conten
         if (isHandle(v)) {
             const id = objs.length;
             idOf.set(v, id);
-            objs.push({ k: "H", h: v });
+            const { state: _s, ...h } = v;
+            objs.push({ k: "H", h });
+            return { k: "r", id };
+        }
+        // a VIEW goes back as the handle it was decoded from: home gets its own live object
+        const vh = v[VIEW];
+        if (vh) {
+            if (idOf.has(vh))
+                return { k: "r", id: idOf.get(vh) };
+            const id = objs.length;
+            idOf.set(vh, id);
+            idOf.set(v, id);
+            objs.push({ k: "H", h: vh });
             return { k: "r", id };
         }
         if (content) { // content-addressed immutable subgraph (code / class shapes / config)
@@ -224,8 +273,10 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024, conten
         }
         // §5 handle into the owning tier's heap (stays tier-local): claimed by ownership
         // (the migrate arm's live instances/host objects) or simply too big to ship
-        if (tier && ((excise && excise(v)) || approxExceeds(v, threshold, excise)))
-            return exciseTo(v);
+        if (tier && excise && excise(v))
+            return exciseTo(v, true);
+        if (tier && approxExceeds(v, threshold, excise))
+            return exciseTo(v, false);
         const id = objs.length;
         idOf.set(v, id); // reserve id BEFORE recursing (cycle-safe)
         if (v instanceof Map) {
@@ -299,10 +350,12 @@ export function toBigInt(s) {
 export function decodeGraph({ roots, objs }, { content = null, tier = null } = {}) {
     const home = (h) => {
         if (!tier || h.owner !== tier.id)
-            return h;
-        const v = tier.heapGet(h.id);
+            return h.view ? viewFrom(h) : h;
+        let v = tier.heapGet(h.id);
         if (v === undefined)
             throw new RangeError("wire: unknown local handle " + h.id);
+        for (const k of h.path ?? [])
+            v = v[k]; // a member handle: that member of the live object
         return v;
     };
     const built = objs.map((s) => (s.k === "a" ? [] : s.k === "o" ? {} : s.k === "map" ? new Map() : s.k === "set" ? new Set() : s.k === "symu" ? Symbol(s.d) : s.k === "c" ? (content && content.store.get(s.h)) : home(s.h))); // pre-create for cycles/sharing; k:"c" resolves to the held immutable subgraph
