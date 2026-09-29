@@ -69,5 +69,16 @@ const idStack = [{ fn: "T", pc: 0, ids, args: [] as unknown[] }];
 const idJson = te.encode(encodeWire(idStack, null, {})).length, idBin = encodeWireBinary(idStack, null, {}).length;
 check(`a 1000-int column packs tightly (${idBin} B binary vs ${idJson} B JSON = ${(idJson / idBin).toFixed(1)}x)`, idBin * 4 < idJson);
 
+// a caps VIEW's handle (view JSON) and a member handle (path) survive the byte format
+{
+  const home = makeTier("browser");
+  const caps = { id: "f1", t: (k: string) => k };
+  const bytes = encodeWireBinary([{ fn: "F", pc: 1, args: [caps] }], null, { tier: home, excise: (v) => v === caps });
+  const [v] = decodeWireBinary(bytes, { tier: makeTier("server") }).stack[0].args as any[];
+  check("binary: a caps view decodes with primitives in place and a member handle with its path", v.id === "f1" && isHandle(v.t) && v.t.path?.join() === "t");
+  const back = decodeWireBinary(encodeWireBinary([{ fn: "F", pc: 1, args: [v, v.t] }], null, { tier: makeTier("server") }), { tier: home }).stack[0].args as any[];
+  check("binary: the view and the member handle go home as the live caps and its member", back[0] === caps && back[1] === caps.t);
+}
+
 console.log(`\n${ok() ? "PASS" : "FAIL"} — binary wire: identical decode (identity/cycles/exotics/handles/typed-arrays) at ${(jsonBytes / binBytes).toFixed(1)}x smaller than JSON on a record feed`);
 process.exit(ok() ? 0 : 1);

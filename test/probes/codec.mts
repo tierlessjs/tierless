@@ -52,5 +52,26 @@ check("undefined local survives the round trip", roundtrip([undefined])[0] === u
 const [bi] = roundtrip([{ n: 9007199254740993n, arr: [1n, 2n] }]);
 check("BigInt survives exactly (> MAX_SAFE_INTEGER)", bi.n === 9007199254740993n && bi.arr[1] === 2n);
 
+// views: an ownership-excised plain object (a closure's caps) decodes off-tier as a view —
+// primitives by value, other members as member handles — and goes home as its handle
+{
+  class Api { realm = "r1"; go(): void { /* behavior */ } }
+  (Api.prototype as unknown as { __tierless_cls: string }).__tierless_cls = "Api";
+  const home = makeTier("browser");
+  const caps = { id: "f1", n: 3, on: true, nil: null, gone: undefined, t: (k: string) => k, form: { a: 1 }, api: new Api() };
+  const enc = encodeGraph([caps], { tier: home, excise: (v) => v === caps });
+  const [view] = decodeGraph(JSON.parse(JSON.stringify(enc)), { tier: makeTier("server") }) as any[];
+  check("view: primitive members arrive as values", view.id === "f1" && view.n === 3 && view.on === true && view.nil === null && !("gone" in view));
+  check("view: function and object members arrive as member handles of the caps' handle",
+    isHandle(view.t) && isHandle(view.form) && view.t.id === view.form.id && view.t.path?.[0] === "t" && view.form.path?.[0] === "form");
+  check("view: a stamped member carries its class and data fields (no functions)",
+    isHandle(view.api) && view.api.cls === "Api" && view.api.state?.realm === "r1" && !("go" in (view.api.state ?? {})));
+  const back = encodeGraph([view, view.form], { tier: makeTier("server") });
+  const [homeCaps, homeForm] = decodeGraph(JSON.parse(JSON.stringify(back)), { tier: home }) as any[];
+  check("view: going home it decodes to the LIVE object, and a member handle to the live member", homeCaps === caps && homeForm === caps.form);
+  const sized = encodeGraph([{ big: caps }], { tier: home, threshold: 16 });
+  check("view: an object excised only for SIZE ships no view (its contents are the point of keeping it home)", !JSON.stringify(sized).includes('"view"'));
+}
+
 console.log(`\n${ok() ? "PASS" : "FAIL"} — wire codec: identity, cycles, big-vs-small excision, exotic values all handled`);
 process.exit(ok() ? 0 : 1);

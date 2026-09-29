@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# Chain migration, timed: the two client-scope specs under injected RTT, three arms.
+# Chain migration, timed: specs under injected RTT, three arms.
 #
 #   bash ports/keycloak/drive-chains.sh            (RTT_MS=80 ROUNDS=3 by default)
+#   SPECS=test/autentication/flows.spec.ts OUT=ports/keycloak/results/flows \
+#     PROFILE=ports/work/keycloak/profile-flows.json bash ports/keycloak/drive-chains.sh
+#
+# Defaults: the two client-scope specs, results/chains, ports/work/keycloak/profile.json.
 #
 #   baseline  stock build
 #   fetch     ported build, no profile: compiled loaders run, nothing migrates
@@ -14,9 +18,9 @@
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 RTT="${RTT_MS:-80}"; ROUNDS="${ROUNDS:-3}"
-SPECS="test/client-scope/main.spec.ts test/clients/scope.spec.ts"
-OUT=ports/keycloak/results/chains
-PROFILE="$PWD/ports/work/keycloak/profile.json"
+SPECS="${SPECS:-test/client-scope/main.spec.ts test/clients/scope.spec.ts}"
+OUT="${OUT:-ports/keycloak/results/chains}"
+PROFILE="$(realpath -m "${PROFILE:-ports/work/keycloak/profile.json}")"
 [ -s "$PROFILE" ] || { echo "!! no locked profile at $PROFILE — run a TIERLESS_PROFILE_RUN=1 pass and ports/build-profile.mts first"; exit 1; }
 mkdir -p "$OUT"
 for r in $(seq 1 "$ROUNDS"); do
