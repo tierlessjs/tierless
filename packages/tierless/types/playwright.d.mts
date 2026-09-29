@@ -81,6 +81,7 @@ export declare function patchPlaywrightPages({ Page, BrowserContext }: SuitePlay
 export declare function anchorPlaywrightConfig<T extends Record<string, unknown>>(config: T, dir: string): T;
 interface IoRequest {
     url(): string;
+    method(): string;
     resourceType(): string;
     timing(): {
         startTime: number;

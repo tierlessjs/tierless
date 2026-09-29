@@ -78,7 +78,7 @@ export default class TierlessMeasureReporter {
                 const text = buf.toString("utf8"), end = text.lastIndexOf("\n") + 1; // whole lines only
                 this.ioAt += Buffer.byteLength(text.slice(0, end));
                 for (const line of text.slice(0, end).split("\n")) {
-                    const [s, e] = line.split(" ").map(Number);
+                    const [s, e] = line.split(" ", 2).map(Number);
                     if (e > s)
                         this.io.push([s, e]);
                 }
@@ -122,7 +122,7 @@ export default class TierlessMeasureReporter {
         const titles = test.titlePath().filter((t) => t && !/\.(spec|test)\.[cm]?[jt]sx?$/.test(t) && t !== file && !this.projectNames.has(t));
         const start = result.startTime.getTime();
         const io = IO_FILE ? { ioWaitMs: this.ioWait(start, start + result.duration) } : {};
-        appendFileSync(OUT, JSON.stringify({ id: `${file}:${test.location.line} › ${titles.join(" › ")}`, status: result.status, retry: result.retry, durationMs: result.duration, ...io, ...wire }) + "\n");
+        appendFileSync(OUT, JSON.stringify({ id: `${file}:${test.location.line} › ${titles.join(" › ")}`, status: result.status, retry: result.retry, durationMs: result.duration, startMs: start, ...io, ...wire }) + "\n");
     }
     printsToStdio() {
         return false;

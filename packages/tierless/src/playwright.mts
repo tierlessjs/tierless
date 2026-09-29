@@ -188,6 +188,8 @@ function responseFacade(c: Crossing): Record<string, unknown> {
 // Playwright-faithful glob → regex, shared with the force-browser seam (url-glob.mts;
 // the live proof differentially verifies it against the installed playwright-core).
 import { globToRegexPattern } from "./url-glob.mjs";
+import { decodeMessage } from "./transport.mjs";
+import { decodeArgs } from "./wire-binary.mjs";
 export { globToRegexPattern, matchesForceBrowser } from "./url-glob.mjs";
 
 // Playwright resolves a non-`*`-leading string pattern against the context baseURL,
@@ -541,11 +543,12 @@ export function anchorPlaywrightConfig<T extends Record<string, unknown>>(config
 //   hello is sent the instant the pipe is up), since a crossing queued behind it waits.
 // Documents, scripts and images are not counted: they are the bundle, not the app's I/O.
 //
-// TIERLESS_IO_FILE=<file>: each interval is appended as "<startMs> <endMs>" (epoch); the
-// measure reporter unions the ones inside each test's own time window (ioWaitMs).
+// TIERLESS_IO_FILE=<file>: each interval is appended as "<startMs> <endMs> <kind> <label>"
+// (epoch ms; kind http|cross|open; label method+path, or the crossing's type and API
+// paths); the measure reporter unions the ones inside each test's own window (ioWaitMs).
 // TIERLESS_IO_IGNORE=<prefix,…>: URL prefixes that are harness, not app (a profile server).
 const IO_WIRED = new WeakSet<object>();
-interface IoRequest { url(): string; resourceType(): string; timing(): { startTime: number; responseEnd: number } }
+interface IoRequest { url(): string; method(): string; resourceType(): string; timing(): { startTime: number; responseEnd: number } }
 interface IoSocket { on(event: "framesent" | "framereceived", cb: (f: { payload: string | Buffer }) => void): unknown }
 export interface IoPage { on(event: "requestfinished" | "requestfailed", cb: (r: IoRequest) => void): unknown; on(event: "websocket", cb: (ws: IoSocket) => void): unknown }
 export interface IoContext { pages(): IoPage[]; on(event: "page", cb: (p: IoPage) => void): unknown }
@@ -562,7 +565,19 @@ export function frameHead(payload: string | Uint8Array): { kind: string; id: str
   const m = FRAME_HEAD.exec(json);
   return m ? { kind: m[1], id: m[2] } : null;
 }
-function ioPage(page: IoPage, record: (s: number, e: number) => void, ignore: string[]): void {
+type IoRecord = (s: number, e: number, kind: string, label: string) => void;
+// a sent request frame's label: its payload type, plus the API path(s) an exec carries
+function crossingLabel(payload: Uint8Array): string {
+  try {
+    const { obj, bin } = decodeMessage(payload);
+    const type = String(obj?.payload?.type);
+    if (!bin || (type !== "exec" && type !== "execBatch")) return type;
+    const d = decodeArgs(bin) as unknown[];
+    const items = (type === "exec" ? [d] : d) as [string, unknown[]][];
+    return type + ":" + items.map(([name, args]) => `${name}(${String(args?.[0] ?? "").split("?")[0]})`).join(",");
+  } catch { return "?"; }
+}
+function ioPage(page: IoPage, record: IoRecord, ignore: string[]): void {
   if (IO_WIRED.has(page)) return;
   IO_WIRED.add(page);
   const http = (r: IoRequest): void => {
@@ -570,25 +585,26 @@ function ioPage(page: IoPage, record: (s: number, e: number) => void, ignore: st
     if (type !== "fetch" && type !== "xhr") return;
     if (ignore.some((p) => r.url().startsWith(p))) return;
     const t = r.timing();
-    record(t.startTime, t.responseEnd >= 0 ? t.startTime + t.responseEnd : Date.now());   // a failed request has no responseEnd
+    const u = new URL(r.url());
+    record(t.startTime, t.responseEnd >= 0 ? t.startTime + t.responseEnd : Date.now(), "http", r.method() + ":" + u.pathname);   // a failed request has no responseEnd
   };
   page.on("requestfinished", http);
   page.on("requestfailed", http);
   page.on("websocket", (ws: IoSocket) => {
     const opened = Date.now();
     let first = true;
-    const out = new Map<string, number>();
+    const out = new Map<string, [number, string]>();
     ws.on("framesent", ({ payload }) => {
       const h = frameHead(payload as Uint8Array);
-      if (h?.kind === "request") out.set(h.id, Date.now());
+      if (h?.kind === "request") out.set(h.id, [Date.now(), crossingLabel(payload as Uint8Array)]);
     });
     ws.on("framereceived", ({ payload }) => {
       const now = Date.now();
       const h = frameHead(payload as Uint8Array);
       if (!h) return;
-      if (first) { first = false; record(opened, now); }
-      const t0 = h.kind === "reply" ? out.get(h.id) : undefined;
-      if (t0 !== undefined) { out.delete(h.id); record(t0, now); }
+      if (first) { first = false; record(opened, now, "open", "socket"); }
+      const sent = h.kind === "reply" ? out.get(h.id) : undefined;
+      if (sent) { out.delete(h.id); record(sent[0], now, "cross", sent[1]); }
     });
   });
 }
@@ -599,7 +615,7 @@ export function installIoWait(target: IoPage | IoContext): void {
   const file = process.env.TIERLESS_IO_FILE;
   if (!file) return;
   const ignore = (process.env.TIERLESS_IO_IGNORE || "").split(",").filter(Boolean);
-  const record = (s: number, e: number): void => { if (e > s) appendFileSync(file, `${Math.round(s)} ${Math.round(e)}\n`); };
+  const record: IoRecord = (s, e, kind, label) => { if (e > s) appendFileSync(file, `${Math.round(s)} ${Math.round(e)} ${kind} ${label.replace(/\s/g, "_")}\n`); };
   if (typeof (target as IoContext).pages === "function") {
     const ctx = target as IoContext;
     for (const p of ctx.pages()) ioPage(p, record, ignore);

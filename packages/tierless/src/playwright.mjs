@@ -158,6 +158,8 @@ function responseFacade(c) {
 // Playwright-faithful glob → regex, shared with the force-browser seam (url-glob.mts;
 // the live proof differentially verifies it against the installed playwright-core).
 import { globToRegexPattern } from "./url-glob.mjs";
+import { decodeMessage } from "./transport.mjs";
+import { decodeArgs } from "./wire-binary.mjs";
 export { globToRegexPattern, matchesForceBrowser } from "./url-glob.mjs";
 // Playwright resolves a non-`*`-leading string pattern against the context baseURL,
 // which a Page doesn't expose; the crossing's own absolute URL is the closest truthful
@@ -497,8 +499,9 @@ export function anchorPlaywrightConfig(config, dir) {
 //   hello is sent the instant the pipe is up), since a crossing queued behind it waits.
 // Documents, scripts and images are not counted: they are the bundle, not the app's I/O.
 //
-// TIERLESS_IO_FILE=<file>: each interval is appended as "<startMs> <endMs>" (epoch); the
-// measure reporter unions the ones inside each test's own time window (ioWaitMs).
+// TIERLESS_IO_FILE=<file>: each interval is appended as "<startMs> <endMs> <kind> <label>"
+// (epoch ms; kind http|cross|open; label method+path, or the crossing's type and API
+// paths); the measure reporter unions the ones inside each test's own window (ioWaitMs).
 // TIERLESS_IO_IGNORE=<prefix,…>: URL prefixes that are harness, not app (a profile server).
 const IO_WIRED = new WeakSet();
 const HEADER = 12; // transport.mts HEADER_BYTES: magic+version, jsonLen, binLen
@@ -515,6 +518,21 @@ export function frameHead(payload) {
     const m = FRAME_HEAD.exec(json);
     return m ? { kind: m[1], id: m[2] } : null;
 }
+// a sent request frame's label: its payload type, plus the API path(s) an exec carries
+function crossingLabel(payload) {
+    try {
+        const { obj, bin } = decodeMessage(payload);
+        const type = String(obj?.payload?.type);
+        if (!bin || (type !== "exec" && type !== "execBatch"))
+            return type;
+        const d = decodeArgs(bin);
+        const items = (type === "exec" ? [d] : d);
+        return type + ":" + items.map(([name, args]) => `${name}(${String(args?.[0] ?? "").split("?")[0]})`).join(",");
+    }
+    catch {
+        return "?";
+    }
+}
 function ioPage(page, record, ignore) {
     if (IO_WIRED.has(page))
         return;
@@ -526,7 +544,8 @@ function ioPage(page, record, ignore) {
         if (ignore.some((p) => r.url().startsWith(p)))
             return;
         const t = r.timing();
-        record(t.startTime, t.responseEnd >= 0 ? t.startTime + t.responseEnd : Date.now()); // a failed request has no responseEnd
+        const u = new URL(r.url());
+        record(t.startTime, t.responseEnd >= 0 ? t.startTime + t.responseEnd : Date.now(), "http", r.method() + ":" + u.pathname); // a failed request has no responseEnd
     };
     page.on("requestfinished", http);
     page.on("requestfailed", http);
@@ -537,7 +556,7 @@ function ioPage(page, record, ignore) {
         ws.on("framesent", ({ payload }) => {
             const h = frameHead(payload);
             if (h?.kind === "request")
-                out.set(h.id, Date.now());
+                out.set(h.id, [Date.now(), crossingLabel(payload)]);
         });
         ws.on("framereceived", ({ payload }) => {
             const now = Date.now();
@@ -546,12 +565,12 @@ function ioPage(page, record, ignore) {
                 return;
             if (first) {
                 first = false;
-                record(opened, now);
+                record(opened, now, "open", "socket");
             }
-            const t0 = h.kind === "reply" ? out.get(h.id) : undefined;
-            if (t0 !== undefined) {
+            const sent = h.kind === "reply" ? out.get(h.id) : undefined;
+            if (sent) {
                 out.delete(h.id);
-                record(t0, now);
+                record(sent[0], now, "cross", sent[1]);
             }
         });
     });
@@ -563,8 +582,8 @@ export function installIoWait(target) {
     if (!file)
         return;
     const ignore = (process.env.TIERLESS_IO_IGNORE || "").split(",").filter(Boolean);
-    const record = (s, e) => { if (e > s)
-        appendFileSync(file, `${Math.round(s)} ${Math.round(e)}\n`); };
+    const record = (s, e, kind, label) => { if (e > s)
+        appendFileSync(file, `${Math.round(s)} ${Math.round(e)} ${kind} ${label.replace(/\s/g, "_")}\n`); };
     if (typeof target.pages === "function") {
         const ctx = target;
         for (const p of ctx.pages())
