@@ -231,13 +231,21 @@ export const Hooked = () => {
   const { client } = useClient();
   async function two() { const a = await client.scopes.a(0); return await client.scopes.b(a); }
   return { two };
-};`;
+};
+function useFetch(fn) { (globalThis.__probeFetches ||= []).push(fn); }
+export function Fetched() {
+  const { client } = useClient();
+  useFetch(async () => { const a = await client.scopes.a(2); return await client.scopes.b(a); });
+  useFetch(async () => await client.scopes.a(9));
+}`;
   const off = compile(COMP, { filename: "comp.js" });
   check("closures off: component functions stay plain", !(off.meta.methods as any[]).some((m) => m.class.startsWith("fn:")), JSON.stringify(off.meta.methods));
   const { code: ccode, meta: cmeta } = compile(COMP, { filename: "comp.js", closures: true });
   const ms = cmeta.methods as any[];
   check("closures on: a const arrow and a declaration compile; the one-call function stays plain",
     ms.some((m) => m.program === "Section$loader") && ms.some((m) => m.program === "Hooked$two") && !ms.some((m) => m.method === "one"), JSON.stringify(ms));
+  check("closures on: an async callback passed to a hook compiles as <Component>$<hook><n>; a one-call callback stays plain",
+    ms.some((m) => m.program === "Fetched$useFetch0") && !ms.some((m) => m.program === "Fetched$useFetch1"), JSON.stringify(ms));
   check("server code carries the program, not the component it was declared in (Section$loader is not a use of Section)",
     typeof cmeta.serverCode === "string" && cmeta.serverCode.includes("Section$loader") && !/function Section\(/.test(cmeta.serverCode), String(cmeta.serverCode).slice(0, 200));
   writeFileSync(join(dir, "comp.mjs"), ccode);
@@ -257,10 +265,12 @@ export const Hooked = () => {
   cmod.__bindTierlessMethods((prog: string, caps: object, args: unknown[]) => chost.runLocal(cpeer, prog, [caps, ...args], { migrate: () => true }));
   const r1 = await cmod.Section({ label: "n" }).loader(1);
   const r2 = await cmod.Hooked().two();
+  cmod.Fetched();
+  const r3 = await ((globalThis as Record<string, unknown>).__probeFetches as Array<() => Promise<number>>)[0]();
   cmod.__bindTierlessMethods(null);
   check("bound + migrate: the component loader's three calls ran on the twin in ONE crossing",
     r1 === "n:2,20,17" && log.slice(0, 3).join(",") === "server:a,server:b,server:c", JSON.stringify({ r1, log, counts }));
-  check("bound + migrate: the hook declaration form too (two calls, one crossing each run)", r2 === 10 && counts.resume === 2, JSON.stringify({ r2, counts }));
+  check("bound + migrate: the hook declaration form and the anonymous hook callback too (one crossing each run)", r2 === 10 && r3 === 30 && counts.resume === 3, JSON.stringify({ r2, r3, counts }));
 }
 
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }

@@ -1338,6 +1338,24 @@ function compileConstUnit(declPath: NodePath<t.VariableDeclarator>, owner: strin
   }
 }
 
+/** Compile an async function passed straight to a call — `useFetch(async () => {...}, set, deps)`
+ *  — in place: the original moves to a const declared before the statement, and the
+ *  argument becomes a rest-param stub over it. Anonymous, so no sibling stamps: nothing can
+ *  name it to call it from compiled code. */
+function compileArgUnit(stmtPath: NodePath<t.Statement>, argPath: NodePath<t.ArrowFunctionExpression | t.FunctionExpression>, owner: string, progName: string, minParks: number, progs: string[], meta: CompileMeta): void {
+  const fnName = progName.slice(progName.indexOf("$") + 1);
+  try {
+    const captures = lowerCapsUnit({ owner, fnName, progName, fnPath: argPath, minParks }, progs, meta);
+    if (!captures) return;
+    const origName = "__tierless_orig_" + progName.replace(/\$/g, "_");
+    stmtPath.insertBefore(t.variableDeclaration("const", [t.variableDeclarator(t.identifier(origName), argPath.node)]));
+    argPath.replaceWith(t.arrowFunctionExpression([t.restElement(t.identifier("__tl_args"))],
+      stubCall(progName, capsLiteral(captures), t.identifier("__tl_args"), origName, t.identifier("__tl_args"))));
+  } catch (e) {
+    meta.methods.push({ class: owner, method: fnName, program: null, error: (e as Error).message.split("\n")[0] });
+  }
+}
+
 function compileStoreFunctions(ast: t.File, progs: string[], meta: CompileMeta): void {
   traverse(ast, { CallExpression(csp) {
     if (!t.isIdentifier(csp.node.callee, { name: "defineStore" })) return;
@@ -1375,7 +1393,22 @@ function compileComponentFunctions(ast: t.File, progs: string[], meta: CompileMe
       const body = cp.get("body") as NodePath;
       if (!body.isBlockStatement()) continue;
       const owner = "fn:" + name;
+      const argCount = new Map<string, number>();
       for (const stmtPath of body.get("body")) {
+        // async functions passed straight to a hook call: `useFetch(async () => {...}, ...)` as
+        // a statement, or as a declarator's init (`const x = useQuery(async () => ...)`)
+        const calls: NodePath<t.CallExpression>[] = [];
+        if (stmtPath.isExpressionStatement() && stmtPath.get("expression").isCallExpression()) calls.push(stmtPath.get("expression") as NodePath<t.CallExpression>);
+        if (stmtPath.isVariableDeclaration()) for (const d of stmtPath.get("declarations")) { const i = d.get("init"); if (!Array.isArray(i) && i.isCallExpression()) calls.push(i as NodePath<t.CallExpression>); }
+        for (const cp of calls) {
+          if (!t.isIdentifier(cp.node.callee)) continue;
+          const callee = cp.node.callee.name;
+          for (const ap of cp.get("arguments")) {
+            if (!(ap.isArrowFunctionExpression() || ap.isFunctionExpression()) || !ap.node.async) continue;
+            const n = argCount.get(callee) ?? 0; argCount.set(callee, n + 1);
+            compileArgUnit(stmtPath, ap as NodePath<t.ArrowFunctionExpression | t.FunctionExpression>, owner, `${name}$${callee}${n}`, 2, progs, meta);
+          }
+        }
         if (stmtPath.isFunctionDeclaration() && stmtPath.node.async && stmtPath.node.id) {
           compileDeclUnit(stmtPath, owner, name + "$" + stmtPath.node.id.name, 2, progs, meta);
         } else if (stmtPath.isVariableDeclaration()) {
