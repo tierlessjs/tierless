@@ -20,21 +20,27 @@ export interface WireCounter { toServer: number; toClient: number }
  *  (serialization delay, the real thing a byte reduction buys back on slow links). At
  *  1 Gbps this app's payloads cost microseconds — the option exists to show that
  *  honestly, and to model the 10-50 Mbps links where 35% fewer bytes IS wall time. */
-export function delayProxy(listen: number, target: number, oneWayMs: number, onWire?: WireCounter, bps?: number): net.Server {
+// tap (optional): a per-connection observer of the relayed bytes — wsIoTap from
+// tierless/playwright times session crossings at the network level here, where a
+// browser-side frame event would wait for the page's main thread.
+type Tap = { up(chunk: Buffer, at: number): void; down(chunk: Buffer, at: number): void } | null;
+export function delayProxy(listen: number, target: number, oneWayMs: number, onWire?: WireCounter, bps?: number, tap?: () => Tap): net.Server {
   const srv = net.createServer((cli) => {
     const up = net.connect(target, "127.0.0.1");
+    const t = tap?.() ?? null;
     // Nagle would coalesce our small relayed writes against the peer's delayed ACK —
     // ~40 ms stalls PER MESSAGE that shaped runs would misread as round trips. The relay
     // must add exactly the modeled delays and nothing else.
     cli.setNoDelay(true); up.setNoDelay(true);
     const relay = (from: net.Socket, to: net.Socket, dir: "toServer" | "toClient"): void => {
       let wireFree = 0;                                  // per-direction: when the modeled link is next idle
-      from.on("data", (chunk) => {
+      from.on("data", (chunk: Buffer) => {
         if (onWire) onWire[dir] += chunk.length;
         const now = Date.now();
         const serializeMs = bps ? (chunk.length * 8 * 1000) / bps : 0;
         wireFree = Math.max(wireFree, now) + serializeMs;                // chunks queue on the link
         const wait = wireFree - now + oneWayMs;                          // finish serializing, then propagate
+        if (t) { if (dir === "toServer") t.up(chunk, now); else t.down(chunk, now + Math.max(wait, 0)); }   // down: when the browser gets it
         if (wait > 0) setTimeout(() => { if (to.writable) to.write(chunk); }, wait);
         else if (to.writable) to.write(chunk);
       });

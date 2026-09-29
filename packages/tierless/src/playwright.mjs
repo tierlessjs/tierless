@@ -33,6 +33,7 @@
 // its own why-comment in the recipe's testPatches).
 import { Buffer } from "node:buffer";
 import { appendFileSync } from "node:fs";
+import zlib from "node:zlib";
 import { createRequire } from "node:module";
 import path from "node:path";
 const BINDING = "__tierlessCrossingPush";
@@ -485,24 +486,13 @@ export function anchorPlaywrightConfig(config, dir) {
         out.projects = out.projects.map(anchor);
     return out;
 }
-// ------------------------------------------------------------------------ I/O wait ----
-// Per-test I/O WAIT: the time the page has at least one network operation outstanding —
-// the union of in-flight intervals, not their sum (parallel requests overlap). It reads
-// the wait directly, server time included, with no floor run to subtract and no
-// dependence on Playwright's retry polling (100/250/500/1000 ms), which quantizes
-// wall-clock differences far coarser than one round trip.
-//
-// Observed from Playwright's side, identically on both arms (nothing in the page):
-// - HTTP fetch/XHR: request.timing() — browser-clock start to response end.
-// - session crossings: a browser `request` frame to the `reply` with its id.
-// - the session socket's opening: creation to its first received frame (the gateway's
-//   hello is sent the instant the pipe is up), since a crossing queued behind it waits.
-// Documents, scripts and images are not counted: they are the bundle, not the app's I/O.
-//
-// TIERLESS_IO_FILE=<file>: each interval is appended as "<startMs> <endMs> <kind> <label>"
-// (epoch ms; kind http|cross|open; label method+path, or the crossing's type and API
-// paths); the measure reporter unions the ones inside each test's own window (ioWaitMs).
-// TIERLESS_IO_IGNORE=<prefix,…>: URL prefixes that are harness, not app (a profile server).
+const ioRecorder = () => {
+    const file = process.env.TIERLESS_IO_FILE;
+    if (!file)
+        return null;
+    return (s, e, kind, label) => { if (e > s)
+        appendFileSync(file, `${Math.round(s)} ${Math.round(e)} ${kind} ${label.replace(/\s/g, "_")}\n`); };
+};
 const IO_WIRED = new WeakSet();
 const HEADER = 12; // transport.mts HEADER_BYTES: magic+version, jsonLen, binLen
 // {"kind":"request"|"reply","id":…} leads every frame's JSON (transport.mts builds the
@@ -518,7 +508,7 @@ export function frameHead(payload) {
     const m = FRAME_HEAD.exec(json);
     return m ? { kind: m[1], id: m[2] } : null;
 }
-// a sent request frame's label: its payload type, plus the API path(s) an exec carries
+// a request frame's label: its payload type, plus the API path(s) an exec carries
 function crossingLabel(payload) {
     try {
         const { obj, bin } = decodeMessage(payload);
@@ -549,41 +539,15 @@ function ioPage(page, record, ignore) {
     };
     page.on("requestfinished", http);
     page.on("requestfailed", http);
-    page.on("websocket", (ws) => {
-        const opened = Date.now();
-        let first = true;
-        const out = new Map();
-        ws.on("framesent", ({ payload }) => {
-            const h = frameHead(payload);
-            if (h?.kind === "request")
-                out.set(h.id, [Date.now(), crossingLabel(payload)]);
-        });
-        ws.on("framereceived", ({ payload }) => {
-            const now = Date.now();
-            const h = frameHead(payload);
-            if (!h)
-                return;
-            if (first) {
-                first = false;
-                record(opened, now, "open", "socket");
-            }
-            const sent = h.kind === "reply" ? out.get(h.id) : undefined;
-            if (sent) {
-                out.delete(h.id);
-                record(sent[0], now, "cross", sent[1]);
-            }
-        });
-    });
 }
-/** Record this page's (or every page of this context's) I/O intervals to
- *  TIERLESS_IO_FILE for the measure reporter's `ioWaitMs`. No-op when unset. Idempotent. */
+/** Record this page's (or every page of this context's) HTTP I/O intervals to
+ *  TIERLESS_IO_FILE for the measure reporter's `ioWaitMs`. No-op when unset. Idempotent.
+ *  Session crossings are recorded at the network level by wsIoTap. */
 export function installIoWait(target) {
-    const file = process.env.TIERLESS_IO_FILE;
-    if (!file)
+    const record = ioRecorder();
+    if (!record)
         return;
     const ignore = (process.env.TIERLESS_IO_IGNORE || "").split(",").filter(Boolean);
-    const record = (s, e, kind, label) => { if (e > s)
-        appendFileSync(file, `${Math.round(s)} ${Math.round(e)} ${kind} ${label.replace(/\s/g, "_")}\n`); };
     if (typeof target.pages === "function") {
         const ctx = target;
         for (const p of ctx.pages())
@@ -592,6 +556,113 @@ export function installIoWait(target) {
     }
     else
         ioPage(target, record, ignore);
+}
+/** One relayed TCP connection's crossing timer: a TCP relay in front of the session
+ *  socket feeds it every chunk as it passes — `up` (browser -> gateway) with the time it
+ *  arrived, `down` (gateway -> browser) with the time the relay DELIVERS it. It follows
+ *  the WebSocket upgrade and frames (permessage-deflate with context takeover included),
+ *  pairs each browser request with its reply by id, and records "cross" and "open"
+ *  intervals to TIERLESS_IO_FILE. Returns null when that is unset. A connection that
+ *  isn't a WebSocket upgrade is ignored. */
+export function wsIoTap() {
+    const record = ioRecorder();
+    if (!record)
+        return null;
+    const TAIL = Buffer.from([0x00, 0x00, 0xff, 0xff]);
+    let deflate = false, dead = false, opened = -1, first = true;
+    const pending = new Map();
+    const side = (onMessage) => {
+        let buf = Buffer.alloc(0), http = true, parts = [], compressed = false, window = Buffer.alloc(0);
+        return (chunk, at, onHead) => {
+            if (dead)
+                return;
+            buf = Buffer.concat([buf, chunk]);
+            if (http) {
+                const end = buf.indexOf("\r\n\r\n");
+                if (end < 0)
+                    return;
+                onHead?.(buf.subarray(0, end).toString("latin1"));
+                http = false;
+                buf = buf.subarray(end + 4);
+            }
+            for (;;) {
+                if (buf.length < 2)
+                    return;
+                const fin = buf[0] & 0x80, rsv1 = buf[0] & 0x40, op = buf[0] & 0x0f, masked = buf[1] & 0x80;
+                let len = buf[1] & 0x7f, off = 2;
+                if (len === 126) {
+                    if (buf.length < 4)
+                        return;
+                    len = buf.readUInt16BE(2);
+                    off = 4;
+                }
+                else if (len === 127) {
+                    if (buf.length < 10)
+                        return;
+                    len = Number(buf.readBigUInt64BE(2));
+                    off = 10;
+                }
+                const mask = masked ? buf.subarray(off, off + 4) : null;
+                if (masked)
+                    off += 4;
+                if (buf.length < off + len)
+                    return;
+                const payload = Buffer.from(buf.subarray(off, off + len));
+                if (mask)
+                    for (let k = 0; k < payload.length; k++)
+                        payload[k] ^= mask[k & 3];
+                buf = buf.subarray(off + len);
+                if (op >= 8)
+                    continue; // ping/pong/close
+                if (op !== 0) {
+                    parts = [];
+                    compressed = deflate && !!rsv1;
+                }
+                parts.push(payload);
+                if (!fin)
+                    continue;
+                let msg = Buffer.concat(parts);
+                if (compressed) {
+                    // context takeover: this message's deflate data may reference the previous 32 KB
+                    // of the stream's output, which a preset dictionary supplies exactly (every
+                    // message ends on a sync flush, so it starts on a block boundary)
+                    msg = zlib.inflateRawSync(Buffer.concat([msg, TAIL]), { finishFlush: zlib.constants.Z_SYNC_FLUSH, ...(window.length ? { dictionary: window } : {}) });
+                    window = Buffer.concat([window, msg]).subarray(-32768);
+                }
+                onMessage(msg, at);
+            }
+        };
+    };
+    const up = side((msg, at) => {
+        const h = frameHead(msg);
+        if (h?.kind === "request")
+            pending.set(h.id, [at, crossingLabel(msg)]);
+    });
+    const down = side((msg, at) => {
+        const h = frameHead(msg);
+        if (!h)
+            return;
+        if (first) {
+            first = false;
+            record(opened, at, "open", "socket");
+        }
+        const sent = h.kind === "reply" ? pending.get(h.id) : undefined;
+        if (sent) {
+            pending.delete(h.id);
+            record(sent[0], at, "cross", sent[1]);
+        }
+    });
+    return {
+        up: (chunk, at) => { if (opened < 0)
+            opened = at; up(chunk, at); },
+        down: (chunk, at) => down(chunk, at, (head) => {
+            if (!/^HTTP\/1\.1 101/.test(head)) {
+                dead = true;
+                return;
+            }
+            deflate = /sec-websocket-extensions:[^\r\n]*permessage-deflate/i.test(head);
+        }),
+    };
 }
 /** Total length of the union of [s, e) intervals, clipped to [from, to). */
 export function unionMs(intervals, from, to) {

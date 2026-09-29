@@ -17,6 +17,7 @@ import { delayProxy, type WireCounter } from "../latency-proxy.mts";
 import { httpLogProxy } from "../http-log-proxy.mts";
 import { writeSuiteConfig } from "../pw-wrapper.mts";
 import { assertFreshBuild } from "../assert-fresh.mts";
+import { wsIoTap } from "tierless/playwright";
 
 const VARIANT = process.argv.includes("--baseline") ? "keycloak-baseline" : "keycloak";
 const TRUTH = !!process.env.TIERLESS_WIRE_TRUTH;
@@ -95,7 +96,7 @@ if (TRUTH) {
 }
 if (RTT) {
   delayProxy(18080, 8080, RTT / 2).unref();
-  delayProxy(18180, 8180, RTT / 2).unref();
+  delayProxy(18180, 8180, RTT / 2, undefined, undefined, wsIoTap).unref();   // the session socket: crossings timed here
   pageUrl = "http://localhost:18080";
   process.env.TIERLESS_WS_URL = "ws://localhost:18180/__tierless";
   console.log(`RTT injection: ${RTT} ms via 18080->8080, 18180->8180`);

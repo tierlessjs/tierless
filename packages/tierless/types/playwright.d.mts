@@ -88,14 +88,8 @@ interface IoRequest {
         responseEnd: number;
     };
 }
-interface IoSocket {
-    on(event: "framesent" | "framereceived", cb: (f: {
-        payload: string | Buffer;
-    }) => void): unknown;
-}
 export interface IoPage {
     on(event: "requestfinished" | "requestfailed", cb: (r: IoRequest) => void): unknown;
-    on(event: "websocket", cb: (ws: IoSocket) => void): unknown;
 }
 export interface IoContext {
     pages(): IoPage[];
@@ -105,8 +99,20 @@ export declare function frameHead(payload: string | Uint8Array): {
     kind: string;
     id: string;
 } | null;
-/** Record this page's (or every page of this context's) I/O intervals to
- *  TIERLESS_IO_FILE for the measure reporter's `ioWaitMs`. No-op when unset. Idempotent. */
+/** Record this page's (or every page of this context's) HTTP I/O intervals to
+ *  TIERLESS_IO_FILE for the measure reporter's `ioWaitMs`. No-op when unset. Idempotent.
+ *  Session crossings are recorded at the network level by wsIoTap. */
 export declare function installIoWait(target: IoPage | IoContext): void;
+/** One relayed TCP connection's crossing timer: a TCP relay in front of the session
+ *  socket feeds it every chunk as it passes — `up` (browser -> gateway) with the time it
+ *  arrived, `down` (gateway -> browser) with the time the relay DELIVERS it. It follows
+ *  the WebSocket upgrade and frames (permessage-deflate with context takeover included),
+ *  pairs each browser request with its reply by id, and records "cross" and "open"
+ *  intervals to TIERLESS_IO_FILE. Returns null when that is unset. A connection that
+ *  isn't a WebSocket upgrade is ignored. */
+export declare function wsIoTap(): {
+    up(chunk: Buffer, at: number): void;
+    down(chunk: Buffer, at: number): void;
+} | null;
 /** Total length of the union of [s, e) intervals, clipped to [from, to). */
 export declare function unionMs(intervals: Array<[number, number]>, from: number, to: number): number;

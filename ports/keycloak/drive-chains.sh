@@ -16,7 +16,8 @@
 #
 # fetch vs profile is the same build with one variable — whether chains migrate. Arms are
 # interleaved within each round so machine drift lands on all three alike. Rows land in
-# ports/keycloak/results/chains/<arm>-r<n>.jsonl; ports/report.mts compares any two.
+# ports/keycloak/results/chains/<arm>-r<n>.jsonl (+ .io, the labelled I/O intervals);
+# ports/report-io.mts compares the arms.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 RTT="${RTT_MS:-80}"; ROUNDS="${ROUNDS:-3}"
@@ -34,6 +35,7 @@ for r in $(seq 1 "$ROUNDS"); do
     env "${extra[@]}" TIERLESS_RTT_MS="$RTT" TIERLESS_SPEC="$SPECS" timeout 1800 node ports/keycloak/suite.mts $flag > "$OUT/$arm-r$r.log" 2>&1
     src="ports/work/$work/measure.jsonl"; [ "$RTT" != 0 ] && src="ports/work/$work/measure-rtt$RTT.jsonl"
     cp "$src" "$OUT/$arm-r$r.jsonl"
+    cp "ports/work/$work/io.txt" "$OUT/$arm-r$r.io"                      # the I/O intervals behind ioWaitMs
     grep -oE "[0-9]+ (passed|failed|flaky)" "$OUT/$arm-r$r.log" | tail -2 | tr '\n' ' '; echo
   done
 done

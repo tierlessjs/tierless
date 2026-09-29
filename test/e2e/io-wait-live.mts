@@ -1,17 +1,21 @@
-// LIVE proof of installIoWait (tierless/playwright): a real Chromium page's I/O wait is
-// the UNION of its in-flight intervals — HTTP fetch/XHR by browser timing, session
-// crossings by request/reply frames — and nothing else. Each scenario runs in its own
-// time window, and the reporter's own unionMs reads the recorded intervals over it:
+// LIVE proof of the I/O wait recorders (tierless/playwright): a real Chromium page's I/O
+// wait is the UNION of its in-flight intervals — HTTP fetch/XHR by browser network timing
+// (installIoWait), session crossings by request/reply frames in a TCP relay in front of
+// the socket (wsIoTap) — and nothing else. Each scenario runs in its own time window, and
+// the reporter's own unionMs reads the recorded intervals over it:
 //
 //   two sequential 150 ms fetches  -> ~300 ms      (waits add)
 //   two parallel 200 ms fetches    -> ~200 ms      (overlap counts once)
 //   300 ms of page CPU, no I/O     -> ~0 ms        (busy is not waiting)
 //   one 200 ms session crossing    -> ~200 ms      (the socket, not only HTTP)
 //   a 200 ms fetch to an ignored harness URL -> 0 ms
-//   the socket's opening counts, from creation to its first frame
+//   the socket's opening counts, from connection to its first frame
+//   a busy main thread does not stretch a crossing (network completion, not dispatch)
+//   compressed replies decode in sequence (permessage-deflate context takeover)
 //
 // Run:  node test/e2e/io-wait-live.mts        (needs Playwright Chromium)
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import net from "node:net";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -19,7 +23,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { attachTierless, WS_PATH } from "tierless/server";
 import { restResources } from "tierless/adapt";
-import { installIoWait, unionMs } from "tierless/playwright";
+import { installIoWait, unionMs, wsIoTap } from "tierless/playwright";
 import { makeCheck } from "../lib/check.mts";
 
 const { chromium } = createRequire(process.env.PLAYWRIGHT_REQUIRE || "/opt/node22/lib/node_modules/")("playwright");
@@ -28,9 +32,11 @@ const { check, ok } = makeCheck();
 const IO = path.join(mkdtempSync(path.join(tmpdir(), "tierless-io-")), "io.txt");
 process.env.TIERLESS_IO_FILE = IO;
 
+const BIG = JSON.stringify({ rows: Array.from({ length: 4000 }, (_, i) => ({ id: "org.keycloak.provider." + i, help: "descriptive help text " + (i % 29) })) });
 // /slow?ms=N answers after N ms — on the backend (crossings) and the page origin (fetch)
 const slow = (req: IncomingMessage, res: ServerResponse): boolean => {
   const u = new URL(req.url ?? "/", "http://x");
+  if (u.pathname === "/big") { res.setHeader("content-type", "application/json"); res.end(BIG); return true; }
   if (u.pathname !== "/slow") return false;
   setTimeout(() => { res.setHeader("content-type", "application/json"); res.end("{\"ok\":true}"); }, Number(u.searchParams.get("ms")));
   return true;
@@ -45,7 +51,18 @@ attachTierless(gwHttp, {
   session: () => ({ exec: restResources(backendUrl, { envelopeErrors: true }) }),
 });
 await new Promise<void>((r) => gwHttp.listen(0, r));
-const gwWs = `ws://127.0.0.1:${(gwHttp.address() as { port: number }).port}${WS_PATH}`;
+// the page reaches the gateway through a TCP relay carrying the crossing tap (the
+// measured runs' latency relay, with no delay)
+const relay = net.createServer((cli) => {
+  const up = net.connect((gwHttp.address() as { port: number }).port, "127.0.0.1");
+  const tap = wsIoTap()!;
+  cli.on("data", (c: Buffer) => { tap.up(c, Date.now()); up.write(c); });
+  up.on("data", (c: Buffer) => { tap.down(c, Date.now()); cli.write(c); });
+  cli.on("end", () => up.end()); up.on("end", () => cli.end());
+  cli.on("error", () => up.destroy()); up.on("error", () => cli.destroy());
+});
+await new Promise<void>((r) => relay.listen(0, r));
+const gwWs = `ws://127.0.0.1:${(relay.address() as { port: number }).port}${WS_PATH}`;
 
 const PKG = fileURLToPath(new URL("../../packages/tierless/src/", import.meta.url));
 const html = `<!doctype html><html><body><script type="module">
@@ -53,6 +70,7 @@ const html = `<!doctype html><html><body><script type="module">
   configureTierless({ url: "${gwWs}" });
   const exec = sessionExec();
   window.cross = (ms) => exec({ op: "resource", tier: "server", name: "api.get", args: ["/slow?ms=" + ms] }).then((e) => e && e.status);
+  window.crossPath = (p) => exec({ op: "resource", tier: "server", name: "api.get", args: [p] });
   window.f = (url) => fetch(url).then((r) => r.json());
   window.busy = (ms) => { const t = performance.now(); while (performance.now() - t < ms); };
 </script></body></html>`;
@@ -109,7 +127,16 @@ check("a 200 ms session crossing reads ~200 ms", near(crossing, 200), crossing +
 const ignored = await measure(`f('${harnessUrl}/slow?ms=200')`);
 check("a fetch to a TIERLESS_IO_IGNORE prefix is not counted", ignored === 0, ignored + " ms");
 
+const busyCross = await measure("(async () => { const p = cross(100); await new Promise(r => setTimeout(r, 20)); busy(300); await p; })()");
+check("a crossing during 300 ms of page CPU reads ~100 ms: network completion, not main-thread dispatch", near(busyCross, 100), busyCross + " ms");
+const busyHttp = await measure("(async () => { const p = f('/slow?ms=100&b=1'); await new Promise(r => setTimeout(r, 20)); busy(300); await p; })()");
+check("the same for HTTP", near(busyHttp, 100), busyHttp + " ms");
+const before = intervals().length;
+await measure("(async () => { for (let k = 0; k < 5; k++) await crossPath('/big'); })()");
+const bigs = readFileSync(IO, "utf8").trim().split("\n").slice(before).filter((l) => l.includes("cross exec:api.get(/big)"));
+check("five large compressed replies in a row each pair with their request (context takeover decodes)", bigs.length === 5, bigs.length + " recorded");
+
 await browser.close();
-for (const s of [backend, gwHttp, pages, harness]) s.close();
+for (const s of [backend, gwHttp, relay, pages, harness]) s.close();
 console.log(`\n${ok() ? "PASS" : "FAIL"} — I/O wait: the union of a page's in-flight fetches and crossings, not its CPU`);
 process.exit(ok() ? 0 : 1);
