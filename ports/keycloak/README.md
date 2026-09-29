@@ -39,35 +39,41 @@ The numbers above move one call per crossing. This measures the thing Tierless i
 several calls in a row running as ONE crossing.
 
 **The measure is I/O wait**: per test, the time the page has at least one fetch or
-session crossing in flight, the union of those intervals (`installIoWait`, test patch
-0005 on both arms; `ports/report-io.mts`). Wall clock also carries render, fixtures and
-Playwright's 100/250/500/1000 ms retry polling, which quantizes it far coarser than one
-round trip, so it's shown for reference only.
+session crossing in flight, the union of those intervals, each ended at network
+completion (`ports/report-io.mts`). HTTP is timed by the browser's network timing
+(`installIoWait`, test patch 0005 on both arms); crossings by the latency relay in front
+of the session socket (`wsIoTap`). Browser-side frame events can't time crossings: they
+wait for the page's main thread (a 100 ms crossing during 300 ms of page CPU reads 321 ms
+there, 107 ms in the relay). Wall clock also carries render, fixtures and Playwright's
+100/250/500/1000 ms retry polling, so it's shown for reference only.
 
 All runs: 80 ms injected RTT, three rounds per arm, arms interleaved within each round
-(`drive-chains.sh`), per-test medians summed over tests passing in every run of both arms.
+(`drive-chains.sh`; rows and labelled intervals in `results/chains/` and
+`results/flows/`), per-test medians summed over tests passing in every run of both arms.
 Arms: stock; ported with nothing migrating; ported migrating on a locked profile from a
-profiling run over the same specs.
+profiling run over the same specs (132 and 54 migrated crossings over the three rounds; 0
+in the nothing-migrating arm).
 
 | | migration alone (same build) | against stock | wall, migration alone |
 |---|---|---|---|
-| client scopes (2 specs, 21 tests) | **−17.5%** (37.6 → 31.0 s), 18 of 21 less, median −315 ms | −14.4% (36.2 → 31.0 s) | −6.8% |
-| flows (1 spec, 23–24 tests) | **−3.8%** (29.3 → 28.2 s), 17 of 23 less, median −27 ms | +0.5% (30.0 → 30.1 s) | −0.7% |
+| client scopes (2 specs, 21 tests) | **−18.3%** (36.2 → 29.6 s), 19 of 21 less, median −327 ms | −17.6% (35.9 → 29.6 s) | −7.6% |
+| flows (1 spec, 23 tests) | **−2.5%** (27.7 → 27.0 s), 12 of 23 less, median −2 ms | −0.1% (27.0 → 27.0 s) | +0.5% |
 
-**These numbers overstate crossings; being re-measured.** The recorder timed a crossing
-until the page's main thread dispatched the reply, while HTTP ends at network completion:
-a 100 ms crossing during 300 ms of page CPU recorded 321 ms, the same HTTP call 105 ms
-(Chromium's DevTools frame timestamps behave the same way). That biases stock vs ported
-against ported, and is the likely source of the +3.7% / +4.7% the ported build showed
-over stock with nothing migrating. The gateway itself adds under 1 ms per call (request in
-to reply out: 14 ms, of which Keycloak 14 ms).
+The ported build with nothing migrating waits +0.8% (client scopes) / +2.4% (flows) more
+than stock. Per call a crossing costs the same as HTTP (median per-endpoint difference 0–1
+ms over 25 and 35 endpoints). The measurable extra is `/admin/serverinfo`: 323 KB on
+every console load, 136–137 ms per load against 122–125 ms stock, because the gateway
+receives the whole body before forwarding it (locally, a 456 KB body takes 20.8 ms over a
+crossing against 9.2 ms over HTTP). The gateway itself adds under 1 ms per call (request
+in to reply out: 14 ms, of which Keycloak 14 ms). On flows that cost cancels the gain, so
+there is no net improvement over stock there.
 
 **Client scopes: independent calls.** The client-scopes page's loader
 (`ClientScopesSection.tsx`) and the client's scopes tab (`clients/scopes/ClientScopes.tsx`)
 each make three `await adminClient.clientScopes…` calls in a row inside a React component.
 Patch 0004 compiles them (`compile: 'auto'` + `closures`); a session twin of the admin
 client serves the calls on the gateway, so each loader run is one crossing instead of
-three. The scopes-tab and modification tests gain 420–740 ms of I/O wait each. These calls don't depend on
+three. The scopes-tab and creation tests gain 470–680 ms of I/O wait each. These calls don't depend on
 each other, so `Promise.all` in the app would save the same round trips: this shows the
 mechanism on unmodified code, not a win the app couldn't get otherwise.
 
@@ -78,11 +84,11 @@ find the flow by the route's `id`, throw `new Error(t("notFound"))` if missing, 
 is a string and travels with the run, and `t()` sits on a branch not taken, which the stop
 rule skips. On a verification run over the spec, all 17 migrations finished on the gateway
 (none went back to the browser mid-chain) and the browser fetched `/executions` 0 times.
-The flow-details tests gain 150–250 ms of I/O wait each; the spec's other tests don't
+The flow-details tests gain 100–200 ms of I/O wait each; the spec's other tests don't
 load that page.
 
-One test changes outcome: `flows.spec.ts:217 › edits flow details` failed in 9 of 12 stock
-and nothing-migrating runs across both batches, and in 0 of 6 migrating runs.
+One test changes outcome: `flows.spec.ts:217 › edits flow details` failed in 15 of 18 stock
+and nothing-migrating runs across three batches, and in 0 of 9 migrating runs.
 `EditFlowModal` is rendered with `flow!`, which stays undefined until this loader
 finishes; at 80 ms RTT the test clicks "Edit info" first and the submit throws reading
 `flow.id`. The migrating loader finishes one round trip sooner. It's a race, so this

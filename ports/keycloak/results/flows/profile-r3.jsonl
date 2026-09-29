@@ -1,25 +1,25 @@
-{"id":"autentication/flows.spec.ts:44 › Authentication flows › searches for an existing flow","status":"passed","retry":0,"durationMs":12794,"ioWaitMs":2041}
-{"id":"autentication/flows.spec.ts:55 › Authentication flows › creates a duplicate of an existing flow","status":"passed","retry":0,"durationMs":8914,"ioWaitMs":2019}
-{"id":"autentication/flows.spec.ts:67 › Authentication flows › fails to create duplicate flow with an empty name","status":"passed","retry":0,"durationMs":7294,"ioWaitMs":999}
-{"id":"autentication/flows.spec.ts:80 › Authentication flows › fails to create duplicate flow with an existing name","status":"passed","retry":0,"durationMs":7083,"ioWaitMs":1160}
-{"id":"autentication/flows.spec.ts:100 › Authentication flow details › adds an execution","status":"passed","retry":0,"durationMs":7978,"ioWaitMs":1584}
-{"id":"autentication/flows.spec.ts:117 › Authentication flow details › adds a condition","status":"passed","retry":0,"durationMs":7522,"ioWaitMs":1646}
-{"id":"autentication/flows.spec.ts:134 › Authentication flow details › adds a sub-flow","status":"passed","retry":0,"durationMs":7366,"ioWaitMs":1662}
-{"id":"autentication/flows.spec.ts:149 › Authentication flow details › removes an execution","status":"passed","retry":0,"durationMs":7788,"ioWaitMs":1502}
-{"id":"autentication/flows.spec.ts:165 › Authentication flow details › sets as default in action menu","status":"passed","retry":0,"durationMs":8124,"ioWaitMs":1911}
-{"id":"autentication/flows.spec.ts:189 › Authentication flow details › drags and drops execution","status":"passed","retry":0,"durationMs":7810,"ioWaitMs":1570}
-{"id":"autentication/flows.spec.ts:217 › Authentication flow details › edits flow details","status":"passed","retry":0,"durationMs":7864,"ioWaitMs":1632}
-{"id":"autentication/flows.spec.ts:235 › Required actions › enables delete account","status":"passed","retry":0,"durationMs":6914,"ioWaitMs":1120}
-{"id":"autentication/flows.spec.ts:251 › Required actions › registers an unregistered action","status":"passed","retry":0,"durationMs":6230,"ioWaitMs":1301}
-{"id":"autentication/flows.spec.ts:275 › Required actions › sets action as default","status":"passed","retry":0,"durationMs":6134,"ioWaitMs":1070}
-{"id":"autentication/flows.spec.ts:293 › Password policies tab › adds password policies","status":"passed","retry":0,"durationMs":5639,"ioWaitMs":1047}
-{"id":"autentication/flows.spec.ts:311 › Accessibility tests for authentication › passes accessibility checks on main page","status":"passed","retry":0,"durationMs":3670,"ioWaitMs":306}
-{"id":"autentication/flows.spec.ts:319 › Accessibility tests for authentication › passes a11y checks on creating flow form","status":"passed","retry":0,"durationMs":6769,"ioWaitMs":959}
-{"id":"autentication/flows.spec.ts:330 › Accessibility tests for authentication › passes a11y checks when creating flow","status":"passed","retry":0,"durationMs":7203,"ioWaitMs":1200}
-{"id":"autentication/flows.spec.ts:346 › Accessibility tests for authentication › passes a11y checks on flow details page","status":"passed","retry":0,"durationMs":6846,"ioWaitMs":1059}
-{"id":"autentication/flows.spec.ts:355 › Accessibility tests for authentication › passes a11y checks on required actions tab","status":"passed","retry":0,"durationMs":7928,"ioWaitMs":1035}
-{"id":"autentication/flows.spec.ts:364 › Accessibility tests for authentication › passes a11y checks on password policy tab","status":"passed","retry":0,"durationMs":6504,"ioWaitMs":870}
-{"id":"autentication/flows.spec.ts:373 › Accessibility tests for authentication › passes a11y checks when adding policy","status":"passed","retry":0,"durationMs":7043,"ioWaitMs":869}
-{"id":"autentication/flows.spec.ts:383 › Accessibility tests for authentication › passes a11y checks on otp policy tab","status":"passed","retry":0,"durationMs":6688,"ioWaitMs":849}
-{"id":"autentication/flows.spec.ts:392 › Accessibility tests for authentication › passes a11y checks on WebAuthn Policies tab","status":"passed","retry":0,"durationMs":7233,"ioWaitMs":842}
-{"id":"autentication/flows.spec.ts:401 › Accessibility tests for authentication › passes a11y checks on CIBA Policy tab","status":"passed","retry":0,"durationMs":7655,"ioWaitMs":931}
+{"id":"autentication/flows.spec.ts:44 › Authentication flows › searches for an existing flow","status":"passed","retry":0,"durationMs":11344,"startMs":1790695019686,"ioWaitMs":1802}
+{"id":"autentication/flows.spec.ts:55 › Authentication flows › creates a duplicate of an existing flow","status":"passed","retry":0,"durationMs":8800,"startMs":1790695031186,"ioWaitMs":1970}
+{"id":"autentication/flows.spec.ts:67 › Authentication flows › fails to create duplicate flow with an empty name","status":"passed","retry":0,"durationMs":7123,"startMs":1790695040011,"ioWaitMs":942}
+{"id":"autentication/flows.spec.ts:80 › Authentication flows › fails to create duplicate flow with an existing name","status":"passed","retry":0,"durationMs":7046,"startMs":1790695047154,"ioWaitMs":1235}
+{"id":"autentication/flows.spec.ts:100 › Authentication flow details › adds an execution","status":"passed","retry":0,"durationMs":8248,"startMs":1790695054216,"ioWaitMs":1596}
+{"id":"autentication/flows.spec.ts:117 › Authentication flow details › adds a condition","status":"passed","retry":0,"durationMs":7987,"startMs":1790695062479,"ioWaitMs":1753}
+{"id":"autentication/flows.spec.ts:134 › Authentication flow details › adds a sub-flow","status":"passed","retry":0,"durationMs":8636,"startMs":1790695070481,"ioWaitMs":1773}
+{"id":"autentication/flows.spec.ts:149 › Authentication flow details › removes an execution","status":"passed","retry":0,"durationMs":8158,"startMs":1790695079146,"ioWaitMs":1499}
+{"id":"autentication/flows.spec.ts:165 › Authentication flow details › sets as default in action menu","status":"failed","retry":0,"durationMs":7601,"startMs":1790695087325,"ioWaitMs":2094}
+{"id":"autentication/flows.spec.ts:189 › Authentication flow details › drags and drops execution","status":"passed","retry":0,"durationMs":7753,"startMs":1790695096171,"ioWaitMs":1524}
+{"id":"autentication/flows.spec.ts:217 › Authentication flow details › edits flow details","status":"passed","retry":0,"durationMs":7312,"startMs":1790695104064,"ioWaitMs":1331}
+{"id":"autentication/flows.spec.ts:235 › Required actions › enables delete account","status":"passed","retry":0,"durationMs":6228,"startMs":1790695111391,"ioWaitMs":1088}
+{"id":"autentication/flows.spec.ts:251 › Required actions › registers an unregistered action","status":"passed","retry":0,"durationMs":6518,"startMs":1790695117638,"ioWaitMs":1183}
+{"id":"autentication/flows.spec.ts:275 › Required actions › sets action as default","status":"passed","retry":0,"durationMs":6331,"startMs":1790695124186,"ioWaitMs":1036}
+{"id":"autentication/flows.spec.ts:293 › Password policies tab › adds password policies","status":"passed","retry":0,"durationMs":5832,"startMs":1790695130540,"ioWaitMs":1041}
+{"id":"autentication/flows.spec.ts:311 › Accessibility tests for authentication › passes accessibility checks on main page","status":"passed","retry":0,"durationMs":3295,"startMs":1790695136406,"ioWaitMs":432}
+{"id":"autentication/flows.spec.ts:319 › Accessibility tests for authentication › passes a11y checks on creating flow form","status":"passed","retry":0,"durationMs":7152,"startMs":1790695139721,"ioWaitMs":989}
+{"id":"autentication/flows.spec.ts:330 › Accessibility tests for authentication › passes a11y checks when creating flow","status":"passed","retry":0,"durationMs":7091,"startMs":1790695146890,"ioWaitMs":1049}
+{"id":"autentication/flows.spec.ts:346 › Accessibility tests for authentication › passes a11y checks on flow details page","status":"passed","retry":0,"durationMs":7431,"startMs":1790695153995,"ioWaitMs":1077}
+{"id":"autentication/flows.spec.ts:355 › Accessibility tests for authentication › passes a11y checks on required actions tab","status":"passed","retry":0,"durationMs":7486,"startMs":1790695161441,"ioWaitMs":956}
+{"id":"autentication/flows.spec.ts:364 › Accessibility tests for authentication › passes a11y checks on password policy tab","status":"passed","retry":0,"durationMs":7607,"startMs":1790695168952,"ioWaitMs":856}
+{"id":"autentication/flows.spec.ts:373 › Accessibility tests for authentication › passes a11y checks when adding policy","status":"passed","retry":0,"durationMs":8089,"startMs":1790695176576,"ioWaitMs":909}
+{"id":"autentication/flows.spec.ts:383 › Accessibility tests for authentication › passes a11y checks on otp policy tab","status":"passed","retry":0,"durationMs":7790,"startMs":1790695184681,"ioWaitMs":860}
+{"id":"autentication/flows.spec.ts:392 › Accessibility tests for authentication › passes a11y checks on WebAuthn Policies tab","status":"passed","retry":0,"durationMs":7018,"startMs":1790695192491,"ioWaitMs":945}
+{"id":"autentication/flows.spec.ts:401 › Accessibility tests for authentication › passes a11y checks on CIBA Policy tab","status":"passed","retry":0,"durationMs":7673,"startMs":1790695199545,"ioWaitMs":928}

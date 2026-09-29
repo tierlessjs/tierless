@@ -81,8 +81,10 @@ are quoted without the network-wait decomposition is quoted incomplete.
 `report-time.mts`'s subtraction is a proxy: it leaves server time in the floor, and
 Playwright's 100/250/500/1000 ms retry polling quantizes durations far coarser than one
 round trip. The direct measure is per-test **I/O wait** (`ioWaitMs`): the union of the
-page's in-flight fetches and session crossings, recorded by `installIoWait`
-(`tierless/playwright`) and read by `ports/report-io.mts`. Keycloak is the first port
+page's in-flight fetches and session crossings, each ended at network completion: HTTP by
+the browser's network timing (`installIoWait`, `tierless/playwright`), crossings by the
+latency relay (`wsIoTap`; browser-side frame events wait for the page's main thread). Read
+by `ports/report-io.mts`. Keycloak is the first port
 measured this way; the earlier ports were not re-measured.
 
 **Test accommodations.** Some upstream tests assert the transport, not the UI —
