@@ -115,21 +115,24 @@ permission, `permissions-configuration/PermissionsConfigurationTab.tsx` three in
 function is plain code; on the gateway the borrowed admin client is replaced by its
 session twin (hydration), so it runs there natively and a load is one crossing. Three
 specs (`permissions/main.spec.ts`, `permissions/policy.spec.ts`,
-`clients/authorization.spec.ts`; `results/perms/`, `results/perms-20mbit/`), 33 migrated
+`clients/authorization.spec.ts`; `results/perms/`, `results/perms-20mbit/`), 39 migrated
 crossings per 3 rounds, 16 tests passing in every run:
 
 | | migration alone | against stock | nothing migrating, against stock |
 |---|---|---|---|
-| 80 ms | −2.9% (23.6 → 22.9 s) | −0.7% | +2.2% |
-| 80 ms + 20 Mbit/s | −2.6% (30.3 → 29.5 s) | **−6.8%** (31.7 → 29.5 s) | −4.3% |
+| 80 ms | −2.5% (23.6 → 23.0 s) | −1.2% | +1.3% |
+| 80 ms + 20 Mbit/s | −2.4% (30.2 → 29.4 s) | **−6.9%** (31.6 → 29.4 s) | −4.7% |
 
 Small totals because few measured tests open these tabs: `should create permission` (two
-loads) gains 420–500 ms per run in both settings. The four evaluate/search tests that use
+loads) gains 310–510 ms per run. The four evaluate/search tests that use
 the tab most never run at 80 ms, on any arm including stock: the test before them
 (`main.spec.ts:85`) fails with a server "policy already exists" conflict at that latency
 (all 21 pass at RTT 0), and Playwright skips the rest of the describe.
-`AuthorizationPermissions` (the per-client tab) left no trace in profiling runs although
-its compiled program is in the bundle; not yet explained, so it doesn't migrate here.
+The profile migrates all three fan-out loaders (`AuthorizationPermissions`,
+`AuthorizationPolicies`, `PermissionsConfigurationTab`). An earlier profile missed the first:
+profiling pages sent their trace once a second, and the harness closes a test's page
+without a pagehide, so short tests lost their records (the authorization spec delivered 1
+of 98). Completed runs now send at once.
 
 Of the 6 dependent chains in the console, 3 now run in one crossing (this loader,
 `identity-providers/add/AdvancedSettings.tsx`'s loader, `DuplicateFlowModal`'s submit).
