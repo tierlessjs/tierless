@@ -10,7 +10,7 @@
 //   decide       cold -> migrate; side effect -> migrate; unstable suffix -> greedy;
 //                stable suffix -> trajectory pricing; stale bundle hash -> refused
 import { encodeWireBinary, decodeWireBinary } from "tierless/wire";
-import { sampleTrace, argFeatures, makeRecorder, memorySink, buildProfile, loadProfile, profileCovers, decide, expectedFetch, siteKey } from "tierless/trace";
+import { sampleTrace, argFeatures, makeRecorder, memorySink, buildProfile, loadProfile, profileCovers, decide, expectedFetch, siteKey, httpTraceSink } from "tierless/trace";
 import type { TraceRecord, TraceFlag } from "tierless/trace";
 import type { Frame } from "tierless/runtime";
 import { makeCounter } from "../lib/check.mts";
@@ -132,6 +132,32 @@ const END = (id: string, seq: number): TraceRecord => ({ t: "end", id, hop: 1, s
   check("profileCovers: a loaded subset the profile was built from drives placement (code-split pages)", profileCovers(m, ["bb"]) === "ok" && profileCovers(m, ["cc", "aa"]) === "ok");
   check("profileCovers: one loaded module it never saw refuses (another build — never misattribute)", profileCovers(m, ["aa", "zz"]) === "refuse");
   check("profileCovers: a non-merged or absent profile refuses", profileCovers(p, ["cafe0001"]) === "refuse" && profileCovers(null, ["aa"]) === "refuse");
+}
+
+// ---- delivery: a profiling page's HTTP sink --------------------------------------------
+{
+  const posts: string[] = [];
+  let fail = 0;
+  const fake = (async (_u: string, init: { body: string }) => { if (fail > 0) { fail--; return { ok: false, status: 503 }; } posts.push(init.body); return { ok: true }; }) as unknown as typeof fetch;
+  const { sink, flush, settled } = httpTraceSink("http://t/trace", { fetch: fake });
+  const res = (id: string): TraceRecord => ({ t: "res", id, hop: 0, seq: 0, fn: "F", pc: 1, resource: "api.get", tier: "server", argFeatures: [], resultBytes: 1 });
+  const end = (id: string): TraceRecord => ({ t: "end", id, hop: 0, seq: 1, outcome: "done" });
+  sink(res("a"));
+  await settled();
+  check("sink: a touch waits in the buffer (no request per record)", posts.length === 0, String(posts.length));
+  sink(end("a"));
+  await settled();
+  check("sink: a run's END sends at once, with its touches — a closed page can't lose a completed run", posts.length === 1 && posts[0].split("\n").filter(Boolean).length === 2, JSON.stringify(posts));
+  fail = 1;
+  sink(res("b")); sink(end("b"));             // this batch fails once…
+  sink(res("c")); sink(end("c"));             // …and this one queues behind it
+  await settled();
+  flush(); await settled();                    // the next tick retries
+  const order = posts.slice(1).join("").split("\n").filter(Boolean).map((l) => (JSON.parse(l) as TraceRecord).id);
+  check("sink: a failed batch retries ahead of later records (runs arrive in order, none lost)", order.join("") === "bbcc", order.join(""));
+  for (let k = 0; k < 100; k++) sink(res("d"));
+  await settled();
+  check("sink: 100 buffered records send without waiting for an end", posts[posts.length - 1].split("\n").filter(Boolean).length === 100, String(posts.length));
 }
 
 const { pass, fail } = counts();

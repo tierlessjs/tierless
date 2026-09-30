@@ -99,6 +99,24 @@ export interface RecorderOpts {
 }
 export declare function makeRecorder({ rate, force, sink }: RecorderOpts): Recorder;
 /** Collect records in memory (tests, small runs). Real deployments pass their own sink (e.g. JSONL appends). */
+/** A profiling page's sink: records batch to `url` (POST, newline-delimited JSON).
+ *  A COMPLETED run (its `end` record) sends at once — a test harness closes the page with
+ *  no pagehide, so anything left for the periodic flush was lost: a 14-test Keycloak spec
+ *  delivered 1 record of dozens. Otherwise `flush` (the caller's interval and pagehide)
+ *  and a 100-record threshold send.
+ *
+ *  A lost batch must not go silent: an incomplete run that still delivers its `end`
+ *  record would teach buildProfile a FALSE trajectory. One request is in flight at a time
+ *  (a later batch must not land while an earlier one is failing); failed ones requeue at
+ *  the front, bounded; past the bound the page's remaining records drop WITH their end markers, so
+ *  runs read incomplete, not wrong. */
+export declare function httpTraceSink(url: string, { fetch: fetchImpl }?: {
+    fetch?: typeof fetch;
+}): {
+    sink: TraceSink;
+    flush(): void;
+    settled(): Promise<void>;
+};
 export declare function memorySink(): {
     sink: TraceSink;
     records: TraceRecord[];

@@ -155,6 +155,64 @@ export function makeRecorder({ rate = 0, force = [], sink }) {
     };
 }
 /** Collect records in memory (tests, small runs). Real deployments pass their own sink (e.g. JSONL appends). */
+/** A profiling page's sink: records batch to `url` (POST, newline-delimited JSON).
+ *  A COMPLETED run (its `end` record) sends at once — a test harness closes the page with
+ *  no pagehide, so anything left for the periodic flush was lost: a 14-test Keycloak spec
+ *  delivered 1 record of dozens. Otherwise `flush` (the caller's interval and pagehide)
+ *  and a 100-record threshold send.
+ *
+ *  A lost batch must not go silent: an incomplete run that still delivers its `end`
+ *  record would teach buildProfile a FALSE trajectory. One request is in flight at a time
+ *  (a later batch must not land while an earlier one is failing); failed ones requeue at
+ *  the front, bounded; past the bound the page's remaining records drop WITH their end markers, so
+ *  runs read incomplete, not wrong. */
+export function httpTraceSink(url, { fetch: fetchImpl = fetch } = {}) {
+    const buf = [];
+    let poisoned = false;
+    // ONE request in flight: a batch is cut from the buffer when it is SENT, so nothing
+    // queues behind a failing request and lands first (a queued-up later batch did, and
+    // could deliver a run's end while its touches were still retrying)
+    let inflight = null, again = false;
+    const flush = () => {
+        if (inflight) {
+            again = true;
+            return;
+        }
+        if (!buf.length || poisoned)
+            return;
+        const batch = buf.splice(0, buf.length);
+        const body = batch.map((r) => JSON.stringify(r)).join("\n") + "\n";
+        inflight = fetchImpl(url, { method: "POST", body, keepalive: true }).then((r) => {
+            if (!r.ok)
+                throw new Error(String(r.status));
+            inflight = null;
+            if (again) {
+                again = false;
+                flush();
+            }
+        }).catch(() => {
+            inflight = null;
+            again = false; // retry on the next flush (the caller's tick)
+            if (buf.length + batch.length > 5000) {
+                poisoned = true;
+                buf.length = 0;
+                console.warn("tierless: trace delivery failing — dropping this page's remaining records (runs read incomplete, not wrong)");
+            }
+            else
+                buf.unshift(...batch);
+        });
+    };
+    const sink = (r) => {
+        if (poisoned)
+            return;
+        buf.push(r);
+        if (r.t === "end" || buf.length >= 100)
+            flush();
+    };
+    const settled = async () => { while (inflight)
+        await inflight; };
+    return { sink, flush, settled };
+}
 export function memorySink() {
     const records = [];
     return { sink: (r) => { records.push(r); }, records };

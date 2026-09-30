@@ -14,7 +14,7 @@
 // mode, ui.* if you pin some); actions that never touch one simply run out on the server.
 import { makeHost, answerWith, batchExec, execOver } from "./host.mjs";
 import { makeCoherence } from "./coherence.mjs";
-import { methodMigrate, profileCovers, type Profile } from "./trace.mjs";
+import { methodMigrate, profileCovers, httpTraceSink, type Profile, type TraceSink } from "./trace.mjs";
 import { makePeer, wsPort, onEvent, pushExecLog } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
 import { TIERLESS_BUILD } from "./build-stamp.mjs";
@@ -84,7 +84,7 @@ export interface Connection {
 // ConnectOpts and consulted by every bindMethods stub. Mutable refs: a profile that
 // arrives after the first interaction upgrades later calls; before it, cold = fetch.
 let appMigrate: ((req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean) | null = null;
-let appTrace: { rate: number; sink: (r: unknown) => void } | null = null;
+let appTrace: { rate: number; sink: TraceSink } | null = null;
 const appHashes: string[] = [];   // per-module BUNDLE_HASHes of the merged world, sorted — the profile validity key
 export const mergedAppHash = (): string => "merged:" + [...appHashes].sort().join("+");
 // A fetched comparison profile stays PENDING until the merged world matches it: with
@@ -186,27 +186,10 @@ export function connect({ url, protocols, exec, bundle, tier = "browser", heap =
   const peer: typeof raw = { ...base, request: async (payload, bin) => { await ready; return base.request(payload, bin); } };
 
   if (traceUrl) {                                            // PROFILING run: batch records to the gateway
-    // a lost batch must not go silent: an incomplete run that still delivers its `end`
-    // record would teach buildProfile a FALSE trajectory. Failed batches requeue at the
-    // front and retry on the next tick, bounded; past the bound the run's remaining
-    // records are dropped WITH their end marker, so the run reads incomplete, not wrong.
-    const buf: unknown[] = [];
-    let poisoned = false;
-    let sending: Promise<void> = Promise.resolve();   // SERIALIZED: a later batch must not land while an earlier one is failing — an out-of-order `end` would mark an incomplete run complete
-    const flush = (): void => {
-      if (!buf.length || poisoned) return;
-      const batch = buf.splice(0, buf.length);
-      const body = batch.map((r) => JSON.stringify(r)).join("\n") + "\n";
-      sending = sending.then(() => fetch(traceUrl, { method: "POST", body, keepalive: true }).then((r) => {
-        if (!r.ok) throw new Error(String(r.status));
-      })).catch(() => {
-        if (buf.length + batch.length > 5000) { poisoned = true; buf.length = 0; console.warn("tierless: trace delivery failing — dropping this page's remaining records (runs read incomplete, not wrong)"); }
-        else buf.unshift(...batch);
-      });
-    };
+    const { sink, flush } = httpTraceSink(traceUrl);
     setInterval(flush, 1000);
     if (typeof addEventListener === "function") addEventListener("pagehide", flush);
-    appTrace = { rate: 1, sink: (r) => { if (!poisoned) { buf.push(r); if (buf.length >= 100) flush(); } } };
+    appTrace = { rate: 1, sink };
   }
   if (profileUrl) {                                          // COMPARISON run: locked profile, no exploration
     profileFetched = fetch(profileUrl).then((r) => (r.ok ? r.json() : null)).then((p) => {
@@ -226,7 +209,7 @@ export function connect({ url, protocols, exec, bundle, tier = "browser", heap =
   const hosts = new Map<string, Host>();                          // moduleId -> host
   const register = (module: string, b: Bundle): Host => {
     const id = module || "";
-    if (!hosts.has(id)) hosts.set(id, makeHost({ bundle: b, tier, exec: exec as Exec, meta: id ? { module: id } : {}, coherence, ...(appTrace ? { trace: appTrace as never } : {}) }));   // exec is optional here (actions-only pages never own a resource); makeHost only calls it when one is
+    if (!hosts.has(id)) hosts.set(id, makeHost({ bundle: b, tier, exec: exec as Exec, meta: id ? { module: id } : {}, coherence, ...(appTrace ? { trace: appTrace } : {}) }));   // exec is optional here (actions-only pages never own a resource); makeHost only calls it when one is
     return hosts.get(id)!;
   };
   if (bundle) register("", bundle);
