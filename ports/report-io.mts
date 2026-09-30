@@ -4,17 +4,27 @@
 //   node ports/report-io.mts <dir>        rows: <dir>/<arm>-r<n>.jsonl (drive-chains.sh)
 //
 // Per test and arm, the median over rounds; a test counts only if it passed in EVERY run
-// of both arms compared. Wall clock (durationMs) is printed beside it for reference only:
+// of both arms compared. When a run's labelled intervals sit beside its rows
+// (<arm>-r<n>.io), ioWaitMs is recomputed from them by the reporter's rule — the union of
+// valid intervals inside the test's window — so a recorder fix applies to rows already on
+// disk (rows recorded before the start-time guard counted a timing-less request, start 0,
+// as waiting for the whole test). Wall clock (durationMs) is printed beside it for reference only:
 // it also carries render, fixtures and Playwright's 100/250/500/1000 ms retry polling.
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { unionMs } from "tierless/playwright";
 
-interface Row { id: string; status: string; retry: number; durationMs: number; ioWaitMs?: number }
+interface Row { id: string; status: string; retry: number; durationMs: number; ioWaitMs?: number; startMs?: number }
 const dir = process.argv[2];
 if (!dir) { console.error("usage: node ports/report-io.mts <dir>"); process.exit(2); }
 
 const runs: Record<string, Row[][]> = {};
 for (const f of readdirSync(dir).filter((f) => /-r\d+\.jsonl$/.test(f)).sort()) {
   const rows = readFileSync(`${dir}/${f}`, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l) as Row).filter((r) => r.retry === 0);
+  const ioFile = `${dir}/${f.replace(/\.jsonl$/, ".io")}`;
+  if (existsSync(ioFile)) {
+    const iv = readFileSync(ioFile, "utf8").trim().split("\n").map((l) => l.split(" ", 2).map(Number) as [number, number]).filter(([s, e]) => s > 0 && e > s);
+    for (const r of rows) if (typeof r.startMs === "number") r.ioWaitMs = unionMs(iv, r.startMs, r.startMs + r.durationMs);
+  }
   (runs[f.replace(/-r\d+\.jsonl$/, "")] ||= []).push(rows);
 }
 const median = (xs: number[]): number => { const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };

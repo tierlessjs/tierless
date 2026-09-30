@@ -83,7 +83,7 @@ export default class TierlessMeasureReporter {
         readSync(fd, buf, 0, buf.length, this.ioAt);
         const text = buf.toString("utf8"), end = text.lastIndexOf("\n") + 1;   // whole lines only
         this.ioAt += Buffer.byteLength(text.slice(0, end));
-        for (const line of text.slice(0, end).split("\n")) { const [s, e] = line.split(" ", 2).map(Number); if (e > s) this.io.push([s, e]); }
+        for (const line of text.slice(0, end).split("\n")) { const [s, e] = line.split(" ", 2).map(Number); if (s > 0 && e > s) this.io.push([s, e]); }
       } finally { closeSync(fd); }
     } catch { /* no intervals yet: the page made no I/O */ }
     return unionMs(this.io, from, to);

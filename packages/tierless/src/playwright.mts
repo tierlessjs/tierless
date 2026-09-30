@@ -596,6 +596,7 @@ function ioPage(page: IoPage, record: IoRecord, ignore: string[]): void {
     if (type !== "fetch" && type !== "xhr") return;
     if (ignore.some((p) => r.url().startsWith(p))) return;
     const t = r.timing();
+    if (!(t.startTime > 0)) return;              // no timing at all (cancelled before it started): it can't be placed
     const u = new URL(r.url());
     record(t.startTime, t.responseEnd >= 0 ? t.startTime + t.responseEnd : Date.now(), "http", r.method() + ":" + u.pathname);   // a failed request has no responseEnd
   };

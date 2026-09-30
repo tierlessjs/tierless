@@ -79,7 +79,7 @@ export default class TierlessMeasureReporter {
                 this.ioAt += Buffer.byteLength(text.slice(0, end));
                 for (const line of text.slice(0, end).split("\n")) {
                     const [s, e] = line.split(" ", 2).map(Number);
-                    if (e > s)
+                    if (s > 0 && e > s)
                         this.io.push([s, e]);
                 }
             }

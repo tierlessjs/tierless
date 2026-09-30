@@ -29,7 +29,7 @@ process.env.TIERLESS_MEASURE_OUT = OUT;
 process.env.TIERLESS_IO_FILE = IO;
 // installIoWait's intervals (epoch ms): two overlapping inside t1's window [1000, 1123),
 // one straddling t1's end, one after; the last line is still being written
-appendFileSync(IO, "1000 1050\n1040 1100\n1110 1200\n1200 1300\n5000 50");
+appendFileSync(IO, "0 1060\n1000 1050\n1040 1100\n1110 1200\n1200 1300\n5000 50");   // "0 …": a request with no timing, never counted
 process.env.TIERLESS_WIRE_URLS = "http://127.0.0.1:" + (counter.address() as { port: number }).port + "/__tierless/wire";
 // env is read at import time — set it BEFORE the module loads (as a suite config would)
 const { default: Reporter } = await import("tierless/playwright-reporter");

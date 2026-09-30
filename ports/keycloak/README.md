@@ -57,7 +57,7 @@ in the nothing-migrating arm).
 | | migration alone (same build) | against stock | wall, migration alone |
 |---|---|---|---|
 | client scopes (2 specs, 21 tests) | **−18.3%** (36.2 → 29.6 s), 19 of 21 less, median −327 ms | −17.6% (35.9 → 29.6 s) | −7.6% |
-| flows (1 spec, 23 tests) | **−2.5%** (27.7 → 27.0 s), 12 of 23 less, median −2 ms | −0.1% (27.0 → 27.0 s) | +0.5% |
+| flows (1 spec, 23 tests) | **−2.6%** (27.7 → 27.0 s), 13 of 23 less, median −10 ms | −0.1% (27.0 → 27.0 s) | +0.5% |
 
 The same arms on a **20 Mbit/s link** as well (`TIERLESS_BPS=20000000`: one modeled line
 shared by every connection of both relays; `results/chains-20mbit/`,
@@ -68,7 +68,7 @@ shared by every connection of both relays; `results/chains-20mbit/`,
 | client scopes (21 tests) | **−14.6%** (45.9 → 39.2 s), 18 of 21 less | **−17.7%** (47.6 → 39.2 s), 20 of 21 less | −3.6% |
 | flows (24–25 tests) | **−2.7%** (39.1 → 38.0 s), 14 of 24 less | **−5.7%** (40.3 → 38.0 s), 19 of 24 less | −3.1% |
 
-The ported build with nothing migrating waits +0.8% (client scopes) / +2.4% (flows) more
+The ported build with nothing migrating waits +0.8% (client scopes) / +2.6% (flows) more
 than stock. Per call a crossing costs the same as HTTP (median per-endpoint difference 0–1
 ms over 25 and 35 endpoints). The measurable extra is `/admin/serverinfo`: 323 KB on
 every console load, 136–137 ms per load against 122–125 ms stock. Measured against the real
@@ -76,7 +76,7 @@ server, the ~13 ms is: deflating the reply to 48 KB (4.5 ms at level 6), Node's 
 client reading the body (36 ms against curl's 32 ms), and encode/forward/inflate (~3 ms,
 measured locally). The unlimited-bandwidth runs count the 275 KB saved for
 nothing. On the 20 Mbit/s link they count, and the ported build with nothing migrating
-waits 3.1–3.6% less than stock instead of 0.8–2.4% more. The gateway itself adds under 1 ms per call (request in to
+waits 3.1–3.6% less than stock instead of 0.8–2.6% more. The gateway itself adds under 1 ms per call (request in to
 reply out: 14 ms, of which Keycloak 14 ms). With unlimited bandwidth, the serverinfo cost
 cancels the flows migration gain against stock; at 20 Mbit/s the flows arm waits 5.7% less
 than stock.
@@ -107,6 +107,29 @@ migrating runs (at 20 Mbit/s it passed in every run of every arm).
 finishes; at 80 ms RTT the test clicks "Edit info" first and the submit throws reading
 `flow.id`. The migrating loader finishes one round trip sooner. It's a race, so this
 shows the latency moved, not a fix.
+
+**Permissions: fan-out.** Both permissions tabs list, then call per item inside
+`Promise.all(items.map(async …))`: `clients/authorization/Permissions.tsx` one call per
+permission, `permissions-configuration/PermissionsConfigurationTab.tsx` three in a row
+(policies, scopes, resources), so stock pays 4 round trips per load. The inner async
+function is plain code; on the gateway the borrowed admin client is replaced by its
+session twin (hydration), so it runs there natively and a load is one crossing. Three
+specs (`permissions/main.spec.ts`, `permissions/policy.spec.ts`,
+`clients/authorization.spec.ts`; `results/perms/`, `results/perms-20mbit/`), 33 migrated
+crossings per 3 rounds, 16 tests passing in every run:
+
+| | migration alone | against stock | nothing migrating, against stock |
+|---|---|---|---|
+| 80 ms | −2.9% (23.6 → 22.9 s) | −0.7% | +2.2% |
+| 80 ms + 20 Mbit/s | −2.6% (30.3 → 29.5 s) | **−6.8%** (31.7 → 29.5 s) | −4.3% |
+
+Small totals because few measured tests open these tabs: `should create permission` (two
+loads) gains 420–500 ms per run in both settings. The four evaluate/search tests that use
+the tab most never run at 80 ms, on any arm including stock: the test before them
+(`main.spec.ts:85`) fails with a server "policy already exists" conflict at that latency
+(all 21 pass at RTT 0), and Playwright skips the rest of the describe.
+`AuthorizationPermissions` (the per-client tab) left no trace in profiling runs although
+its compiled program is in the bundle; not yet explained, so it doesn't migrate here.
 
 Of the 6 dependent chains in the console, 3 now run in one crossing (this loader,
 `identity-providers/add/AdvancedSettings.tsx`'s loader, `DuplicateFlowModal`'s submit).

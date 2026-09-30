@@ -1,0 +1,21 @@
+{"id":"clients/authorization.spec.ts:70 › Client authentication subtab › Should update the resource server settings","status":"passed","retry":0,"durationMs":9767,"startMs":1790737154352,"ioWaitMs":1893}
+{"id":"clients/authorization.spec.ts:76 › Client authentication subtab › Should create a resource","status":"passed","retry":0,"durationMs":10092,"startMs":1790737165436,"ioWaitMs":2049}
+{"id":"clients/authorization.spec.ts:89 › Client authentication subtab › Edit a resource","status":"passed","retry":0,"durationMs":9537,"startMs":1790737175542,"ioWaitMs":1973}
+{"id":"clients/authorization.spec.ts:99 › Client authentication subtab › Should navigate to previous page when last resource on current page is deleted","status":"passed","retry":0,"durationMs":14747,"startMs":1790737185099,"ioWaitMs":3229}
+{"id":"clients/authorization.spec.ts:137 › Client authentication subtab › Should create a scope","status":"passed","retry":0,"durationMs":9202,"startMs":1790737199866,"ioWaitMs":1975}
+{"id":"clients/authorization.spec.ts:154 › Client authentication subtab › Should create a permission","status":"passed","retry":0,"durationMs":9113,"startMs":1790737209080,"ioWaitMs":1935}
+{"id":"clients/authorization.spec.ts:170 › Client authentication subtab › Should create a policy","status":"passed","retry":0,"durationMs":9018,"startMs":1790737218209,"ioWaitMs":1778}
+{"id":"clients/authorization.spec.ts:183 › Client authentication subtab › Should delete a policy","status":"passed","retry":0,"durationMs":9068,"startMs":1790737227242,"ioWaitMs":1874}
+{"id":"clients/authorization.spec.ts:190 › Client authentication subtab › Should create a client policy","status":"passed","retry":0,"durationMs":9327,"startMs":1790737236322,"ioWaitMs":2055}
+{"id":"clients/authorization.spec.ts:202 › Client authentication subtab › Should copy auth details","status":"passed","retry":0,"durationMs":8638,"startMs":1790737245661,"ioWaitMs":1611}
+{"id":"clients/authorization.spec.ts:211 › Client authentication subtab › Should export auth details","status":"passed","retry":0,"durationMs":8633,"startMs":1790737254313,"ioWaitMs":1614}
+{"id":"clients/authorization.spec.ts:255 › Client authorization tab access for view-realm-authorization › Should view authorization tab","status":"passed","retry":0,"durationMs":13001,"startMs":1790737263235,"ioWaitMs":10339}
+{"id":"clients/authorization.spec.ts:302 › Accessibility tests for client authorization › Check a11y violations on load/ client authorization","status":"passed","retry":0,"durationMs":9580,"startMs":1790737279399,"ioWaitMs":1521}
+{"id":"clients/authorization.spec.ts:344 › Client authorization resources pagination › Should not duplicate the 10th item on the 2nd page","status":"passed","retry":0,"durationMs":8787,"startMs":1790737289215,"ioWaitMs":1342}
+{"id":"permissions/main.spec.ts:46 › Permissions section tests › should create permission","status":"passed","retry":0,"durationMs":10539,"startMs":1790737299251,"ioWaitMs":2540}
+{"id":"permissions/main.spec.ts:85 › Permissions section tests › should edit group permission","status":"failed","retry":0,"durationMs":14882,"startMs":1790737310863,"ioWaitMs":2515}
+{"id":"permissions/main.spec.ts:149 › Permissions section tests › evaluate permissions › should evaluate permissions success","status":"skipped","retry":0,"durationMs":0,"startMs":1790737326607,"ioWaitMs":0}
+{"id":"permissions/main.spec.ts:162 › Permissions section tests › evaluate permissions › should evaluate permissions denied","status":"skipped","retry":0,"durationMs":0,"startMs":1790737326607,"ioWaitMs":0}
+{"id":"permissions/main.spec.ts:191 › Permissions section tests › permission search › should search permission","status":"skipped","retry":0,"durationMs":0,"startMs":1790737326607,"ioWaitMs":0}
+{"id":"permissions/main.spec.ts:200 › Permissions section tests › permission search › should search permission filter clients","status":"skipped","retry":0,"durationMs":0,"startMs":1790737326607,"ioWaitMs":0}
+{"id":"permissions/policy.spec.ts:30 › Policy section tests › create policy","status":"passed","retry":0,"durationMs":8771,"startMs":1790737327628,"ioWaitMs":1654}
