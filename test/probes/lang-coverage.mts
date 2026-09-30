@@ -137,6 +137,11 @@ await supported("a function with no return statement yields undefined, not a sen
 // the frame slot (base is 100). The rewrite resolves each name's binding rather than matching by name.
 await supported("a callback param shadowing a frame local keeps its own binding, not the frame slot", "function A(){ const x = api.get(10); const ys = [1,2,3].map(x => x * 2); return x + ys[0] + ys[1] + ys[2]; }", "A", 22);
 await supported("a nested callback closing over a frame local reads the frame slot", "function A(){ const base = api.get(100); const ys = [1,2].map(i => i + base); return ys[0] + ys[1]; }", "A", 203);
+// locals and params NAMED like frame fields ({ fn, pc, args, ret, __h, __t0, … } and F itself)
+// must not become those fields: Keycloak's group picker declared `const args = {…}` and the
+// lowered F.args = {…} overwrote the frame's own arguments
+await supported("locals named args/pc/ret/fn/F/__t0 stay locals (renamed off the frame's fields)", "function A(){ const args = { n: api.get(1) }; let pc = api.get(2); const ret = api.get(3); const fn = 4; const F = 5; const __t0 = 6; const r = api.get(args.n + pc + ret + fn + F + __t0); return r; }", "A", 21);
+await supported("a param named args (params live in F.args[i]) read by a nested closure after a suspension", "function A(args){ const x = api.get(args.k); const g = [1, 2].map(i => i + args.k + x); return g[0] + g[1]; } function B(){ const r = A({ k: 10 }); return r; }", "B", 43);
 
 console.log("\noptional-chain conditional suspensions (compiled result checked vs a native-JS oracle — value AND call sequence, so short-circuit skipping the tier call is verified):");
 await optchain("obj?.[api.f()] — receiver present", 'function A(){ const o = { b: 42 }; const r = o?.[api.get("b")]; return r; }', "A");

@@ -1014,7 +1014,27 @@ function desugarBindings(fnPath: NodePath<t.FunctionDeclaration>): void {
   desugarDestructuring(fnPath, fresh); // finally every pattern, incl. those the two passes above introduced
 }
 
+// A frame is { fn, pc, args, ret, __h, __c, __err, __t0…, <locals> }: a local or param
+// with one of those names would BE that field once it lowers to F.<name> — `const args =
+// {…}` overwrote the frame's own arguments (Keycloak's group picker read F.args[0] as its
+// caps and got the query object). Rename them first, scope-aware, so nested closures that
+// read them follow. `F` itself is the frame.
+const FRAME_FIELD = (name: string): boolean => name === "F" || name === "fn" || name === "pc" || name === "args" || name === "ret" || name.startsWith("__");
+function renameFrameClashes(p: NodePath<t.FunctionDeclaration>): void {
+  const clash = new Set<string>();
+  for (const x of p.node.params) if (t.isIdentifier(x) && FRAME_FIELD(x.name)) clash.add(x.name);
+  p.traverse({
+    VariableDeclarator(v) { if (v.getFunctionParent()?.node === p.node && t.isIdentifier(v.node.id) && FRAME_FIELD(v.node.id.name)) clash.add(v.node.id.name); },
+    CatchClause(c) { if (c.getFunctionParent()?.node === p.node && t.isIdentifier(c.node.param) && FRAME_FIELD(c.node.param.name)) clash.add(c.node.param.name); },
+  });
+  if (!clash.size) return;
+  const scopes = new Set<import("@babel/traverse").Scope>([p.scope]);
+  p.traverse({ Scopable(sp) { if (sp.getFunctionParent()?.node === p.node || sp.node === p.node) scopes.add(sp.scope); } });
+  for (const sc of scopes) for (const name of clash) if (Object.prototype.hasOwnProperty.call(sc.bindings, name)) sc.rename(name, sc.generateUid(name.replace(/^_+/, "") || "v"));
+}
+
 function lower(p: NodePath<t.FunctionDeclaration>): string {
+  renameFrameClashes(p);                                          // before anything lowers a name to F.<name>
   desugarBindings(p);                                             // for-of/for-in, destructuring, non-simple params -> simple forms
   // AUTO_WRITEBACK forces AUTO_DEREF (a write through a handle must first materialize it), so whenever
   // insertWriteBacks runs, insertDerefGuards just ran on the same p — reuse its remotable-locals scan
