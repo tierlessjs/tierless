@@ -131,8 +131,8 @@ the tab most never run at 80 ms, on any arm including stock: the test before the
 The profile migrates all three fan-out loaders (`AuthorizationPermissions`,
 `AuthorizationPolicies`, `PermissionsConfigurationTab`). An earlier profile missed the first:
 profiling pages sent their trace once a second, and the harness closes a test's page
-without a pagehide, so short tests lost their records (the authorization spec delivered 1
-of 98). Completed runs now send at once.
+without a pagehide, so short tests lost their records (the authorization spec alone
+delivered 1 record; 37 with the fix). Completed runs now send at once.
 
 Of the 6 dependent chains in the console, 3 now run in one crossing (this loader,
 `identity-providers/add/AdvancedSettings.tsx`'s loader, `DuplicateFlowModal`'s submit).
