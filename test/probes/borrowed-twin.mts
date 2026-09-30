@@ -22,6 +22,10 @@
 //   - a dependent chain that reads borrowed PRIMITIVES between calls, with a branch not
 //     taken that calls a borrowed function, still runs in ONE crossing (member-precise
 //     stop rule + checkpoint branches); taking that branch goes home and is still right
+//   - a FAN-OUT (list, then Promise.all over an inline async map calling the borrowed
+//     client) runs in ONE crossing: the server hydrates the borrowed client to its twin, so
+//     the plain inner closure calls it natively; the twin's writes are diffed per crossing,
+//     and a twin that escaped into a local goes home as the live client
 import { createRequire } from "node:module";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -63,6 +67,7 @@ class Client {
       b: (x) => io("b", x * 10),
       c: (x) => io("c", x - 3),
       fail: async () => { this.calls++; log.push(this.where + ":fail"); throw new NetErr("nope", 409); },
+      list: async (n) => { this.calls++; log.push(this.where + ":list"); return [...Array(n).keys()] as unknown as number; },
     };
   }
 }
@@ -242,6 +247,20 @@ export function Fetched() {
   useFetch(async () => await client.scopes.a(9));
 }
 function useT() { return { t: (k) => "t:" + k }; }
+export function Perms() {
+  const { client } = useClient();
+  useFetch(async () => {                         // Keycloak's permissions tabs: list, then per item
+    const ps = await client.scopes.list(3);      // a dependent pair, fanned out in parallel
+    return await Promise.all(ps.map(async (p) => { const a = await client.scopes.a(p); return await client.scopes.b(a); }));
+  });
+  const report = globalThis.__probeReport;
+  useFetch(async () => {                         // the twin escapes into a local, then the run goes home
+    const xs = await client.scopes.list(2);      // migrates here; on the server client is the twin
+    const c = client;
+    await c.scopes.a(0);
+    return report(c, xs.length);                 // a borrowed function: runs at home, sees c
+  });
+}
 export function Details(props) {
   const { client } = useClient();
   const { id, step } = props;
@@ -302,6 +321,27 @@ export function Details(props) {
   let r5: unknown;
   try { await ((globalThis as Record<string, unknown>).__probeFetches as Array<() => Promise<number>>)[3](); } catch (e) { r5 = (e as Error).message; }
   cmod.__bindTierlessMethods(null);
+  cmod.__bindTierlessMethods((prog: string, caps: object, args: unknown[]) => chost.runLocal(cpeer, prog, [caps, ...args], { migrate: () => true }));
+  reset();
+  (globalThis as Record<string, unknown>).__probeClient = new Client("browser", log);
+  cmod.Perms();
+  const fans = (globalThis as Record<string, unknown>).__probeFetches as Array<() => Promise<number[]>>;
+  const r6 = await fans[fans.length - 2]();          // Perms registers two: the fan-out, then the escape case
+  cmod.__bindTierlessMethods(null);
+  check("fan-out (list, then Promise.all over an async map of dependent calls): all 7 calls on the twin in ONE crossing",
+    JSON.stringify(r6) === "[10,20,30]" && counts.resume === 1 && log.length === 7 && log.every((x) => x.startsWith("server:")), JSON.stringify({ r6, counts, log }));
+  const liveFan = (globalThis as Record<string, unknown>).__probeClient as Client;
+  check("the twin's field writes from plain code ride the reply home (diffed once per crossing)", liveFan.calls === twin.calls, `${liveFan.calls} vs ${twin.calls}`);
+  const seen: unknown[] = [];
+  (globalThis as Record<string, unknown>).__probeReport = (c: unknown, n: number) => { seen.push(c); return n; };
+  cmod.__bindTierlessMethods((prog: string, caps: object, args: unknown[]) => chost.runLocal(cpeer, prog, [caps, ...args], { migrate: () => true }));
+  reset();
+  (globalThis as Record<string, unknown>).__probeClient = new Client("browser", log);
+  cmod.Perms();
+  const r7 = await (fans[fans.length - 1] as unknown as () => Promise<number>)();
+  cmod.__bindTierlessMethods(null);
+  check("a hydrated twin that escaped into a local goes home as the LIVE client, not a copy of the twin",
+    r7 === 2 && seen[0] === (globalThis as Record<string, unknown>).__probeClient && log.join(",") === "server:list,server:a", JSON.stringify({ r7, log, same: seen[0] === (globalThis as Record<string, unknown>).__probeClient }));
   check("dependent chain reading borrowed primitives: all three calls on the twin in ONE crossing",
     r4 === 67 && dcounts.resume === 1, JSON.stringify({ r4, dcounts }));
   check("the branch that calls a borrowed function still runs it at home: right error",

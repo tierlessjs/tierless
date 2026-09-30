@@ -12,7 +12,7 @@
 // The host is STATELESS per message — the continuation carries all session state — so any
 // number of sessions can be in flight on one peer concurrently; the transport's
 // correlation ids keep their bounces apart.
-import { makePump, initialStack } from "./runtime.mjs";
+import { makePump, initialStack, hydrateViews, twinDelta } from "./runtime.mjs";
 import { encodeWireBinary, decodeWireBinary, encodeArgs, decodeArgs } from "./wire-binary.mjs";
 import { RawJsonBody, RAW_TEXT } from "./transport.mjs";
 import { makeRecorder, decide, siteKey, argFeatures } from "./trace.mjs";
@@ -198,7 +198,17 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
         // awaiting code resumes — read-your-writes without an extra crossing
         const twinDeltas = [];
         const sink = twins ? { twinDelta: (d) => twinDeltas.push(d) } : undefined;
-        const carry = () => (twinDeltas.length ? { twinDeltas } : {});
+        // borrowed members with a twin here become the twin (hydrateViews); their changes
+        // are diffed once, at the reply, since plain code may have called them anywhere
+        const wet = twins ? hydrateViews(stack, twins) : [];
+        const carry = () => {
+            for (const { twin, where, pre } of wet.splice(0)) {
+                const d = twinDelta(pre, twin, where);
+                if (d)
+                    twinDeltas.push(d);
+            }
+            return twinDeltas.length ? { twinDeltas } : {};
+        };
         try {
             const res = await runPump(peer, stack, incoming, sink);
             if (res.done)

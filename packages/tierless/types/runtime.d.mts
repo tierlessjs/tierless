@@ -1,4 +1,23 @@
-import type { Bundle, Frame, Pump } from "./types.mjs";
+import type { Bundle, Frame, Pump, TwinDelta } from "./types.mjs";
+type TwinWhere = {
+    owner: string;
+    id: string;
+    path?: string[];
+};
+export declare function twinImage(twin: object): Record<string, string | undefined>;
+export declare function twinDelta(pre: Record<string, string | undefined>, twin: object, where: TwinWhere): TwinDelta | null;
+/** HYDRATE a migrated stack: every caps VIEW member that is a stamped member handle with
+ *  a session twin here becomes the twin itself. Plain code the machine runs on this tier —
+ *  an inline `async x => await client.find(x)` handed to Promise.all — then calls the
+ *  twin natively, and the stop rule sees a live object, not a handle, so the run stays.
+ *  Returns each twin with its snapshot: the caller diffs them once per crossing (no
+ *  per-call hook exists for plain code). Going home, the encoder writes a hydrated twin
+ *  back as its handle (graph.mts `hydrated`). */
+export declare function hydrateViews(stack: Frame[], twins: NonNullable<PumpOpts["twins"]>): Array<{
+    twin: object;
+    where: TwinWhere;
+    pre: Record<string, string | undefined>;
+}>;
 export type { Bundle, Frame, MachineResult, ResourceRequest, HomePark, PumpRequest, Exec, Peer, Host } from "./types.mjs";
 export declare const initialStack: (fn: string, args?: unknown[]) => Frame[];
 export interface PumpOpts {

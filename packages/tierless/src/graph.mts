@@ -85,6 +85,11 @@ export function protoFor(cls: string, err: boolean): object | undefined {
 // stop rule reads members precisely (compiler slot refs "args[0].id"), so touching a
 // primitive stays put and touching anything else still goes home.
 export const VIEW = Symbol("tierless.view");
+// a HYDRATED view member (runtime.mts hydrateViews): the session twin standing in for a
+// borrowed member on this tier. Encoded, it is the member handle it replaced — home gets
+// its own live object back, never a copy of the twin.
+const HYDRATED = new WeakMap<object, Handle>();
+export function hydrated(twin: object, handle: Handle): void { HYDRATED.set(twin, handle); }
 function isPrimitive(x: unknown): boolean {
   return x === null || typeof x === "string" || typeof x === "boolean" || (typeof x === "number" && Number.isFinite(x));
 }
@@ -231,6 +236,8 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
     if (v === null || typeof v !== "object") return { k: "p", v };
     if (idOf.has(v)) return { k: "r", id: idOf.get(v) };
     if (isHandle(v)) { const id = objs.length; idOf.set(v, id); const { state: _s, ...h } = v; objs.push({ k: "H", h }); return { k: "r", id }; }
+    const hh = HYDRATED.get(v as object);
+    if (hh) { const id = objs.length; idOf.set(v, id); objs.push({ k: "H", h: hh }); return { k: "r", id }; }
     // a VIEW goes back as the handle it was decoded from: home gets its own live object
     const vh = (v as { [VIEW]?: Handle })[VIEW];
     if (vh) { if (idOf.has(vh)) return { k: "r", id: idOf.get(vh) }; const id = objs.length; idOf.set(vh, id); idOf.set(v, id); objs.push({ k: "H", h: vh }); return { k: "r", id }; }

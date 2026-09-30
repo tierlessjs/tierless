@@ -1,6 +1,6 @@
 # The §6 migrate arm for compiled methods
 
-Status: slices 1-2 shipped and proven (probe + live e2e + vite emit); slice-3 MECHANICS shipped (dynamic call parks, class-stamped handles, session twins, frame-aware fetch arm). The §6 decide loop is now LANDED in the shipped host's full-tierless drive path (host.mts `drive` + `placement`; see "LANDED" below) — fetch a first-class protocol message the driver prices against migrate per park. Closures in React components and hooks compile too (`closures`), a borrowed service's calls run on a session twin through the caps view's member handles, borrowed primitives and untaken branches don't send a chain home, and a profiled comparison run is measured end to end on Keycloak (ports/keycloak/README.md, "Chain migration"). Remaining: async `map` callbacks, symmetric step-side fetch. The fetch arm (host.mts runLocal) stays the
+Status: slices 1-2 shipped and proven (probe + live e2e + vite emit); slice-3 MECHANICS shipped (dynamic call parks, class-stamped handles, session twins, frame-aware fetch arm). The §6 decide loop is now LANDED in the shipped host's full-tierless drive path (host.mts `drive` + `placement`; see "LANDED" below) — fetch a first-class protocol message the driver prices against migrate per park. Closures in React components and hooks compile too (`closures`), a borrowed service's calls run on a session twin through the caps view's member handles, borrowed primitives and untaken branches don't send a chain home, and a profiled comparison run is measured end to end on Keycloak (ports/keycloak/README.md, "Chain migration"). Remaining: symmetric step-side fetch. The fetch arm (host.mts runLocal) stays the
 default and the cold fallback; this document is the delta that lets a compiled method's
 continuation MIGRATE to the server and run its request chain there — N crossings become 1.
 
@@ -49,6 +49,12 @@ mid-segment (design.md §8). So the check happens BEFORE the segment runs, in th
   member handles (stamped ones carry class and state for twins). With member-precise
   refs, a segment that reads a borrowed `id` or `realm` stays put; one that calls a
   borrowed `t()` goes home.
+- **Hydration:** when a migrated stack arrives, a view member that has a session twin
+  here becomes the twin itself (`hydrateViews`). Plain code the machine runs — an inline
+  `async p => await client.x(p)` handed to `Promise.all` — then calls the twin natively,
+  and the stop rule sees a live object, so a list-then-fan-out loader is one crossing.
+  Twins' field changes are diffed once per crossing; a twin that escaped into a local is
+  encoded back as its member handle going home.
 - **Pump stop rule:** before stepping a frame, if any slot referenced by the current
   state holds a handle → park with `{op:"home", tier: handle.owner}` and ship the stack
   there. The pump stays tier-agnostic: no configuration, the VALUES say where segments

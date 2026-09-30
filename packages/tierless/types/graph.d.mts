@@ -25,6 +25,7 @@ export declare function shareClass(name: string, cls: {
 }): void;
 export declare function protoFor(cls: string, err: boolean): object | undefined;
 export declare const VIEW: unique symbol;
+export declare function hydrated(twin: object, handle: Handle): void;
 export declare function isHandle(x: unknown): x is Handle;
 export declare const GLOBALS: Record<string, unknown>;
 /** `claimed` (the encoder's excise predicate) marks values that ship as a handle whatever

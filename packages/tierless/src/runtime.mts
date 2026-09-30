@@ -11,8 +11,64 @@
 // the last resource lands. The {stack, request} it hands back is serialized for the
 // socket by the binary wire codec (wire-binary.mjs); host.mjs assembles that loop.
 
-import { isHandle } from "./graph.mjs";
-import type { Bundle, Frame, Exec, ResourceRequest, HomePark, Pump } from "./types.mjs";
+import { isHandle, VIEW, hydrated } from "./graph.mjs";
+import type { Bundle, Frame, Exec, ResourceRequest, HomePark, Pump, TwinDelta } from "./types.mjs";
+
+// ---- twins' state, diffed ------------------------------------------------------------
+// A twin's observable state change ships home on the same crossing so the awaiting code
+// reads its writes (docs/migrate-arm.md "twins and correctness"): own enumerable data
+// fields, shallow-diffed. Snapshots are JSON IMAGES, not references: this.items.push(x)
+// mutates in place, so a reference diff would ship nothing.
+type TwinWhere = { owner: string; id: string; path?: string[] };
+const image = (v: unknown): string | undefined => { try { return JSON.stringify(v); } catch { return undefined; } };
+const dataFields = (o: object): Record<string, unknown> => {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(o)) if (typeof v !== "function") out[k] = v;
+  return out;
+};
+export function twinImage(twin: object): Record<string, string | undefined> {
+  const pre: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(dataFields(twin))) pre[k] = image(v);
+  return pre;
+}
+export function twinDelta(pre: Record<string, string | undefined>, twin: object, where: TwinWhere): TwinDelta | null {
+  const fields: Record<string, unknown> = {};
+  const post = dataFields(twin);
+  for (const [k, v] of Object.entries(post)) {
+    const img = image(v);
+    // ship the JSON IMAGE's value, not the live reference: the delta rides a JSON-encoded
+    // reply, so a circular/unserializable change can't cross — skip it
+    if (img !== undefined && img !== pre[k]) fields[k] = JSON.parse(img);
+  }
+  const gone = Object.keys(pre).filter((k) => !(k in post));   // deletions: assignment can't express them
+  return Object.keys(fields).length || gone.length ? { owner: where.owner, id: where.id, ...(where.path ? { path: where.path } : {}), fields, ...(gone.length ? { gone } : {}) } : null;
+}
+
+/** HYDRATE a migrated stack: every caps VIEW member that is a stamped member handle with
+ *  a session twin here becomes the twin itself. Plain code the machine runs on this tier —
+ *  an inline `async x => await client.find(x)` handed to Promise.all — then calls the
+ *  twin natively, and the stop rule sees a live object, not a handle, so the run stays.
+ *  Returns each twin with its snapshot: the caller diffs them once per crossing (no
+ *  per-call hook exists for plain code). Going home, the encoder writes a hydrated twin
+ *  back as its handle (graph.mts `hydrated`). */
+export function hydrateViews(stack: Frame[], twins: NonNullable<PumpOpts["twins"]>): Array<{ twin: object; where: TwinWhere; pre: Record<string, string | undefined> }> {
+  const out: Array<{ twin: object; where: TwinWhere; pre: Record<string, string | undefined> }> = [];
+  const seen = new Set<object>();
+  const views = new Set<Record<string, unknown>>();
+  for (const f of stack) for (const v of [...(Array.isArray(f.args) ? f.args : []), ...Object.values(f)]) {
+    if (v && typeof v === "object" && (v as { [VIEW]?: unknown })[VIEW]) views.add(v as Record<string, unknown>);
+  }
+  for (const view of views) for (const [k, h] of Object.entries(view)) {
+    if (!isHandle(h) || !h.cls) continue;
+    const twin = twins(h.cls, { id: h.id, owner: h.owner, ...(h.path ? { path: h.path } : {}), ...(h.state ? { state: h.state } : {}) });
+    if (!twin) continue;
+    view[k] = twin;
+    const { state: _s, ...handle } = h;
+    hydrated(twin, handle);
+    if (!seen.has(twin)) { seen.add(twin); out.push({ twin, where: { owner: h.owner, id: h.id, ...(h.path ? { path: h.path } : {}) }, pre: twinImage(twin) }); }
+  }
+  return out;
+}
 import type { Handle } from "./graph.mjs";
 
 export type { Bundle, Frame, MachineResult, ResourceRequest, HomePark, PumpRequest, Exec, Peer, Host } from "./types.mjs";
@@ -114,14 +170,6 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
     catch (err) { if (!__unwind(stack, err)) throw err; }
   }
 
-  // a twin call's observable state change, shipped home on the same crossing so the
-  // awaiting code reads its writes (docs/migrate-arm.md "twins and correctness"): own
-  // enumerable data fields, shallow-diffed around the call
-  const dataFields = (o: object): Record<string, unknown> => {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(o)) if (typeof v !== "function") out[k] = v;
-    return out;
-  };
 
   return async function pump(stack, ownsHere, execHere, incoming = null, sink, offer) {
     // the dynamic call park (docs/migrate-arm.md slice 3), resolved in dispatch order:
@@ -142,30 +190,15 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
       };
       // run the member on a twin (or on an object reached through one), and ship the
       // twin's own data-field changes home so the awaiting code reads its writes
-      const onTwin = async (twin: object, target: unknown, where: { owner: string; id: string; path?: string[] }): Promise<void> => {
-        // snapshot JSON IMAGES, not references: this.items.push(x) mutates in place,
-        // so Object.is(pre, post) is true and a reference diff ships nothing
-        const image = (v: unknown): string | undefined => { try { return JSON.stringify(v); } catch { return undefined; } };
-        const pre: Record<string, string | undefined> = {};
-        for (const [k, v] of Object.entries(dataFields(twin))) pre[k] = image(v);
+      const onTwin = async (twin: object, target: unknown, where: TwinWhere): Promise<void> => {
+        const pre = twinImage(twin);
         try {
           await settle(() => (target as Record<string, (...a: unknown[]) => unknown>)[r.member](...r.args));
         } finally {
           // diff in a FINALLY: plain JS keeps mutations made before a throw, so an
           // uncaught error (settle rethrows) must still ship them home
-          if (sink) {
-            const fields: Record<string, unknown> = {};
-            const post = dataFields(twin);
-            for (const [k, v] of Object.entries(post)) {
-              const img = image(v);
-              // ship the JSON IMAGE's value, not the live reference: the delta rides a
-              // JSON-encoded reply, so a circular/unserializable field would crash the
-              // whole session at encode time — unserializable changes can't cross, skip
-              if (img !== undefined && img !== pre[k]) fields[k] = JSON.parse(img);
-            }
-            const gone = Object.keys(pre).filter((k) => !(k in post));   // deletions: assignment can't express them
-            if (Object.keys(fields).length || gone.length) sink.twinDelta({ owner: where.owner, id: where.id, ...(where.path ? { path: where.path } : {}), fields, ...(gone.length ? { gone } : {}) });
-          }
+          const d = sink && twinDelta(pre, twin, where);
+          if (d) sink!.twinDelta(d);
         }
       };
       // a receiver PATH off a frame slot (compiler: caps.adminClient.clientScopes): walk
