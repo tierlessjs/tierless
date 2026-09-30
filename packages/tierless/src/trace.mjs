@@ -149,7 +149,7 @@ export function makeRecorder({ rate = 0, force = [], sink }) {
         end(flag, outcome) {
             if (!flag)
                 return;
-            emit({ t: "end", id: flag.id, hop: flag.hop, seq: flag.seq++, outcome });
+            emit({ t: "end", id: flag.id, hop: flag.hop, seq: flag.seq++, outcome, ...(flag.entry ? { entry: flag.entry } : {}) }); // entry: a run with no touch still says what it was
         },
         get dropped() { return dropped; },
     };

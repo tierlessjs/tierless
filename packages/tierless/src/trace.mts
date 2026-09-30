@@ -63,7 +63,7 @@ export type TraceRecord =
   /** One crossing: the continuation shipped (or was priced) at this site. choice is present once a §6 driver decides. */
   | { t: "hop"; id: string; hop: number; seq: number; fn: string; pc: number; resource: string; contBytes: number; choice?: "migrate" | "fetch" }
   /** Run completion marker. A run id with no "end" record is truncated: usable for size models, excluded from trajectory statistics. */
-  | { t: "end"; id: string; hop: number; seq: number; outcome: "done" | "error" };
+  | { t: "end"; id: string; hop: number; seq: number; outcome: "done" | "error"; entry?: string };
 
 export type TraceSink = (record: TraceRecord) => void;
 
@@ -178,7 +178,7 @@ export function makeRecorder({ rate = 0, force = [], sink }: RecorderOpts): Reco
     },
     end(flag, outcome) {
       if (!flag) return;
-      emit({ t: "end", id: flag.id, hop: flag.hop, seq: flag.seq++, outcome });
+      emit({ t: "end", id: flag.id, hop: flag.hop, seq: flag.seq++, outcome, ...(flag.entry ? { entry: flag.entry } : {}) });   // entry: a run with no touch still says what it was
     },
     get dropped() { return dropped; },
   };

@@ -42,6 +42,7 @@ export type TraceRecord =
     hop: number;
     seq: number;
     outcome: "done" | "error";
+    entry?: string;
 };
 export type TraceSink = (record: TraceRecord) => void;
 /** Argument FEATURES, never values: numbers stay (they are structure — a row count),
