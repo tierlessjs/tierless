@@ -330,6 +330,25 @@ export function Details(props) {
   cmod.__bindTierlessMethods(null);
   check("fan-out (list, then Promise.all over an async map of dependent calls): all 7 calls on the twin in ONE crossing",
     JSON.stringify(r6) === "[10,20,30]" && counts.resume === 1 && log.length === 7 && log.every((x) => x.startsWith("server:")), JSON.stringify({ r6, counts, log }));
+  {
+    // the PROFILE learns the fan-out: the Promise.all park after the borrowed list call is a
+    // recorded touch, so a traced fetch-arm run shows a chain, and the locked profile migrates it
+    const { sink, records } = memorySink();
+    const thost = makeHost({ bundle: cbundle as never, tier: "browser", exec: (() => { throw new Error("browser owns nothing"); }) as never, trace: { rate: 1, sink } });
+    cmod.__bindTierlessMethods((prog: string, caps: object, args: unknown[]) => thost.runLocal(cpeer, prog, [caps, ...args], {}));
+    for (let i = 0; i < 3; i++) { cmod.Perms(); await fans[fans.length - 2](); }
+    const touches = records.filter((r: any) => r.t === "res").slice(0, 2).map((r: any) => r.resource).join(",");
+    check("profiling: the fan-out's Promise.all is recorded after the borrowed list call", touches === "dyn:client.scopes.list,dyn:all", touches);
+    const mig = methodMigrate(loadProfile(buildProfile(records, cmod.BUNDLE_HASH), cmod.BUNDLE_HASH));
+    cmod.__bindTierlessMethods((prog: string, caps: object, args: unknown[]) => chost.runLocal(cpeer, prog, [caps, ...args], { migrate: mig }));
+    reset();
+    (globalThis as Record<string, unknown>).__probeClient = new Client("browser", log);
+    cmod.Perms();
+    const rp = await fans[fans.length - 2]();
+    cmod.__bindTierlessMethods(null);
+    check("profiled: the locked profile migrates the fan-out — ONE crossing, all on the twin",
+      JSON.stringify(rp) === "[10,20,30]" && counts.resume === 1 && log.length === 7 && log.every((x) => x.startsWith("server:")), JSON.stringify({ rp, counts, log }));
+  }
   const liveFan = (globalThis as Record<string, unknown>).__probeClient as Client;
   check("the twin's field writes from plain code ride the reply home (diffed once per crossing)", liveFan.calls === twin.calls, `${liveFan.calls} vs ${twin.calls}`);
   const seen: unknown[] = [];

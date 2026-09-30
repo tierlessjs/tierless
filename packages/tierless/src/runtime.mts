@@ -180,7 +180,7 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
     // (name "dyn:<member>", args [recv, ...callArgs]) and the owner re-dispatches it
     // here before stepping on, or the resume would read a stale ret.
     // Returns a park to ship, or null when the call settled (ret set / frame pushed / unwound).
-    const dispatchDyn = async (stack: Frame[], r: { recv: unknown; path?: string[]; member: string; args: unknown[] }, offer?: (req: { name: string; args: unknown[] }) => boolean): Promise<HomePark | null> => {
+    const dispatchDyn = async (stack: Frame[], r: { recv: unknown; path?: string[]; member: string; args: unknown[] }, offer?: (req: { name: string; args: unknown[] }, migratable?: boolean) => boolean): Promise<HomePark | null> => {
       const top = stack[stack.length - 1];
       // a THUNK, invoked inside the try: a synchronous throw from the member call
       // itself (a getter, a sync method body) unwinds exactly like a rejection —
@@ -214,9 +214,10 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
       // HOME with the live object in hand: a borrowed STAMPED member of a plain object
       // is exactly what a peer's session twin can stand in for, so the caller may ship
       // the stack there instead of settling this call (and the chain behind it) here.
-      if (offer && path.length && !isHandle(r.recv) && isPlain(r.recv) && stampOf((r.recv as Record<string, unknown>)[path[0]])) {
+      const offerable = !!offer && path.length > 0 && !isHandle(r.recv) && isPlain(r.recv) && !!stampOf((r.recv as Record<string, unknown>)[path[0]]);
+      if (offerable) {
         const name = "dyn:" + [...path, r.member].join(".");
-        if (offer({ name, args: r.args })) return { op: "home", tier: PEER, name, args: [r.recv, ...r.args] };
+        if (offer!({ name, args: r.args })) return { op: "home", tier: PEER, name, args: [r.recv, ...r.args] };
       }
       if (isHandle(recv)) {
         const h = recv, rest = path.slice(i);
@@ -244,7 +245,10 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
         // closure can build — the compiler stamps the builder for exactly this dispatch
         // (recv here is the CALLER's caps, the wrong frame for the sibling).
         if (f && typeof f.__tierless_program === "string") stack.push({ fn: f.__tierless_program, pc: 0, args: [f.__tierless_caps ? f.__tierless_caps() : recv, ...r.args] });
-        else await settle(() => f!.apply(recv as object, r.args));
+        else {
+          if (!offerable) offer?.({ name: "dyn:" + [...path, r.member].join("."), args: r.args }, false);   // a touch to record, not a migrate point
+          await settle(() => f!.apply(recv as object, r.args));
+        }
       }
       return null;
     };

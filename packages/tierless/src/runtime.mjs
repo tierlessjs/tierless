@@ -239,7 +239,8 @@ export function makePump(bundle, { twins } = {}) {
             // HOME with the live object in hand: a borrowed STAMPED member of a plain object
             // is exactly what a peer's session twin can stand in for, so the caller may ship
             // the stack there instead of settling this call (and the chain behind it) here.
-            if (offer && path.length && !isHandle(r.recv) && isPlain(r.recv) && stampOf(r.recv[path[0]])) {
+            const offerable = !!offer && path.length > 0 && !isHandle(r.recv) && isPlain(r.recv) && !!stampOf(r.recv[path[0]]);
+            if (offerable) {
                 const name = "dyn:" + [...path, r.member].join(".");
                 if (offer({ name, args: r.args }))
                     return { op: "home", tier: PEER, name, args: [r.recv, ...r.args] };
@@ -287,8 +288,11 @@ export function makePump(bundle, { twins } = {}) {
                 // (recv here is the CALLER's caps, the wrong frame for the sibling).
                 if (f && typeof f.__tierless_program === "string")
                     stack.push({ fn: f.__tierless_program, pc: 0, args: [f.__tierless_caps ? f.__tierless_caps() : recv, ...r.args] });
-                else
+                else {
+                    if (!offerable)
+                        offer?.({ name: "dyn:" + [...path, r.member].join("."), args: r.args }, false); // a touch to record, not a migrate point
                     await settle(() => f.apply(recv, r.args));
+                }
             }
             return null;
         };

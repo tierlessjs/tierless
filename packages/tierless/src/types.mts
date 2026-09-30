@@ -90,8 +90,11 @@ export type Pump = (
   sink?: { twinDelta(d: TwinDelta): void },
   /** Consulted at a dynamic park whose receiver is reached through a stamped member of a
    *  plain object (a borrowed service in a closure's caps): true ships the stack to the
-   *  peer, where a session twin of that member can serve this call and the ones after it. */
-  offer?: (req: { name: string; args: unknown[] }) => boolean,
+   *  peer, where a session twin of that member can serve this call and the ones after it.
+   *  Also told (migratable false, answer ignored) about every other dynamic park settled
+   *  here — `await Promise.all(xs.map(async …))` — so a profiling run sees the work that
+   *  follows a borrowed call and can learn the chain. */
+  offer?: (req: { name: string; args: unknown[] }, migratable?: boolean) => boolean,
 ) => Promise<{ done: true; value: unknown } | { done: false; request: PumpRequest; stack: Frame[] }>;
 
 /** The RPC peer from tierless/transport (structural — anything with request/on works). */

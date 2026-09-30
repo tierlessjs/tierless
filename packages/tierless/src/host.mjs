@@ -301,11 +301,11 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                 // It is also a TOUCH a profiling run must record (unsized: it hasn't settled), or
                 // a profile could never learn that such calls chain — profiling runs have no
                 // migrate callback, so the hook is live whenever either is.
-                const offer = migrate || rec ? (r) => {
+                const offer = migrate || rec ? (r, migratable = true) => {
                     const t = stack[stack.length - 1];
                     const req = { op: "resource", tier: "peer", name: r.name, args: r.args };
                     rec?.res(stack, req, undefined, -1);
-                    return migrate ? migrate(req, { fn: t.fn, pc: t.pc, entry }) : false;
+                    return migratable && migrate ? migrate(req, { fn: t.fn, pc: t.pc, entry }) : false;
                 } : undefined;
                 const res = await pump(stack, ownsHere, onceExec, request, undefined, offer);
                 if (res.done) {

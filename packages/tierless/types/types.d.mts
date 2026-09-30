@@ -84,11 +84,14 @@ export type Pump = (stack: Frame[], ownsHere: (tier: string) => boolean, execHer
 }, 
 /** Consulted at a dynamic park whose receiver is reached through a stamped member of a
  *  plain object (a borrowed service in a closure's caps): true ships the stack to the
- *  peer, where a session twin of that member can serve this call and the ones after it. */
+ *  peer, where a session twin of that member can serve this call and the ones after it.
+ *  Also told (migratable false, answer ignored) about every other dynamic park settled
+ *  here — `await Promise.all(xs.map(async …))` — so a profiling run sees the work that
+ *  follows a borrowed call and can learn the chain. */
 offer?: (req: {
     name: string;
     args: unknown[];
-}) => boolean) => Promise<{
+}, migratable?: boolean) => boolean) => Promise<{
     done: true;
     value: unknown;
 } | {
