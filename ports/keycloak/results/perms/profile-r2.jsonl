@@ -1,21 +1,21 @@
-{"id":"clients/authorization.spec.ts:70 › Client authentication subtab › Should update the resource server settings","status":"passed","retry":0,"durationMs":7504,"startMs":1790735936225,"ioWaitMs":1431}
-{"id":"clients/authorization.spec.ts:76 › Client authentication subtab › Should create a resource","status":"passed","retry":0,"durationMs":7520,"startMs":1790735945104,"ioWaitMs":1621}
-{"id":"clients/authorization.spec.ts:89 › Client authentication subtab › Edit a resource","status":"passed","retry":0,"durationMs":7482,"startMs":1790735952644,"ioWaitMs":1473}
-{"id":"clients/authorization.spec.ts:99 › Client authentication subtab › Should navigate to previous page when last resource on current page is deleted","status":"passed","retry":0,"durationMs":12274,"startMs":1790735960139,"ioWaitMs":2734}
-{"id":"clients/authorization.spec.ts:137 › Client authentication subtab › Should create a scope","status":"passed","retry":0,"durationMs":6904,"startMs":1790735972433,"ioWaitMs":1469}
-{"id":"clients/authorization.spec.ts:154 › Client authentication subtab › Should create a permission","status":"passed","retry":0,"durationMs":6967,"startMs":1790735979351,"ioWaitMs":1437}
-{"id":"clients/authorization.spec.ts:170 › Client authentication subtab › Should create a policy","status":"passed","retry":0,"durationMs":6941,"startMs":1790735986330,"ioWaitMs":1390}
-{"id":"clients/authorization.spec.ts:183 › Client authentication subtab › Should delete a policy","status":"passed","retry":0,"durationMs":6794,"startMs":1790735993283,"ioWaitMs":1343}
-{"id":"clients/authorization.spec.ts:190 › Client authentication subtab › Should create a client policy","status":"passed","retry":0,"durationMs":6878,"startMs":1790736000094,"ioWaitMs":1522}
-{"id":"clients/authorization.spec.ts:202 › Client authentication subtab › Should copy auth details","status":"passed","retry":0,"durationMs":6503,"startMs":1790736006985,"ioWaitMs":1266}
-{"id":"clients/authorization.spec.ts:211 › Client authentication subtab › Should export auth details","status":"passed","retry":0,"durationMs":6410,"startMs":1790736013512,"ioWaitMs":1110}
-{"id":"clients/authorization.spec.ts:255 › Client authorization tab access for view-realm-authorization › Should view authorization tab","status":"passed","retry":0,"durationMs":10061,"startMs":1790736020174,"ioWaitMs":1712}
-{"id":"clients/authorization.spec.ts:302 › Accessibility tests for client authorization › Check a11y violations on load/ client authorization","status":"passed","retry":0,"durationMs":7428,"startMs":1790736033780,"ioWaitMs":1073}
-{"id":"clients/authorization.spec.ts:344 › Client authorization resources pagination › Should not duplicate the 10th item on the 2nd page","status":"passed","retry":0,"durationMs":6663,"startMs":1790736041491,"ioWaitMs":979}
-{"id":"permissions/main.spec.ts:46 › Permissions section tests › should create permission","status":"passed","retry":0,"durationMs":7658,"startMs":1790736049312,"ioWaitMs":1422}
-{"id":"permissions/main.spec.ts:85 › Permissions section tests › should edit group permission","status":"failed","retry":0,"durationMs":12524,"startMs":1790736058182,"ioWaitMs":1897}
-{"id":"permissions/main.spec.ts:149 › Permissions section tests › evaluate permissions › should evaluate permissions success","status":"skipped","retry":0,"durationMs":0,"startMs":1790736071448,"ioWaitMs":0}
-{"id":"permissions/main.spec.ts:162 › Permissions section tests › evaluate permissions › should evaluate permissions denied","status":"skipped","retry":0,"durationMs":0,"startMs":1790736071448,"ioWaitMs":0}
-{"id":"permissions/main.spec.ts:191 › Permissions section tests › permission search › should search permission","status":"skipped","retry":0,"durationMs":0,"startMs":1790736071448,"ioWaitMs":0}
-{"id":"permissions/main.spec.ts:200 › Permissions section tests › permission search › should search permission filter clients","status":"skipped","retry":0,"durationMs":0,"startMs":1790736071448,"ioWaitMs":0}
-{"id":"permissions/policy.spec.ts:30 › Policy section tests › create policy","status":"passed","retry":0,"durationMs":6335,"startMs":1790736072497,"ioWaitMs":957}
+{"id":"clients/authorization.spec.ts:70 › Client authentication subtab › Should update the resource server settings","status":"passed","retry":0,"durationMs":7583,"startMs":1790740848034,"ioWaitMs":1503}
+{"id":"clients/authorization.spec.ts:76 › Client authentication subtab › Should create a resource","status":"passed","retry":0,"durationMs":7819,"startMs":1790740856875,"ioWaitMs":1557}
+{"id":"clients/authorization.spec.ts:89 › Client authentication subtab › Edit a resource","status":"passed","retry":0,"durationMs":7471,"startMs":1790740864712,"ioWaitMs":1534}
+{"id":"clients/authorization.spec.ts:99 › Client authentication subtab › Should navigate to previous page when last resource on current page is deleted","status":"passed","retry":0,"durationMs":12075,"startMs":1790740872199,"ioWaitMs":2728}
+{"id":"clients/authorization.spec.ts:137 › Client authentication subtab › Should create a scope","status":"passed","retry":0,"durationMs":6824,"startMs":1790740884287,"ioWaitMs":1422}
+{"id":"clients/authorization.spec.ts:154 › Client authentication subtab › Should create a permission","status":"passed","retry":0,"durationMs":7034,"startMs":1790740891127,"ioWaitMs":1473}
+{"id":"clients/authorization.spec.ts:170 › Client authentication subtab › Should create a policy","status":"passed","retry":0,"durationMs":6700,"startMs":1790740898173,"ioWaitMs":1327}
+{"id":"clients/authorization.spec.ts:183 › Client authentication subtab › Should delete a policy","status":"passed","retry":0,"durationMs":6617,"startMs":1790740904886,"ioWaitMs":1406}
+{"id":"clients/authorization.spec.ts:190 › Client authentication subtab › Should create a client policy","status":"passed","retry":0,"durationMs":6991,"startMs":1790740911520,"ioWaitMs":1496}
+{"id":"clients/authorization.spec.ts:202 › Client authentication subtab › Should copy auth details","status":"passed","retry":0,"durationMs":6485,"startMs":1790740918523,"ioWaitMs":1159}
+{"id":"clients/authorization.spec.ts:211 › Client authentication subtab › Should export auth details","status":"passed","retry":0,"durationMs":6427,"startMs":1790740925019,"ioWaitMs":1132}
+{"id":"clients/authorization.spec.ts:255 › Client authorization tab access for view-realm-authorization › Should view authorization tab","status":"passed","retry":0,"durationMs":9874,"startMs":1790740931725,"ioWaitMs":1833}
+{"id":"clients/authorization.spec.ts:302 › Accessibility tests for client authorization › Check a11y violations on load/ client authorization","status":"passed","retry":0,"durationMs":7528,"startMs":1790740944326,"ioWaitMs":1087}
+{"id":"clients/authorization.spec.ts:344 › Client authorization resources pagination › Should not duplicate the 10th item on the 2nd page","status":"passed","retry":0,"durationMs":6688,"startMs":1790740952112,"ioWaitMs":889}
+{"id":"permissions/main.spec.ts:46 › Permissions section tests › should create permission","status":"passed","retry":0,"durationMs":7777,"startMs":1790740960046,"ioWaitMs":1503}
+{"id":"permissions/main.spec.ts:85 › Permissions section tests › should edit group permission","status":"failed","retry":0,"durationMs":12391,"startMs":1790740969078,"ioWaitMs":1892}
+{"id":"permissions/main.spec.ts:149 › Permissions section tests › evaluate permissions › should evaluate permissions success","status":"skipped","retry":0,"durationMs":0,"startMs":1790740982158,"ioWaitMs":0}
+{"id":"permissions/main.spec.ts:162 › Permissions section tests › evaluate permissions › should evaluate permissions denied","status":"skipped","retry":0,"durationMs":0,"startMs":1790740982158,"ioWaitMs":0}
+{"id":"permissions/main.spec.ts:191 › Permissions section tests › permission search › should search permission","status":"skipped","retry":0,"durationMs":0,"startMs":1790740982158,"ioWaitMs":0}
+{"id":"permissions/main.spec.ts:200 › Permissions section tests › permission search › should search permission filter clients","status":"skipped","retry":0,"durationMs":0,"startMs":1790740982158,"ioWaitMs":0}
+{"id":"permissions/policy.spec.ts:30 › Policy section tests › create policy","status":"passed","retry":0,"durationMs":6350,"startMs":1790740983216,"ioWaitMs":1073}
