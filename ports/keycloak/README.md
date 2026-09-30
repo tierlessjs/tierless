@@ -59,18 +59,27 @@ in the nothing-migrating arm).
 | client scopes (2 specs, 21 tests) | **−18.3%** (36.2 → 29.6 s), 19 of 21 less, median −327 ms | −17.6% (35.9 → 29.6 s) | −7.6% |
 | flows (1 spec, 23 tests) | **−2.5%** (27.7 → 27.0 s), 12 of 23 less, median −2 ms | −0.1% (27.0 → 27.0 s) | +0.5% |
 
+The same arms on a **20 Mbit/s link** as well (`TIERLESS_BPS=20000000`: one modeled line
+shared by every connection of both relays; `results/chains-20mbit/`,
+`results/flows-20mbit/`):
+
+| | migration alone (same build) | against stock | ported, nothing migrating, against stock |
+|---|---|---|---|
+| client scopes (21 tests) | **−14.6%** (45.9 → 39.2 s), 18 of 21 less | **−17.7%** (47.6 → 39.2 s), 20 of 21 less | −3.6% |
+| flows (24–25 tests) | **−2.7%** (39.1 → 38.0 s), 14 of 24 less | **−5.7%** (40.3 → 38.0 s), 19 of 24 less | −3.1% |
+
 The ported build with nothing migrating waits +0.8% (client scopes) / +2.4% (flows) more
 than stock. Per call a crossing costs the same as HTTP (median per-endpoint difference 0–1
 ms over 25 and 35 endpoints). The measurable extra is `/admin/serverinfo`: 323 KB on
 every console load, 136–137 ms per load against 122–125 ms stock. Measured against the real
 server, the ~13 ms is: deflating the reply to 48 KB (4.5 ms at level 6), Node's HTTP
 client reading the body (36 ms against curl's 32 ms), and encode/forward/inflate (~3 ms,
-measured locally). These runs shape latency but not bandwidth, so the 275 KB saved count for
-nothing here; on a capped link they would outweigh it (at 20 Mbit/s, 323 KB takes ~130 ms
-to transfer, 48 KB ~20 ms). The gateway itself adds under 1 ms per call (request in to
-reply out: 14 ms, of which Keycloak 14 ms). On flows the serverinfo cost cancels the
-migration gain, so there is no net improvement over stock at this RTT with unlimited
-bandwidth.
+measured locally). The unlimited-bandwidth runs count the 275 KB saved for
+nothing. On the 20 Mbit/s link they count, and the ported build with nothing migrating
+waits 3.1–3.6% less than stock instead of 0.8–2.4% more. The gateway itself adds under 1 ms per call (request in to
+reply out: 14 ms, of which Keycloak 14 ms). With unlimited bandwidth, the serverinfo cost
+cancels the flows migration gain against stock; at 20 Mbit/s the flows arm waits 5.7% less
+than stock.
 
 **Client scopes: independent calls.** The client-scopes page's loader
 (`ClientScopesSection.tsx`) and the client's scopes tab (`clients/scopes/ClientScopes.tsx`)
@@ -91,8 +100,9 @@ rule skips. On a verification run over the spec, all 17 migrations finished on t
 The flow-details tests gain 100–200 ms of I/O wait each; the spec's other tests don't
 load that page.
 
-One test changes outcome: `flows.spec.ts:217 › edits flow details` failed in 15 of 18 stock
-and nothing-migrating runs across three batches, and in 0 of 9 migrating runs.
+One test changes outcome at unlimited bandwidth: `flows.spec.ts:217 › edits flow details`
+failed in 15 of 18 stock and nothing-migrating runs across three batches, and in 0 of 9
+migrating runs (at 20 Mbit/s it passed in every run of every arm).
 `EditFlowModal` is rendered with `flow!`, which stays undefined until this loader
 finishes; at 80 ms RTT the test clicks "Edit info" first and the submit throws reading
 `flow.id`. The migrating loader finishes one round trip sooner. It's a race, so this
