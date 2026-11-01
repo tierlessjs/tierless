@@ -25,8 +25,11 @@ node ports/run.mts keycloak $FLAG
 # 2. the shared release distribution
 if [ ! -x "$DIST/keycloak-$VERSION/bin/kc.sh" ]; then
   mkdir -p "$DIST"
-  curl -sSL --fail -o "$DIST/keycloak-$VERSION.zip" \
-    "https://github.com/keycloak/keycloak/releases/download/$VERSION/keycloak-$VERSION.zip"
+  # Maven Central's quarkus-dist zip is the release distribution (sessions may not reach
+  # github.com release assets); its published SHA-1 checks the download
+  URL="https://repo1.maven.org/maven2/org/keycloak/keycloak-quarkus-dist/$VERSION/keycloak-quarkus-dist-$VERSION.zip"
+  curl -sSL --fail --retry 3 --retry-all-errors -o "$DIST/keycloak-$VERSION.zip" "$URL"
+  [ "$(sha1sum < "$DIST/keycloak-$VERSION.zip" | cut -d' ' -f1)" = "$(curl -sSL --fail --retry 3 "$URL.sha1")" ] || { echo "distribution checksum mismatch" >&2; exit 1; }
   unzip -q "$DIST/keycloak-$VERSION.zip" -d "$DIST"
   chmod +x "$DIST/keycloak-$VERSION/bin/kc.sh"
 fi
