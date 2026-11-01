@@ -87,33 +87,9 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
     const placeMode = placement?.mode ?? "trajectory";
     const placeStability = placement?.stability ?? 0.9;
     const pump = makePump(bundle, { twins });
-    // a shipped sync closure (graph.mts "fn") runs its program HERE, synchronously: a sync
-    // body has no awaits, so a park is a compiler bug and throws rather than hangs
-    const runSync = (fn, args) => {
-        const stack = [{ fn, pc: 0, args }];
-        for (;;) {
-            const top = stack[stack.length - 1];
-            const r = bundle.PROGRAMS[top.fn](top);
-            if (r.op === "return") {
-                stack.pop();
-                if (!stack.length)
-                    return r.value;
-                stack[stack.length - 1].ret = r.value;
-            }
-            else if (r.op === "call")
-                stack.push({ fn: r.fn, pc: 0, args: r.args });
-            else if (r.op === "check")
-                continue;
-            else if (r.op === "throw") {
-                stack.pop();
-                if (!bundle.__unwind(stack, r.value))
-                    throw r.value;
-            }
-            else
-                throw new Error("tierless: compiled closure " + fn + " parked (" + r.op + ") in a synchronous call");
-        }
-    };
-    const programs = (name) => (bundle.PROGRAMS[name] ? (caps, args) => runSync(name, [caps, ...args]) : undefined);
+    // a shipped closure invoked natively off its tier runs its program through the pump's
+    // synchronous runner (runtime.mts runSync)
+    const programs = (name) => (bundle.PROGRAMS[name] ? (caps, args) => pump.runSync(name, [caps, ...args]) : undefined);
     const dopts = { programs };
     const coherence = coherenceIn && usesHeap(bundle) ? coherenceIn : undefined; // per-bundle gate (see MakeHostOpts.coherence)
     const ownsBase = owns || ((t) => t === tier);

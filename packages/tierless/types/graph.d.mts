@@ -20,6 +20,18 @@ export declare function shareFunction(name: string, fn: Function): void;
 export declare function shareClass(name: string, cls: {
     prototype: object;
 }): void;
+export declare function bindTracked(target: unknown, self: unknown, args: unknown[]): unknown;
+/** A decoded bound method off its tier: `__tierless_program` + `__tierless_bound` (its
+ *  receiver and bound args), callable only through the pump (a native call throws). */
+export interface BoundStub {
+    (...a: unknown[]): never;
+    __tierless_program: string;
+    __tierless_bound: {
+        self: unknown;
+        args: unknown[];
+    };
+}
+export declare const isBoundStub: (v: unknown) => v is BoundStub;
 export declare function protoFor(cls: string, err: boolean): object | undefined;
 export declare const VIEW: unique symbol;
 export declare function hydrated(twin: object, handle: Handle): void;
@@ -88,6 +100,11 @@ export interface EncodedGraph {
     objs: unknown[];
 }
 export declare function encodeGraph(values: unknown[], { tier, threshold, content, excise }?: EncodeOptions): EncodedGraph;
+export declare function reOf(n: {
+    s: string;
+    f: string;
+    li: number;
+}): RegExp;
 export declare function toBigInt(s: string): bigint;
 export declare function decodeGraph({ roots, objs }: EncodedGraph, { content, tier, programs }?: DecodeOptions): unknown[];
 export {};

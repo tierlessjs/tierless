@@ -35,4 +35,6 @@ export interface PumpOpts {
         state?: Record<string, unknown>;
     }) => object | undefined;
 }
-export declare function makePump(bundle: Bundle, { twins }?: PumpOpts): Pump;
+export declare function makePump(bundle: Bundle, { twins }?: PumpOpts): Pump & {
+    runSync: (fn: string, args: unknown[]) => unknown;
+};

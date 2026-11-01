@@ -10,7 +10,7 @@
 // differ — so one continuation flows back and forth across the wire, finishing wherever
 // the last resource lands. The {stack, request} it hands back is serialized for the
 // socket by the binary wire codec (wire-binary.mjs); host.mjs assembles that loop.
-import { isHandle, VIEW, hydrated, twinOf } from "./graph.mjs";
+import { isHandle, VIEW, hydrated, twinOf, isCompiledFn, isBoundStub, protoFor } from "./graph.mjs";
 const image = (v) => { try {
     return JSON.stringify(v);
 }
@@ -233,6 +233,11 @@ export function makePump(bundle, { twins } = {}) {
                 const c = v;
                 if (c.__tierless_sync && typeof c.__tierless_caps === "function")
                     work.push(c.__tierless_caps());
+                else if (isBoundStub(v)) {
+                    work.push(v.__tierless_bound.self);
+                    for (const x of v.__tierless_bound.args)
+                        work.push(x);
+                }
                 continue;
             }
             if (Array.isArray(v)) {
@@ -274,6 +279,11 @@ export function makePump(bundle, { twins } = {}) {
                 const c = v;
                 if (c.__tierless_sync && typeof c.__tierless_caps === "function")
                     work.push(c.__tierless_caps());
+                else if (isBoundStub(v)) {
+                    work.push(v.__tierless_bound.self);
+                    for (const x of v.__tierless_bound.args)
+                        work.push(x);
+                }
                 continue;
             }
             const vh = v[VIEW];
@@ -321,22 +331,26 @@ export function makePump(bundle, { twins } = {}) {
             const base = ref.endsWith("[]="), move = base || ref.endsWith("=");
             const [k, ...chain] = (base ? ref.slice(0, -3) : move ? ref.slice(0, -1) : ref).split(".");
             let v = k === "args" ? top.args
-                : k.startsWith("args[") ? (Array.isArray(top.args) ? top.args[Number(k.slice(5, -1))] : top.args)
-                    : top[k];
-            let broke = false;
+                : k === "args+" ? (Array.isArray(top.args) ? top.args.slice(1) : top.args) // a closure's or method's own arguments, past its caps/receiver
+                    : k.startsWith("args[") ? (Array.isArray(top.args) ? top.args[Number(k.slice(5, -1))] : top.args)
+                        : top[k];
+            let broke = false, proto;
             for (const m of chain) {
-                if (v === null || typeof v !== "object" || isHandle(v)) {
+                if (v === null || (typeof v !== "object" && typeof v !== "function") || isHandle(v)) {
                     broke = true;
                     break;
-                }
+                } // a function's own data props (a shipped closure's t.lng) read like an object's
                 const d = Object.getOwnPropertyDescriptor(v, m);
                 const vh = v[VIEW];
                 // an own DATA member is exactly what the read gets; a plain view omits only
-                // undefined members; an instance view's missing member is unknown, and a getter
-                // or inherited member could reach anything — those check the object itself
+                // undefined members; an instance view's missing member is unknown — unless its
+                // class is registered here (shareClass) and the prototype chain lacks it too — and
+                // a getter or inherited member could reach anything: those check the object itself
                 if (d && "value" in d)
                     v = d.value;
-                else if (!d && vh && !vh.inst)
+                else if (!d && ((vh && !vh.inst) || isCompiledFn(v) || isBoundStub(v)))
+                    v = undefined; // a plain view, or a shipped closure/bound method (own data props, no getters): absent reads undefined
+                else if (!d && vh?.inst && vh.cls && (proto = protoFor(vh.cls, false)) && !(m in proto))
                     v = undefined;
                 else {
                     broke = true;
@@ -362,7 +376,185 @@ export function makePump(bundle, { twins } = {}) {
                 throw err;
         }
     }
-    return async function pump(stack, ownsHere, execHere, incoming = null, sink, offer) {
+    // a SYNC call of a value (op "dyn" with sync, or "callv": compiler rewriteSyncCalls),
+    // resolved like an awaited member call but never awaited: a shipped closure's or a
+    // compiled class's program as a sub-frame, a session twin or a live object natively,
+    // or parked home with the call (the owner re-dispatches it before stepping on).
+    // a SYNC call of a value (op "dyn" with sync, or "callv": compiler rewriteSyncCalls),
+    // resolved like an awaited member call but never awaited — see the pump below
+    const dispatchSyncWith = (sink) => (stack, r) => {
+        const top = stack[stack.length - 1];
+        const path = r.path ?? [];
+        let recv = r.recv;
+        let i = 0;
+        try {
+            for (; i < path.length && !isHandle(recv); i++)
+                recv = recv?.[path[i]];
+        }
+        catch (err) {
+            if (!__unwind(stack, err))
+                throw err;
+            return null;
+        }
+        const name = (r.member !== undefined ? "dyns:" : "callv:") + [...path, ...(r.member !== undefined ? [r.member] : [])].join(".");
+        const homePark = (owner) => ({ op: "home", tier: owner, name, args: [r.recv, ...r.args] });
+        // native code must not receive another tier's object (a view it could write to, a
+        // handle it can't read): the call goes home with its arguments — except a few pure
+        // builtins that only READ a plain view's own members, where a complete view answers
+        // exactly (Object.keys, Array.isArray, Object.prototype.hasOwnProperty)
+        const plainView = (x) => { const vh = x !== null && typeof x === "object" ? x[VIEW] : undefined; return !!vh && !vh.inst; };
+        const pureRead = (f, self) => f === Object.keys || f === Array.isArray || f === Object.prototype.hasOwnProperty || (f === Function.prototype.call && self === Object.prototype.hasOwnProperty);
+        const argsHome = (f, self) => {
+            const pure = pureRead(f, self);
+            for (const x of r.args) {
+                if (pure && plainView(x))
+                    continue;
+                const h = findHandle(x);
+                if (h)
+                    return homePark(h.owner);
+            }
+            return null;
+        };
+        const callOn = (f, self) => {
+            if (isHandle(f))
+                return homePark(f.owner);
+            if (isCompiledFn(f)) {
+                stack.push({ fn: f.__tierless_program, pc: 0, args: [f.__tierless_caps(), ...r.args] });
+                return null;
+            }
+            if (isBoundStub(f)) {
+                stack.push({ fn: f.__tierless_program, pc: 0, args: [f.__tierless_bound.self, ...f.__tierless_bound.args, ...r.args] });
+                return null;
+            } // a bound method: its class's program over the receiver
+            const prog = typeof f === "function" ? f.__tierless_program : undefined;
+            if (typeof prog === "string" && PROGRAMS[prog]) {
+                stack.push({ fn: prog, pc: 0, args: [self, ...r.args] });
+                return null;
+            } // a compiled class method on a live instance: its machine
+            const away = argsHome(f, self);
+            if (away)
+                return away;
+            if (self !== null && typeof self === "object" && self[VIEW] && !(f === Object.prototype.hasOwnProperty && plainView(self)))
+                return homePark(self[VIEW].owner); // a native function with a view as `this`
+            try {
+                top.ret = f.apply(self, r.args);
+            } // a non-function throws the TypeError the source would
+            catch (err) {
+                if (!__unwind(stack, err))
+                    throw err;
+            }
+            return null;
+        };
+        const onTwinSync = (twin, target, where) => {
+            const away = argsHome();
+            if (away)
+                return away;
+            const pre = twinImage(twin);
+            try {
+                top.ret = target[r.member](...r.args);
+            }
+            catch (err) {
+                if (!__unwind(stack, err))
+                    throw err;
+            }
+            finally {
+                const d = sink && twinDelta(pre, twin, where);
+                if (d)
+                    sink.twinDelta(d);
+            }
+            return null;
+        };
+        if (r.member === undefined)
+            return isHandle(recv) ? homePark(recv.owner) : callOn(recv, undefined); // callv: the path led to the callee
+        if (isHandle(recv)) {
+            const h = recv, rest = path.slice(i);
+            const twin = h.cls && twins ? twins(h.cls, { id: h.id, owner: h.owner, ...(h.path ? { path: h.path } : {}), ...(h.state ? { state: h.state } : {}) }) : undefined;
+            if (twin) {
+                let target = twin;
+                try {
+                    for (const p of rest)
+                        target = target?.[p];
+                }
+                catch (err) {
+                    if (!__unwind(stack, err))
+                        throw err;
+                    return null;
+                }
+                return onTwinSync(twin, target, { owner: h.owner, id: h.id, ...(h.path ? { path: h.path } : {}) });
+            }
+            const prog = !rest.length && h.cls && PROGRAMS[h.cls + "$" + r.member] ? h.cls + "$" + r.member : null;
+            if (prog) {
+                stack.push({ fn: prog, pc: 0, args: [h, ...r.args] });
+                return null;
+            }
+            return homePark(h.owner);
+        }
+        const vh = recv !== null && typeof recv === "object" ? recv[VIEW] : undefined;
+        if (vh) {
+            const d = Object.getOwnPropertyDescriptor(recv, r.member);
+            if (!d || !("value" in d)) {
+                if (!vh.inst && r.member === "hasOwnProperty")
+                    return callOn(Object.prototype.hasOwnProperty, recv); // a plain view answers its own keys exactly
+                const twin = vh.cls && twins ? twins(vh.cls, { id: vh.id, owner: vh.owner, ...(vh.path ? { path: vh.path } : {}), state: viewImage(recv) }) : undefined;
+                if (twin)
+                    return onTwinSync(twin, twin, { owner: vh.owner, id: vh.id, ...(vh.path ? { path: vh.path } : {}) });
+                const prog = vh.cls && PROGRAMS[vh.cls + "$" + r.member] ? vh.cls + "$" + r.member : null;
+                if (prog) {
+                    stack.push({ fn: prog, pc: 0, args: [recv, ...r.args] });
+                    return null;
+                }
+                return homePark(vh.owner);
+            }
+        }
+        let f;
+        try {
+            f = recv?.[r.member];
+        }
+        catch (err) {
+            if (!__unwind(stack, err))
+                throw err;
+            return null;
+        }
+        if (r.opt && f == null) {
+            top.ret = undefined;
+            return null;
+        } // `o.m?.()` with no m: not a call
+        return callOn(f, recv);
+    };
+    // a shipped closure invoked NATIVELY off its tier (a decoded stub called by library code):
+    // its program runs here, synchronously, its sync calls dispatched as the pump would —
+    // a park that would leave the tier is a stop-rule miss upstream, and throws
+    const runSync = (fn, args) => {
+        const dispatch = dispatchSyncWith(undefined);
+        const stack = [{ fn, pc: 0, args }];
+        for (;;) {
+            const top = stack[stack.length - 1];
+            const r = PROGRAMS[top.fn](top);
+            if (r.op === "return") {
+                stack.pop();
+                if (!stack.length)
+                    return r.value;
+                stack[stack.length - 1].ret = r.value;
+            }
+            else if (r.op === "call")
+                stack.push({ fn: r.fn, pc: 0, args: r.args });
+            else if (r.op === "check")
+                continue;
+            else if (r.op === "throw") {
+                stack.pop();
+                if (!__unwind(stack, r.value))
+                    throw r.value;
+            }
+            else if (r.op === "callv" || (r.op === "dyn" && r.sync)) {
+                const park = dispatch(stack, r);
+                if (park)
+                    throw new Error("tierless: compiled closure " + fn + " would park (" + park.name + ") in a synchronous call");
+            }
+            else
+                throw new Error("tierless: compiled closure " + fn + " parked (" + r.op + ") in a synchronous call");
+        }
+    };
+    const pump = async function pump(stack, ownsHere, execHere, incoming = null, sink, offer) {
         // the dynamic call park (docs/migrate-arm.md slice 3), resolved in dispatch order:
         // twin method on a class-stamped handle / nested machine / plain promise settled
         // here. Settled promises route rejections like any resource error; a handle with no
@@ -503,6 +695,7 @@ export function makePump(bundle, { twins } = {}) {
             }
             return null;
         };
+        const dispatchSync = dispatchSyncWith(sink);
         // an op:"home" incoming is a park marker, not a resource. The stop rule's (a slot
         // name) carries nothing — the value is already in the frame's ret; a DYNAMIC park
         // ("dyn:<member>") carries the call, whose receiver decoded to the LIVE local
@@ -516,6 +709,15 @@ export function makePump(bundle, { twins } = {}) {
             const park = await dispatchDyn(stack, { recv, ...(path.length ? { path } : {}), member, args });
             if (park)
                 return { done: false, request: park, stack }; // still no meaning here: park onward (misrouted stack)
+        }
+        else if (incoming && incoming.op === "home" && (incoming.name.startsWith("dyns:") || incoming.name.startsWith("callv:"))) {
+            const sync = incoming.name.startsWith("dyns:");
+            const [recv, ...args] = incoming.args;
+            const path = incoming.name.slice(sync ? 5 : 6).split(".").filter(Boolean);
+            const member = sync ? path.pop() : undefined;
+            const park = dispatchSync(stack, { recv, ...(path.length ? { path } : {}), ...(member !== undefined ? { member } : {}), args });
+            if (park)
+                return { done: false, request: park, stack };
         }
         for (;;) {
             const top = stack[stack.length - 1];
@@ -531,6 +733,14 @@ export function makePump(bundle, { twins } = {}) {
             }
             else if (r.op === "call") {
                 stack.push({ fn: r.fn, pc: 0, args: r.args }); // suspendable call: push a sub-frame and run it
+            }
+            else if (r.op === "callv" || (r.op === "dyn" && r.sync)) {
+                const park = dispatchSync(stack, r);
+                if (park) {
+                    if (ownsHere(park.tier))
+                        throw new Error("tierless: sync call on a handle owned here has no local meaning: " + park.name);
+                    return { done: false, request: park, stack };
+                }
             }
             else if (r.op === "dyn") {
                 const park = await dispatchDyn(stack, r, offer);
@@ -558,4 +768,5 @@ export function makePump(bundle, { twins } = {}) {
             }
         }
     };
+    return Object.assign(pump, { runSync });
 }

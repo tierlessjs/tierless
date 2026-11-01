@@ -18,6 +18,13 @@ interface CompileOptions {
      *  registered with shareClass), so a shipped instance rebuilds with its prototype on
      *  any tier that loads the module. */
     syncClosures?: boolean;
+    /** Sync calls of VALUES (a captured function, a method of this or of a local) become
+     *  pump-dispatched parks: a program runs as a sub-frame under the stop rule, a live
+     *  function natively, a borrowed one at home. Module code stays a plain call. */
+    syncCalls?: boolean;
+    /** Every method of a top-level class compiles, tier calls or not — a library's methods
+     *  as machines, runnable over a view of an instance. Sync methods keep their bodies. */
+    syncMethods?: boolean;
 }
 interface CompileMeta {
     programs: string[];

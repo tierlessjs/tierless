@@ -32,7 +32,7 @@ const zlen = (x) => { let v = x >= 0 ? x * 2 : -x * 2 - 1, n = 1; while (v >= 12
     n++;
 } return n; }; // bytes of zigzag varint(x)
 // The graph codec's internal wire-node/slot shapes (graph.mts's own enc/dec keep these as
-// `any` too) — a handful of tagged-union variants (node: r/u/big/glob/symw/symf/p; slot:
+// `any` too) — a handful of tagged-union variants (node: r/u/big/glob/symw/symf/re/p; slot:
 // a/o/map/set/H/symu) that only writeNode/readNode/encodeWireBinary/decodeWireBinary ever
 // branch on, so modeling them as a full discriminated union buys nothing over `any` here.
 function writeNode(w, n, intern) {
@@ -59,6 +59,12 @@ function writeNode(w, n, intern) {
         case "symf":
             w.u8(11);
             w.varu(intern(n.key));
+            break;
+        case "re":
+            w.u8(12);
+            w.varu(intern(n.s));
+            w.varu(intern(n.f));
+            w.varu(n.li);
             break;
         default: { // "p"
             const v = n.v;
@@ -102,6 +108,7 @@ function readNode(r, S) {
         case 9: return { k: "glob", name: S(r.varu()) };
         case 10: return { k: "symw", name: S(r.varu()) };
         case 11: return { k: "symf", key: S(r.varu()) };
+        case 12: return { k: "re", s: S(r.varu()), f: S(r.varu()), li: r.varu() };
         default: throw new RangeError("wire-binary: bad node tag " + t);
     }
 }
@@ -157,6 +164,10 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
         intern(n.name);
     else if (n.k === "symf")
         intern(n.key);
+    else if (n.k === "re") {
+        intern(n.s);
+        intern(n.f);
+    }
     else if (n.k === "p" && typeof n.v === "string")
         intern(n.v); };
     const internHandle = internHandleWith(intern);
@@ -233,6 +244,15 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
         else if (s.k === "sf") {
             intern(s.name);
             internHandle(s.h);
+        }
+        else if (s.k === "bnd") {
+            intern(s.cls);
+            intern(s.name);
+            intern(s.hm.owner);
+            intern(String(s.hm.id));
+            internNode(s.s);
+            for (const e of s.a)
+                internNode(e);
         }
         else if (s.k === "symu") {
             if (s.d !== undefined)
@@ -386,6 +406,17 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
             w.varu(intern(s.name));
             writeHandle(w, s.h, intern, false);
         }
+        else if (s.k === "bnd") {
+            w.u8(14);
+            w.varu(intern(s.cls));
+            w.varu(intern(s.name));
+            w.varu(intern(s.hm.owner));
+            w.varu(intern(String(s.hm.id)));
+            writeNode(w, s.s, intern);
+            w.varu(s.a.length);
+            for (const e of s.a)
+                writeNode(w, e, intern);
+        }
         else if (s.k === "symu") {
             w.u8(5);
             if (s.d !== undefined) {
@@ -534,6 +565,14 @@ export function decodeWireBinary(bytes, { content = null, tier = null, programs 
             const name = S(r.varu());
             const { h } = readHandle(r, S);
             slot = { k: "sf", name, h };
+        }
+        else if (t === 14) {
+            const cls = S(r.varu()), name = S(r.varu()), owner = S(r.varu()), id = S(r.varu());
+            const sn = readNode(r, S);
+            const c = r.count(), a = [];
+            for (let j = 0; j < c; j++)
+                a.push(readNode(r, S));
+            slot = { k: "bnd", cls, name, hm: { owner, id }, s: sn, a };
         }
         else if (t === 5) {
             slot = { k: "symu", d: r.u8() ? S(r.varu()) : undefined };

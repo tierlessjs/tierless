@@ -109,6 +109,77 @@ await home("the object passed to a native helper", "pass", [1], "2/2", new Lib()
 await home("an element write through a computed key", "writeComputed", [1, "fr"], "2/w", new Lib(), (l) => l.data.fr?.ns.k === "w");
 await home("the instance over the byte budget (a member handle)", "readNamed", [1], "2/.", new Lib(), undefined, 64);
 
+// ---- sync calls of values: a compiled library runs over the view (syncCalls + syncMethods)
+// The library's class compiles with every method as a machine and its sync calls as
+// pump-dispatched parks; the component's sync calls too. Then `lib.get(k)` mid-chain runs
+// ON THE GATEWAY over the instance's view (reads through the view, under the stop rule),
+// a method that touches behavior (`this.on()`, a listener) parks that call home, and a
+// shipped closure (`const t = (k) => this.get(k)`) runs there too — no copy of the
+// instance anywhere.
+{
+  const SRC2 = `"use tierless";
+export class Lib2 {
+  constructor() { this.opts = { sep: "." }; this.data = { en: { ns: { k: "v", j: "w" } } }; this.list = [1, 2, 3]; this.hits = 0; this.on = () => { this.hits++; return "listened"; }; }
+  get(k) { const row = this.data.en.ns; const v = row[k]; return this.join(v, this.opts.sep); }
+  join(v, sep) { return v + sep + this.list.length; }
+  spread(...args) { return this.join?.(...args); }
+  each(xs) { const out = []; xs.forEach((x, i) => { if (i > 2) return; out.push(this.join(x, "+")); }); return out.join(",") + "/" + xs.map((x) => x.length).filter((n) => n > 1).some((n) => n > 1); }
+  notify(k) { const r = this.on(); return r + ":" + k; }
+  fixed() { const t = (k) => this.get(k); return t; }
+}
+function useClient() { return { client: globalThis.__probeClient }; }
+export function Dialog2(props) {
+  const { client } = useClient();
+  const { lib, t } = props;
+  async function viaMethod(id) { const a = await client.scopes.a(id); const r = lib.get("k"); return await client.scopes.b(a, r); }
+  async function viaListener(id) { const a = await client.scopes.a(id); const r = lib.notify("k"); return await client.scopes.b(a, r); }
+  async function viaClosure(id) { const a = await client.scopes.a(id); const r = t("j"); return await client.scopes.b(a, r); }
+  async function viaSpread(id) { const a = await client.scopes.a(id); const r = lib.spread("v", "-"); return await client.scopes.b(a, r); }
+  async function viaEach(id) { const a = await client.scopes.a(id); const r = lib.each(["p", "qq", "r", "s"]); return await client.scopes.b(a, r); }
+  return { viaMethod, viaListener, viaClosure, viaSpread, viaEach };
+}`;
+  const out2 = compile(SRC2, { filename: "views2.js", closures: true, syncClosures: true, syncCalls: true, syncMethods: true });
+  const ms2 = out2.meta.methods as Array<{ class: string; method: string; program: string | null; error?: string }>;
+  check("the library's six methods and its closure compiled, the component's five chains too", ["Lib2$get", "Lib2$join", "Lib2$notify", "Lib2$fixed", "Lib2$spread", "Lib2$each", "Lib2$fixed$t", "Dialog2$viaMethod", "Dialog2$viaListener", "Dialog2$viaClosure", "Dialog2$viaSpread", "Dialog2$viaEach"].every((n) => ms2.some((m) => m.program === n)), JSON.stringify(ms2.filter((m) => !m.program)));
+  check("a sync call of a value lowers to a pump-dispatched park, a call of module code stays plain", out2.code.includes('op: "dyn", sync: 1, recv: F.args[0], path: ["lib"], member: "get"') && out2.code.includes('op: "callv", recv: F.args[0], path: ["t"]'), out2.code.match(/op: "(?:dyn|callv)"[^}]*/g)?.slice(0, 6).join("\n"));
+  writeFileSync(join(GEN, "views2.mjs"), out2.code);
+  const m2 = await import(pathToFileURL(join(GEN, "views2.mjs")).href);
+  const b2 = { PROGRAMS: m2.PROGRAMS, __unwind: m2.__unwind, __slots: m2.__slots };
+  const run2 = async (fn: string, lib: InstanceType<typeof m2.Lib2>, t?: unknown): Promise<{ r: unknown; resumes: number; log: string[] }> => {
+    const log: string[] = []; let resumes = 0;
+    const cbs: Array<((obj: unknown, bin: Uint8Array | null) => void) | null> = [null, null];
+    const mkPort = (me: number): Port => ({
+      send(obj: any, bin?: Uint8Array): void { if (me === 0 && obj.kind === "request" && obj.payload?.type === "resume") resumes++; const m = decodeMessage(encodeMessage(obj, bin)); queueMicrotask(() => cbs[1 - me]?.(m.obj, m.bin)); },
+      onMessage(cb): void { cbs[me] = cb; }, onClose(): void { /* in-process */ }, close(): void { /* in-process */ },
+    });
+    const twin = new Client("server", log);
+    makeHost({ bundle: b2 as never, tier: "server", exec: (() => { throw new Error("none"); }) as never, twins: (cls) => (cls === "Client" ? twin : undefined) }).answer(makePeer(mkPort(1)));
+    const peer = makePeer(mkPort(0));
+    const bhost = makeHost({ bundle: b2, tier: "browser", exec: (() => { throw new Error("none"); }) as never });
+    (globalThis as Record<string, unknown>).__probeClient = new Client("browser", log);
+    m2.__bindTierlessMethods((prog: string, caps: object, a: unknown[]) => bhost.runLocal(peer, prog, [caps, ...a], { migrate: () => true }));
+    try { return { r: await m2.Dialog2({ lib, t })[fn](1), resumes, log }; } finally { m2.__bindTierlessMethods(null); }
+  };
+  const lib = new m2.Lib2();
+  check("at home the compiled sync methods behave as written", lib.get("k") === "v.3" && lib.notify("x") === "listened:x" && lib.hits === 1 && lib.fixed()("j") === "w.3" && lib.spread("v", "-") === "v-3", lib.get("k"));
+  const l4 = new m2.Lib2();
+  const r4 = await run2("viaSpread", l4);
+  check("a rest-parameter method (`...args`, a frame-field name) with a guarded optional call runs over the view — one crossing, right value", r4.r === "2/v-3" && r4.resumes === 1 && r4.log.join() === "server:a,server:b", JSON.stringify(r4));
+  const l5 = new m2.Lib2();
+  check("at home, inline array callbacks (forEach with an early return, map/filter/some) behave as written", l5.each(["p", "qq", "r", "s"]) === "p+3,qq+3,r+3/true", l5.each(["p", "qq", "r", "s"]));
+  const r5 = await run2("viaEach", new m2.Lib2());
+  check("a method whose work is inside forEach/map/filter callbacks runs over the view as loops — one crossing, right value", r5.r === "2/p+3,qq+3,r+3/true" && r5.resumes === 1 && r5.log.join() === "server:a,server:b", JSON.stringify(r5));
+  const l1 = new m2.Lib2();
+  const r1 = await run2("viaMethod", l1);
+  check("a method call mid-chain runs on the gateway over the instance's view — one crossing, right value", r1.r === "2/v.3" && r1.resumes === 1 && r1.log.join() === "server:a,server:b", JSON.stringify(r1));
+  const l2 = new m2.Lib2();
+  const r2 = await run2("viaListener", l2);
+  check("a method that calls a listener parks that call home — right value, the listener ran at home (hits=1), two crossings", r2.r === "2/listened:k" && l2.hits === 1 && r2.resumes === 2 && r2.log.join() === "server:a,server:b", JSON.stringify({ ...r2, hits: l2.hits }));
+  const l3 = new m2.Lib2();
+  const r3 = await run2("viaClosure", l3, l3.fixed());
+  check("a shipped closure over the instance (no copy: its view) runs on the gateway — one crossing, right value", r3.r === "2/w.3" && r3.resumes === 1 && r3.log.join() === "server:a,server:b", JSON.stringify(r3));
+}
+
 // ---- fidelity over random objects: what a view carries reads as the original ------------
 // Random plain/array/instance graphs with functions, host objects and big strings mixed in,
 // excised under random budgets: every own data member of the original is, in the view,

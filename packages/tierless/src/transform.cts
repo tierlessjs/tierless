@@ -160,6 +160,9 @@ let blocks: Block[], suspSet: Set<string>, AUTO_DEREF = false, AUTO_WRITEBACK = 
 let SOURCE_MAP = false, curLine = 0, srcFile = "", fnSites: Record<string, Record<number, number | undefined>> = {};   // --source-map: stamp each block with its source line so a migrated frame reports file:line, not just a pc
 let CLOSURES = false;   // opts.closures: compile async functions declared in component/hook bodies
 let SYNC_CLOSURES = false;   // opts.syncClosures: sync closures a class method creates become shippable values
+let SYNC_CALLS = false;      // opts.syncCalls: sync calls to values (a captured function, a method of this/a local) are pump-dispatched parks
+let SYNC_METHODS = false;    // opts.syncMethods: every method of a top-level class compiles, tier calls or not (a library's machines)
+let MODULE_FNS = new Set<string>();   // the module's top-level functions (a lowered body is an isolated file: module scope is known by name only)
 let fnSlots: Record<string, Record<number, string[]>> = {};   // §5 stop rule: per program per state, the frame slots its segment references (docs/migrate-arm.md)
 const nb = (): number => { const b: Block = { lines: [], term: null }; if (SOURCE_MAP) b.line = curLine; blocks.push(b); return blocks.length - 1; };
 const isSusp = (s: t.Statement): boolean =>
@@ -173,7 +176,20 @@ function suspInfo(s: t.Statement): { assign: string | null; op: string } {
   const assign = t.isVariableDeclaration(s) ? (s.declarations[0].id as t.Identifier).name : null;
   const call = y.argument as t.CallExpression;
   const a = call.arguments as t.Node[];
-  if ((call.callee as t.Identifier).name === "D") {
+  const cn = (call.callee as t.Identifier).name;
+  const slotPath = (e: t.Node): { root: t.Node; path: string[] } => {   // a static member path off a frame slot, or the expression itself
+    const path: string[] = [];
+    let root = e;
+    while (t.isMemberExpression(root) && !root.computed && t.isIdentifier(root.property) && !isSlotRef(root)) { path.unshift(root.property.name); root = root.object; }
+    return path.length && isSlotRef(root) ? { root, path } : { root: e, path: [] };
+  };
+  if (cn === "C") {
+    // C(callee, ...args) — a SYNC call of a value (rewriteSyncCalls): the pump resolves the
+    // callee where the run is (a program, a live function) or parks the call home
+    const { root, path } = slotPath(a[0]);
+    return { assign, op: `{ op: "callv", recv: ${gen(root)}, path: ${JSON.stringify(path)}, args: [${a.slice(1).map(gen).join(", ")}] }` };
+  }
+  if (cn === "D" || cn === "DS" || cn === "DSO") {
     // D(recv, "member", ...args) — the DYNAMIC call park (docs/migrate-arm.md slice 3).
     // The machine only DESCRIBES the call; the pump dispatches it (twin instance on a
     // class-stamped handle / nested machine on a stamped stub / promise settled in
@@ -186,10 +202,11 @@ function suspInfo(s: t.Statement): { assign: string | null; op: string } {
     const path: string[] = [];
     let root = a[0] as t.Node;
     while (t.isMemberExpression(root) && !root.computed && t.isIdentifier(root.property) && !isSlotRef(root)) { path.unshift(root.property.name); root = root.object; }
+    const sync = cn === "DS" ? "sync: 1, " : cn === "DSO" ? "sync: 1, opt: 1, " : "";   // a sync member call: dispatched the same way, never awaited; opt: `o.m?.()`, undefined when the member is null
     if (path.length && isSlotRef(root)) {
-      return { assign, op: `{ op: "dyn", recv: ${gen(root)}, path: ${JSON.stringify(path)}, member: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` };
+      return { assign, op: `{ op: "dyn", ${sync}recv: ${gen(root)}, path: ${JSON.stringify(path)}, member: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` };
     }
-    return { assign, op: `{ op: "dyn", recv: ${gen(a[0])}, member: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` };
+    return { assign, op: `{ op: "dyn", ${sync}recv: ${gen(a[0])}, member: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` };
   }
   return { assign, op: `{ op: "resource", tier: ${gen(a[0])}, name: ${gen(a[1])}, args: [${a.slice(2).map(gen).join(", ")}] }` };   // R(tier, name, ...args)
 }
@@ -233,9 +250,11 @@ function containsSuspCall(node: t.Node | t.Node[] | null | undefined): boolean {
 // which is all compileStmt knows how to lower. This is what lets ordinary code compile:
 // `return f(x)`, `out = api.get()`, `a + f(x)`, `g(f(x))`, `if (api.check())`, `while (...)`.
 const isResYield = (n: t.Node | null | undefined): n is t.YieldExpression => !!n && t.isYieldExpression(n) && t.isCallExpression(n.argument) && t.isIdentifier(n.argument.callee, { name: "R" });
-const isDynYield = (n: t.Node | null | undefined): n is t.YieldExpression => !!n && t.isYieldExpression(n) && t.isCallExpression(n.argument) && t.isIdentifier(n.argument.callee, { name: "D" });   // the dynamic call park (slice 3)
+const isDynYield = (n: t.Node | null | undefined): n is t.YieldExpression => !!n && t.isYieldExpression(n) && t.isCallExpression(n.argument) && (t.isIdentifier(n.argument.callee, { name: "D" }) || t.isIdentifier(n.argument.callee, { name: "DS" }) || t.isIdentifier(n.argument.callee, { name: "DSO" }));   // the dynamic call park (slice 3); DS: its sync form; DSO: a sync optional call `o.m?.()`
+const isAsyncDynYield = (n: t.Node | null | undefined): boolean => isDynYield(n) && t.isIdentifier((n.argument as t.CallExpression).callee, { name: "D" });
+const isCallvYield = (n: t.Node | null | undefined): n is t.YieldExpression => !!n && t.isYieldExpression(n) && t.isCallExpression(n.argument) && t.isIdentifier(n.argument.callee, { name: "C" });   // a sync call of a VALUE (rewriteSyncCalls)
 const isSuspCallNode = (n: t.Node | null | undefined): n is t.CallExpression => !!n && t.isCallExpression(n) && t.isIdentifier(n.callee) && suspSet.has(n.callee.name);
-const isSuspExpr = (n: t.Node | null | undefined): n is t.YieldExpression | t.CallExpression => isResYield(n) || isDynYield(n) || isSuspCallNode(n);
+const isSuspExpr = (n: t.Node | null | undefined): n is t.YieldExpression | t.CallExpression => isResYield(n) || isDynYield(n) || isCallvYield(n) || isSuspCallNode(n);
 // Same "generic walk, untyped inner walker" shape as containsSuspCall.
 function hasSuspInside(node: t.Node | t.Node[] | null | undefined, exclSelf: boolean): boolean {
   let found = false;
@@ -649,12 +668,24 @@ function compileFn(node: t.FunctionDeclaration): string {
     // same way: the pump walks the path and parks home itself when it meets a handle it
     // can't resolve. Argument expressions always stay scanned.
     const capsFn = t.isIdentifier(node.params[0], { name: "__caps" });   // a closure program: frame arg 0 is its caps
+    const selfFn = t.isIdentifier(node.params[0], { name: "__self" });   // a method program: frame arg 0 is its receiver
     const refsOf = (id: number): Set<string> => {
       const out = new Set<string>();
-      const text = caseText.get(id)!.replace(/\bop: "dyn", recv: F\.(?:args\[\d+\]|[A-Za-z_$][\w$]*)(?=,)/g, 'op: "dyn"');
+      // a SYNC call park (callv, dyn+sync) is checked by the pump in full — receiver and
+      // arguments — since only it knows whether the callee is a program (its own refs
+      // guard what it reads) or native code (which must not receive a view): its text is
+      // not scanned here. An async dyn park's receiver is the pump's; its args are scanned.
+      // A shipped closure's generated lines are not the segment's reads either: the kept
+      // original body (off-tier, calls go to the program through the stub) and the caps
+      // builder (invoked by the codec, which excises what it reads).
+      const text = caseText.get(id)!.split("\n").filter((l) => !/^\s*F\._{1,2}tierless_orig_[\w$]+ = /.test(l) && !/\.__tierless_caps = \(\) => \(\{/.test(l) && !l.includes("((__tl_orig) => {")).join("\n")
+        .replace(/return \{ op: "(?:callv|dyn", sync: 1)[^\n]*\};/g, "").replace(/\b(op: "dyn", recv): F\.(?:args\[\d+\]|[A-Za-z_$][\w$]*)(?=,)/g, "$1");
       for (const m of text.matchAll(/\bF\.([A-Za-z_$][\w$]*)(\[(\d+)\])?((?:\??\.[A-Za-z_$][\w$]*)*)/g)) {
         if (m[1] === "pc") continue;
-        const slot = m[1] === "args" && m[3] !== undefined ? `args[${m[3]}]` : m[1];
+        // the whole args array (a rest parameter's unpack): arg 0 of a closure or method
+        // program is its caps or receiver — a view by design, checked by its own member
+        // refs — so "args+" means the elements from 1
+        const slot = m[1] === "args" && m[3] !== undefined ? `args[${m[3]}]` : m[1] === "args" && (capsFn || selfFn) ? "args+" : m[1];
         // a plain READ records its member chain ("args[0].user.id"): a caps VIEW's
         // primitives, nested ones too, may be read off-tier (graph.mts "views"). A write
         // or a delete (it must land on the home object) records the whole slot. A call's
@@ -664,6 +695,9 @@ function compileFn(node: t.FunctionDeclaration): string {
         const members = m[4] ? m[4].split(/\??\./).slice(1) : [];
         const after = text.slice(m.index! + m[0].length), before = text.slice(0, m.index!);
         const write = /^\s*(?:\+\+|--|(?:\*\*|<<|>>>?|&&|\|\||\?\?|[-+*\/%&|^])?=(?!=))/.test(after) || /(?:\+\+|--|\bdelete)\s*$/.test(before);
+        // a bare slot as the TARGET of a plain assignment (`F.x = …`, a local reassigned —
+        // `object = object[key]`) touches nothing: the frame's own variable changes
+        if (write && !members.length && /^\s*=(?!=)/.test(after)) continue;
         if (write) { out.add(slot); continue; }
         const call = /^\s*(?:\?\.)?\(/.test(after);
         // computed access on the chain's result (`data[lng][ns]`): consume the bracket
@@ -679,8 +713,33 @@ function compileFn(node: t.FunctionDeclaration): string {
         // a read whose whole statement is `F.x = <this>;` only MOVES the value into a frame
         // slot (that slot's later uses have refs of their own): "=" — or, through computed
         // access, "[]=" (the object reached must be complete: runtime.mts parkHome)
-        const move = !call && /\bF\.(?:args\[\d+\]|[A-Za-z_$][\w$]*)\s*(?<![=!<>+\-*\/%&|^])=\s*$/.test(before) && /^\s*;/.test(brackets ? rest : after);
-        if (!members.length && !(move && brackets)) { out.add(slot); continue; }
+        const tail = brackets ? rest : after;
+        // the statement this read sits in (one per line of case text), and the read's
+        // neighbours within it
+        const ls = text.lastIndexOf("\n", m.index!) + 1, le = text.indexOf("\n", m.index!);
+        const line = text.slice(ls, le < 0 ? undefined : le), beforeL = line.slice(0, m.index! - ls), afterL = (brackets ? rest : after).slice(0, Math.max(0, (le < 0 ? text.length : le) - (m.index! + m[0].length + (after.length - tail.length))));
+        // a read that only TESTS presence or truthiness: `x == null`, `!x`, `typeof x`, or
+        // an operand of an if/while condition — a view or a member handle at the end
+        // answers like the home object (the condition opens a block, or is a lowered
+        // branch: `if (c) { F.pc = 1; } else { F.pc = 2; } break;`)
+        const cond = /^\s*(?:if|while) \(.*\) \{(?: F\.pc = \d+; \} else \{ F\.pc = \d+; \} break;)?$/.test(line) && /(?:\(|!|&&|\|\|)\s*$/.test(beforeL) && /^\s*(?:\)|&&|\|\|)/.test(afterL);
+        // …or the sole argument of a shallow pure builtin that answers the same for a view
+        // (Array.isArray: a view array is an array; Object.keys: a view has the original's own keys)
+        const pureArg = /\b(?:Array\.isArray|Object\.keys)\($/.test(before) && /^\s*\)/.test(tail);
+        const test = !call && (/^\s*(?:[!=]==?)\s*(?:null|undefined|void 0)\b/.test(tail) || /(?:!|\btypeof\s*)$/.test(before) || cond || pureArg);
+        // a read whose value only MOVES into a frame slot: the whole right side of
+        // `F.x = …;`, or a bare operand of ||, &&, ?? or ?: inside it (the slot's later
+        // uses have refs of their own)
+        // …or the value a `return` hands to the caller's frame (its uses have refs there)
+        const moveStmt = /^\s*F\.(?:args\[\d+\]|[A-Za-z_$][\w$]*) = [^;]*;$/.test(line) || /^\s*return \{ op: "return", value: [^;]*\};$/.test(line);   // one statement: a park's `F.pc = n; return { op: "dyn", … }` is not a move
+        const operand = moveStmt && /(?:=|value:|\|\||&&|\?\?|\?|:)\s*$/.test(beforeL) && /^\s*(?:;|\}|\|\||&&|\?\?|\?|:)/.test(afterL);
+        // …or a property/element of an object or array LITERAL built by such a statement
+        // (`return { obj: x, k }`): the literal is fresh data that moves on; no call may
+        // sit on the line (a literal passed to native code would carry the view out)
+        const literalMove = moveStmt && !/[()]/.test(line) && /(?::|\[|,)\s*$/.test(beforeL) && /^\s*(?:,|\}|\])/.test(afterL);
+        const move = !call && (test || operand || literalMove);
+        if (!members.length && !brackets) { out.add(move ? slot + "=" : slot); continue; }   // a direct slot: a test or move only needs it present; anything else is a whole-slot use
+        if (!members.length && !move) { out.add(slot); continue; }
         const chain = call && !(capsFn && slot === "args[0]" && members.length === 1) ? members.slice(0, -1) : members;
         out.add([slot, ...chain].join(".") + (move ? (brackets ? "[]=" : "=") : ""));
       }
@@ -1050,6 +1109,16 @@ function renameFrameClashes(p: NodePath<t.FunctionDeclaration>): void {
     VariableDeclarator(v) { if (v.getFunctionParent()?.node === p.node && t.isIdentifier(v.node.id) && FRAME_FIELD(v.node.id.name)) clash.add(v.node.id.name); },
     CatchClause(c) { if (c.getFunctionParent()?.node === p.node && t.isIdentifier(c.node.param) && FRAME_FIELD(c.node.param.name)) clash.add(c.node.param.name); },
   });
+  // params that desugar into LOCALS (a rest element, a destructured pattern) clash like
+  // locals: `t(...args)` would become `F.args = F.args.slice(1)`, clobbering the frame's
+  // own arguments. A plain param (defaulted or not) stays a param (F.args[i]) and must keep
+  // its name — renaming it once hid a closure's `__caps`.
+  const localsFromParam = (prm: t.Node): string[] => {
+    if (t.isRestElement(prm)) return t.isIdentifier(prm.argument) ? [prm.argument.name] : Object.keys(t.getBindingIdentifiers(prm.argument));
+    if (t.isAssignmentPattern(prm)) return t.isIdentifier(prm.left) ? [] : Object.keys(t.getBindingIdentifiers(prm.left));
+    return t.isIdentifier(prm) ? [] : Object.keys(t.getBindingIdentifiers(prm));
+  };
+  for (const prm of p.node.params) for (const n of localsFromParam(prm)) if (FRAME_FIELD(n)) clash.add(n);
   if (!clash.size) return;
   const scopes = new Set<import("@babel/traverse").Scope>([p.scope]);
   p.traverse({ Scopable(sp) { if (sp.getFunctionParent()?.node === p.node || sp.node === p.node) scopes.add(sp.scope); } });
@@ -1227,15 +1296,20 @@ function compileClassMethods(ast: t.File, progs: string[], meta: CompileMeta, re
         progs.push(prog);
         meta.programs.push(progName);
         meta.methods.push({ class: clsName, method: mName, program: progName });
-        // keep the original under a mangled name; the visible method becomes the stub
-        cls.body.body.push(t.classMethod("method", t.identifier("__tierless_orig_" + mName), m.params, m.body, false, false, false, m.async));
-        m.params = [];                                             // stub reads `arguments`; original params would re-evaluate defaults
-        m.body = t.blockStatement([t.returnStatement(t.conditionalExpression(
-          t.binaryExpression("===", t.unaryExpression("typeof", t.identifier("__TIERLESS_METHOD__")), t.stringLiteral("function")),
-          t.callExpression(t.identifier("__TIERLESS_METHOD__"), [t.stringLiteral(progName), t.thisExpression(),
-            t.callExpression(t.memberExpression(t.identifier("Array"), t.identifier("from")), [t.identifier("arguments")])]),
-          t.callExpression(t.memberExpression(t.thisExpression(), t.identifier("__tierless_orig_" + mName)), [t.spreadElement(t.identifier("arguments"))]),
-        ))]);
+        // keep the original under a mangled name; the visible method becomes the stub.
+        // A SYNC method (syncMethods) keeps its body: the routing stub returns a promise,
+        // which a sync caller can't take — its machine runs when a compiled caller's
+        // pump-dispatched call reaches it (by the program stamp below, or by class on a view)
+        if (m.async) {
+          cls.body.body.push(t.classMethod("method", t.identifier("__tierless_orig_" + mName), m.params, m.body, false, false, false, m.async));
+          m.params = [];                                           // stub reads `arguments`; original params would re-evaluate defaults
+          m.body = t.blockStatement([t.returnStatement(t.conditionalExpression(
+            t.binaryExpression("===", t.unaryExpression("typeof", t.identifier("__TIERLESS_METHOD__")), t.stringLiteral("function")),
+            t.callExpression(t.identifier("__TIERLESS_METHOD__"), [t.stringLiteral(progName), t.thisExpression(),
+              t.callExpression(t.memberExpression(t.identifier("Array"), t.identifier("from")), [t.identifier("arguments")])]),
+            t.callExpression(t.memberExpression(t.thisExpression(), t.identifier("__tierless_orig_" + mName)), [t.spreadElement(t.identifier("arguments"))]),
+          ))]);
+        }
         // stamp the stub with its program name: a compiled CALLER's dynamic park reads it
         // to push this method as a nested machine instead of awaiting an opaque promise
         stubProps.push(t.expressionStatement(t.assignmentExpression("=",
@@ -1269,50 +1343,131 @@ function compileClassMethods(ast: t.File, progs: string[], meta: CompileMeta, re
 // Scope: `const NAME = <sync arrow|function>` statements directly in a class method's
 // body. Captures are the method's bindings and module bindings the closure reads (a
 // write to one can't be carried: the closure stays native); `this` captures as `__self`.
+// Pass state shared by the two closure passes below (reset per compile)
+let madeByPass = new WeakSet<t.Node>();                            // function nodes the passes emit: never targets themselves
+let takenNames = new Set<string>();
+const uniqName = (base: string): string => { let n = base, i = 2; while (takenNames.has(n)) n = base + "_" + i++; takenNames.add(n); return n; };
+
+// every sync closure in a function body, INNERMOST FIRST (an outer closure's program then
+// carries the inner one's stub), each replaced by its stub: a `const NAME = fn` keeps the
+// statement form (the closure may name itself); any other position becomes an expression
+// — (orig => stub)(fn). `selfOk`: an arrow's `this` here is an instance
+function convertClosuresIn(body: NodePath, owner: string, selfOk: boolean, report: (name: string) => string, progs: string[], meta: CompileMeta): void {
+  const made = madeByPass;
+  const targets: NodePath<t.ArrowFunctionExpression | t.FunctionExpression>[] = [];
+  body.traverse({ "ArrowFunctionExpression|FunctionExpression"(fp: NodePath) { if (!made.has(fp.node)) targets.push(fp as NodePath<t.ArrowFunctionExpression | t.FunctionExpression>); } });
+  let anon = 0;
+  for (const fp of targets.reverse()) {                              // pre-order reversed: a nested closure precedes the one that holds it
+    const fn = fp.node;
+    if (fn.async || fn.generator) continue;
+    if (fp.parentPath.isCallExpression() && fp.parentPath.node.callee === fn) continue;   // an IIFE
+    const decl = fp.parentPath.isVariableDeclarator() && t.isIdentifier(fp.parentPath.node.id) ? fp.parentPath as NodePath<t.VariableDeclarator> : null;
+    const name = decl ? (decl.node.id as t.Identifier).name : fp.parentPath.isObjectProperty() && t.isIdentifier(fp.parentPath.node.key) ? fp.parentPath.node.key.name : "fn" + anon++;
+    // `this` is the instance only through arrows all the way up to the method body
+    let thisOk = selfOk;
+    for (let a: NodePath | null = fp.parentPath; a && a !== body; a = a.parentPath) if (a.isFunction() && !a.isArrowFunctionExpression()) { thisOk = false; break; }
+    const progName = uniqName(`${owner}$${name}`);
+    try {
+      const captures = lowerSyncClosure(fp, thisOk, progName, report(name), progs, meta);
+      const capsLit = t.objectExpression([
+        ...(captures.self ? [t.objectProperty(t.identifier("__self"), t.thisExpression())] : []),
+        ...captures.names.map((n) => t.objectProperty(t.identifier(n), t.identifier(n), false, true)),
+      ]);
+      const builder = t.arrowFunctionExpression([], capsLit); made.add(builder);
+      if (decl) {
+        const sp = decl.parentPath as NodePath<t.VariableDeclaration>;
+        const origName = "__tierless_orig_" + name;
+        sp.insertBefore(t.variableDeclaration("const", [t.variableDeclarator(t.identifier(origName), fn)]));
+        const stub = t.arrowFunctionExpression([t.restElement(t.identifier("__tl_args"))], t.callExpression(t.identifier(origName), [t.spreadElement(t.identifier("__tl_args"))])); made.add(stub);
+        decl.node.init = stub;
+        sp.insertAfter([
+          t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier(name), t.identifier("__tierless_caps")), builder)),
+          t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier(name), t.identifier("__tierless_sync")), t.booleanLiteral(true))),
+          t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier(name), t.identifier("__tierless_program")), t.stringLiteral(progName))),
+        ]);
+      } else {
+        const stub = t.arrowFunctionExpression([t.restElement(t.identifier("__tl_args"))], t.callExpression(t.identifier("__tl_orig"), [t.spreadElement(t.identifier("__tl_args"))])); made.add(stub);
+        const wrap = t.arrowFunctionExpression([t.identifier("__tl_orig")], t.blockStatement([
+          t.variableDeclaration("const", [t.variableDeclarator(t.identifier("__tl_stub"), stub)]),
+          t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier("__tl_stub"), t.identifier("__tierless_caps")), builder)),
+          t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier("__tl_stub"), t.identifier("__tierless_sync")), t.booleanLiteral(true))),
+          t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier("__tl_stub"), t.identifier("__tierless_program")), t.stringLiteral(progName))),
+          t.returnStatement(t.identifier("__tl_stub")),
+        ])); made.add(wrap);
+        fp.replaceWith(t.callExpression(wrap, [fn]));
+      }
+      meta.methods.push({ class: owner.split("$")[0], method: owner.split("$").slice(1).concat(name).join("."), program: progName });
+    } catch (e) {
+      meta.methods.push({ class: owner.split("$")[0], method: owner.split("$").slice(1).concat(name).join("."), program: null, error: (e as Error).message.split("\n")[0] });
+    }
+  }
+}
+// the top-level functions of the module: [path, name]
+function moduleFunctions(ast: t.File): Array<[NodePath<t.Function>, string]> {
+  const out: Array<[NodePath<t.Function>, string]> = [];
+  traverse(ast, { Function(fp) {
+    const top = fp.isFunctionDeclaration() ? fp.parentPath : fp.parentPath.isVariableDeclarator() ? fp.parentPath.parentPath?.parentPath : null;
+    const exported = top && top.isExportNamedDeclaration() ? top.parentPath : top;
+    if (!top || !exported?.isProgram()) return;
+    const fname = fp.isFunctionDeclaration() ? fp.node.id?.name : t.isIdentifier((fp.parentPath.node as t.VariableDeclarator).id) ? ((fp.parentPath.node as t.VariableDeclarator).id as t.Identifier).name : undefined;
+    if (fname && !madeByPass.has(fp.node)) out.push([fp, fname]);
+    fp.skip();
+  } });
+  return out;
+}
+/** PASS 1 (before class methods compile, so their programs carry the stubs): the sync
+ *  closures in every class method, constructor and module-level function become
+ *  shippable stubs — in the kept code and, cloned from it, in the programs. */
+function convertClosures(ast: t.File, progs: string[], meta: CompileMeta): void {
+  madeByPass = new WeakSet(); takenNames = new Set(meta.programs);
+  traverse(ast, { ClassDeclaration(cp) {
+    const topLevel = cp.parentPath.isExportNamedDeclaration() ? !!cp.parentPath.parentPath?.isProgram() : cp.parentPath.isProgram();
+    if (!cp.node.id || !topLevel) return;
+    const clsName = cp.node.id.name;
+    for (const mp of cp.get("body.body") as NodePath[]) {
+      if (!mp.isClassMethod() || !(mp.node.kind === "method" || mp.node.kind === "constructor") || mp.node.static || mp.node.computed || !t.isIdentifier(mp.node.key)) continue;
+      const mName = mp.node.key.name;
+      if (SYNC_CALLS) inlineArrayCallbacks(mp as NodePath<t.Function>);   // loops first: an inline callback is the function's own code, not a closure
+      convertClosuresIn(mp.get("body") as NodePath, `${clsName}$${mName}`, true, (n) => `${clsName}.${mName}.${n}`, progs, meta);
+    }
+  } });
+  for (const [fp, fname] of moduleFunctions(ast)) {
+    if (SYNC_CALLS) inlineArrayCallbacks(fp);
+    const body = fp.get("body") as NodePath;
+    if (body.isBlockStatement() || body.isExpression()) convertClosuresIn(body, fname, false, (n) => `${fname}.${n}`, progs, meta);
+  }
+}
+/** PASS 2 (after): every top-level class gets a tier-independent identity (shareClass:
+ *  a compiled class its bare name, any other module hash + name), and under syncMethods
+ *  each module-level function becomes a program too, stamped on the function. */
 function convertSyncClosures(ast: t.File, progs: string[], meta: CompileMeta, rest: t.Statement[]): void {
   const moduleHash = fnv1a(gen(ast.program));
-  const compiledClasses = new Set(meta.methods.filter((m) => m.program).map((m) => m.class));
+  const compiledClasses = new Set(meta.methods.filter((m) => m.program && !m.method.includes(".")).map((m) => m.class));   // classes with compiled METHODS (a closure's entry is "method.closure")
   const stamps: t.Statement[] = [];
   traverse(ast, { ClassDeclaration(cp) {
     const topLevel = cp.parentPath.isExportNamedDeclaration() ? !!cp.parentPath.parentPath?.isProgram() : cp.parentPath.isProgram();
     if (!cp.node.id || !topLevel) return;
     const clsName = cp.node.id.name;
-    // identity: a compiled class keeps its bare name (its machines and twins key on it);
-    // any other class is named by module + class, so two modules' `Logger`s stay apart
     const clsId = compiledClasses.has(clsName) ? clsName : `${moduleHash}:${clsName}`;
     stamps.push(t.expressionStatement(t.callExpression(t.identifier("__tlShareClass"), [t.stringLiteral(clsId), t.identifier(clsName)])));
-    for (const mp of cp.get("body.body") as NodePath[]) {
-      if (!mp.isClassMethod() || mp.node.kind !== "method" || mp.node.static || mp.node.computed || !t.isIdentifier(mp.node.key)) continue;
-      const mName = mp.node.key.name;
-      if (compiledClasses.has(clsName) && meta.methods.some((m) => m.class === clsName && m.method === mName && m.program)) continue;   // its body is the stub now
-      for (const sp of (mp.get("body") as NodePath<t.BlockStatement>).get("body")) {
-        if (!sp.isVariableDeclaration()) continue;
-        for (const dp of sp.get("declarations")) {
-          const init = dp.get("init");
-          if (!t.isIdentifier(dp.node.id) || Array.isArray(init) || !(init.isArrowFunctionExpression() || init.isFunctionExpression()) || init.node.async || init.node.generator) continue;
-          const fnName = dp.node.id.name, progName = `${clsName}$${mName}$${fnName}`;
-          try {
-            const captures = lowerSyncClosure(init as NodePath<t.ArrowFunctionExpression | t.FunctionExpression>, mp.node, progName, `${clsName}.${mName}.${fnName}`, progs, meta);
-            const origName = "__tierless_orig_" + fnName;
-            sp.insertBefore(t.variableDeclaration("const", [t.variableDeclarator(t.identifier(origName), init.node)]));
-            dp.node.init = t.arrowFunctionExpression([t.restElement(t.identifier("__tl_args"))], t.callExpression(t.identifier(origName), [t.spreadElement(t.identifier("__tl_args"))]));
-            const capsLit = t.objectExpression([
-              ...(captures.self ? [t.objectProperty(t.identifier("__self"), t.thisExpression())] : []),
-              ...captures.names.map((n) => t.objectProperty(t.identifier(n), t.identifier(n), false, true)),
-            ]);
-            sp.insertAfter([
-              t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier(fnName), t.identifier("__tierless_caps")), t.arrowFunctionExpression([], capsLit))),
-              t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier(fnName), t.identifier("__tierless_sync")), t.booleanLiteral(true))),
-              t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier(fnName), t.identifier("__tierless_program")), t.stringLiteral(progName))),
-            ]);
-            meta.methods.push({ class: clsName, method: `${mName}.${fnName}`, program: progName });
-          } catch (e) {
-            meta.methods.push({ class: clsName, method: `${mName}.${fnName}`, program: null, error: (e as Error).message.split("\n")[0] });
-          }
-        }
-      }
-    }
   } });
+  if (SYNC_METHODS) for (const [fp, fname] of moduleFunctions(ast)) {
+    if (fp.node.async || fp.node.generator || !(fp.isFunctionDeclaration() || fp.isArrowFunctionExpression() || fp.isFunctionExpression())) continue;
+    if (meta.methods.some((m) => m.class === "fn:" + fname)) continue;   // a component: compileComponentFunctions owns it
+    const progName = uniqName(fname);
+    try {
+      const captures = lowerSyncClosure(fp as NodePath<t.ArrowFunctionExpression | t.FunctionExpression>, false, progName, fname, progs, meta);
+      const builder = t.arrowFunctionExpression([], t.objectExpression(captures.names.map((n) => t.objectProperty(t.identifier(n), t.identifier(n), false, true)))); madeByPass.add(builder);
+      stamps.push(
+        t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier(fname), t.identifier("__tierless_caps")), builder)),
+        t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier(fname), t.identifier("__tierless_sync")), t.booleanLiteral(true))),
+        t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier(fname), t.identifier("__tierless_program")), t.stringLiteral(progName))),
+      );
+      meta.methods.push({ class: "(module)", method: fname, program: progName });
+    } catch (e) {
+      meta.methods.push({ class: "(module)", method: fname, program: null, error: (e as Error).message.split("\n")[0] });
+    }
+  }
   if (!stamps.length) return;
   rest.unshift(t.importDeclaration([t.importSpecifier(t.identifier("__tlShareClass"), t.identifier("shareClass"))], t.stringLiteral("tierless/graph")));
   rest.push(...stamps);
@@ -1321,7 +1476,7 @@ function convertSyncClosures(ast: t.File, progs: string[], meta: CompileMeta, re
 // One sync closure -> program `prog(__caps, ...params)`: captured names read through
 // __caps, `this` (the method's, through arrows) through __caps.__self. Returns what the
 // kept stub must put in the caps literal.
-function lowerSyncClosure(fnPath: NodePath<t.ArrowFunctionExpression | t.FunctionExpression>, method: t.ClassMethod, progName: string, label: string, progs: string[], meta: CompileMeta): { names: string[]; self: boolean } {
+function lowerSyncClosure(fnPath: NodePath<t.ArrowFunctionExpression | t.FunctionExpression>, selfOk: boolean, progName: string, label: string, progs: string[], meta: CompileMeta): { names: string[]; self: boolean } {
   const fn = fnPath.node;
   const names: string[] = [];
   const seen = new Set<string>();
@@ -1347,7 +1502,7 @@ function lowerSyncClosure(fnPath: NodePath<t.ArrowFunctionExpression | t.Functio
     if (f && f.node === fn && t.isArrowFunctionExpression(fn)) self = true;   // an arrow's this is the method's
     else if (f && f.node === fn) throw new Error(`tierless: ${label} is a function expression using its own \`this\` — the closure stays native`);
   } });
-  if (self && method.kind !== "method") throw new Error(`tierless: ${label} captures this outside a method`);
+  if (self && !selfOk) throw new Error(`tierless: ${label} captures \`this\` outside an instance method — the closure stays native`);
   const body = t.isBlockStatement(fn.body) ? t.cloneNode(fn.body, true) : t.blockStatement([t.returnStatement(t.cloneNode(fn.body, true))]);
   const fnNode = t.functionDeclaration(t.identifier(progName), [t.identifier("__caps"), ...(fn.params.map((x) => t.cloneNode(x, true)) as t.FunctionDeclaration["params"])], body);
   const file = t.file(t.program([fnNode]));
@@ -1363,6 +1518,7 @@ function lowerSyncClosure(fnPath: NodePath<t.ArrowFunctionExpression | t.Functio
   } });
   allowlist(file);
   rewriteDynAwaits(file, fnNode);
+  if (SYNC_CALLS) { traverse(file, { FunctionDeclaration(fp) { if (fp.node === fnNode) { inlineArrayCallbacks(fp); fp.stop(); } } }); rewriteSyncCalls(file, fnNode); }                  // sync calls of values -> pump-dispatched parks
   traverse(file, { AwaitExpression(ap) {
     if (ap.getFunctionParent()?.node !== fnNode) return;
     throw new Error(`tierless: ${label} awaits (line ${ap.node.loc?.start.line ?? "?"}) — a sync closure can't; the closure stays native`);
@@ -1391,6 +1547,188 @@ function rewriteDynAwaits(file: t.File, fnNode: t.FunctionDeclaration): void {
       y.loc = ap.node.loc;
       ap.replaceWith(y);
     }
+  } });
+}
+
+// ---- tracked binds (opts.syncClosures) --------------------------------------------------
+// `x.bind(self, …)` anywhere in the module becomes bindTracked(x, self, [...]) (graph.mts):
+// a bound method of a shared class then ships as the method by name plus its receiver
+// and args, and runs off-tier as the class's program over the receiver's view — the
+// i18next idiom (bindMemberFunctions) made shippable without guessing from names.
+function rewriteBinds(ast: t.File, rest: t.Statement[]): void {
+  let n = 0;
+  traverse(ast, { CallExpression(cp) {
+    const c = cp.node.callee;
+    if (!t.isMemberExpression(c) || c.computed || !t.isIdentifier(c.property, { name: "bind" }) || !cp.node.arguments.length || cp.node.arguments.some((a) => t.isSpreadElement(a))) return;
+    if (t.isSuper(c.object)) return;
+    const [self, ...args] = cp.node.arguments as t.Expression[];
+    cp.replaceWith(t.callExpression(t.identifier("__tlBind"), [c.object as t.Expression, self, t.arrayExpression(args)]));
+    n++;
+  } });
+  if (n) rest.unshift(t.importDeclaration([t.importSpecifier(t.identifier("__tlBind"), t.identifier("bindTracked"))], t.stringLiteral("tierless/graph")));
+}
+
+// ---- inline array callbacks as loops (opts.syncCalls) -----------------------------------
+// `xs.forEach(x => …)`, map, filter, some, every, find, findIndex, reduce with an INLINE
+// callback: the callback's body runs natively inside the segment, so a `this.m()` in it
+// can't park and sends the whole receiver home. Lowered into a loop over the array (the
+// body becomes the function's own code, under the stop rule and the sync-call rewrite),
+// guarded by Array.isArray — any other receiver (a Map, a NodeList) keeps the native call.
+// Only at statement level, as `const v = …`, `v = …` or `return …`; a callback using its
+// own `this`/`arguments`, async, or with a thisArg stays native.
+let cbCounter = 0;
+function inlineArrayCallbacks(fnPath: NodePath<t.Function>): void {
+  const fnNode = fnPath.node;
+  const METHODS = new Set(["forEach", "map", "filter", "some", "every", "find", "findIndex", "reduce"]);
+  const fresh = (): string => "__cb" + cbCounter++;
+  const nativeKept = new WeakSet<t.Node>();                      // the fallback calls this pass emits: not candidates again
+  for (let guard = 0; guard < 10000; guard++) {
+    let acted = false;
+    fnPath.traverse({ CallExpression(cp) {
+      if (acted || cp.getFunctionParent()?.node !== fnNode || nativeKept.has(cp.node)) return;
+      const c = cp.node.callee;
+      if (!t.isMemberExpression(c) || c.computed || !t.isIdentifier(c.property) || !METHODS.has(c.property.name)) return;
+      const method = c.property.name, args = cp.node.arguments;
+      const cb = args[0];
+      if (!cb || !(t.isArrowFunctionExpression(cb) || t.isFunctionExpression(cb)) || cb.async || cb.generator) return;
+      if (args.length !== (method === "reduce" ? 2 : 1)) return;
+      if (cb.params.length > (method === "reduce" ? 3 : 2) || cb.params.some((q) => !(t.isIdentifier(q) || t.isArrayPattern(q) || t.isObjectPattern(q)))) return;
+      const cbPath = cp.get("arguments.0") as NodePath<t.ArrowFunctionExpression | t.FunctionExpression>;
+      let bad = false;
+      cbPath.traverse({
+        ThisExpression(tp) { if (t.isFunctionExpression(cb)) { let f = tp.getFunctionParent(); while (f && f.isArrowFunctionExpression()) f = f.getFunctionParent(); if (f?.node === cb) bad = true; } },
+        Identifier(ip) { if (ip.node.name === "arguments" && ip.getFunctionParent()?.node === cb) bad = true; },
+        YieldExpression() { bad = true; },
+      });
+      if (bad) return;
+      const par = cp.parentPath;
+      let kind: "stmt" | "decl" | "assign" | "return";
+      if (par.isExpressionStatement()) kind = "stmt";
+      else if (par.isVariableDeclarator() && par.node.init === cp.node && t.isIdentifier(par.node.id) && (par.parentPath.node as t.VariableDeclaration).declarations.length === 1) kind = "decl";
+      else if (par.isAssignmentExpression() && par.node.right === cp.node && par.node.operator === "=" && t.isIdentifier(par.node.left) && par.parentPath.isExpressionStatement()) kind = "assign";
+      else if (par.isReturnStatement()) kind = "return";
+      else return;
+      // the callback's own names must not alias the function's: rename on clash
+      const fnScope = cbPath.scope.getFunctionParent()!.parent!;   // the enclosing function's scope (through the callback's own)
+      for (const name of Object.keys(cbPath.scope.bindings)) if (fnScope.hasBinding(name)) cbPath.scope.rename(name, fresh() + "_" + name);
+      cbPath.traverse({ Scopable(sp) { for (const name of Object.keys(sp.scope.bindings)) if (sp.scope !== cbPath.scope && fnScope.hasBinding(name)) sp.scope.rename(name, fresh() + "_" + name); } });
+      const a = fresh(), i = fresh(), r = fresh();
+      const [q0, q1, q2] = cb.params;
+      const accP = method === "reduce" ? (q0 as t.Identifier) : undefined, itemP = method === "reduce" ? q1 : q0, idxP = method === "reduce" ? q2 : q1;
+      const itemId = itemP && t.isIdentifier(itemP) ? itemP.name : fresh();
+      const item = (): t.Identifier => t.identifier(itemId);
+      const assign = (name: string, e: t.Expression): t.Statement => t.expressionStatement(t.assignmentExpression("=", t.identifier(name), e));
+      const push = (e: t.Expression): t.Statement => t.expressionStatement(t.callExpression(t.memberExpression(t.identifier(r), t.identifier("push")), [e]));
+      const brk = (): t.Statement => t.breakStatement(), cont = (): t.Statement => t.continueStatement();
+      const undef = (): t.Expression => t.identifier("undefined");
+      const onReturn = (e: t.Expression | null): t.Statement[] => {
+        const v = e ?? undef();
+        switch (method) {
+          case "forEach": return [cont()];
+          case "map": return [push(v), cont()];
+          case "filter": return [t.ifStatement(v, push(item())), cont()];
+          case "some": return [t.ifStatement(v, t.blockStatement([assign(r, t.booleanLiteral(true)), brk()])), cont()];
+          case "every": return [t.ifStatement(t.unaryExpression("!", v), t.blockStatement([assign(r, t.booleanLiteral(false)), brk()])), cont()];
+          case "find": return [t.ifStatement(v, t.blockStatement([assign(r, item()), brk()])), cont()];
+          case "findIndex": return [t.ifStatement(v, t.blockStatement([assign(r, t.identifier(i)), brk()])), cont()];
+          default: return [assign(accP!.name, v), cont()];          // reduce
+        }
+      };
+      const body = t.isBlockStatement(cb.body) ? t.cloneNode(cb.body, true) : t.blockStatement([t.returnStatement(t.cloneNode(cb.body, true))]);
+      const wrapper = t.functionDeclaration(t.identifier("__w"), [], body);
+      traverse(t.file(t.program([wrapper])), { ReturnStatement(rp) { if (rp.getFunctionParent()?.node === wrapper) rp.replaceWithMultiple(onReturn(rp.node.argument ?? null)); } });
+      const loopBody: t.Statement[] = [];
+      if (itemP) loopBody.push(t.variableDeclaration("const", [t.variableDeclarator(t.isIdentifier(itemP) ? t.identifier(itemId) : (itemP as t.ArrayPattern | t.ObjectPattern), t.memberExpression(t.identifier(a), t.identifier(i), true))]));
+      if (idxP && t.isIdentifier(idxP)) loopBody.push(t.variableDeclaration("const", [t.variableDeclarator(idxP, t.identifier(i))]));
+      loopBody.push(...wrapper.body.body, ...onReturn(null).filter((st) => !t.isContinueStatement(st)));   // falling off the end returns undefined
+      const loop = t.forStatement(
+        t.variableDeclaration("let", [t.variableDeclarator(t.identifier(i), t.numericLiteral(0))]),
+        t.binaryExpression("<", t.identifier(i), t.memberExpression(t.identifier(a), t.identifier("length"))),
+        t.updateExpression("++", t.identifier(i)), t.blockStatement(loopBody));
+      const init: t.Statement[] = method === "map" || method === "filter" ? [t.variableDeclaration("const", [t.variableDeclarator(t.identifier(r), t.arrayExpression([]))])]
+        : method === "some" ? [t.variableDeclaration("let", [t.variableDeclarator(t.identifier(r), t.booleanLiteral(false))])]
+        : method === "every" ? [t.variableDeclaration("let", [t.variableDeclarator(t.identifier(r), t.booleanLiteral(true))])]
+        : method === "find" ? [t.variableDeclaration("let", [t.variableDeclarator(t.identifier(r), undef())])]
+        : method === "findIndex" ? [t.variableDeclaration("let", [t.variableDeclarator(t.identifier(r), t.unaryExpression("-", t.numericLiteral(1)))])]
+        : method === "reduce" ? [t.variableDeclaration("let", [t.variableDeclarator(t.identifier(accP!.name), args[1] as t.Expression)])] : [];
+      const result = (): t.Expression => (method === "reduce" ? t.identifier(accP!.name) : t.identifier(r));
+      const target = kind === "decl" ? (par.node as t.VariableDeclarator).id as t.Identifier : kind === "assign" ? (par.node as t.AssignmentExpression).left as t.Identifier : kind === "return" ? t.identifier(fresh()) : null;
+      const arrayBranch = t.blockStatement([...init, loop, ...(target && method !== "forEach" ? [assign(target.name, result())] : [])]);
+      const native = t.callExpression(t.memberExpression(t.identifier(a), t.identifier(method)), [cb, ...(args.slice(1) as t.Expression[])]); nativeKept.add(native);
+      const nativeBranch = target && method !== "forEach" ? assign(target.name, native) : t.expressionStatement(native);
+      const block = t.blockStatement([
+        t.variableDeclaration("const", [t.variableDeclarator(t.identifier(a), c.object as t.Expression)]),
+        t.ifStatement(t.callExpression(t.memberExpression(t.identifier("Array"), t.identifier("isArray")), [t.identifier(a)]), arrayBranch, nativeBranch),
+      ]);
+      const stmt = cp.getStatementParent()!;
+      if (kind === "decl") stmt.replaceWithMultiple([t.variableDeclaration("let", [t.variableDeclarator(t.identifier(target!.name))]), block]);
+      else if (kind === "return") stmt.replaceWithMultiple([t.variableDeclaration("let", [t.variableDeclarator(t.identifier(target!.name))]), block, t.returnStatement(t.identifier(target!.name))]);
+      else stmt.replaceWith(block);
+      acted = true; cp.stop();
+    } });
+    if (!acted) break;
+  }
+}
+
+// ---- sync calls of VALUES as pump-dispatched parks (opts.syncCalls) ----------------------
+// A call whose callee is a value the segment holds — a captured function (`t(k)`), a
+// method of `this` or of a local (`this.translate(k)`, `lib.get(k)`) — lowers like an
+// awaited member call (rewriteDynAwaits): the pump resolves it where the run is — a
+// shipped closure's or a compiled class's program as a sub-frame (so the stop rule covers
+// ITS segments), a session twin, a native call on a live object — or parks the call home
+// with the view. Calls to module code (a module-level function, an import, a global) and
+// calls inside nested functions stay plain JS. The pump never awaits a sync call.
+function rewriteSyncCalls(file: t.File, fnNode: t.FunctionDeclaration): void {
+  const SPECIAL = new Set(["R", "D", "DS", "DSO", "C", "deref"]);
+  traverse(file, { CallExpression(cp) {
+    if (cp.getFunctionParent()?.node !== fnNode) return;             // a nested function's call: plain JS
+    if (cp.parentPath.isYieldExpression() || cp.parentPath.isAwaitExpression()) return;   // a suspension already; an awaited value stays an await
+    const c = cp.node.callee;
+    // a param or local of THIS function (captures are __caps members by now); anything
+    // else bound outside, or unbound, is module code or a global
+    const localValue = (name: string): boolean => { const b = cp.scope.getBinding(name); return !!b && b.scope.getFunctionParent()?.path.node === fnNode; };
+    let y: t.YieldExpression;
+    if (t.isIdentifier(c)) {
+      if (SPECIAL.has(c.name) || suspSet.has(c.name)) return;
+      // a module-level function: plain code — unless syncMethods compiles it too, when its
+      // program runs as a sub-frame (a view argument is then read under the stop rule)
+      if (!localValue(c.name) && !(SYNC_METHODS && MODULE_FNS.has(c.name) && !cp.scope.getBinding(c.name))) return;   // unbound in the lowered copy = the module's
+      y = t.yieldExpression(t.callExpression(t.identifier("C"), [c, ...(cp.node.arguments as t.Expression[])]));
+    } else if (t.isMemberExpression(c) && !c.computed && t.isIdentifier(c.property) && t.isIdentifier(c.object, { name: "__caps" })) {
+      // a captured function called bare in the source (`t(k)` -> `__caps.t(k)`): a call of
+      // the VALUE, with no receiver — not a method of the caps object
+      y = t.yieldExpression(t.callExpression(t.identifier("C"), [c, ...(cp.node.arguments as t.Expression[])]));
+    } else if (t.isMemberExpression(c) && (c.computed ? !t.isPrivateName(c.property) : t.isIdentifier(c.property))) {
+      const o = c.object;
+      if (t.isSuper(o)) return;
+      if (t.isIdentifier(o) && !localValue(o.name)) return;          // a module object's or a global's method (Object.keys, JSON.parse, a module-level helper)
+      if (!(t.isThisExpression(o) || t.isIdentifier(o) || t.isMemberExpression(o) || t.isCallExpression(o))) return;   // a literal's method: native
+      const member = c.computed ? (c.property as t.Expression) : t.stringLiteral((c.property as t.Identifier).name);   // `o[k](…)`: the member is a value
+      y = t.yieldExpression(t.callExpression(t.identifier("DS"), [o as t.Expression, member, ...(cp.node.arguments as t.Expression[])]));
+    } else return;
+    y.loc = cp.node.loc;
+    cp.replaceWith(y);
+  },
+  // `o?.m(a)` — the same park, guarded: `o == null ? undefined : yield DS(o, "m", a)`. Only
+  // when `o` is a side-effect-free chain (this, a local, their members), which re-evaluates
+  // safely; anything else stays native (and the stop rule still fences a view receiver)
+  OptionalCallExpression(cp) {
+    if (cp.getFunctionParent()?.node !== fnNode) return;
+    if (cp.parentPath.isYieldExpression() || cp.parentPath.isAwaitExpression()) return;
+    const c = cp.node.callee;
+    if (!(t.isOptionalMemberExpression(c) || t.isMemberExpression(c)) || c.computed || !t.isIdentifier(c.property)) return;   // `o.m?.()` has a plain member callee; `o?.m()` an optional one
+    const o = c.object;
+    if (t.isIdentifier(o)) { const b = cp.scope.getBinding(o.name); if (!b || b.scope.getFunctionParent()?.path.node !== fnNode) return; }   // a module object's optional method: native
+    if (cp.node.optional && !(t.isOptionalMemberExpression(c) && c.optional)) {   // `o.m?.(a)`: guards the MEMBER — the pump answers undefined when it is null
+      const y = t.yieldExpression(t.callExpression(t.identifier("DSO"), [o as t.Expression, t.stringLiteral(c.property.name), ...(cp.node.arguments as t.Expression[])]));
+      y.loc = cp.node.loc; cp.replaceWith(y); return;
+    }
+    const pure = (e: t.Node): boolean => t.isThisExpression(e) || t.isIdentifier(e) || ((t.isMemberExpression(e) || t.isOptionalMemberExpression(e)) && !e.computed && pure(e.object));
+    if (!pure(o)) return;
+    const guard = t.binaryExpression("==", t.cloneNode(o as t.Expression, true), t.nullLiteral());
+    const y = t.yieldExpression(t.callExpression(t.identifier("DS"), [o as t.Expression, t.stringLiteral(c.property.name), ...(cp.node.arguments as t.Expression[])]));
+    y.loc = cp.node.loc;
+    cp.replaceWith(t.conditionalExpression(guard, t.identifier("undefined"), y));
   } });
 }
 
@@ -1455,8 +1793,9 @@ function lowerCapsUnit(u: CapsUnit, progs: string[], meta: CompileMeta): string[
   allowlist(file);
   rewriteDynAwaits(file, fnNode);
   let yields = 0;
-  traverse(file, { YieldExpression(yp) { if (isResYield(yp.node) || isDynYield(yp.node)) yields++; } });
+  traverse(file, { YieldExpression(yp) { if (isResYield(yp.node) || isAsyncDynYield(yp.node)) yields++; } });
   if (yields < u.minParks) return null;                            // too few tier-reaching awaits: stays a plain function
+  if (SYNC_CALLS) { traverse(file, { FunctionDeclaration(fp) { if (fp.node === fnNode) { inlineArrayCallbacks(fp); fp.stop(); } } }); rewriteSyncCalls(file, fnNode); }                  // sync calls of values -> pump-dispatched parks
   traverse(file, { ThisExpression(tp) {
     throw new Error(`tierless: ${label} uses \`this\` (line ${tp.node.loc?.start.line ?? "?"}) — a closure function has no instance; the function stays uncompiled`);
   } });
@@ -1629,6 +1968,7 @@ function lowerMethod(clsName: string, mName: string, m: t.ClassMethod, progName:
   const file = t.file(t.program([fnNode]));
   allowlist(file);                                                 // recognizes both this.<ns> and __self.<ns>, so it can run before the this-rewrite
   rewriteDynAwaits(file, fnNode);                                  // awaited member calls -> dynamic parks; bare awaits still reject below
+  if (SYNC_CALLS) { traverse(file, { FunctionDeclaration(fp) { if (fp.node === fnNode) { inlineArrayCallbacks(fp); fp.stop(); } } }); rewriteSyncCalls(file, fnNode); }                  // sync calls of values -> pump-dispatched parks
   // a WRAPPER's `return this.m(...)` where m is a tier-calling sibling: the callee is
   // promise-returning by construction, so the tail joins the run as a dyn park — the
   // chains real services build out of delegation (update -> post) stay ONE traced run.
@@ -1644,8 +1984,8 @@ function lowerMethod(clsName: string, mName: string, m: t.ClassMethod, progName:
     }
   } });
   let yields = 0;
-  traverse(file, { YieldExpression(yp) { if (isResYield(yp.node) || isDynYield(yp.node)) yields++; } });
-  if (!yields) return null;                                        // no tier calls: not a compilation candidate, no report either
+  traverse(file, { YieldExpression(yp) { if (isResYield(yp.node) || isAsyncDynYield(yp.node)) yields++; } });
+  if (!yields && !SYNC_METHODS) return null;                       // no tier calls: not a compilation candidate, no report either
   traverse(file, { Super(sp) {
     throw new Error(`tierless: ${clsName}.${mName} uses super (line ${sp.node.loc?.start.line ?? "?"}) — super dispatch can't be carried by the frame yet; the method stays uncompiled`);
   } });
@@ -1673,6 +2013,12 @@ function compile(src: string, preamble: string): { code: string; meta: CompileMe
   fnSites = {}; fnSlots = {};
   const { fnPaths, rest, susp } = collectProgram(ast);
   suspSet = susp;
+  MODULE_FNS = new Set();
+  for (const st of ast.program.body) {
+    const d = t.isExportNamedDeclaration(st) ? st.declaration : st;
+    if (t.isFunctionDeclaration(d) && d.id) MODULE_FNS.add(d.id.name);
+    else if (t.isVariableDeclaration(d)) for (const dc of d.declarations) if (t.isIdentifier(dc.id) && t.isFunction(dc.init)) MODULE_FNS.add(dc.id.name);
+  }
 
   const pure: string[] = [], progs: string[] = [], meta: CompileMeta = { programs: [], exported: [], pure: [], imports: relativeImports(rest), methods: [] };
   // component/hook closures (opt-in) BEFORE the pure print below: a component is a pure
@@ -1682,6 +2028,7 @@ function compile(src: string, preamble: string): { code: string; meta: CompileMe
     if (suspSet.has(name)) { progs.push(lower(p!)); meta.programs.push(name); if (exported) meta.exported.push(name); }
     else { if (TRACK_WRITES) insertDirtyBarriers(p!); pure.push((exported ? "export " : "") + gen(p!.node)); meta.pure.push(name); }  // a pure helper can still mutate continuation state
   }
+  if (SYNC_CLOSURES) { rewriteBinds(ast, rest); convertClosures(ast, progs, meta); }   // before: programs are lowered from the rewritten bodies, stubs included
   compileClassMethods(ast, progs, meta, rest);                    // class methods with tier calls (their nodes sit in `rest` — the stub swap lands in `kept`)
   if (SYNC_CLOSURES) convertSyncClosures(ast, progs, meta, rest);  // after: it keeps a compiled class's bare identity
   compileStoreFunctions(ast, progs, meta);                        // setup-store functions (defineStore closures) — stub swaps mutate nodes already in `rest`
@@ -1793,6 +2140,13 @@ interface CompileOptions {
    *  registered with shareClass), so a shipped instance rebuilds with its prototype on
    *  any tier that loads the module. */
   syncClosures?: boolean;
+  /** Sync calls of VALUES (a captured function, a method of this or of a local) become
+   *  pump-dispatched parks: a program runs as a sub-frame under the stop rule, a live
+   *  function natively, a borrowed one at home. Module code stays a plain call. */
+  syncCalls?: boolean;
+  /** Every method of a top-level class compiles, tier calls or not — a library's methods
+   *  as machines, runnable over a view of an instance. Sync methods keep their bodies. */
+  syncMethods?: boolean;
 }
 interface CompileMeta {
   programs: string[];
@@ -1828,6 +2182,9 @@ function configure(opts: CompileOptions = {}): void {
   SOURCE_MAP = !!opts.sourceMap;
   CLOSURES = !!opts.closures;
   SYNC_CLOSURES = !!opts.syncClosures;
+  SYNC_CALLS = !!opts.syncCalls;
+  SYNC_METHODS = !!opts.syncMethods;
+  cbCounter = 0;                                                   // generated names restart per compile: the same source compiles to the same bytes
   srcFile = opts.filename || "<tierless>";
   TIER_OF = { ...DEFAULT_RESOURCES, ...(opts.resources || {}) };
 }

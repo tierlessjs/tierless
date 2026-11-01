@@ -68,7 +68,31 @@ export function shareFunction(name: string, fn: Function): void {
 export function shareClass(name: string, cls: { prototype: object }): void {
   (cls.prototype as { __tierless_cls?: string }).__tierless_cls = name;
   SHARED.set(name, cls.prototype);
+  for (const k of Object.getOwnPropertyNames(cls.prototype)) {   // its methods, by class and name: what a tracked bind of one ships as
+    if (k === "constructor") continue;
+    const d = Object.getOwnPropertyDescriptor(cls.prototype, k)!;
+    if ("value" in d && typeof d.value === "function") METHOD_OF.set(d.value, { cls: name, name: k });
+  }
 }
+const METHOD_OF = new WeakMap<Function, { cls: string; name: string }>();
+// ---- tracked binds ----------------------------------------------------------------------
+// `fn.bind(self, …)` hides its target and receiver from everyone; a module compiled with
+// syncClosures calls bindTracked instead, which records them. A bound METHOD of a shared
+// class (i18next's bindMemberFunctions puts one on every instance) then ships as the
+// method by name plus its receiver and bound args, and off-tier it is a stub whose program
+// runs over the receiver's view (runtime.mts callOn) — no guessing from the function's name.
+const BOUND = new WeakMap<Function, { target: Function; self: unknown; args: unknown[] }>();
+export function bindTracked(target: unknown, self: unknown, args: unknown[]): unknown {
+  if (typeof target !== "function" || target.bind !== Function.prototype.bind) return (target as { bind: (s: unknown, ...a: unknown[]) => unknown }).bind(self, ...args);   // not a plain function's bind: whatever it does
+  const b = target.bind(self, ...args);
+  const inner = BOUND.get(target);                                  // binding a bound function: the inner receiver stays, the args accumulate
+  BOUND.set(b, inner ? { target: inner.target, self: inner.self, args: [...inner.args, ...args] } : { target, self, args });
+  return b;
+}
+/** A decoded bound method off its tier: `__tierless_program` + `__tierless_bound` (its
+ *  receiver and bound args), callable only through the pump (a native call throws). */
+export interface BoundStub { (...a: unknown[]): never; __tierless_program: string; __tierless_bound: { self: unknown; args: unknown[] } }
+export const isBoundStub = (v: unknown): v is BoundStub => typeof v === "function" && typeof (v as BoundStub).__tierless_program === "string" && typeof (v as BoundStub).__tierless_bound === "object" && (v as BoundStub).__tierless_bound !== null;
 /** The class a structurally-copied object carries: a stamped name, or "!<BuiltinError>". */
 function classOf(v: object): { cls: string; err: boolean } | null {
   const p = Object.getPrototypeOf(v);
@@ -151,7 +175,11 @@ export function isHandle(x: unknown): x is Handle {
 // not data: a GLOBAL op pushes them, and the codec ships them BY REFERENCE (a
 // {k:"glob"} tag re-bound per tier) — never deep-copied. Matches how closures and
 // class objects travel.
-export const GLOBALS: Record<string, unknown> = { Math, JSON, Object, Array, Number, String, Boolean, parseInt, parseFloat, isNaN, isFinite, console, Date, Symbol };
+export const GLOBALS: Record<string, unknown> = { Math, JSON, Object, Array, Number, String, Boolean, parseInt, parseFloat, isNaN, isFinite, console, Date, Symbol,
+  // builtin methods code reaches as VALUES (`Object.prototype.hasOwnProperty.call(o, k)`): by reference too
+  "Object.prototype.hasOwnProperty": Object.prototype.hasOwnProperty, "Object.prototype.toString": Object.prototype.toString,
+  "Function.prototype.call": Function.prototype.call, "Function.prototype.apply": Function.prototype.apply,
+  "Array.prototype.slice": Array.prototype.slice, "Array.prototype.splice": Array.prototype.splice, "Array.prototype.push": Array.prototype.push, "Array.prototype.indexOf": Array.prototype.indexOf, "Array.prototype.concat": Array.prototype.concat, "Array.prototype.join": Array.prototype.join };
 const GLOBAL_NAME = new Map(Object.entries(GLOBALS).map(([k, v]) => [v, k]));
 const WELLKNOWN = new Map(Object.getOwnPropertyNames(Symbol).filter((k) => typeof (Symbol as any)[k] === "symbol").map((k) => [(Symbol as any)[k], k])); // Symbol.iterator, .asyncIterator, ...
 
@@ -236,7 +264,9 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
     while (stack.length && total <= limit) {
       const x = stack.pop();
       if (x === null || typeof x !== "object") { total += typeof x === "string" ? x.length : 8; continue; }
-      if (seen.has(x)) continue; seen.add(x); total += 16;
+      if (seen.has(x)) continue; seen.add(x);
+      if (x !== root && idOf.has(x)) { total += 16; continue; }       // already encoded (a shared subgraph): a reference, not bytes again
+      total += 16;
       if (Array.isArray(x)) { for (const e of x) stack.push(e); }
       else if (x instanceof Map) { total += 16 * x.size; for (const [k, v] of x) { stack.push(k); stack.push(v); } }
       else if (x instanceof Set) { total += 16 * x.size; for (const e of x) stack.push(e); }
@@ -261,8 +291,9 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
       if (x === undefined) return h.inst ? { k: "u" } : null;         // a plain view omits what is undefined; an instance's says so
       if (typeof x === "string") { if (x.length > budget.left) return refH(member(k)); budget.left -= x.length; return enc(x); }   // a string pays its length; an oversized one stays home
       if (x === null || (typeof x !== "object" && typeof x !== "function")) { budget.left -= 8; return enc(x); }   // other primitives, bigint, symbols
+      if (x instanceof RegExp) { budget.left -= 16 + x.source.length; return reNode(x); }
       if (typeof x === "function") {
-        if (isCompiledFn(x)) return enc(x);
+        if (isCompiledFn(x) || BOUND.has(x)) return enc(x);
         const name = FN_NAME.get(x); if (name) { const sid = objs.length; objs.push({ k: "sf", name, h: member(k) }); return { k: "r", id: sid }; }
         return refH(member(k));
       }
@@ -306,7 +337,7 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
       if (typeof x === "function") { if (isCompiledFn(x)) { work.push(x.__tierless_caps()); continue; } return true; }   // a compiled closure is a value — complete only if its caps are; any other function is behavior
       if (x === null || typeof x !== "object" || seen.has(x)) continue;
       seen.add(x);
-      if (x instanceof Date || x instanceof Uint8Array || GLOBAL_NAME.has(x)) continue;
+      if (x instanceof Date || x instanceof RegExp || x instanceof Uint8Array || GLOBAL_NAME.has(x)) continue;
       if (isHandle(x) || HYDRATED.has(x) || (x as { [VIEW]?: unknown })[VIEW]) return true;   // another tier's object: a copy can't carry it
       if (!stampOf(x) && excise!(x)) return true;
       if (Array.isArray(x)) { for (const e of x) work.push(e); }
@@ -342,6 +373,19 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
       for (const k of Object.keys(v)) if (!k.startsWith("__tierless_")) slot.f[k] = enc((v as unknown as Record<string, unknown>)[k]);
       return { k: "r", id };
     }
+    if (typeof v === "function" && tier) {                             // a tracked bind of a shared class's method: method by name + receiver + args
+      const br = BOUND.get(v), mo = br && METHOD_OF.get(br.target);
+      if (br && mo) {
+        if (idOf.has(v)) return { k: "r", id: idOf.get(v) };
+        const fh = HYDRATED.get(v);
+        if (fh) { const id = objs.length; idOf.set(v, id); objs.push({ k: "H", h: fh }); return { k: "r", id }; }
+        const id = objs.length; idOf.set(v, id);
+        const slot: any = { k: "bnd", cls: mo.cls, name: mo.name, s: null, a: [], hm: { owner: tier.id, id: tier.heapPut(v) } };
+        objs.push(slot);
+        slot.s = enc(br.self); slot.a = br.args.map(enc);
+        return { k: "r", id };
+      }
+    }
     if (typeof v === "function" && tier && excise && excise(v)) {      // a function's effect lives in this heap — keep its identity home
       if (idOf.has(v)) return { k: "r", id: idOf.get(v) };
       return exciseTo(v, true);
@@ -353,6 +397,7 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
     }
     if (GLOBAL_NAME.has(v)) return { k: "glob", name: GLOBAL_NAME.get(v) }; // host global -> by reference
     if (v === null || typeof v !== "object") return { k: "p", v };
+    if (v instanceof RegExp) return reNode(v);
     if (idOf.has(v)) return { k: "r", id: idOf.get(v) };
     if (isHandle(v)) { const id = objs.length; idOf.set(v, id); const { state: _s, ...h } = v; objs.push({ k: "H", h }); return { k: "r", id }; }
     const hh = HYDRATED.get(v as object);
@@ -399,6 +444,17 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
   return { roots: values.map(enc), objs };
 }
 
+// A RegExp crosses as a VALUE (node "re": source, flags, lastIndex) — a copy, like a
+// string: a /g loop advances the copy's lastIndex and ends with it back at 0, as the
+// original's would; a copy is what a view member or a plain object's field decodes to.
+// A hostile peer can send an invalid pattern: a RangeError, like a bad bigint (below).
+const reNode = (v: RegExp): { k: "re"; s: string; f: string; li: number } => ({ k: "re", s: v.source, f: v.flags, li: v.lastIndex });
+export function reOf(n: { s: string; f: string; li: number }): RegExp {
+  let re: RegExp;
+  try { re = new RegExp(n.s, n.f); } catch { throw new RangeError("wire: invalid regexp"); }
+  re.lastIndex = n.li;
+  return re;
+}
 // A bigint crosses the wire as a decimal string; a hostile peer can send a non-numeric one.
 // Bare BigInt() throws SyntaxError, which would escape the reader's "clean RangeError on bad
 // input" contract (see wire-io.mts) — normalize it here, at the §7 trust boundary.
@@ -419,6 +475,17 @@ export function decodeGraph({ roots, objs }: EncodedGraph, { content = null, tie
   // stop rule parks the segment that would call it home (a stub that throws is the last
   // resort, for a graph encoded with no tier)
   const fnOwn = (s: { hm?: { owner: string; id: string } }): boolean => !!(tier && s.hm && s.hm.owner === tier.id);
+  // a bound method (slot "bnd"): coming home, the live bound function; off-tier, a stub the
+  // pump runs as the class's program over the receiver — or its opaque handle where this
+  // tier has no such program
+  const bndShell = (s: { cls: string; name: string; hm: { owner: string; id: string } }): unknown => {
+    if (fnOwn(s)) return home({ __tierless_handle__: true, owner: s.hm.owner, id: s.hm.id });
+    const prog = s.cls + "$" + s.name;
+    if (!programs?.(prog)) return { __tierless_handle__: true, owner: s.hm.owner, id: s.hm.id, kind: "function" } as Handle;
+    const stub = Object.assign((): never => { throw new Error("tierless: bound method " + prog + " called natively off its tier"); }, { __tierless_program: prog, __tierless_bound: { self: undefined as unknown, args: [] as unknown[] } });
+    HYDRATED.set(stub, { __tierless_handle__: true, owner: s.hm.owner, id: s.hm.id, kind: "function" });
+    return stub;
+  };
   const fnShell = (s: { p: string; hm?: { owner: string; id: string } }): unknown => {
     if (fnOwn(s)) return home({ __tierless_handle__: true, owner: s.hm!.owner, id: s.hm!.id });
     const run = programs?.(s.p);
@@ -441,6 +508,7 @@ export function decodeGraph({ roots, objs }: EncodedGraph, { content = null, tie
     else if (s.k === "o") { for (const key in s.f) refsOf(s.f[key], out); if (s.sf) for (const [kn, vn] of s.sf) { refsOf(kn, out); refsOf(vn, out); } }
     else if (s.k === "fn") { refsOf(s.c, out); for (const key in s.f) refsOf(s.f[key], out); }
     else if (s.k === "v") { if (s.e) for (const e of s.e) refsOf(e, out); else for (const key in s.f) refsOf(s.f[key], out); }
+    else if (s.k === "bnd") { refsOf(s.s, out); for (const e of s.a) refsOf(e, out); }
     return out;
   };
   const twinOk = (root: number): boolean => {
@@ -452,6 +520,7 @@ export function decodeGraph({ roots, objs }: EncodedGraph, { content = null, tie
       const i = work.pop()!, s: any = objs[i];
       if (s.k === "H" || s.k === "v") ok = !!(tier && s.h.owner === tier.id);        // a foreign handle or view: the copy would hide it
       else if (s.k === "sf") ok = SHARED_FN.has(s.name) || !!(tier && s.h.owner === tier.id);
+      else if (s.k === "bnd") ok = fnOwn(s);
       else if (s.k === "fn") { ok = fnRunnable(s); if (fnOwn(s)) continue; }   // a live closure of ours holds what it holds
       else if (s.k === "o" && s.tw && i !== root) { if (tier && s.tw.owner === tier.id) continue; ok = twinOk(i); }   // a nested copy stands or falls on its own
       if (!ok) break;
@@ -477,8 +546,8 @@ export function decodeGraph({ roots, objs }: EncodedGraph, { content = null, tie
   // registered copy, else the member handle it would be (the stop rule parks on it)
   const viewOwn = (s: { h: Handle }): boolean => !!(tier && s.h.owner === tier.id);
   const viewShell = (s: { h: Handle; e?: unknown[] }): unknown => { if (viewOwn(s)) return home(s.h); const base: object = s.e ? [] : {}; Object.defineProperty(base, VIEW, { value: s.h }); return base; };
-  const built: any[] = (objs as any[]).map((s, i) => (s.k === "a" ? [] : s.k === "o" ? (s.tw ? twinShell(s, i) : {}) : s.k === "v" ? viewShell(s) : s.k === "sf" ? (SHARED_FN.get(s.name) ?? home(s.h)) : s.k === "map" ? new Map() : s.k === "set" ? new Set() : s.k === "symu" ? Symbol(s.d) : s.k === "fn" ? fnShell(s) : s.k === "c" ? (content && content.store.get(s.h)) : home(s.h))); // pre-create for cycles/sharing; k:"c" resolves to the held immutable subgraph
-  const dec = (n: any): any => (n.k === "u" ? undefined : n.k === "big" ? toBigInt(n.v) : n.k === "glob" ? GLOBALS[n.name] : n.k === "symw" ? (Symbol as any)[n.name] : n.k === "symf" ? Symbol.for(n.key) : n.k === "p" ? n.v : built[n.id]);
+  const built: any[] = (objs as any[]).map((s, i) => (s.k === "a" ? [] : s.k === "o" ? (s.tw ? twinShell(s, i) : {}) : s.k === "v" ? viewShell(s) : s.k === "sf" ? (SHARED_FN.get(s.name) ?? home(s.h)) : s.k === "map" ? new Map() : s.k === "set" ? new Set() : s.k === "symu" ? Symbol(s.d) : s.k === "fn" ? fnShell(s) : s.k === "bnd" ? bndShell(s) : s.k === "c" ? (content && content.store.get(s.h)) : home(s.h))); // pre-create for cycles/sharing; k:"c" resolves to the held immutable subgraph
+  const dec = (n: any): any => (n.k === "u" ? undefined : n.k === "big" ? toBigInt(n.v) : n.k === "glob" ? GLOBALS[n.name] : n.k === "symw" ? (Symbol as any)[n.name] : n.k === "symf" ? Symbol.for(n.key) : n.k === "re" ? reOf(n) : n.k === "p" ? n.v : built[n.id]);
   (objs as any[]).forEach((s, i) => {
     if (s.k === "a") for (const n of s.e) built[i].push(dec(n));
     else if (s.k === "o" && s.tw && (isHandle(built[i]) || (tier && s.tw.owner === tier.id))) { /* the handle, or the live instance: its fields are not the copy's */ }
@@ -487,6 +556,7 @@ export function decodeGraph({ roots, objs }: EncodedGraph, { content = null, tie
     else if (s.k === "map") for (const [kn, vn] of s.e) built[i].set(dec(kn), dec(vn));
     else if (s.k === "set") for (const vn of s.e) built[i].add(dec(vn));
     else if (s.k === "fn" && (fnOwn(s) || isHandle(built[i]))) { /* the live closure, or its handle: nothing to fill */ }
+    else if (s.k === "bnd") { if (!fnOwn(s) && !isHandle(built[i])) built[i].__tierless_bound = { self: dec(s.s), args: s.a.map(dec) }; }
     else if (s.k === "fn") { const caps = dec(s.c); built[i].__tierless_caps = () => caps; for (const key in s.f) { if (key === "__proto__") continue; built[i][key] = dec(s.f[key]); } }
     else if (s.k === "v" && !viewOwn(s)) { if (s.e) { for (const n of s.e) built[i].push(dec(n)); } else for (const key in s.f) { if (key === "__proto__" || key === "__tierless_handle__") continue; built[i][key] = dec(s.f[key]); } }
     else if (s.k === "H" && s.st !== undefined && isHandle(built[i])) built[i].state = dec(s.st);   // a stamped member handle's data fields, for a session twin

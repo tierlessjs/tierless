@@ -25,10 +25,11 @@ if (!existsSync(I18NEXT) || !existsSync(TABLE)) { console.log("SKIP — i18next 
 const GEN = fileURLToPath(new URL("../.gen/", import.meta.url));
 mkdirSync(GEN, { recursive: true });
 // the library, compiled: every `const f = () => …` in a method becomes a program
-const lib = compile('"use tierless";\n' + readFileSync(I18NEXT, "utf8"), { filename: "i18next.js", syncClosures: true });
+const lib = compile('"use tierless";\n' + readFileSync(I18NEXT, "utf8"), { filename: "i18next.js", syncClosures: true, syncCalls: true, syncMethods: true });
 writeFileSync(join(GEN, "i18next-compiled.mjs"), lib.code);
 const i18next = await import(pathToFileURL(join(GEN, "i18next-compiled.mjs")).href);
 const ms = lib.meta.methods as Array<{ class: string; method: string; program: string | null; error?: string }>;
+console.log("  library: " + ms.filter((m) => m.program).length + " programs, " + ms.filter((m) => !m.program).length + " refused: " + [...new Set(ms.filter((m) => !m.program).map((m) => (m.error ?? "").replace(/^tierless: \S+ /, "").slice(0, 60)))].slice(0, 8).join(" | "));
 check("getFixedT's closure compiles (" + ms.filter((m) => m.program).length + " closures compiled, " + ms.filter((m) => !m.program).length + " kept native)", ms.some((m) => m.program === "I18n$getFixedT$fixedT"), JSON.stringify(ms.filter((m) => !m.program)));
 
 // Keycloak's table and init options (src/i18n/i18n.ts)
@@ -57,12 +58,13 @@ export function Dialog(props) {
   const { t } = props;
   async function save(id, keys) {
     const a = await client.scopes.a(id);
-    const labels = keys.map((k) => t(k));
+    const labels = [];
+    for (const k of keys) labels.push(t(k));
     await client.scopes.b(a, labels.length);
     return labels;
   }
   return { save };
-}`, { filename: "dialog.js", closures: true });
+}`, { filename: "dialog.js", closures: true, syncCalls: true });
 writeFileSync(join(GEN, "i18next-dialog.mjs"), comp.code);
 const dlg = await import(pathToFileURL(join(GEN, "i18next-dialog.mjs")).href);
 const bundle = {

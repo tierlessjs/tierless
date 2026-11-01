@@ -29,6 +29,15 @@ export type MachineResult = {
     path?: string[];
     member: string;
     args: unknown[];
+    sync?: 1;
+    opt?: 1;
+}
+/** a SYNC call of a value the segment holds (compiler rewriteSyncCalls): recv[path…] is the callee */
+ | {
+    op: "callv";
+    recv: unknown;
+    path?: string[];
+    args: unknown[];
 };
 /** A compiled bundle (transform.cjs output): named state machines + the frame unwinder. */
 export interface Bundle {
