@@ -151,6 +151,12 @@ admin-client calls. The twins module shares it by name (`shareFunction` on both 
 it runs on the gateway; its browser-only imports are stubbed in the gateway's bundle
 (`twinsStubs`), which stays at 3 KB.
 
+Checked end to end after these compiler and runtime changes: the ported arm rebuilt, the
+four specs that exercise the chains (`autentication/flows.spec.ts`,
+`identity-providers/saml.spec.ts`, `organization/idp.spec.ts`, `users/main.spec.ts`)
+profiled and run on the locked profile at 80 ms — 46 of 48 pass (the two failures are
+under "Known failures"), 64 migrated crossings, 0 without the profile.
+
 ## The whole suite
 
 All 434 tests, three rounds of three arms at 80 ms RTT + 20 Mbit/s
@@ -221,3 +227,9 @@ fetches a discovery URL) and `identity-providers/saml-signature-defaults.spec.ts
 `identity-providers/saml.spec.ts:78` are flaky on both arms across runs; a failure
 cascades, because Playwright skips the rest of a describe, which is why a 1-test failure
 moves the pass count by 7. Pass-parity gating excludes them from every number above.
+`autentication/flows.spec.ts:165` ends with a bind-flow save it doesn't wait for, then
+`deleteRealm`; the two overlap on the server (H2 deadlock on `REALM_EVENTS_LISTENERS` in
+`server.log`) and the test reads `unknown_error` — seen in 2 of 4 migrating runs and in
+none of 7 others, consistent with the ported path's extra hop landing the save later.
+`users/main.spec.ts:90` fails on every arm: `User not found`, or an optimistic-lock
+conflict on the credential row, which also occurred with nothing migrating.
