@@ -151,11 +151,14 @@ admin-client calls. The twins module shares it by name (`shareFunction` on both 
 it runs on the gateway; its browser-only imports are stubbed in the gateway's bundle
 (`twinsStubs`), which stays at 3 KB.
 
-Checked end to end after these compiler and runtime changes: the ported arm rebuilt, the
-four specs that exercise the chains (`autentication/flows.spec.ts`,
+Checked end to end after these compiler and runtime changes (last on 2026-11-01, with
+writable views and the stop rule's write and computed-access modes): the ported arm
+rebuilt, the four specs that exercise the chains (`autentication/flows.spec.ts`,
 `identity-providers/saml.spec.ts`, `organization/idp.spec.ts`, `users/main.spec.ts`)
-profiled and run on the locked profile at 80 ms — 46 of 48 pass (the two failures are
-under "Known failures"), 64 migrated crossings, 0 without the profile.
+profiled and run on the locked profile at 80 ms — 47 of 48 pass (the failure is
+`flows.spec.ts:165`, under "Known failures"), 64 migrated crossings. With nothing
+migrating, 45 of 48: `flows.spec.ts:165` and `:217` (the unlimited-bandwidth race above)
+and one 180 s timeout in `users/main.spec.ts:285` that passed when the spec was re-run.
 
 ## The whole suite
 
