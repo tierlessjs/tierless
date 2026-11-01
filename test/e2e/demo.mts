@@ -12,16 +12,14 @@
 //                  migrations; this Node process just adapts dom.commit onto the page.
 //
 // Run:  node src/demo.mjs        (needs Playwright Chromium)
-import { createRequire } from "node:module";
 import { serveApp, type ResourceRequest } from "tierless/server";
 import { connect } from "tierless/browser";
 import { startSidecar, makeApiExec } from "tierless/api";
 import { vdomToHtml, shell } from "./dom.mts";
 import * as bundle from "./app/bundle.gen.mjs";
 import { WS_PATH } from "tierless/server";
+import { launch } from "../lib/pw.mts";
 
-// playwright: loaded via createRequire (no @types/playwright wired into this tsconfig) — chromium, browser, page are all any
-const { chromium } = createRequire(process.env.PLAYWRIGHT_REQUIRE || "/opt/node22/lib/node_modules/")("playwright");
 const trace: string[] = [];
 
 // ---------------------------------------------------------------- server tier ----
@@ -46,7 +44,7 @@ const app = await serveApp({
 });
 
 // --------------------------------------------------------------- browser tier ----
-const browser = await chromium.launch();
+const browser = await launch();
 const page = await browser.newPage();
 
 // __smClick is the page->Node bridge for a real click; it persists across the

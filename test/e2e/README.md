@@ -229,9 +229,8 @@ node test/e2e/verify-live.mts   # headless drive of the live page with real Chro
 The headless regressions — `verify.mts`, `control-flow.mts`, and the heap/policy probes
 (`heap-probe.mts`, `heap-live.mts`, `heap-auto.mts`, `heap-writeback.mts`, `heap-write.mts`,
 `policy-live.mts`) — run as part of `npm test` (no browser needed). The
-Chromium runs (`demo.mts`, `server-live.mts`, `verify-live.mts`) need Playwright; this repo
-env ships it pre-installed (`PLAYWRIGHT_BROWSERS_PATH`), resolved from the global install —
-override the resolver root with `PLAYWRIGHT_REQUIRE` if needed.
+Chromium runs use the repo's pinned Playwright (`test/lib/pw.mts`) with the host's Chromium
+(`TIERLESS_CHROMIUM`, default `/opt/pw-browsers/chromium`).
 
 Regenerating the bundles needs the Babel toolchain (not a runtime dependency):
 

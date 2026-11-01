@@ -9,10 +9,10 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { makeCounter } from "../lib/check.mts";
+import { PW_DIR } from "../lib/pw.mts";
 
 const { check, counts } = makeCounter();
 const REGISTER = fileURLToPath(new URL("../../packages/tierless/src/playwright-register.cjs", import.meta.url));
-const PW_DIR = "/opt/node22/lib/node_modules/playwright";
 
 const PROBE = `
 const { createRequire } = require("node:module");

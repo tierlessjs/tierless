@@ -21,13 +21,12 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 import { attachTierless, WS_PATH } from "tierless/server";
 import { restResources } from "tierless/adapt";
 import { installIoWait, unionMs, wsIoTap } from "tierless/playwright";
 import { makeCheck } from "../lib/check.mts";
+import { launch } from "../lib/pw.mts";
 
-const { chromium } = createRequire(process.env.PLAYWRIGHT_REQUIRE || "/opt/node22/lib/node_modules/")("playwright");
 const { check, ok } = makeCheck();
 
 const IO = path.join(mkdtempSync(path.join(tmpdir(), "tierless-io-")), "io.txt");
@@ -104,7 +103,7 @@ const measure = async (script: string): Promise<number> => {
 };
 const near = (got: number, want: number): boolean => got >= want - 5 && got <= want + 60;
 
-const browser = await chromium.launch();
+const browser = await launch();
 const context = await browser.newContext();
 installIoWait(context);
 const page = await context.newPage();

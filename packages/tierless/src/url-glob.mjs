@@ -3,8 +3,9 @@
 // verifies the port against the installed copy). One implementation, two consumers with
 // the same contract: tierless/playwright matches crossings the way the suite's own
 // waits would, and the force-browser seam (adapt-auto) matches routes the way the
-// suite's route() patterns read. Current Playwright semantics: `*` → any run without
-// `/`, `**` → any run at all, `{a,b}` → alternation, `\` escapes — and `?`/`[`/`]` are
+// suite's route() patterns read. Current Playwright semantics (1.59–1.60): `*` → any run
+// without `/`, `**` → any run at all, `**/` → any run ending in `/` (empty between two
+// slashes), `{a,b}` → alternation, `\` escapes — and `?`/`[`/`]` are
 // LITERALS (URLs carry query strings), so a no-wildcard string compiles to an anchored
 // literal and exact-equality falls out. Browser-safe: no imports.
 const GLOB_ESCAPE = new Set(["$", "^", "+", ".", "*", "(", ")", "|", "\\", "?", "{", "}", "[", "]"]);
@@ -19,12 +20,21 @@ export function globToRegexPattern(glob) {
             continue;
         }
         if (c === "*") {
+            const before = glob[i - 1];
             let stars = 1;
             while (glob[i + 1] === "*") {
                 stars++;
                 i++;
             }
-            tokens.push(stars > 1 ? "(.*)" : "([^/]*)");
+            if (stars === 1)
+                tokens.push("([^/]*)");
+            else if (glob[i + 1] !== "/")
+                tokens.push("(.*)");
+            // `**/` takes its slash: `/**/` may be empty (`a/**/b` matches `a/b`)
+            else {
+                tokens.push(before === "/" ? "((.+/)|)" : "(.*/)");
+                i++;
+            }
             continue;
         }
         switch (c) {

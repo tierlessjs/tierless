@@ -24,9 +24,8 @@ import { attachTierless, WS_PATH } from "tierless/server";
 import { restResources } from "tierless/adapt";
 import { installTransportWaits, globToRegexPattern, resolveSuitePlaywright, patchPlaywrightPages } from "tierless/playwright";
 import { makeCheck } from "../lib/check.mts";
+import { launch, PW_DIR } from "../lib/pw.mts";
 
-// playwright: loaded via createRequire (no @types/playwright wired into this tsconfig) — chromium, browser, page are all any
-const { chromium } = createRequire(process.env.PLAYWRIGHT_REQUIRE || "/opt/node22/lib/node_modules/")("playwright");
 const { check, ok } = makeCheck();
 
 // ---- mock backend: the gateway's localhost target ---------------------------------------
@@ -95,7 +94,7 @@ await new Promise<void>((r) => pages.listen(0, r));
 const pageUrl = "http://127.0.0.1:" + (pages.address() as { port: number }).port;
 
 // ---- drive it ----------------------------------------------------------------------------
-const browser = await chromium.launch();
+const browser = await launch();
 const warnings: string[] = [];
 const context = await browser.newContext();
 await installTransportWaits(context, { warn: (m: string) => warnings.push(m) });   // context-level: covers every page it creates
@@ -189,8 +188,8 @@ check("the page's requests cross the session socket (no HTTP fired for them)", (
 // 9. differential: our glob compiler IS Playwright's — token-for-token against the
 //    installed playwright-core (current semantics: `?`/`[`/`]` literal, `**` = `(.*)`)
 {
-  const outerRequire = createRequire(process.env.PLAYWRIGHT_REQUIRE || "/opt/node22/lib/node_modules/");
-  const pwDir = outerRequire.resolve("playwright").replace(/\/index\.js$/, "");
+  const outerRequire = createRequire(PW_DIR + "/x.js");
+  const pwDir = PW_DIR;
   // absolute file path: playwright-core's exports map doesn't expose its internals
   const candidates = [pwDir + "/node_modules/playwright-core", pwDir.replace(/\/playwright$/, "/playwright-core")]
     .map((d) => d + "/lib/utils/isomorphic/urlMatch.js");
@@ -198,7 +197,8 @@ check("the page's requests cross the session socket (no HTTP fired for them)", (
   if (!found) throw new Error("playwright-core urlMatch.js not found under " + pwDir);
   const theirs = outerRequire(found).globToRegexPattern as (glob: string) => string;
   const GLOBS = ["**/rest/workflows", "**/rest/workflows/**", "**/api/v1/projects*", "a**b", "a*b",
-    "**/x?y", "**/{one,two}/end", "**/[ab]", "**/z\\*z", "http://h:1/exact", "**/a.b+c(d)|e^f$g"];
+    "**/x?y", "**/{one,two}/end", "**/[ab]", "**/z\\*z", "http://h:1/exact", "**/a.b+c(d)|e^f$g",
+    "a/**/b", "x**/y", "**"];
   const diverged = GLOBS.filter((g) => globToRegexPattern(g) !== theirs(g));
   check("glob compiler matches installed playwright-core token-for-token (" + GLOBS.length + " patterns)", diverged.length === 0, JSON.stringify(diverged));
 }
@@ -209,7 +209,7 @@ check("the page's requests cross the session socket (no HTTP fired for them)", (
 {
   // the playwright package dir — resolveSuitePlaywright digs playwright-core out of the
   // SAME install driving this test, so the patched class is the class of our pages
-  const pwDir = createRequire(process.env.PLAYWRIGHT_REQUIRE || "/opt/node22/lib/node_modules/").resolve("playwright").replace(/\/index\.js$/, "");
+  const pwDir = PW_DIR;
   patchPlaywrightPages(resolveSuitePlaywright(pwDir), { warn: (m: string) => warnings.push(m), initScript: "localStorage.setItem('tierlessSeeded', 'yes')" });
   const ctx = await browser.newContext();                    // NO install call anywhere
   const page2 = await ctx.newPage();

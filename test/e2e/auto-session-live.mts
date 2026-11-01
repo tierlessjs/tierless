@@ -26,9 +26,8 @@ import { createRequire } from "node:module";
 import { spawn, type ChildProcess } from "node:child_process";
 import { installTransportWaits, recordForceBrowserRoutes } from "tierless/playwright";
 import { makeCheck } from "../lib/check.mts";
+import { launch } from "../lib/pw.mts";
 
-// playwright: loaded via createRequire (no @types/playwright wired into this tsconfig) — chromium, browser, page are all any
-const { chromium } = createRequire(process.env.PLAYWRIGHT_REQUIRE || "/opt/node22/lib/node_modules/")("playwright");
 const { WebSocket } = createRequire(import.meta.url)("ws");
 const { check, ok } = makeCheck();
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -141,7 +140,7 @@ const wsCookie = await spawnGateway(["--cookie-authority"]);                   /
 check("the CLI gateway boots and prints its bound port (both arms)", wsHeader.includes("ws://") && wsCookie.includes("ws://"));
 
 // ---- drive it -----------------------------------------------------------------------------
-const browser = await chromium.launch();
+const browser = await launch();
 const context = await browser.newContext();
 await installTransportWaits(context);
 recordForceBrowserRoutes(context);

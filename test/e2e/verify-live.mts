@@ -7,12 +7,10 @@
 // control-flow.mjs guard the logic in CI.
 //
 // Run:  node test/e2e/verify-live.mts
-import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { launch } from "../lib/pw.mts";
 
-// playwright: loaded via createRequire (no @types/playwright wired into this tsconfig) — chromium, browser, page are all any
-const { chromium } = createRequire(process.env.PLAYWRIGHT_REQUIRE || "/opt/node22/lib/node_modules/")("playwright");
 const SERVER = fileURLToPath(new URL("./server-live.mts", import.meta.url));
 const PORT = Number(process.env.PORT) || 8231;
 const URL_ = `http://localhost:${PORT}/`;
@@ -46,7 +44,7 @@ const rootText = (page: any) => page.evaluate(() => document.getElementById("roo
 let browser: any;
 try {
   await waitFor(() => log.includes(`http://localhost:${PORT}`), 8000, "server listening");
-  browser = await chromium.launch();
+  browser = await launch();
   const page = await browser.newPage();
   const pageErrors: string[] = [];
   page.on("pageerror", (e: Error) => pageErrors.push(String((e && e.stack) || e)));

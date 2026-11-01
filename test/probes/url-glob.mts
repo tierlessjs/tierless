@@ -17,6 +17,8 @@ check("root-relative glob matches too", M("/api/foo", "http://app.local:3000/api
 check("relative glob still anchors its own path: a different path misses",
   !M("api/foo", "http://app.local:3000/api/foobar"));
 check("** glob unchanged", M("**/rest/thing", "https://x.example/rest/thing"));
+check("/**/ may be empty, as in Playwright ≥1.59: a/**/b matches a/b and a/x/y/b",
+  M("https://x.example/a/**/b", "https://x.example/a/b") && M("https://x.example/a/**/b", "https://x.example/a/x/y/b") && !M("https://x.example/a/**/b", "https://x.example/ab"));
 check("absolute glob unchanged (exact origin only)",
   M("http://a.local/api/x", "http://a.local/api/x") && !M("http://a.local/api/x", "http://b.local/api/x"));
 check("query-stripped candidate still consulted", M("/api/q", "http://a.local/api/q?anything=1"));
