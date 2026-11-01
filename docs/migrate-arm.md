@@ -40,8 +40,9 @@ mid-segment (design.md §8). So the check happens BEFORE the segment runs, in th
 - **Compiler metadata:** for each program, for each resume state, the set of frame
   slots the segment entered at that state references (computed on the LOWERED output —
   walk each switch case for identifiers naming frame slots). Emitted with PROGRAMS. A
-  plain read of one member is recorded as that member (`args[0].id`); calls, writes and
-  deletes record the whole slot. A branch whose two sides reference different slots is a
+  plain read of one member is recorded as that member (`args[0].id`), with a mode suffix
+  for moves, computed access and writes (below); a call on a slot, or passing it to native
+  code, records the whole slot. A branch whose two sides reference different slots is a
   **checkpoint** (it returns `{op:"check"}` once decided), so only the side taken counts;
   branches inside an in-step loop are not checkpoints.
 - **Views:** an excised object (a closure's caps, a borrowed library instance, a big
@@ -50,13 +51,27 @@ mid-segment (design.md §8). So the check happens BEFORE the segment runs, in th
   nested views, functions registered with `shareFunction` as this tier's copy, compiled
   closures as shipped closures — within a byte budget (`makeHost({ threshold })`, 8 KB);
   everything else (a function, a host object, a string or object over the budget) is a
-  member handle. A class instance's view is marked `inst`: a member it lacks may be a
-  prototype getter, so reading it parks. The compiler records what a segment reads: a
-  member chain (`args[0].user.id`) stays when it reaches data; a read that only moves
-  into a frame slot (`"="`) needs the chain to walk; one through computed access
-  (`"[]="`, `data[lng][ns][key]`) needs the object reached to be complete; a value read of
-  a view object, a call on it, a write, a delete, or passing it on finds its handle and
-  goes home. `test/probes/views.mts` holds each case.
+  member handle; a RegExp is a value (source, flags, lastIndex). A class instance's view
+  is marked `inst`: a member it lacks may be a prototype getter, so reading it parks —
+  unless the class is registered here (`shareClass`; compiled classes are) and its
+  prototype chain lacks the member too, which reads undefined. The compiler records what
+  a segment reads, by mode: a member chain (`args[0].user.id`) stays when it reaches data;
+  a read that only moves into a frame slot (`"="`: a test, a condition operand, a member
+  of an object/array literal in a move statement) needs the chain to walk; a move through
+  one computed level (`"[]="`) needs the object indexed to answer any key (a plain view or
+  a local object, not an instance view); through more levels (`"[..]="`), or as a value
+  (`"[]"`), the object reached must be complete; a value read of a view object, a call on
+  it, or passing it to native code finds its handle and goes home.
+- **Writable views:** a write (`"!"` names the member: `args[0].opts.sep!`; `"[]!"`
+  through a computed key) lands on the view when the object written is a plain view, a
+  local object, or a registered class's instance view whose prototype lacks the member (a
+  setter would have run at home); anything else parks the write home. The view's writes
+  since it arrived — members assigned or added (by identity), deleted, an array's new
+  length — are diffed when the run leaves (`viewDelta`) and ride the crossing's graph, so
+  a value shared with a frame slot is one object at home, and a handle stays a handle;
+  the owner applies them as it decodes (`applyDeltas`), before anything reads them. Same
+  model as session twins' deltas, same caveat: home code running meanwhile sees the old
+  state until the crossing lands. `test/probes/views.mts` holds each case.
 - **Shipped sync closures (`syncClosures`):** a `const f = () => …` in a class method —
   i18next's `getFixedT` returning `t` — compiles into a program over explicit caps
   (captures, `this` as `__self`; module-level code stays a free reference); the kept
@@ -64,10 +79,24 @@ mid-segment (design.md §8). So the check happens BEFORE the segment runs, in th
   + caps (slot `fn`) with its home identity: the far tier calls its own copy of the program,
   synchronously; a tier without that program gets an opaque handle instead (the stop rule
   parks the segment that would call it home); and coming home it is the original closure
-  again, never a fresh one. A closure that writes a captured binding, awaits, or is a
-  function expression using its own `this` stays native. Every top-level class of the
-  module is stamped (`shareClass`, module hash + name) so instances keep their class across
-  tiers.
+  again, never a fresh one. A captured `let` a closure assigns is boxed first (`found.v`:
+  the frame and the closure share one object through the graph); a closure that awaits,
+  reads `arguments`, or is a function expression using its own `this` stays native. Every
+  top-level class of the module is stamped (`shareClass`, module hash + name) so instances
+  keep their class across tiers.
+- **Sync calls of values (`syncCalls`, `syncMethods`):** a synchronous call of a value a
+  segment holds — a captured `t(k)`, `this.translate(k)`, `lib.get(k)`, `h.call(this, k)`
+  on a local arrow — lowers to a park the pump resolves where the run is: a shipped
+  closure's or a compiled class's program as a sub-frame (its segments under the stop
+  rule), a session twin or a live object natively, or home with the call when an argument
+  or the receiver is another tier's object (a few pure builtins — `Object.keys`,
+  `Array.isArray`, `hasOwnProperty` — read a plain view directly). Under `syncMethods`
+  every method of the module's classes and every module-level function is a program too.
+  `fn.bind(self, …)` becomes a tracked bind (`bindTracked`): a bound method of a shared
+  class ships as class + name + receiver and runs as the class's program over the
+  receiver's view (i18next's `bindMemberFunctions`). `forEach`/`map`/`filter`/`some`
+  callbacks inline as loops of the method's own code (a native fallback stays for
+  non-arrays).
 - **Value twins:** inside a shipped closure's caps the engine chooses data or stack per
   value: a stamped instance that holds only data (no function but a compiled closure whose
   caps are data too, no host object, accessor or handle anywhere in it) and fits the
@@ -98,21 +127,28 @@ mid-segment (design.md §8). So the check happens BEFORE the segment runs, in th
   in `frame.ret` (already part of the encoded frame); ship `(stack, null)` — the
   existing resume path pumps straight on from `ret`. No new message type; no re-servicing.
 
-### The i18next experiment (2026-11-01): what stops the real library
+### The i18next experiment (2026-11-01): the real `t()` runs on the gateway
 
-Goal: `t()` called mid-chain with no port code. The real i18next ESM compiles with the
-pass (11 closures become programs, 1 is refused for writing a capture) and its `t`
+Goal: `t()` called mid-chain with no port code. The real i18next ESM compiles with
+`syncClosures + syncCalls + syncMethods` (220 programs: every class method, every
+module function, every closure — one stays native for assigning a parameter) and its `t`
 translates Keycloak's 4,170 keys identically through the stub
-(`test/probes/sync-closures-i18next.mts`). Its instance stays home under any threshold:
-it holds 39 function values — 17 methods bound as own properties (`bindMemberFunctions`),
-15 closures its constructors make (`formatter.formats.*`), 7 object-literal handlers — and,
-in the console, react-i18next registers a `languageChanged` listener per mounted
-`useTranslation()` (394 files), closures over React state setters that `translate` can
-reach (`emit('missingKey')`). A copy of that instance can't be sound, so the engine's
-"keep it home" is the right answer. The sound route without port code would compile
-i18next's classes as machines and give stamped handles a data view, so `translate` reads
-`options` and `store.data` in place; not built — no compiled Keycloak program calls `t()`
-before a later server call, so there is nothing to measure.
+(`test/probes/sync-closures-i18next.mts`). A dialog that calls `t()` for three keys
+between two gateway calls, with the instance excised as a view:
+
+| threshold | crossings | shipped | where `t()` ran |
+|---|---|---|---|
+| 8 KB (default) | 2 | 15 KB | home: the 337 KB table is a member handle, `resolve` parks at it |
+| 4 MB | 1 | 338 KB | gateway: `translate → resolve → interpolate` over the view, no copy |
+
+What the chain needed, each found by tracing the park and fixed generally (above): moves
+into literals and conditions, a registered class's missing members, a RegExp by value,
+writes to the view (`resetRegExp` rewrites three regexps per call — the same objects, so
+no delta), one-level computed reads, boxed captured writes (`nest`'s `handleHasOptions`),
+`call`/`apply` on arrows, and `bindMemberFunctions`' bound methods. Not measured on
+Keycloak: no compiled Keycloak program calls `t()` before a later server call. The table
+ships on every crossing at 4 MB; shipping it once per session (content addressing) is
+the next step for that arm.
 
 ## Protocol shape (no new messages)
 

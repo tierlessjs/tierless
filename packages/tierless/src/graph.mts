@@ -15,6 +15,7 @@
 // The encoded form is acyclic and JSON-safe; decodeGraph rebuilds the graph,
 // pre-creating each object so cycles and sharing are restored exactly.
 
+import type { TwinDelta } from "./types.mjs";
 export interface Handle {
   __tierless_handle__: true;
   owner: string;
@@ -444,6 +445,19 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
   return { roots: values.map(enc), objs };
 }
 
+/** Land a run's writes on this tier's live objects (runtime.mts viewDelta, twinDelta):
+ *  the object a delta addresses — a heap master, or a member of one by path — takes the
+ *  fields and loses the keys gone. Deltas owned elsewhere are not ours to apply. */
+export function applyDeltas(tier: { id: string; heapGet(hid: string): unknown }, deltas: TwinDelta[]): void {
+  for (const d of deltas) {
+    if (d.owner !== tier.id) continue;
+    let live = tier.heapGet(d.id);
+    for (const k of d.path ?? []) live = (live as Record<string, unknown> | null | undefined)?.[k];
+    if (live === null || typeof live !== "object") continue;
+    for (const k of Object.keys(d.fields)) if (k !== "__proto__") (live as Record<string, unknown>)[k] = d.fields[k];
+    for (const k of d.gone ?? []) if (k !== "__proto__") delete (live as Record<string, unknown>)[k];
+  }
+}
 // A RegExp crosses as a VALUE (node "re": source, flags, lastIndex) — a copy, like a
 // string: a /g loop advances the copy's lastIndex and ends with it back at 0, as the
 // original's would; a copy is what a view member or a plain object's field decodes to.

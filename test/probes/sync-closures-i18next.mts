@@ -104,7 +104,12 @@ check("default threshold: every sampled key translates right", r1.labels.length 
 console.log(`  default threshold (8 KB): ${r1.resumes} crossing(s), ${r1.bytes} B shipped, calls ran ${r1.log.join(",")}`);
 const r2 = await run(1 << 22);
 check("4 MB threshold: every sampled key translates right", r2.labels.length === sample.length && r2.labels.every((l, i) => l === homeSample[i]), r2.labels.length + " labels");
-check("the instance stays home under both thresholds (two crossings): behavior it holds, not size", r1.resumes === 2 && r2.resumes === 2, r1.resumes + "/" + r2.resumes);
+// the instance is behavior AND data: under the default threshold its 337 KB table is a
+// member handle, so t() parks home between the two calls (two crossings); with the table
+// inside the view the whole chain — both calls, both t() — runs on the gateway (one crossing)
+check("default threshold: the table stays home, t() parks home between the calls (two crossings)", r1.resumes === 2, String(r1.resumes));
+check("4 MB threshold: t() runs on the gateway over the instance's view — one crossing", r2.resumes === 1, String(r2.resumes));
+check("4 MB threshold: the crossing carries the table once (under 400 KB)", r2.bytes < 400 * 1024, r2.bytes + " B");
 check("home translates all " + keys.length + " keys through the compiled stub exactly as the native closure would", home.length === keys.length && home.every((l, i) => l === i18n.t(keys[i], { lng: "en", ns: "master" })), "");
 console.log(`  4 MB threshold: ${r2.resumes} crossing(s), ${r2.bytes} B shipped, calls ran ${r2.log.join(",")}`);
 
@@ -129,5 +134,5 @@ console.log(`  4 MB threshold: ${r2.resumes} crossing(s), ${r2.bytes} B shipped,
   console.log("  the instance holds " + Object.values(kinds).reduce((n, a) => n + a.length, 0) + " function values the copy would need:");
   for (const [k, paths] of Object.entries(kinds)) console.log(`    ${paths.length} ${k}: ${paths.slice(0, 4).join(" ")}${paths.length > 4 ? " …" : ""}`);
 }
-console.log(`\n${ok() ? "PASS" : "FAIL"} — real i18next: correct either way; the engine's choice and its reason reported above`);
+console.log(`\n${ok() ? "PASS" : "FAIL"} — real i18next: correct either way; one crossing once the table fits the view`);
 process.exit(ok() ? 0 : 1);

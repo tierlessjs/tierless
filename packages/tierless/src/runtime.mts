@@ -73,8 +73,24 @@ function viewImage(o: object): Record<string, unknown> {
  *  Returns each twin with its snapshot: the caller diffs them once per crossing (no
  *  per-call hook exists for plain code). Going home, the encoder writes a hydrated twin
  *  back as its handle (graph.mts `hydrated`). */
-export function hydrateViews(stack: Frame[], twins: NonNullable<PumpOpts["twins"]>): Array<{ twin: object; where: TwinWhere; pre: Record<string, string | undefined> }> {
+/** A view this tier decoded, with its members as they arrived: what viewDelta diffs
+ *  against when the run leaves. */
+export interface TrackedView { view: object; h: Handle; pre: Record<string, unknown> | unknown[] }
+/** A view's writes since it arrived (docs/migrate-arm.md "writable views"): the members
+ *  assigned or added, by identity — a view's containers are views of their own, with
+ *  deltas of their own — the members deleted, and an array's new length. Rides the
+ *  crossing's graph (wire-binary.mts) and lands on the live object at home (applyDeltas). */
+export function viewDelta({ view, h, pre }: TrackedView): TwinDelta | null {
+  const fields: Record<string, unknown> = {};
+  const cur = view as Record<string, unknown>, old = pre as Record<string, unknown>;
+  for (const k of Object.keys(cur)) if (!(k in old) || old[k] !== cur[k]) fields[k] = cur[k];
+  const gone = Object.keys(old).filter((k) => !(k in cur));
+  if (Array.isArray(view) && (pre as unknown[]).length !== view.length) fields.length = view.length;
+  return Object.keys(fields).length || gone.length ? { owner: h.owner, id: h.id, ...(h.path ? { path: h.path } : {}), fields, ...(gone.length ? { gone } : {}) } : null;
+}
+export function hydrateViews(stack: Frame[], twins: NonNullable<PumpOpts["twins"]>): { twins: Array<{ twin: object; where: TwinWhere; pre: Record<string, string | undefined> }>; views: TrackedView[] } {
   const out: Array<{ twin: object; where: TwinWhere; pre: Record<string, string | undefined> }> = [];
+  const views: TrackedView[] = [];
   const seen = new Set<object>();
   const add = (twin: object, h: { owner: string; id: string; path?: string[] }): void => {
     if (seen.has(twin)) return;
@@ -114,6 +130,8 @@ export function hydrateViews(stack: Frame[], twins: NonNullable<PumpOpts["twins"
         hydrated(twin, handle);
         add(twin, handle);
       }
+      // snapshot AFTER hydration: a twin standing in for a member is not a write
+      views.push({ view: v as object, h: (v as { [VIEW]: Handle })[VIEW], pre: Array.isArray(v) ? [...(v as unknown[])] : { ...(v as object) } });
       continue;
     }
     if (Array.isArray(v)) { for (const x of v) work.push(x); }
@@ -121,7 +139,7 @@ export function hydrateViews(stack: Frame[], twins: NonNullable<PumpOpts["twins"
     else if (v instanceof Set) { for (const x of v) work.push(x); }
     else { const p = Object.getPrototypeOf(v); if (p === Object.prototype || p === null) for (const x of Object.values(v as object)) work.push(x); }
   }
-  return out;
+  return { twins: out, views };
 }
 import type { Handle } from "./graph.mjs";
 
@@ -218,6 +236,25 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump & { run
     }
     return null;
   };
+  // what a write of member m lands on: a local object or a plain view take it (a view's
+  // write rides home as a delta); a registered class's instance view takes its own data
+  // members, never one its prototype has (a setter would have run at home); any other
+  // instance view, or a handle, parks the write home
+  const writable = (o: unknown, m: string): { owner: string } | null => {
+    if (isHandle(o)) return o;
+    if (o === null || (typeof o !== "object" && typeof o !== "function")) return null;   // the write throws here as it would at home
+    const vh = (o as { [VIEW]?: Handle })[VIEW];
+    if (!vh || !vh.inst) return null;
+    const proto = vh.cls ? protoFor(vh.cls, false) : undefined;
+    return proto && !(m in proto) ? null : vh;
+  };
+  // what `o[k]` with k unknown may reach: a handle is unreadable; an instance view's
+  // unknown key may be a prototype getter; a local object or a plain view answers any key
+  const anyKey = (o: unknown): { owner: string } | null => {
+    if (isHandle(o)) return o;
+    const vh = o !== null && typeof o === "object" ? (o as { [VIEW]?: Handle })[VIEW] : undefined;
+    return vh?.inst ? vh : null;
+  };
   const parkHome = (top: Frame): HomePark | null => {
     const need = slots?.[top.fn]?.[top.pc];
     if (!need) return null;
@@ -226,10 +263,18 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump & { run
       // a VIEW's primitives (nested ones too) don't send the run home. A trailing "=" is a
       // read that only MOVES into a frame slot (the slot's later uses are checked by their
       // own refs): the chain must walk, the value may be anything. "[]=" moves the result
-      // of a computed access: the object reached must be complete. Anything else is a
-      // value read: a view used as a value parks (its own handle), a primitive stays.
-      const base = ref.endsWith("[]="), move = base || ref.endsWith("=");
-      const [k, ...chain] = (base ? ref.slice(0, -3) : move ? ref.slice(0, -1) : ref).split(".");
+      // of a computed access `o[k]`: o must answer any key — a local object or a plain
+      // view, not a handle or an instance view (an unknown key could be a getter);
+      // "[..]=" reaches through two or more computed levels: the object must be complete.
+      // "!" is a WRITE of the last member: the object before it must be writable here — a
+      // local object, or a view (its write rides home: viewDelta); "[]!" and "[..]!" write
+      // through computed access, with the same conditions as the moves. "[]" and "[..]"
+      // read through computed access as a VALUE: the object must be complete, so whatever
+      // the key reaches is plain data. Anything else is a value read: a view used as a
+      // value parks (its own handle), a primitive stays.
+      const mode = /\[(?:\.\.)?\][=!]?$/.exec(ref)?.[0] ?? (ref.endsWith("=") ? "=" : ref.endsWith("!") ? "!" : "");
+      const path = ref.slice(0, ref.length - mode.length).split(".");
+      const [k, ...chain] = mode === "!" ? path.slice(0, -1) : path;
       let v = k === "args" ? top.args
         : k === "args+" ? (Array.isArray(top.args) ? top.args.slice(1) : top.args)    // a closure's or method's own arguments, past its caps/receiver
         : k.startsWith("args[") ? (Array.isArray(top.args) ? top.args[Number(k.slice(5, -1))] : top.args)
@@ -248,7 +293,7 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump & { run
         else if (!d && vh?.inst && vh.cls && (proto = protoFor(vh.cls, false)) && !(m in proto)) v = undefined;
         else { broke = true; break; }
       }
-      const h = broke ? findHandle(v) : base ? incomplete(v) : move ? null : findHandle(v);
+      const h = broke ? findHandle(v) : mode === "[]=" || mode === "[]!" ? anyKey(v) : mode.startsWith("[") ? incomplete(v) : mode === "=" ? null : mode === "!" ? writable(v, path[path.length - 1]) : findHandle(v);
       if (h) return { op: "home", tier: h.owner, name: k, args: [] };
     }
     return null;
@@ -335,6 +380,12 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump & { run
         if (prog) { stack.push({ fn: prog, pc: 0, args: [recv, ...r.args] }); return null; }
         return homePark(vh.owner);
       }
+    }
+    // call/apply on a compiled closure: its program, the thisArg dropped (a closure's
+    // `this` is its creator's, captured in its caps; one with a `this` of its own stays native)
+    if (isCompiledFn(recv) && (r.member === "call" || r.member === "apply")) {
+      const a = r.member === "call" ? r.args.slice(1) : Array.from((r.args[1] as Iterable<unknown> | undefined) ?? []);
+      stack.push({ fn: recv.__tierless_program, pc: 0, args: [recv.__tierless_caps(), ...a] }); return null;
     }
     let f: unknown;
     try { f = (recv as Record<string, unknown> | null | undefined)?.[r.member]; }

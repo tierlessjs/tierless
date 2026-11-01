@@ -621,6 +621,26 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024, conten
     }
     return { roots: values.map(enc), objs };
 }
+/** Land a run's writes on this tier's live objects (runtime.mts viewDelta, twinDelta):
+ *  the object a delta addresses — a heap master, or a member of one by path — takes the
+ *  fields and loses the keys gone. Deltas owned elsewhere are not ours to apply. */
+export function applyDeltas(tier, deltas) {
+    for (const d of deltas) {
+        if (d.owner !== tier.id)
+            continue;
+        let live = tier.heapGet(d.id);
+        for (const k of d.path ?? [])
+            live = live?.[k];
+        if (live === null || typeof live !== "object")
+            continue;
+        for (const k of Object.keys(d.fields))
+            if (k !== "__proto__")
+                live[k] = d.fields[k];
+        for (const k of d.gone ?? [])
+            if (k !== "__proto__")
+                delete live[k];
+    }
+}
 // A RegExp crosses as a VALUE (node "re": source, flags, lastIndex) — a copy, like a
 // string: a /g loop advances the copy's lastIndex and ends with it back at 0, as the
 // original's would; a copy is what a view member or a plain object's field decodes to.

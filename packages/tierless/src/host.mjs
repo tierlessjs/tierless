@@ -12,8 +12,8 @@
 // The host is STATELESS per message — the continuation carries all session state — so any
 // number of sessions can be in flight on one peer concurrently; the transport's
 // correlation ids keep their bounces apart.
-import { makePump, initialStack, hydrateViews, twinDelta } from "./runtime.mjs";
-import { isCompiledFn } from "./graph.mjs";
+import { makePump, initialStack, hydrateViews, twinDelta, viewDelta } from "./runtime.mjs";
+import { isCompiledFn, applyDeltas } from "./graph.mjs";
 import { encodeWireBinary, decodeWireBinary, encodeArgs, decodeArgs } from "./wire-binary.mjs";
 import { RawJsonBody, RAW_TEXT } from "./transport.mjs";
 import { makeRecorder, decide, siteKey, argFeatures } from "./trace.mjs";
@@ -138,8 +138,11 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
     // The continuation is about to cross: the recorder bumps the stack-carried counters,
     // encodes, and records the site with the REAL shipped bytes. The shipped host always
     // migrates today; a §6 driver records its actual choice itself.
-    const ship = (sid, res) => rec ? rec.ship(res.stack, res.request, () => encodeWireBinary(res.stack, res.request, encOpts(sid)), "migrate")
-        : encodeWireBinary(res.stack, res.request, encOpts(sid));
+    const ship = (sid, res, deltas) => rec ? rec.ship(res.stack, res.request, () => encodeWireBinary(res.stack, res.request, { ...encOpts(sid), deltas }), "migrate")
+        : encodeWireBinary(res.stack, res.request, { ...encOpts(sid), deltas });
+    // the writes a step made to views of the peer's objects (runtime.mts viewDelta): they
+    // ride the reply's graph and land on the live objects as the peer decodes it
+    const viewDeltas = (views) => views.map(viewDelta).filter((d) => d !== null);
     // Interpret a peer reply: done -> final value; suspend -> pump the migrated stack here
     // (which may end done, or park at another foreign resource for the caller to bounce).
     async function settle(peer, { obj: reply, bin }) {
@@ -211,7 +214,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
         // borrowed members with a twin here become the twin (hydrateViews); their changes
         // are diffed once, at the reply, since plain code may have called them anywhere.
         // Value twins (a shipped closure's instance) are tracked the same way, twins registry or not.
-        const wet = hydrateViews(stack, twins ?? (() => undefined));
+        const { twins: wet, views } = hydrateViews(stack, twins ?? (() => undefined));
         const carry = () => {
             for (const { twin, where, pre } of wet.splice(0)) {
                 const d = twinDelta(pre, twin, where);
@@ -220,17 +223,20 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
             }
             return twinDeltas.length ? { twinDeltas } : {};
         };
+        // a done or error reply has no stack to ship: the views' writes ride a graph of their own
+        const binOf = (deltas) => (deltas.length ? { bin: encodeWireBinary([], null, { ...encOpts(sid), deltas }) } : {});
         try {
             const res = await runPump(peer, stack, incoming, sink);
+            const deltas = viewDeltas(views);
             if (res.done)
-                return { obj: { type: "done", value: res.value, ...carry() } };
-            return { obj: { type: "suspend", ...carry() }, bin: ship(sid, res) };
+                return { obj: { type: "done", value: res.value, ...carry() }, ...binOf(deltas) };
+            return { obj: { type: "suspend", ...carry() }, bin: ship(sid, res, deltas) };
         }
         catch (e) {
             rec?.end(flag, "error");
             // error replies carry twin deltas too: mutations made before an uncaught throw
             // are real (plain JS keeps them) and the home instances must converge
-            return { obj: { type: "error", message: String((e && e.message) || e), ...carry() } };
+            return { obj: { type: "error", message: String((e && e.message) || e), ...carry() }, ...binOf(viewDeltas(views)) };
         }
     }
     const newSid = () => tier + "#" + nextSid++; // starter-side unique; tiers differ, so two starters on one socket can't collide
@@ -297,6 +303,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
             // §5 mini-heap for the MIGRATE arm: excised locals park here while the stack is away
             // and resolve back by identity when it returns. Scoped to this run — nothing leaks.
             let heapTier = null;
+            let views = []; // views of the peer's objects the stack brought back (hydrateViews)
             for (;;) {
                 const c = carry;
                 carry = null;
@@ -373,24 +380,20 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                         let n = 0;
                         heapTier = { id: tier, heapPut: (v) => { const k = "l" + n++; objs.set(k, v); return k; }, heapGet: (hid) => objs.get(hid) };
                     }
-                    const enc = () => encodeWireBinary(stack, req, { tier: heapTier, excise: ownedUnit, ...(threshold ? { threshold } : {}) });
+                    // the stack may hold views of the PEER's objects from an earlier round: their
+                    // writes here ride along (viewDeltas)
+                    const enc = () => encodeWireBinary(stack, req, { tier: heapTier, excise: ownedUnit, ...(threshold ? { threshold } : {}), deltas: viewDeltas(views) });
                     const reply = await peer.request({ type: "resume", sid, ...meta }, rec ? rec.ship(stack, req, enc, "migrate") : enc());
-                    // twin write-back (docs/migrate-arm.md "twins and correctness"): apply the
-                    // fields the session twins mutated to OUR live instances BEFORE the awaiting
-                    // code resumes — it reads its writes exactly as if the method ran at home.
-                    // Applied on ERROR replies too: mutations made before an uncaught throw are
-                    // real, exactly as they would be had the method run here.
-                    for (const d of reply.obj.twinDeltas ?? []) {
-                        if (d.owner !== tier)
-                            continue;
-                        let live = heapTier.heapGet(d.id);
-                        for (const k of d.path ?? [])
-                            live = live?.[k];
-                        if (live && typeof live === "object") {
-                            Object.assign(live, d.fields);
-                            for (const k of d.gone ?? [])
-                                delete live[k];
-                        }
+                    // write-back (docs/migrate-arm.md "twins and correctness", "writable views"):
+                    // the fields the session twins and the views mutated land on OUR live objects
+                    // BEFORE the awaiting code resumes — it reads its writes exactly as if the code
+                    // ran at home. On ERROR replies too: mutations made before an uncaught throw
+                    // are real, exactly as they would be had the code run here. Twin deltas ride
+                    // the JSON header; view deltas the graph (decoding applies them).
+                    applyDeltas(heapTier, reply.obj.twinDeltas ?? []);
+                    if (reply.obj.type !== "suspend") {
+                        if (reply.bin)
+                            decodeWireBinary(reply.bin, { tier: heapTier, programs });
                     }
                     if (reply.obj.type === "error")
                         throw new Error(reply.obj.message);
@@ -399,6 +402,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                     const back = decodeWireBinary(reply.bin, { tier: heapTier, programs });
                     stack = back.stack;
                     request = back.request; // op:"home" -> pump steps on from ret; a browser-owned resource -> pump services it here
+                    views = hydrateViews(stack, twins ?? (() => undefined)).views;
                     continue;
                 }
                 try {

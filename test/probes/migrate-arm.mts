@@ -130,7 +130,7 @@ const mod = await import(pathToFileURL(join(dir, "svc.mjs")).href);
 
 check("__slots emitted", !!mod.__slots && !!mod.__slots["Svc$chain"], Object.keys(mod.__slots || {}).join(","));
 const slotNames = new Set(Object.values(mod.__slots["Svc$getAllish"] as Record<string, string[]>).flat());
-check("getAllish's table names args[0] (this — the stop-rule trigger)", slotNames.has("args[0]"), [...slotNames].join(","));
+check("getAllish's table names the write to this (args[0].total! — a view takes it as a delta, a handle parks)", slotNames.has("args[0].total!"), [...slotNames].join(","));
 const chainMid = new Set(Object.values(mod.__slots["Svc$chain"] as Record<string, string[]>).flat());
 check("chain's table keeps element precision (args[1], never bare args)", chainMid.has("args[1]") && !chainMid.has("args"), [...chainMid].join(","));
 

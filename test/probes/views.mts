@@ -13,9 +13,13 @@
 //   - an array element read (lib.list[1]), the length                  -> stays
 //   - a prototype getter (lib.size)                                    -> home, right value
 //   - a method call (lib.get(k))                                       -> home, right value
-//   - a write (lib.opts.sep = x), an array push                        -> home, the live object changed
+//   - a write (lib.opts.sep = x), an element write (lib.list[0] = 9),
+//     a delete, a new member, a whole-member replacement                -> stays, the live object changed
+//     (writable views: the write rides home as a delta, docs/migrate-arm.md)
+//   - a write to a name the class's prototype has (an accessor)         -> home, the setter ran there
+//   - an array push (a native method on the view)                      -> home, the live object changed
 //   - the object passed to a native helper                             -> home
-//   - an element write through a computed key (lib.data[a] = …)        -> home, live object changed
+//   - an element write through a computed key, then read back          -> stays, live object changed
 //   - the instance over the byte budget (threshold 64)                 -> home (a member handle)
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -45,7 +49,11 @@ export function Dialog(props) {
   async function push(id) { const a = await client.scopes.a(id); lib.list.push(9); return await client.scopes.b(a, lib.list.length); }
   async function pass(id) { const a = await client.scopes.a(id); const n = helper(lib.opts); return await client.scopes.b(a, n); }
   async function writeComputed(id, lng) { const a = await client.scopes.a(id); lib.data[lng] = { ns: { k: "w" } }; return await client.scopes.b(a, lib.data[lng].ns.k); }
-  return { readNamed, readComputed, readArray, readGetter, callMethod, write, push, pass, writeComputed };
+  async function writeMany(id) { const a = await client.scopes.a(id); lib.list[0] = 9; delete lib.opts.sep; lib.opts.extra = { n: 1 }; lib.hits = 5; lib.opts.extra.n++; return await client.scopes.b(a, lib.list[0] + ":" + lib.opts.sep + ":" + lib.opts.extra.n + ":" + lib.hits); }
+  async function replaceMember(id) { const a = await client.scopes.a(id); lib.opts = { sep: "x" }; return await client.scopes.b(a, lib.opts.sep); }
+  async function writeGetter(id) { const a = await client.scopes.a(id); lib.size = 1; return await client.scopes.b(a, lib.size); }
+  async function useRegExp(id) { const a = await client.scopes.a(id); const m = lib.re.test("abc"); return await client.scopes.b(a, m); }
+  return { readNamed, readComputed, readArray, readGetter, callMethod, write, push, pass, writeComputed, writeMany, replaceMember, writeGetter, useRegExp };
 }`;
 const { code, meta } = compile(SRC, { filename: "views.js", closures: true });
 const GEN = fileURLToPath(new URL("../.gen/", import.meta.url));
@@ -53,16 +61,20 @@ mkdirSync(GEN, { recursive: true });
 writeFileSync(join(GEN, "views.mjs"), code);
 const mod = await import(pathToFileURL(join(GEN, "views.mjs")).href);
 const bundle = { PROGRAMS: mod.PROGRAMS, __unwind: mod.__unwind, __slots: mod.__slots };
-check("the nine chains compiled", (meta.methods as Array<{ program: string | null }>).filter((m) => m.program).length === 9, JSON.stringify(meta.methods));
+check("the thirteen chains compiled", (meta.methods as Array<{ program: string | null }>).filter((m) => m.program).length === 13, JSON.stringify(meta.methods));
 const refsAt = (prog: string): string => JSON.stringify(mod.__slots[prog]);
-check("the compiler records the computed read as a move through computed access (\"[]=\") and the named read as a plain chain",
-  refsAt("Dialog$readComputed").includes('"args[0].lib.data[]="') && refsAt("Dialog$readNamed").includes('"args[0].lib.opts.sep="'), refsAt("Dialog$readComputed") + " " + refsAt("Dialog$readNamed"));
+check("the compiler records the computed read as a move through computed access (\"[..]=\": three levels) and the named read as a plain chain",
+  refsAt("Dialog$readComputed").includes('"args[0].lib.data[..]="') && refsAt("Dialog$readNamed").includes('"args[0].lib.opts.sep="'), refsAt("Dialog$readComputed") + " " + refsAt("Dialog$readNamed"));
+check("the compiler records a write by the member written (\"!\"), an element write through one computed level (\"[]!\")",
+  refsAt("Dialog$write").includes('"args[0].lib.opts.sep!"') && refsAt("Dialog$writeMany").includes('"args[0].lib.list[]!"') && refsAt("Dialog$writeMany").includes('"args[0].lib.opts.sep!"') && refsAt("Dialog$writeMany").includes('"args[0].lib.hits!"'), refsAt("Dialog$writeMany"));
 
 // the library: a class instance with data, a getter, a method, a listener
 class Lib {
-  opts = { sep: "." }; data: Record<string, Record<string, Record<string, string>>> = { en: { ns: { k: "v" } } }; list = [1, 2, 3];
+  opts: Record<string, unknown> = { sep: "." }; data: Record<string, Record<string, Record<string, string>>> = { en: { ns: { k: "v" } } }; list = [1, 2, 3]; hits = 0; re = /b/;
   on = (): void => { /* a listener: behavior */ };
   get size(): number { return this.list.length * 10; }
+  set size(v: number) { this.sizeSet = v; }
+  sizeSet = 0;
   get(k: string): string { return this.data.en.ns[k] + "!"; }
 }
 shareClass("probe:Lib", Lib);
@@ -89,9 +101,9 @@ const run = async (fn: string, args: unknown[], lib: Lib, threshold?: number): P
   mod.__bindTierlessMethods((prog: string, caps: object, a: unknown[]) => bhost.runLocal(peer, prog, [caps, ...a], { migrate: () => true }));
   try { return { r: await mod.Dialog({ lib })[fn](...args), resumes, log }; } finally { mod.__bindTierlessMethods(null); }
 };
-const stays = async (name: string, fn: string, args: unknown[], want: unknown, lib = new Lib()): Promise<void> => {
+const stays = async (name: string, fn: string, args: unknown[], want: unknown, lib = new Lib(), after?: (l: Lib) => boolean): Promise<void> => {
   const { r, resumes, log } = await run(fn, args, lib);
-  check(`stays: ${name} — one crossing, right value`, r === want && resumes === 1 && log.join() === "server:a,server:b", JSON.stringify({ r, resumes, log }));
+  check(`stays: ${name} — one crossing, right value${after ? ", the live object changed" : ""}`, r === want && resumes === 1 && log.join() === "server:a,server:b" && (!after || after(lib)), JSON.stringify({ r, resumes, log, lib }));
 };
 const home = async (name: string, fn: string, args: unknown[], want: unknown, lib = new Lib(), after?: (l: Lib) => boolean, threshold?: number): Promise<void> => {
   const { r, resumes, log } = await run(fn, args, lib, threshold);
@@ -103,10 +115,14 @@ await stays("a computed read moved into a local", "readComputed", [1, "en", "ns"
 await stays("an array element and its length", "readArray", [1], "2/2:3");
 await home("a prototype getter", "readGetter", [1], "2/30");
 await home("a method call", "callMethod", [1], "2/v!");
-await home("a write", "write", [1], "2/-", new Lib(), (l) => l.opts.sep === "-");
+await stays("a write (the view takes it; the delta lands at home)", "write", [1], "2/-", new Lib(), (l) => l.opts.sep === "-");
+await stays("an element write, a delete, a new member, an instance field, a nested update", "writeMany", [1], "2/9:undefined:2:5", new Lib(), (l) => l.list[0] === 9 && !("sep" in l.opts) && (l.opts.extra as { n: number }).n === 2 && l.hits === 5);
+await stays("a member replaced by a local object (a copy lands at home)", "replaceMember", [1], "2/x", new Lib(), (l) => l.opts.sep === "x");
+await stays("a RegExp member (a copy) used natively", "useRegExp", [1], "2/true");
+await home("a write to a name the prototype has (an accessor: the setter runs at home)", "writeGetter", [1], "2/30", new Lib(), (l) => l.sizeSet === 1);
 await home("an array push", "push", [1], "2/4", new Lib(), (l) => l.list.length === 4 && l.list[3] === 9);
 await home("the object passed to a native helper", "pass", [1], "2/2", new Lib(), (l) => (l.opts as { touched?: boolean }).touched === true);
-await home("an element write through a computed key", "writeComputed", [1, "fr"], "2/w", new Lib(), (l) => l.data.fr?.ns.k === "w");
+await stays("an element write through a computed key, read back through it (the view is complete)", "writeComputed", [1, "fr"], "2/w", new Lib(), (l) => l.data.fr?.ns.k === "w");
 await home("the instance over the byte budget (a member handle)", "readNamed", [1], "2/.", new Lib(), undefined, 64);
 
 // ---- sync calls of values: a compiled library runs over the view (syncCalls + syncMethods)
@@ -126,6 +142,8 @@ export class Lib2 {
   each(xs) { const out = []; xs.forEach((x, i) => { if (i > 2) return; out.push(this.join(x, "+")); }); return out.join(",") + "/" + xs.map((x) => x.length).filter((n) => n > 1).some((n) => n > 1); }
   notify(k) { const r = this.on(); return r + ":" + k; }
   fixed() { const t = (k) => this.get(k); return t; }
+  boxed(k) { let found; let n = 0; const pick = (key) => { if (this.data.en.ns[key]) { found = this.data.en.ns[key]; n++; } }; pick(k); pick("j"); return found + n; }
+  viaCall(k) { const h = (key) => this.get(key); return h.call(this, k) + h.apply(this, ["j"]); }
 }
 function useClient() { return { client: globalThis.__probeClient }; }
 export function Dialog2(props) {
@@ -136,11 +154,15 @@ export function Dialog2(props) {
   async function viaClosure(id) { const a = await client.scopes.a(id); const r = t("j"); return await client.scopes.b(a, r); }
   async function viaSpread(id) { const a = await client.scopes.a(id); const r = lib.spread("v", "-"); return await client.scopes.b(a, r); }
   async function viaEach(id) { const a = await client.scopes.a(id); const r = lib.each(["p", "qq", "r", "s"]); return await client.scopes.b(a, r); }
-  return { viaMethod, viaListener, viaClosure, viaSpread, viaEach };
+  async function viaBoxed(id) { const a = await client.scopes.a(id); const r = lib.boxed("k"); return await client.scopes.b(a, r); }
+  async function viaCallArrow(id) { const a = await client.scopes.a(id); const r = lib.viaCall("k"); return await client.scopes.b(a, r); }
+  return { viaMethod, viaListener, viaClosure, viaSpread, viaEach, viaBoxed, viaCallArrow };
 }`;
   const out2 = compile(SRC2, { filename: "views2.js", closures: true, syncClosures: true, syncCalls: true, syncMethods: true });
   const ms2 = out2.meta.methods as Array<{ class: string; method: string; program: string | null; error?: string }>;
-  check("the library's six methods and its closure compiled, the component's five chains too", ["Lib2$get", "Lib2$join", "Lib2$notify", "Lib2$fixed", "Lib2$spread", "Lib2$each", "Lib2$fixed$t", "Dialog2$viaMethod", "Dialog2$viaListener", "Dialog2$viaClosure", "Dialog2$viaSpread", "Dialog2$viaEach"].every((n) => ms2.some((m) => m.program === n)), JSON.stringify(ms2.filter((m) => !m.program)));
+  check("the library's eight methods and its closures compiled (one assigns a captured `let`: boxed), the component's seven chains too", ["Lib2$get", "Lib2$join", "Lib2$notify", "Lib2$fixed", "Lib2$spread", "Lib2$each", "Lib2$boxed", "Lib2$viaCall", "Lib2$fixed$t", "Lib2$boxed$pick", "Lib2$viaCall$h", "Dialog2$viaMethod", "Dialog2$viaListener", "Dialog2$viaClosure", "Dialog2$viaSpread", "Dialog2$viaEach", "Dialog2$viaBoxed", "Dialog2$viaCallArrow"].every((n) => ms2.some((m) => m.program === n)), JSON.stringify(ms2.filter((m) => !m.program)));
+  check("a captured `let` a closure assigns is boxed: the frame and the closure share `found.v`", /F\.found = \{\s*v: undefined\s*\}/.test(out2.code) && out2.code.includes("found: F.found") && /__caps\.found\.v = |args\[0\]\.found\.v = /.test(out2.code), out2.code.match(/found[^\n]{0,60}/g)?.slice(0, 5).join("\n"));
+  check("`h.call(this, k)` / `h.apply(this, xs)` on a local arrow lower to plain calls of the value", out2.code.includes('op: "callv", recv: F.h, path: [], args: [F.args[1]]') && out2.code.includes('op: "callv", recv: F.h, path: [], args: [...["j"]]'), out2.code.match(/op: "callv", recv: F\.h[^}]*/g)?.join("\n"));
   check("a sync call of a value lowers to a pump-dispatched park, a call of module code stays plain", out2.code.includes('op: "dyn", sync: 1, recv: F.args[0], path: ["lib"], member: "get"') && out2.code.includes('op: "callv", recv: F.args[0], path: ["t"]'), out2.code.match(/op: "(?:dyn|callv)"[^}]*/g)?.slice(0, 6).join("\n"));
   writeFileSync(join(GEN, "views2.mjs"), out2.code);
   const m2 = await import(pathToFileURL(join(GEN, "views2.mjs")).href);
@@ -161,7 +183,11 @@ export function Dialog2(props) {
     try { return { r: await m2.Dialog2({ lib, t })[fn](1), resumes, log }; } finally { m2.__bindTierlessMethods(null); }
   };
   const lib = new m2.Lib2();
-  check("at home the compiled sync methods behave as written", lib.get("k") === "v.3" && lib.notify("x") === "listened:x" && lib.hits === 1 && lib.fixed()("j") === "w.3" && lib.spread("v", "-") === "v-3", lib.get("k"));
+  check("at home the compiled sync methods behave as written", lib.get("k") === "v.3" && lib.notify("x") === "listened:x" && lib.hits === 1 && lib.fixed()("j") === "w.3" && lib.spread("v", "-") === "v-3" && lib.boxed("k") === "w2" && lib.viaCall("k") === "v.3w.3", lib.get("k") + " " + lib.boxed("k") + " " + lib.viaCall("k"));
+  const r6 = await run2("viaBoxed", new m2.Lib2());
+  check("a closure that writes a captured `let` runs over the view, the write seen by its creator — one crossing, right value", r6.r === "2/w2" && r6.resumes === 1 && r6.log.join() === "server:a,server:b", JSON.stringify(r6));
+  const r7 = await run2("viaCallArrow", new m2.Lib2());
+  check("call/apply on a local arrow run its program over the view — one crossing, right value", r7.r === "2/v.3w.3" && r7.resumes === 1 && r7.log.join() === "server:a,server:b", JSON.stringify(r7));
   const l4 = new m2.Lib2();
   const r4 = await run2("viaSpread", l4);
   check("a rest-parameter method (`...args`, a frame-field name) with a guarded optional call runs over the view — one crossing, right value", r4.r === "2/v-3" && r4.resumes === 1 && r4.log.join() === "server:a,server:b", JSON.stringify(r4));
@@ -174,7 +200,7 @@ export function Dialog2(props) {
   check("a method call mid-chain runs on the gateway over the instance's view — one crossing, right value", r1.r === "2/v.3" && r1.resumes === 1 && r1.log.join() === "server:a,server:b", JSON.stringify(r1));
   const l2 = new m2.Lib2();
   const r2 = await run2("viaListener", l2);
-  check("a method that calls a listener parks that call home — right value, the listener ran at home (hits=1), two crossings", r2.r === "2/listened:k" && l2.hits === 1 && r2.resumes === 2 && r2.log.join() === "server:a,server:b", JSON.stringify({ ...r2, hits: l2.hits }));
+  check("a method that calls a listener (a compiled closure the instance holds) runs it over the view; its write to the instance lands at home — one crossing, hits=1", r2.r === "2/listened:k" && l2.hits === 1 && r2.resumes === 1 && r2.log.join() === "server:a,server:b", JSON.stringify({ ...r2, hits: l2.hits }));
   const l3 = new m2.Lib2();
   const r3 = await run2("viaClosure", l3, l3.fixed());
   check("a shipped closure over the instance (no copy: its view) runs on the gateway — one crossing, right value", r3.r === "2/w.3" && r3.resumes === 1 && r3.log.join() === "server:a,server:b", JSON.stringify(r3));
@@ -237,5 +263,5 @@ export function Dialog2(props) {
   check(`300 random objects under random budgets: ${members} members read as the original, ${handles} member handles resolve at home, views come home as the original`, fails.length === 0, fails.slice(0, 3).join("; "));
 }
 
-console.log(`\n${ok() ? "PASS" : "FAIL"} — a borrowed instance is readable off-tier: data reads stay, behavior and writes park home`);
+console.log(`\n${ok() ? "PASS" : "FAIL"} — a borrowed instance is readable and writable off-tier: data reads and writes stay (writes ride home as deltas), behavior parks`);
 process.exit(ok() ? 0 : 1);

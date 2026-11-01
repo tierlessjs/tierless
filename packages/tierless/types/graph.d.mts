@@ -1,3 +1,4 @@
+import type { TwinDelta } from "./types.mjs";
 export interface Handle {
     __tierless_handle__: true;
     owner: string;
@@ -100,6 +101,13 @@ export interface EncodedGraph {
     objs: unknown[];
 }
 export declare function encodeGraph(values: unknown[], { tier, threshold, content, excise }?: EncodeOptions): EncodedGraph;
+/** Land a run's writes on this tier's live objects (runtime.mts viewDelta, twinDelta):
+ *  the object a delta addresses — a heap master, or a member of one by path — takes the
+ *  fields and loses the keys gone. Deltas owned elsewhere are not ours to apply. */
+export declare function applyDeltas(tier: {
+    id: string;
+    heapGet(hid: string): unknown;
+}, deltas: TwinDelta[]): void;
 export declare function reOf(n: {
     s: string;
     f: string;

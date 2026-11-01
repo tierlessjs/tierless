@@ -13,11 +13,27 @@ export declare function twinDelta(pre: Record<string, string | undefined>, twin:
  *  Returns each twin with its snapshot: the caller diffs them once per crossing (no
  *  per-call hook exists for plain code). Going home, the encoder writes a hydrated twin
  *  back as its handle (graph.mts `hydrated`). */
-export declare function hydrateViews(stack: Frame[], twins: NonNullable<PumpOpts["twins"]>): Array<{
-    twin: object;
-    where: TwinWhere;
-    pre: Record<string, string | undefined>;
-}>;
+/** A view this tier decoded, with its members as they arrived: what viewDelta diffs
+ *  against when the run leaves. */
+export interface TrackedView {
+    view: object;
+    h: Handle;
+    pre: Record<string, unknown> | unknown[];
+}
+/** A view's writes since it arrived (docs/migrate-arm.md "writable views"): the members
+ *  assigned or added, by identity — a view's containers are views of their own, with
+ *  deltas of their own — the members deleted, and an array's new length. Rides the
+ *  crossing's graph (wire-binary.mts) and lands on the live object at home (applyDeltas). */
+export declare function viewDelta({ view, h, pre }: TrackedView): TwinDelta | null;
+export declare function hydrateViews(stack: Frame[], twins: NonNullable<PumpOpts["twins"]>): {
+    twins: Array<{
+        twin: object;
+        where: TwinWhere;
+        pre: Record<string, string | undefined>;
+    }>;
+    views: TrackedView[];
+};
+import type { Handle } from "./graph.mjs";
 export type { Bundle, Frame, MachineResult, ResourceRequest, HomePark, PumpRequest, Exec, Peer, Host } from "./types.mjs";
 export declare const initialStack: (fn: string, args?: unknown[]) => Frame[];
 export interface PumpOpts {

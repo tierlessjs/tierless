@@ -8,7 +8,8 @@
 // reuses encodeGraph's proven graph-building/excision and decodeGraph's cycle-safe
 // reconstruction unchanged — only the serialization of that structure is swapped. Browser-
 // safe (Uint8Array/DataView/TextEncoder, no Buffer); ships as one binary frame.
-import { encodeGraph, decodeGraph, type Handle, type EncodeOptions, type DecodeOptions } from "./graph.mjs";
+import { encodeGraph, decodeGraph, applyDeltas, type Handle, type EncodeOptions, type DecodeOptions } from "./graph.mjs";
+import type { TwinDelta } from "./types.mjs";
 import { W, R, isVarInt, writeMagic, checkMagic, makeInterner, writeStrings, readStrings, strAt, rootsOf, rebuildStack, writeFrameHeader, readFrameHeader } from "./wire-io.mjs";
 import type { DeltaFrame, DeltaRequest } from "./wire-delta.mjs";
 
@@ -22,7 +23,10 @@ import type { DeltaFrame, DeltaRequest } from "./wire-delta.mjs";
 // SMW4: views are graph slots (tag 12: handle + members; tag 13: a shared function by
 // name with its member handle); a handle record's flags are kind 1, cls 2, state 4 (a node
 // follows), path 8, inst 16. The JSON view string and the handle's beside-members are gone.
-const MAGIC = "SMW4";
+// SMW5: a deltas section after the frame header — the writes a run made to views of
+// the receiver's objects (runtime.mts viewDelta), each field a graph root — and node tag
+// 12, a RegExp by value.
+const MAGIC = "SMW5";
 
 // The writer/hardened reader, magic header, string table, and frame flatten/rebuild live in
 // wire-io.mts (one copy, shared with the delta wire). This file owns only what is binary-
@@ -95,8 +99,11 @@ function readHandle(r: R, S: (i: number) => string): { h: Handle; st: boolean } 
 }
 const internHandleWith = (intern: (s: string) => number) => (h: Handle): void => { intern(h.owner); intern(String(h.id)); if (h.kind) intern(h.kind); if (h.cls) intern(h.cls); for (const k of h.path ?? []) intern(k); };
 
-export function encodeWireBinary(stack: DeltaFrame[], request: DeltaRequest | null, { tier = null, threshold = 8192, content = null, excise = null }: EncodeOptions = {}): Uint8Array {
+export function encodeWireBinary(stack: DeltaFrame[], request: DeltaRequest | null, { tier = null, threshold = 8192, content = null, excise = null, deltas = [] }: EncodeOptions & { deltas?: TwinDelta[] } = {}): Uint8Array {
   const { rootVals, frames, req } = rootsOf(stack, request);
+  // view deltas: each field value is one more root of the same graph (a value shared
+  // with a frame slot stays one object at home)
+  const dl = deltas.map((d) => { const keys = Object.keys(d.fields); const f0 = rootVals.length; for (const k of keys) rootVals.push(d.fields[k]); return { d, keys, f0 }; });
   const graph = encodeGraph(rootVals, { tier, threshold, content, excise });
 
   // pass 1: intern strings and collect object shapes ------------------------------------
@@ -107,6 +114,7 @@ export function encodeWireBinary(stack: DeltaFrame[], request: DeltaRequest | nu
   const internHandle = internHandleWith(intern);
   for (const f of frames) { intern(f.fn); for (const k of f.keys) intern(k); }
   if (req) { intern(req.op); intern(req.tier); intern(req.name); }
+  for (const { d, keys } of dl) { intern(d.owner); intern(String(d.id)); for (const x of d.path ?? []) intern(x); for (const k of keys) intern(k); for (const x of d.gone ?? []) intern(x); }
   for (const n of graph.roots) internNode(n);
   for (let i = 0; i < graph.objs.length; i++) {
     const s: any = graph.objs[i];
@@ -137,6 +145,13 @@ export function encodeWireBinary(stack: DeltaFrame[], request: DeltaRequest | nu
   writeStrings(w, strs);
   w.varu(shapes.length); for (const sh of shapes) { w.varu(sh.length); for (const [si, ne] of sh) { w.varu(si); w.u8(ne); } }
   writeFrameHeader(w, frames, req, intern);
+  w.varu(dl.length);
+  for (const { d, keys, f0 } of dl) {
+    w.varu(intern(d.owner)); w.varu(intern(String(d.id)));
+    const path = d.path ?? []; w.varu(path.length); for (const x of path) w.varu(intern(x));
+    w.varu(keys.length); for (const k of keys) w.varu(intern(k)); w.varu(f0);
+    const gone = d.gone ?? []; w.varu(gone.length); for (const x of gone) w.varu(intern(x));
+  }
   w.varu(graph.roots.length); for (const n of graph.roots) writeNode(w, n, intern);
   w.varu(graph.objs.length);
   for (let i = 0; i < graph.objs.length; i++) {
@@ -174,7 +189,7 @@ export function encodeWireBinary(stack: DeltaFrame[], request: DeltaRequest | nu
   return w.done();
 }
 
-export function decodeWireBinary(bytes: Uint8Array | ArrayBufferLike, { content = null, tier = null, programs = null }: DecodeOptions = {}): { stack: DeltaFrame[]; request: DeltaRequest | null } {
+export function decodeWireBinary(bytes: Uint8Array | ArrayBufferLike, { content = null, tier = null, programs = null }: DecodeOptions = {}): { stack: DeltaFrame[]; request: DeltaRequest | null; deltas: TwinDelta[] } {
   const r = new R(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), "wire-binary");
   checkMagic(r, MAGIC);
   const strs = readStrings(r);
@@ -182,6 +197,15 @@ export function decodeWireBinary(bytes: Uint8Array | ArrayBufferLike, { content 
   const shapes: [number, number][][] = []; { const n = r.count(); for (let i = 0; i < n; i++) { const kc = r.count(); const sh: [number, number][] = []; for (let j = 0; j < kc; j++) { const si = r.varu(); sh.push([si, r.u8()]); } shapes.push(sh); } }
   const SH = (i: number): [number, number][] => { if (i < 0 || i >= shapes.length) throw new RangeError("wire-binary: shape index out of range"); return shapes[i]; };
   const { frames, req } = readFrameHeader(r, S);
+  const dh: { owner: string; id: string; path: string[]; keys: string[]; f0: number; gone: string[] }[] = [];
+  { const n = r.count(); for (let i = 0; i < n; i++) {
+    const owner = S(r.varu()), id = S(r.varu());
+    const pc = r.count(), path: string[] = []; for (let j = 0; j < pc; j++) path.push(S(r.varu()));
+    const kc = r.count(), keys: string[] = []; for (let j = 0; j < kc; j++) keys.push(S(r.varu()));
+    const f0 = r.varu();
+    const gc = r.count(), gone: string[] = []; for (let j = 0; j < gc; j++) gone.push(S(r.varu()));
+    dh.push({ owner, id, path, keys, f0, gone });
+  } }
   const roots: any[] = []; { const n = r.count(); for (let i = 0; i < n; i++) roots.push(readNode(r, S)); }
   const readSlot = (): any => {
     let t = r.u8();
@@ -214,7 +238,14 @@ export function decodeWireBinary(bytes: Uint8Array | ArrayBufferLike, { content 
   };
   const objs: any[] = []; { const n = r.count(); for (let i = 0; i < n; i++) objs.push(readSlot()); }
   const vals = decodeGraph({ roots, objs }, { content, tier, programs });
-  return rebuildStack(frames, req, vals);
+  const deltas: TwinDelta[] = dh.map(({ owner, id, path, keys, f0, gone }) => {
+    if (f0 + keys.length > vals.length) throw new RangeError("wire-binary: delta field root out of range");
+    const fields: Record<string, unknown> = {}; keys.forEach((k, i) => { if (k !== "__proto__") fields[k] = vals[f0 + i]; });
+    return { owner, id, ...(path.length ? { path } : {}), fields, ...(gone.length ? { gone } : {}) };
+  });
+  // the writes a run made to views of OUR objects land before anything reads them
+  if (tier) applyDeltas(tier, deltas);
+  return { ...rebuildStack(frames, req, vals), deltas };
 }
 
 // A fresh start ships only the entry args — no continuation and no resource yet. Carry them through

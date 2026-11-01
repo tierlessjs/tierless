@@ -80,5 +80,28 @@ check(`a 1000-int column packs tightly (${idBin} B binary vs ${idJson} B JSON = 
   check("binary: the view and the member handle go home as the live caps and its member", back[0] === caps && back[1] === caps.t);
 }
 
+// a RegExp crosses as a value (source, flags, lastIndex); a run's view deltas ride the
+// graph and land on the owner's live object at decode (runtime.mts viewDelta)
+{
+  const re = /a(b)/gi; re.lastIndex = 3;
+  const [r] = decodeWireBinary(encodeWireBinary([{ fn: "F", pc: 1, args: [re] }], null)).stack[0].args as RegExp[];
+  check("binary: a RegExp round-trips as a copy with its source, flags and lastIndex", r instanceof RegExp && r !== re && r.source === "a(b)" && r.flags === "gi" && r.lastIndex === 3);
+  const home = makeTier("browser");
+  const live = { opts: { sep: ".", old: 1 }, list: [1, 2, 3] };
+  const id = home.heapPut(live);
+  const shared = { fresh: true };
+  const deltas = [
+    { owner: "browser", id, path: ["opts"], fields: { sep: "-", added: shared, re: /x/ }, gone: ["old"] },
+    { owner: "browser", id, path: ["list"], fields: { 0: 9, length: 2 }, gone: ["2"] },
+    { owner: "other", id, fields: { not: "ours" } },
+  ];
+  const bytes = encodeWireBinary([{ fn: "F", pc: 1, args: [shared] }], null, { deltas });
+  const back = decodeWireBinary(bytes, { tier: home });
+  check("binary: view deltas decode with their fields, path and gone keys", back.deltas.length === 3 && back.deltas[0].path?.join() === "opts" && back.deltas[0].gone?.join() === "old" && back.deltas[2].owner === "other");
+  check("binary: our deltas landed on the live object — fields set, keys gone, an array shortened", live.opts.sep === "-" && !("old" in live.opts) && (live.opts as any).re instanceof RegExp && live.list.length === 2 && live.list[0] === 9);
+  check("binary: a delta value shared with a frame slot is one object at home", (live.opts as any).added === back.stack[0].args[0] && (live.opts as any).added.fresh === true);
+  check("binary: a delta owned elsewhere is not applied", !("not" in live));
+}
+
 console.log(`\n${ok() ? "PASS" : "FAIL"} — binary wire: identical decode (identity/cycles/exotics/handles/typed-arrays) at ${(jsonBytes / binBytes).toFixed(1)}x smaller than JSON on a record feed`);
 process.exit(ok() ? 0 : 1);

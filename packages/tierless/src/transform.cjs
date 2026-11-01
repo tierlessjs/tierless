@@ -810,18 +810,9 @@ function compileFn(node) {
                 // itself is the ref (a shared function stays; a borrowed one goes home).
                 const members = m[4] ? m[4].split(/\??\./).slice(1) : [];
                 const after = text.slice(m.index + m[0].length), before = text.slice(0, m.index);
-                const write = /^\s*(?:\+\+|--|(?:\*\*|<<|>>>?|&&|\|\||\?\?|[-+*\/%&|^])?=(?!=))/.test(after) || /(?:\+\+|--|\bdelete)\s*$/.test(before);
-                // a bare slot as the TARGET of a plain assignment (`F.x = …`, a local reassigned —
-                // `object = object[key]`) touches nothing: the frame's own variable changes
-                if (write && !members.length && /^\s*=(?!=)/.test(after))
-                    continue;
-                if (write) {
-                    out.add(slot);
-                    continue;
-                }
                 const call = /^\s*(?:\?\.)?\(/.test(after);
                 // computed access on the chain's result (`data[lng][ns]`): consume the bracket
-                // groups; an assignment after them is a write of the home object
+                // groups; an assignment after them is a write of the object reached
                 let rest = after, brackets = 0;
                 for (;;) {
                     const open = /^\s*(?:\?\.)?\[/.exec(rest);
@@ -838,14 +829,26 @@ function compileFn(node) {
                     rest = rest.slice(i + 1);
                     brackets++;
                 }
-                if (brackets && /^\s*(?:\+\+|--|(?:\*\*|<<|>>>?|&&|\|\||\?\?|[-+*\/%&|^])?=(?!=))/.test(rest)) {
-                    out.add(slot);
+                const tail = brackets ? rest : after;
+                const write = /^\s*(?:\+\+|--|(?:\*\*|<<|>>>?|&&|\|\||\?\?|[-+*\/%&|^])?=(?!=))/.test(tail) || /(?:\+\+|--|\bdelete)\s*$/.test(before);
+                // a bare slot as the TARGET of a plain assignment (`F.x = …`, a local reassigned —
+                // `object = object[key]`) touches nothing: the frame's own variable changes
+                if (write && !members.length && !brackets && /^\s*=(?!=)/.test(after))
+                    continue;
+                // a WRITE through a chain (`F.o.a.b = …`, `F.o.n++`, `delete F.o.k`) needs the object
+                // written to be here — a local object, or a view, whose write rides home as a delta
+                // (runtime.mts viewDelta): "!" after the member written; through computed access
+                // "[]!" (the object reached must be complete). A bare slot updated in place
+                // (`F.n++`) reads its value.
+                const comp = brackets > 1 ? "[..]" : brackets ? "[]" : ""; // one computed level: only the object indexed matters; deeper, the objects reached are unknown
+                if (write) {
+                    out.add(brackets ? [slot, ...members].join(".") + comp + "!" : members.length ? [slot, ...members].join(".") + "!" : slot);
                     continue;
                 }
                 // a read whose whole statement is `F.x = <this>;` only MOVES the value into a frame
                 // slot (that slot's later uses have refs of their own): "=" — or, through computed
-                // access, "[]=" (the object reached must be complete: runtime.mts parkHome)
-                const tail = brackets ? rest : after;
+                // access, "[]=" / "[..]=" (runtime.mts parkHome: the object indexed must be readable
+                // by any key; through two or more levels, complete)
                 // the statement this read sits in (one per line of case text), and the read's
                 // neighbours within it
                 const ls = text.lastIndexOf("\n", m.index) + 1, le = text.indexOf("\n", m.index);
@@ -879,7 +882,9 @@ function compileFn(node) {
                     continue;
                 }
                 const chain = call && !(capsFn && slot === "args[0]" && members.length === 1) ? members.slice(0, -1) : members;
-                out.add([slot, ...chain].join(".") + (move ? (brackets ? "[]=" : "=") : ""));
+                // a computed read used as a VALUE (`f(o[k])`, `o[k] + 1`): "[]" / "[..]" — the object
+                // must be complete, so whatever the key reaches is plain data (runtime.mts parkHome)
+                out.add([slot, ...chain].join(".") + (move ? comp + "=" : comp));
             }
             return out;
         };
@@ -1851,6 +1856,59 @@ function rewriteDynAwaits(file, fnNode) {
 }
 // ---- tracked binds (opts.syncClosures) --------------------------------------------------
 // `x.bind(self, …)` anywhere in the module becomes bindTracked(x, self, [...]) (graph.mts):
+// A local that a NESTED function assigns (`let found; keys.forEach(k => { found = … })`)
+// can't ride a caps snapshot: a stub's caps copies the value at creation. BOX it — `let
+// found = { v: undefined }`, every read `found.v`, every write `found.v = …` — so the
+// closure captures the box (one object, shared with the frame through the graph) and
+// its writes land where the function reads them. Only a simple `let` declarator written
+// by plain assignments, updates or for-of/in heads qualifies; anything else keeps the
+// closure native (lowerSyncClosure's check).
+function boxCapturedWrites(ast) {
+    traverse(ast, { Function(fp) {
+            const scopes = new Set([fp.scope]);
+            fp.traverse({ Scopable(sp) { if (sp.getFunctionParent()?.node === fp.node)
+                    scopes.add(sp.scope); } });
+            for (const sc of scopes)
+                for (const name of Object.keys(sc.bindings)) {
+                    const b = sc.bindings[name];
+                    if (b.kind !== "let" || !b.path.isVariableDeclarator() || !t.isIdentifier(b.path.node.id))
+                        continue;
+                    if (!b.constantViolations.some((v) => v.getFunctionParent()?.node !== fp.node))
+                        continue;
+                    const plain = (v) => (v.isAssignmentExpression() && t.isIdentifier(v.node.left, { name })) || (v.isUpdateExpression() && t.isIdentifier(v.node.argument, { name })) || ((v.isForOfStatement() || v.isForInStatement()) && t.isIdentifier(v.node.left, { name }));
+                    if (!b.constantViolations.every(plain))
+                        continue;
+                    const box = () => t.memberExpression(t.identifier(name), t.identifier("v"));
+                    const decl = b.path.node;
+                    decl.init = t.objectExpression([t.objectProperty(t.identifier("v"), decl.init ?? t.identifier("undefined"))]);
+                    const refs = [];
+                    for (const ref of b.referencePaths) {
+                        if (ref.parentPath?.isObjectProperty() && ref.parentPath.node.shorthand && ref.parentPath.node.value === ref.node)
+                            ref.parentPath.node.shorthand = false;
+                        ref.replaceWith(box());
+                        refs.push(ref.get("object"));
+                    }
+                    for (const v of b.constantViolations) {
+                        if (v.isAssignmentExpression()) {
+                            v.node.left = box();
+                            refs.push(v.get("left.object"));
+                        }
+                        else if (v.isUpdateExpression()) {
+                            v.node.argument = box();
+                            refs.push(v.get("argument.object"));
+                        }
+                        else if (v.isForOfStatement() || v.isForInStatement()) {
+                            v.node.left = box();
+                            refs.push(v.get("left.object"));
+                        }
+                    }
+                    // the binding is a constant now (the box never changes); its references are the boxes' objects
+                    b.referencePaths = refs;
+                    b.constantViolations = [];
+                    b.constant = true;
+                }
+        } });
+}
 // a bound method of a shared class then ships as the method by name plus its receiver
 // and args, and runs off-tier as the class's program over the receiver's view — the
 // i18next idiom (bindMemberFunctions) made shippable without guessing from names.
@@ -2006,6 +2064,15 @@ function inlineArrayCallbacks(fnPath) {
 // ITS segments), a session twin, a native call on a live object — or parks the call home
 // with the view. Calls to module code (a module-level function, an import, a global) and
 // calls inside nested functions stay plain JS. The pump never awaits a sync call.
+// a local const bound to an arrow function — as written, or as the stub wrapper a
+// converted closure left in its place (`(__tl_orig => …)(x => …)`)
+function arrowBound(cp, name, fnNode) {
+    const b = cp.scope.getBinding(name);
+    if (!b || b.kind !== "const" || !b.path.isVariableDeclarator() || b.scope.getFunctionParent()?.path.node !== fnNode)
+        return false;
+    const init = b.path.node.init;
+    return t.isArrowFunctionExpression(init) || (t.isCallExpression(init) && t.isArrowFunctionExpression(init.callee) && init.arguments.length === 1 && t.isArrowFunctionExpression(init.arguments[0]));
+}
 function rewriteSyncCalls(file, fnNode) {
     const SPECIAL = new Set(["R", "D", "DS", "DSO", "C", "deref"]);
     traverse(file, { CallExpression(cp) {
@@ -2031,6 +2098,14 @@ function rewriteSyncCalls(file, fnNode) {
                 // a captured function called bare in the source (`t(k)` -> `__caps.t(k)`): a call of
                 // the VALUE, with no receiver — not a method of the caps object
                 y = t.yieldExpression(t.callExpression(t.identifier("C"), [c, ...cp.node.arguments]));
+            }
+            else if (t.isMemberExpression(c) && !c.computed && t.isIdentifier(c.object) && t.isIdentifier(c.property) && (c.property.name === "call" || c.property.name === "apply") && arrowBound(cp, c.object.name, fnNode)) {
+                // `f.call(this, a)` / `f.apply(this, xs)` on a local ARROW: an arrow has no `this` of
+                // its own, so the thisArg is noise — a plain call of the value (its program, when
+                // it compiled)
+                const [, ...rest] = cp.node.arguments;
+                const args = c.property.name === "call" ? rest : rest.length ? [t.spreadElement(rest[0])] : [];
+                y = t.yieldExpression(t.callExpression(t.identifier("C"), [c.object, ...args]));
             }
             else if (t.isMemberExpression(c) && (c.computed ? !t.isPrivateName(c.property) : t.isIdentifier(c.property))) {
                 const o = c.object;
@@ -2413,6 +2488,7 @@ function compile(src, preamble) {
         } // a pure helper can still mutate continuation state
     }
     if (SYNC_CLOSURES) {
+        boxCapturedWrites(ast);
         rewriteBinds(ast, rest);
         convertClosures(ast, progs, meta);
     } // before: programs are lowered from the rewritten bodies, stubs included
