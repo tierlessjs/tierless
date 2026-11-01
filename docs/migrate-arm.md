@@ -44,13 +44,19 @@ mid-segment (design.md §8). So the check happens BEFORE the segment runs, in th
   deletes record the whole slot. A branch whose two sides reference different slots is a
   **checkpoint** (it returns `{op:"check"}` once decided), so only the side taken counts;
   branches inside an in-step loop are not checkpoints.
-- **Caps views:** a closure's caps object excises whole (writes land at home), but off
-  its home tier it decodes as a view: primitive members are values, plain-object members
-  are nested views (3 levels, 64 keys each), functions registered with `shareFunction` are
-  this tier's own copy, and other members are member handles (stamped ones carry class
-  and state for twins). The compiler records a read as its member chain
-  (`args[0].user.id`), so a segment that reads a borrowed primitive stays put; one that
-  calls a borrowed native function, or uses a view object as a whole, goes home.
+- **Views:** an excised object (a closure's caps, a borrowed library instance, a big
+  value) keeps its identity and its writes at home, but off its home tier it decodes as a
+  VIEW: its own data as it shipped — primitives by value, nested objects and arrays as
+  nested views, functions registered with `shareFunction` as this tier's copy, compiled
+  closures as shipped closures — within a byte budget (`makeHost({ threshold })`, 8 KB);
+  everything else (a function, a host object, a string or object over the budget) is a
+  member handle. A class instance's view is marked `inst`: a member it lacks may be a
+  prototype getter, so reading it parks. The compiler records what a segment reads: a
+  member chain (`args[0].user.id`) stays when it reaches data; a read that only moves
+  into a frame slot (`"="`) needs the chain to walk; one through computed access
+  (`"[]="`, `data[lng][ns][key]`) needs the object reached to be complete; a value read of
+  a view object, a call on it, a write, a delete, or passing it on finds its handle and
+  goes home. `test/probes/views.mts` holds each case.
 - **Shipped sync closures (`syncClosures`):** a `const f = () => …` in a class method —
   i18next's `getFixedT` returning `t` — compiles into a program over explicit caps
   (captures, `this` as `__self`; module-level code stays a free reference); the kept
@@ -75,8 +81,9 @@ mid-segment (design.md §8). So the check happens BEFORE the segment runs, in th
   (`test/probes/sync-closures.mts`): a 3-key instance ships in 376 B and a chain calling
   `t` between two twin calls is one crossing instead of two; a 3,001-key instance stays
   home at the default 8 KB and ships (211 KB) at 1 MB.
-- **Hydration:** when a migrated stack arrives, a view member that has a session twin
-  here becomes the twin itself (`hydrateViews`). Plain code the machine runs — an inline
+- **Hydration:** when a migrated stack arrives, a view member (a nested instance view,
+  or a member handle carrying the instance's data fields) that has a session twin here
+  becomes the twin itself (`hydrateViews`). Plain code the machine runs — an inline
   `async p => await client.x(p)` handed to `Promise.all` — then calls the twin natively,
   and the stop rule sees a live object, so a list-then-fan-out loader is one crossing.
   Twins' field changes are diffed once per crossing; a twin that escaped into a local is

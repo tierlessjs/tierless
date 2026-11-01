@@ -122,7 +122,7 @@ const describe = (v: unknown, depth = 0, seen = new Set<unknown>()): string => {
   if (typeof v === "function") return isStub(v) ? `stub(${v.__tierless_program})${depth < 6 ? describe(v.__tierless_caps(), depth + 1, seen) : ""}` : "fn";
   if (v === null || typeof v !== "object") return typeof v === "string" && v.length > 20 ? `str(${v.length})` : JSON.stringify(v) ?? "undefined";
   if (seen.has(v)) return "<cycle>"; seen.add(v);
-  if (isHandle(v)) return `H(${v.owner}${v.path ? "." + v.path.join(".") : ""}${v.view ? " view" : ""}${v.cls ? " " + v.cls : ""})`;
+  if (isHandle(v)) return `H(${v.owner}${v.path ? "." + v.path.join(".") : ""}${v.cls ? " " + v.cls : ""})`;
   const p = Object.getPrototypeOf(v), tag = p === A.prototype ? "A" : p === B.prototype ? "B" : p === U.prototype ? "U" : Array.isArray(v) ? "" : v instanceof Map ? "Map" : "";
   const copy = twinOf(v) ? "copy:" : "";
   if (v instanceof Map) return `${copy}Map{${[...v].map(([k, x]) => `${String(k)}:${describe(x, depth + 1, seen)}`).join(",")}}`;

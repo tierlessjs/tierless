@@ -6,12 +6,10 @@ export interface Handle {
     /** Class identity of an excised compiled-class instance (the __tierless_cls stamp):
      *  what a dynamic call park dispatches on without the live object (migrate-arm.md). */
     cls?: string;
-    /** An ownership-excised PLAIN object (a compiled closure's caps): how the far side may see
-     *  it, as JSON { p: primitive members by value, c: stamped members' classes, s: those
-     *  members' data fields, o: every other member's name }. The object still excises whole —
-     *  writes to its members only ever happen at home — but off-tier it decodes as a VIEW
-     *  (decodeGraph): primitives readable in place, other members as member handles. */
-    view?: string;
+    /** A class instance's view (plain objects' and arrays' views are complete about their own
+     *  members; an instance's is not — a member it lacks may be a prototype getter, so a read
+     *  of it parks home instead of reading undefined). */
+    inst?: true;
     /** A MEMBER handle (one of a view's non-primitive members): its path from the handle's
      *  object. Resolves at home to heapGet(id)[path…]. */
     path?: string[];

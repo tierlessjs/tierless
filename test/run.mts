@@ -80,6 +80,7 @@ const cases: Case[] = [
   { file: "test/probes/borrowed-twin.mts", needs: ["a chain through a borrowed service runs on a session twin in one crossing"] },
   { file: "test/probes/sync-closures.mts", needs: ["a library's sync closure ships as a value"] },
   { file: "test/probes/value-twins.mts", needs: ["a copy is complete and comes home as the original, or it never left"] },
+  { file: "test/probes/views.mts", needs: ["a borrowed instance is readable off-tier: data reads stay, behavior and writes park home"] },
 ];
 
 let failed = 0;

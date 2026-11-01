@@ -23,12 +23,10 @@ export interface Handle {
   /** Class identity of an excised compiled-class instance (the __tierless_cls stamp):
    *  what a dynamic call park dispatches on without the live object (migrate-arm.md). */
   cls?: string;
-  /** An ownership-excised PLAIN object (a compiled closure's caps): how the far side may see
-   *  it, as JSON { p: primitive members by value, c: stamped members' classes, s: those
-   *  members' data fields, o: every other member's name }. The object still excises whole —
-   *  writes to its members only ever happen at home — but off-tier it decodes as a VIEW
-   *  (decodeGraph): primitives readable in place, other members as member handles. */
-  view?: string;
+  /** A class instance's view (plain objects' and arrays' views are complete about their own
+   *  members; an instance's is not — a member it lacks may be a prototype getter, so a read
+   *  of it parks home instead of reading undefined). */
+  inst?: true;
   /** A MEMBER handle (one of a view's non-primitive members): its path from the handle's
    *  object. Resolves at home to heapGet(id)[path…]. */
   path?: string[];
@@ -86,74 +84,48 @@ export function protoFor(cls: string, err: boolean): object | undefined {
   return SHARED.get(cls) ?? (err ? Error.prototype : undefined);
 }
 
-// ---- views: a caps object off its home tier -------------------------------------------
-// A compiled closure's caps excise whole (writes stay home), which used to make EVERY caps
-// read a reason to go home — so a dependent chain that reads a borrowed `id` between calls
-// bounced back to the browser mid-chain. Primitives are immutable, so they can travel: off
-// its home tier an excised caps decodes as a VIEW — primitive members in place, every
-// other member a MEMBER handle (stamped ones carry their class and state, for twins). The
-// stop rule reads members precisely (compiler slot refs "args[0].id"), so touching a
-// primitive stays put and touching anything else still goes home.
+// ---- views: an excised object, readable off its home tier --------------------------
+// An excised object (a closure's caps, a borrowed library instance, a big plain value)
+// keeps its identity and its writes at home, but off-tier it decodes as a VIEW: a plain
+// object (or array) carrying the handle it stands for under the VIEW symbol, whose members
+// are the object's own data as it shipped — primitives by value, nested objects as nested
+// views (each with its member path), functions registered with shareFunction as this tier's
+// own copy, compiled closures as shipped closures — and every other member (a function, a
+// host object, anything over the view's byte budget) a MEMBER handle. Reads of what the
+// view carries stay; any touch of what it doesn't, and any whole-object use (a write, a
+// call with it as `this`, passing it on), finds a handle and parks home: the stop rule
+// (runtime.mts parkHome) sees the VIEW symbol's handle among the object's own properties.
+// A class instance's view is marked `inst`: a member it lacks is unknown (a prototype
+// getter, say), so reading it parks too. Going home a view encodes as its handle.
 export const VIEW = Symbol("tierless.view");
 // a HYDRATED view member (runtime.mts hydrateViews): the session twin standing in for a
-// borrowed member on this tier. Encoded, it is the member handle it replaced — home gets
-// its own live object back, never a copy of the twin.
+// borrowed member on this tier, or a value twin a shipped closure brought. Encoded, it
+// is the handle it replaced — home gets its own live object back, never a copy of the twin.
 const HYDRATED = new WeakMap<object, Handle>();
 export function hydrated(twin: object, handle: Handle): void { HYDRATED.set(twin, handle); }
 /** The home handle of a twin on this tier (a session twin hydrated into a view, or a value
  *  twin a shipped closure brought), or undefined for any other object. */
 export function twinOf(o: object): Handle | undefined { return HYDRATED.get(o); }
-function isPrimitive(x: unknown): boolean {
-  return x === null || typeof x === "string" || typeof x === "boolean" || (typeof x === "number" && Number.isFinite(x));
+/** What an excised object's view can be built from: an ordinary object, array or class
+ *  instance. Host objects with internal state (Map, Set, Date, typed arrays, promises,
+ *  DOM nodes…) have no own-property picture worth reading: they stay member handles. */
+function viewable(x: unknown): x is object {
+  if (x === null || typeof x !== "object") return false;
+  if (Array.isArray(x)) return true;
+  if (x instanceof Map || x instanceof Set || x instanceof WeakMap || x instanceof WeakSet || x instanceof Date || x instanceof RegExp || x instanceof Promise || x instanceof ArrayBuffer || ArrayBuffer.isView(x)) return false;
+  if (typeof Node !== "undefined" && x instanceof Node) return false;
+  return true;
 }
-// A view's shape, per object level: p primitives by value, c/s stamped members' classes and
-// data fields (twins), f shared functions by name, n nested plain objects as views of their
-// own, o every other member (a member handle). Nesting is bounded: past VIEW_DEPTH levels,
-// or an object with more than VIEW_KEYS own keys, a plain object stays a member handle.
-interface ViewData { p: Record<string, unknown>; c: Record<string, string>; s: Record<string, Record<string, unknown>>; f: Record<string, string>; n: Record<string, ViewData>; o: string[] }
-const VIEW_DEPTH = 3, VIEW_KEYS = 64;
-function viewData(v: object, depth: number): ViewData {
-  const d: ViewData = { p: {}, c: {}, s: {}, f: {}, n: {}, o: [] };
-  for (const [k, x] of Object.entries(v)) {
-    if (x === undefined) continue;                                 // absent and undefined read the same
-    if (isPrimitive(x)) { d.p[k] = x; continue; }
-    if (typeof x === "function") { const name = FN_NAME.get(x as Function); if (name) d.f[k] = name; else d.o.push(k); continue; }
-    const cls = stampOf(x);
-    if (cls) {
-      d.c[k] = cls;
-      const data: Record<string, unknown> = {};
-      for (const [f, fv] of Object.entries(x as object)) {
-        if (holdsFunction(fv)) continue;                           // behavior, not state: {} after JSON would clobber the twin's own
-        try { const j = JSON.stringify(fv); if (j !== undefined) data[f] = JSON.parse(j); } catch { /* circular or unserializable: stays home */ }
-      }
-      d.s[k] = data;
-      continue;
-    }
-    const proto = Object.getPrototypeOf(x);
-    if ((proto === Object.prototype || proto === null) && depth + 1 < VIEW_DEPTH && Object.keys(x as object).length <= VIEW_KEYS) d.n[k] = viewData(x as object, depth + 1);
-    else d.o.push(k);
+/** A stamped member handle's data fields as they shipped, for a session twin (JSON images,
+ *  fields holding a function skipped: behavior, not state). */
+function twinState(x: object): Record<string, unknown> | undefined {
+  const data: Record<string, unknown> = {};
+  let any = false;
+  for (const [f, fv] of Object.entries(x)) {
+    if (holdsFunction(fv)) continue;
+    try { const j = JSON.stringify(fv); if (j !== undefined) { data[f] = JSON.parse(j); any = true; } } catch { /* circular or unserializable: stays home */ }
   }
-  return d;
-}
-function viewOf(v: object): string { return JSON.stringify(viewData(v, 0)); }
-// Built from the data, with VIEW naming the handle this level came from (the caps handle,
-// or a member handle for a nested level): encoded, a view goes home as that handle, and
-// any whole-object use of it (a write, a call with it as `this`) finds the handle and
-// parks home — only a member-precise read of a primitive stays.
-function viewBuild(d: ViewData, h: Handle): Record<string, unknown> {
-  const v: Record<string, unknown> = {};
-  Object.defineProperty(v, VIEW, { value: h });
-  const member = (k: string): Handle => ({ __tierless_handle__: true, owner: h.owner, id: h.id, path: [...(h.path ?? []), k] });
-  for (const [k, x] of Object.entries(d.p)) v[k] = x;
-  for (const [k, cls] of Object.entries(d.c)) v[k] = { ...member(k), cls, ...(d.s[k] ? { state: d.s[k] } : {}) };
-  for (const [k, name] of Object.entries(d.f)) v[k] = SHARED_FN.get(name) ?? member(k);   // this tier's own copy, if registered here
-  for (const [k, nd] of Object.entries(d.n)) v[k] = viewBuild(nd, member(k));
-  for (const k of d.o) v[k] = member(k);
-  return v;
-}
-function viewFrom(h: Handle): Record<string, unknown> {
-  const { view: _v, ...handle } = h;                               // nested levels' handles carry no view of their own
-  return viewBuild(JSON.parse(h.view!) as ViewData, h.path ? handle : h);
+  return any ? data : undefined;
 }
 function stampOf(v: unknown): string | undefined {
   const proto = v && typeof v === "object" ? Object.getPrototypeOf(v) : null;
@@ -252,24 +224,69 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
   const objs: any[] = [];          // id -> { k:"a"|"o"|"H"|"c", ... }
   const idOf = new Map<unknown, number>();   // object -> id (identity + cycle handling)
 
-  // §5 excision: park v in the local heap, emit the handle leaf (identity-deduped).
-  // The class stamp rides ONLY for DIRECT instances of the stamped class: a subclass
-  // may override the very method a far-side dispatch would resolve to the BASE machine,
-  // silently running the wrong code. Subclass instances stay unstamped — their calls
-  // park home (or hit a session twin, which constructs the real subclass and is exact).
-  const exciseTo = (v: unknown, owned: boolean): any => {
-    const id = objs.length; idOf.set(v, id);
+  // §5 excision: park v in the local heap and emit its VIEW (above) — or, for what has no
+  // view (a function), the bare handle. The class stamp rides ONLY for DIRECT instances of
+  // the stamped class: a subclass may override the very method a far-side dispatch would
+  // resolve to the BASE machine, silently running the wrong code. Subclass instances stay
+  // unstamped — their calls park home (or hit a session twin, which constructs the real
+  // subclass and is exact).
+  const onPath = new Set<unknown>();                                  // the view being built, root to here: a back-edge is a member handle
+  const approxSize = (root: unknown, limit: number): number => {   // approxExceeds's accounting, as a number (capped just past limit)
+    let total = 0; const seen = new Set<unknown>(), stack: unknown[] = [root];
+    while (stack.length && total <= limit) {
+      const x = stack.pop();
+      if (x === null || typeof x !== "object") { total += typeof x === "string" ? x.length : 8; continue; }
+      if (seen.has(x)) continue; seen.add(x); total += 16;
+      if (Array.isArray(x)) { for (const e of x) stack.push(e); }
+      else if (x instanceof Map) { total += 16 * x.size; for (const [k, v] of x) { stack.push(k); stack.push(v); } }
+      else if (x instanceof Set) { total += 16 * x.size; for (const e of x) stack.push(e); }
+      else for (const k of Object.keys(x)) { total += k.length; stack.push((x as Record<string, unknown>)[k]); }
+    }
+    return Math.min(total, limit + 1);
+  };
+  const handleFor = (v: object, h: Omit<Handle, "__tierless_handle__">): Handle => {
     const cls = stampOf(v);
-    const proto = v && typeof v === "object" ? Object.getPrototypeOf(v) : undefined;
-    // an OWNED plain object (not one excised for size — that one's contents are the point
-    // of keeping it home) describes its members for the far side's view
-    const view = owned && (proto === Object.prototype || proto === null) ? viewOf(v as object) : undefined;
-    const slot: { k: "H"; h: Handle; m?: Record<string, unknown> } = { k: "H", h: { __tierless_handle__: true, owner: tier!.id, id: tier!.heapPut(v), kind: Array.isArray(v) ? "array" : "object", ...(cls ? { cls } : {}), ...(view ? { view } : {}) } };
+    const proto = Object.getPrototypeOf(v);
+    return { __tierless_handle__: true, ...h, kind: Array.isArray(v) ? "array" : "object", ...(cls ? { cls } : {}), ...(!Array.isArray(v) && proto !== Object.prototype && proto !== null ? { inst: true as const } : {}) };
+  };
+  const refH = (h: Handle, st?: unknown): any => { const id = objs.length; objs.push({ k: "H", h, ...(st !== undefined ? { st } : {}) }); return { k: "r", id }; };
+  // the view of v under handle h: own data members by the rules above, within `budget` bytes
+  const viewSlot = (v: object, h: Handle, depth: number, budget: { left: number }): any => {
+    const id = objs.length; idOf.set(v, id);
+    const arr = Array.isArray(v);
+    const slot: any = { k: "v", h, ...(arr ? { e: [] } : { f: {} }) };
     objs.push(slot);
-    // a view's compiled sync closures (a captured `t`) ship as graph values beside it:
-    // the far side's view gets a callable member, not a member handle
-    if (view) for (const [k, x] of Object.entries(v as object)) if (isCompiledFn(x)) (slot.m ??= {})[k] = enc(x);
+    const member = (k: string): Handle => ({ __tierless_handle__: true, owner: h.owner, id: h.id, path: [...(h.path ?? []), k] });
+    const encMember = (k: string, x: unknown): any => {
+      if (x === undefined) return h.inst ? { k: "u" } : null;         // a plain view omits what is undefined; an instance's says so
+      if (typeof x === "string") { if (x.length > budget.left) return refH(member(k)); budget.left -= x.length; return enc(x); }   // a string pays its length; an oversized one stays home
+      if (x === null || (typeof x !== "object" && typeof x !== "function")) { budget.left -= 8; return enc(x); }   // other primitives, bigint, symbols
+      if (typeof x === "function") {
+        if (isCompiledFn(x)) return enc(x);
+        const name = FN_NAME.get(x); if (name) { const sid = objs.length; objs.push({ k: "sf", name, h: member(k) }); return { k: "r", id: sid }; }
+        return refH(member(k));
+      }
+      if (isHandle(x) || HYDRATED.has(x) || (x as { [VIEW]?: unknown })[VIEW] || GLOBAL_NAME.has(x)) return enc(x);   // another tier's object, or a twin/view/global here
+      if (idOf.has(x) && objs[idOf.get(x)!].k === "v") return { k: "r", id: idOf.get(x) };   // the same object's view again (never a data copy: a view parks writes, a copy would lose them)
+      if (viewable(x) && depth < 8 && !onPath.has(x)) {
+        const size = approxSize(x, budget.left);
+        if (size <= budget.left) { budget.left -= size; onPath.add(x); const r = viewSlot(x, handleFor(x, member(k)), depth + 1, budget); onPath.delete(x); return r; }
+      }
+      const mh = handleFor(x, member(k));                              // a member handle: class and data fields ride for a session twin
+      const st = mh.cls ? twinState(x) : undefined;
+      return refH(mh, st !== undefined ? enc(st) : undefined);
+    };
+    if (arr) { for (let i = 0; i < (v as unknown[]).length; i++) slot.e.push(encMember(String(i), (v as unknown[])[i]) ?? { k: "u" }); }
+    else for (const key of Object.keys(v)) { if (key === "__proto__") continue; const n = encMember(key, (v as Record<string, unknown>)[key]); if (n !== null) slot.f[key] = n; }
     return { k: "r", id };
+  };
+  // `owned`: excised by ownership (a closure's caps, a live instance) — its view ships;
+  // excised for SIZE only — a bare handle: the §5 heap fetches it on deref and keeps its
+  // writes coherent (heap.mts), and its contents are the point of keeping it home
+  const exciseTo = (v: unknown, owned: boolean): any => {
+    const h = v !== null && typeof v === "object" ? handleFor(v, { owner: tier!.id, id: tier!.heapPut(v) }) : { __tierless_handle__: true as const, owner: tier!.id, id: tier!.heapPut(v), kind: "object" as const };
+    if (owned && viewable(v)) { onPath.add(v); const r = viewSlot(v, h, 0, { left: threshold }); onPath.delete(v); return r; }
+    const id = objs.length; idOf.set(v, id); objs.push({ k: "H", h }); return { k: "r", id };
   };
 
   // VALUE TWINS — the engine's move-the-data-or-the-stack choice for a shipped sync
@@ -423,7 +440,7 @@ export function decodeGraph({ roots, objs }: EncodedGraph, { content = null, tie
     else if (s.k === "map") for (const [kn, vn] of s.e) { refsOf(kn, out); refsOf(vn, out); }
     else if (s.k === "o") { for (const key in s.f) refsOf(s.f[key], out); if (s.sf) for (const [kn, vn] of s.sf) { refsOf(kn, out); refsOf(vn, out); } }
     else if (s.k === "fn") { refsOf(s.c, out); for (const key in s.f) refsOf(s.f[key], out); }
-    else if (s.k === "H" && s.m) for (const key in s.m) refsOf(s.m[key], out);
+    else if (s.k === "v") { if (s.e) for (const e of s.e) refsOf(e, out); else for (const key in s.f) refsOf(s.f[key], out); }
     return out;
   };
   const twinOk = (root: number): boolean => {
@@ -433,7 +450,8 @@ export function decodeGraph({ roots, objs }: EncodedGraph, { content = null, tie
     let ok = true;
     while (ok && work.length) {
       const i = work.pop()!, s: any = objs[i];
-      if (s.k === "H") ok = !!(tier && s.h.owner === tier.id);        // a foreign handle: the copy would hide it
+      if (s.k === "H" || s.k === "v") ok = !!(tier && s.h.owner === tier.id);        // a foreign handle or view: the copy would hide it
+      else if (s.k === "sf") ok = SHARED_FN.has(s.name) || !!(tier && s.h.owner === tier.id);
       else if (s.k === "fn") { ok = fnRunnable(s); if (fnOwn(s)) continue; }   // a live closure of ours holds what it holds
       else if (s.k === "o" && s.tw && i !== root) { if (tier && s.tw.owner === tier.id) continue; ok = twinOk(i); }   // a nested copy stands or falls on its own
       if (!ok) break;
@@ -442,8 +460,8 @@ export function decodeGraph({ roots, objs }: EncodedGraph, { content = null, tie
     copyOk.set(root, ok);
     return ok;
   };
-  const home = (h: Handle): unknown => {   // an owned handle resolves to the live object; foreign ones stay opaque leaves (or a VIEW)
-    if (!tier || h.owner !== tier.id) return h.view ? viewFrom(h) : h;
+  const home = (h: Handle): unknown => {   // an owned handle resolves to the live object; foreign ones stay opaque leaves
+    if (!tier || h.owner !== tier.id) return h;
     let v = tier.heapGet(h.id);
     if (v === undefined) throw new RangeError("wire: unknown local handle " + h.id);
     for (const k of h.path ?? []) v = (v as Record<string, unknown>)[k];   // a member handle: that member of the live object
@@ -454,7 +472,12 @@ export function decodeGraph({ roots, objs }: EncodedGraph, { content = null, tie
   // parks the touching segment home rather than run methods a copy wouldn't have)
   const twinHandle = (s: { tw: { owner: string; id: string }; cls?: string }): Handle => ({ __tierless_handle__: true, owner: s.tw.owner, id: s.tw.id, kind: "object", ...(s.cls ? { cls: s.cls } : {}) });
   const twinShell = (s: { tw: { owner: string; id: string }; cls?: string; err?: number }, i: number): unknown => (tier && s.tw.owner === tier.id ? home(twinHandle(s)) : s.cls && protoFor(s.cls, !!s.err) && twinOk(i) ? {} : twinHandle(s));
-  const built: any[] = (objs as any[]).map((s, i) => (s.k === "a" ? [] : s.k === "o" ? (s.tw ? twinShell(s, i) : {}) : s.k === "map" ? new Map() : s.k === "set" ? new Set() : s.k === "symu" ? Symbol(s.d) : s.k === "fn" ? fnShell(s) : s.k === "c" ? (content && content.store.get(s.h)) : home(s.h))); // pre-create for cycles/sharing; k:"c" resolves to the held immutable subgraph
+  // a view (slot "v"): coming home, the live object it stands for; off-tier, a plain object
+  // or array carrying its handle under VIEW. A shared function (slot "sf"): this tier's
+  // registered copy, else the member handle it would be (the stop rule parks on it)
+  const viewOwn = (s: { h: Handle }): boolean => !!(tier && s.h.owner === tier.id);
+  const viewShell = (s: { h: Handle; e?: unknown[] }): unknown => { if (viewOwn(s)) return home(s.h); const base: object = s.e ? [] : {}; Object.defineProperty(base, VIEW, { value: s.h }); return base; };
+  const built: any[] = (objs as any[]).map((s, i) => (s.k === "a" ? [] : s.k === "o" ? (s.tw ? twinShell(s, i) : {}) : s.k === "v" ? viewShell(s) : s.k === "sf" ? (SHARED_FN.get(s.name) ?? home(s.h)) : s.k === "map" ? new Map() : s.k === "set" ? new Set() : s.k === "symu" ? Symbol(s.d) : s.k === "fn" ? fnShell(s) : s.k === "c" ? (content && content.store.get(s.h)) : home(s.h))); // pre-create for cycles/sharing; k:"c" resolves to the held immutable subgraph
   const dec = (n: any): any => (n.k === "u" ? undefined : n.k === "big" ? toBigInt(n.v) : n.k === "glob" ? GLOBALS[n.name] : n.k === "symw" ? (Symbol as any)[n.name] : n.k === "symf" ? Symbol.for(n.key) : n.k === "p" ? n.v : built[n.id]);
   (objs as any[]).forEach((s, i) => {
     if (s.k === "a") for (const n of s.e) built[i].push(dec(n));
@@ -465,8 +488,9 @@ export function decodeGraph({ roots, objs }: EncodedGraph, { content = null, tie
     else if (s.k === "set") for (const vn of s.e) built[i].add(dec(vn));
     else if (s.k === "fn" && (fnOwn(s) || isHandle(built[i]))) { /* the live closure, or its handle: nothing to fill */ }
     else if (s.k === "fn") { const caps = dec(s.c); built[i].__tierless_caps = () => caps; for (const key in s.f) { if (key === "__proto__") continue; built[i][key] = dec(s.f[key]); } }
-    else if (s.k === "H" && s.m && built[i] && (built[i] as { [VIEW]?: unknown })[VIEW]) for (const key in s.m) { if (key === "__proto__") continue; built[i][key] = dec(s.m[key]); }   // a foreign view's shipped closures (an owned handle resolved to the live object needs nothing)
-    // k:"H" -> built[i] is already the handle object; k:"c" -> already resolved to the held subgraph
+    else if (s.k === "v" && !viewOwn(s)) { if (s.e) { for (const n of s.e) built[i].push(dec(n)); } else for (const key in s.f) { if (key === "__proto__" || key === "__tierless_handle__") continue; built[i][key] = dec(s.f[key]); } }
+    else if (s.k === "H" && s.st !== undefined && isHandle(built[i])) built[i].state = dec(s.st);   // a stamped member handle's data fields, for a session twin
+    // k:"H" -> built[i] is already the handle object; k:"c" -> already resolved to the held subgraph; an own "v" is the live object
     if (content && s.cah !== undefined) content.store.put(s.cah, built[i]);   // first arrival of an immutable subgraph: cache it by hash for later hash-only refs
   });
   return roots.map(dec);

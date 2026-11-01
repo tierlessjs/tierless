@@ -17,7 +17,10 @@ import { W, R, isVarInt, writeMagic, checkMagic, makeInterner, writeStrings, rea
 // SMW3: slot tags 10 (a compiled closure: program, home identity, caps, own props) and
 // 11 (a value twin's home identity, wrapping an object slot); a handle's flag bit 16
 // (shipped closures beside a view). An SMW2 reader would reject tag 10 as a bad slot.
-const MAGIC = "SMW3";
+// SMW4: views are graph slots (tag 12: handle + members; tag 13: a shared function by
+// name with its member handle); a handle record's flags are kind 1, cls 2, state 4 (a node
+// follows), path 8, inst 16. The JSON view string and the handle's beside-members are gone.
+const MAGIC = "SMW4";
 // The writer/hardened reader, magic header, string table, and frame flatten/rebuild live in
 // wire-io.mts (one copy, shared with the delta wire). This file owns only what is binary-
 // format-specific: the shape table, the node/slot tag encodings, and the numeric-array packs.
@@ -104,6 +107,43 @@ function readNode(r, S) {
 }
 // Serialize a continuation, mirroring encodeWire's frame-flattening, then writing the
 // {frames, req, {roots, objs}} structure as bytes. opts (tier/threshold) drive §5 excision.
+// a handle record: owner, id, flags (kind 1, cls 2, state-follows 4, path 8, inst 16), then the flagged fields
+function writeHandle(w, h, intern, st) {
+    w.varu(intern(h.owner));
+    w.varu(intern(String(h.id)));
+    w.u8((h.kind ? 1 : 0) | (h.cls ? 2 : 0) | (st ? 4 : 0) | (h.path ? 8 : 0) | (h.inst ? 16 : 0));
+    if (h.kind)
+        w.varu(intern(h.kind));
+    if (h.cls)
+        w.varu(intern(h.cls));
+    if (h.path) {
+        w.varu(h.path.length);
+        for (const k of h.path)
+            w.varu(intern(k));
+    }
+}
+function readHandle(r, S) {
+    const owner = S(r.varu()), id = S(r.varu());
+    const h = { __tierless_handle__: true, owner, id };
+    const fl = r.u8();
+    if (fl & 1)
+        h.kind = S(r.varu());
+    if (fl & 2)
+        h.cls = S(r.varu());
+    if (fl & 8) {
+        const c = r.count();
+        h.path = [];
+        for (let j = 0; j < c; j++)
+            h.path.push(S(r.varu()));
+    }
+    if (fl & 16)
+        h.inst = true;
+    return { h, st: !!(fl & 4) };
+}
+const internHandleWith = (intern) => (h) => { intern(h.owner); intern(String(h.id)); if (h.kind)
+    intern(h.kind); if (h.cls)
+    intern(h.cls); for (const k of h.path ?? [])
+    intern(k); };
 export function encodeWireBinary(stack, request, { tier = null, threshold = 8192, content = null, excise = null } = {}) {
     const { rootVals, frames, req } = rootsOf(stack, request);
     const graph = encodeGraph(rootVals, { tier, threshold, content, excise });
@@ -119,6 +159,7 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
         intern(n.key);
     else if (n.k === "p" && typeof n.v === "string")
         intern(n.v); };
+    const internHandle = internHandleWith(intern);
     for (const f of frames) {
         intern(f.fn);
         for (const k of f.keys)
@@ -173,21 +214,25 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
                 }
         }
         else if (s.k === "H") {
-            intern(s.h.owner);
-            intern(String(s.h.id));
-            if (s.h.kind)
-                intern(s.h.kind);
-            if (s.h.cls)
-                intern(s.h.cls);
-            if (s.h.view)
-                intern(s.h.view);
-            for (const k of s.h.path ?? [])
-                intern(k);
-            if (s.m)
-                for (const k of Object.keys(s.m)) {
+            internHandle(s.h);
+            if (s.st !== undefined)
+                internNode(s.st);
+        }
+        else if (s.k === "v") {
+            internHandle(s.h);
+            if (s.e) {
+                for (const e of s.e)
+                    internNode(e);
+            }
+            else
+                for (const k of Object.keys(s.f)) {
                     intern(k);
-                    internNode(s.m[k]);
+                    internNode(s.f[k]);
                 }
+        }
+        else if (s.k === "sf") {
+            intern(s.name);
+            internHandle(s.h);
         }
         else if (s.k === "symu") {
             if (s.d !== undefined)
@@ -313,28 +358,33 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
         }
         else if (s.k === "H") {
             w.u8(4);
-            w.varu(intern(s.h.owner));
-            w.varu(intern(String(s.h.id)));
-            w.u8((s.h.kind ? 1 : 0) | (s.h.cls ? 2 : 0) | (s.h.view ? 4 : 0) | (s.h.path ? 8 : 0) | (s.m ? 16 : 0));
-            if (s.h.kind)
-                w.varu(intern(s.h.kind));
-            if (s.h.cls)
-                w.varu(intern(s.h.cls));
-            if (s.h.view)
-                w.varu(intern(s.h.view));
-            if (s.h.path) {
-                w.varu(s.h.path.length);
-                for (const k of s.h.path)
-                    w.varu(intern(k));
+            writeHandle(w, s.h, intern, s.st !== undefined);
+            if (s.st !== undefined)
+                writeNode(w, s.st, intern);
+        }
+        else if (s.k === "v") {
+            w.u8(12);
+            writeHandle(w, s.h, intern, false);
+            if (s.e) {
+                w.u8(1);
+                w.varu(s.e.length);
+                for (const e of s.e)
+                    writeNode(w, e, intern);
             }
-            if (s.m) {
-                const ks = Object.keys(s.m);
+            else {
+                w.u8(0);
+                const ks = Object.keys(s.f);
                 w.varu(ks.length);
                 for (const k of ks) {
                     w.varu(intern(k));
-                    writeNode(w, s.m[k], intern);
+                    writeNode(w, s.f[k], intern);
                 }
             }
+        }
+        else if (s.k === "sf") {
+            w.u8(13);
+            w.varu(intern(s.name));
+            writeHandle(w, s.h, intern, false);
         }
         else if (s.k === "symu") {
             w.u8(5);
@@ -454,34 +504,36 @@ export function decodeWireBinary(bytes, { content = null, tier = null, programs 
             slot = { k: "set", e };
         }
         else if (t === 4) {
-            const owner = S(r.varu()), id = S(r.varu());
-            const h = { __tierless_handle__: true, owner, id };
-            const fl = r.u8();
-            if (fl & 1)
-                h.kind = S(r.varu());
-            if (fl & 2)
-                h.cls = S(r.varu());
-            if (fl & 4)
-                h.view = S(r.varu());
-            if (fl & 8) {
-                const c = r.varu();
-                h.path = [];
-                for (let j = 0; j < c; j++)
-                    h.path.push(S(r.varu()));
-            }
+            const { h, st } = readHandle(r, S);
             slot = { k: "H", h };
-            if (fl & 16) {
-                const c = r.count();
-                const m = {};
+            if (st)
+                slot.st = readNode(r, S);
+        }
+        else if (t === 12) {
+            const { h } = readHandle(r, S);
+            const arr = r.u8();
+            if (arr) {
+                const c = r.count(), e = [];
+                for (let j = 0; j < c; j++)
+                    e.push(readNode(r, S));
+                slot = { k: "v", h, e };
+            }
+            else {
+                const c = r.count(), f = {};
                 for (let j = 0; j < c; j++) {
                     const key = S(r.varu());
                     const val = readNode(r, S);
                     if (key === "__proto__")
                         continue;
-                    m[key] = val;
+                    f[key] = val;
                 }
-                slot.m = m;
+                slot = { k: "v", h, f };
             }
+        }
+        else if (t === 13) {
+            const name = S(r.varu());
+            const { h } = readHandle(r, S);
+            slot = { k: "sf", name, h };
         }
         else if (t === 5) {
             slot = { k: "symu", d: r.u8() ? S(r.varu()) : undefined };

@@ -777,13 +777,43 @@ function compileFn(node) {
                 const members = m[4] ? m[4].split(/\??\./).slice(1) : [];
                 const after = text.slice(m.index + m[0].length), before = text.slice(0, m.index);
                 const write = /^\s*(?:\+\+|--|(?:\*\*|<<|>>>?|&&|\|\||\?\?|[-+*\/%&|^])?=(?!=))/.test(after) || /(?:\+\+|--|\bdelete)\s*$/.test(before);
-                if (write || !members.length) {
+                if (write) {
                     out.add(slot);
                     continue;
                 }
                 const call = /^\s*(?:\?\.)?\(/.test(after);
+                // computed access on the chain's result (`data[lng][ns]`): consume the bracket
+                // groups; an assignment after them is a write of the home object
+                let rest = after, brackets = 0;
+                for (;;) {
+                    const open = /^\s*(?:\?\.)?\[/.exec(rest);
+                    if (!open)
+                        break;
+                    let depth = 0, i = open[0].length - 1;
+                    for (; i < rest.length; i++) {
+                        const ch = rest[i];
+                        if (ch === "[")
+                            depth++;
+                        else if (ch === "]" && --depth === 0)
+                            break;
+                    }
+                    rest = rest.slice(i + 1);
+                    brackets++;
+                }
+                if (brackets && /^\s*(?:\+\+|--|(?:\*\*|<<|>>>?|&&|\|\||\?\?|[-+*\/%&|^])?=(?!=))/.test(rest)) {
+                    out.add(slot);
+                    continue;
+                }
+                // a read whose whole statement is `F.x = <this>;` only MOVES the value into a frame
+                // slot (that slot's later uses have refs of their own): "=" — or, through computed
+                // access, "[]=" (the object reached must be complete: runtime.mts parkHome)
+                const move = !call && /\bF\.(?:args\[\d+\]|[A-Za-z_$][\w$]*)\s*(?<![=!<>+\-*\/%&|^])=\s*$/.test(before) && /^\s*;/.test(brackets ? rest : after);
+                if (!members.length && !(move && brackets)) {
+                    out.add(slot);
+                    continue;
+                }
                 const chain = call && !(capsFn && slot === "args[0]" && members.length === 1) ? members.slice(0, -1) : members;
-                out.add([slot, ...chain].join("."));
+                out.add([slot, ...chain].join(".") + (move ? (brackets ? "[]=" : "=") : ""));
             }
             return out;
         };
