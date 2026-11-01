@@ -19,7 +19,7 @@ export interface Handle {
   __tierless_handle__: true;
   owner: string;
   id: string;
-  kind?: "array" | "object";
+  kind?: "array" | "object" | "function";
   /** Class identity of an excised compiled-class instance (the __tierless_cls stamp):
    *  what a dynamic call park dispatches on without the live object (migrate-arm.md). */
   cls?: string;
@@ -168,7 +168,7 @@ function stampOf(v: unknown): string | undefined {
 // component captured, built by a library's factory method). Async stubs (store and
 // component functions) keep their own dispatch and don't ship this way.
 interface CompiledFn { __tierless_program: string; __tierless_caps: () => unknown; __tierless_sync: true }
-const isCompiledFn = (v: unknown): v is CompiledFn => typeof v === "function" && (v as { __tierless_sync?: unknown }).__tierless_sync === true
+export const isCompiledFn = (v: unknown): v is CompiledFn => typeof v === "function" && (v as { __tierless_sync?: unknown }).__tierless_sync === true
   && typeof (v as { __tierless_program?: unknown }).__tierless_program === "string" && typeof (v as { __tierless_caps?: unknown }).__tierless_caps === "function";
 
 export function isHandle(x: unknown): x is Handle {
@@ -286,7 +286,7 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
     const seen = new Set<unknown>(), work: unknown[] = [root];
     while (work.length) {
       const x = work.pop();
-      if (typeof x === "function") return true;
+      if (typeof x === "function") { if (isCompiledFn(x)) { work.push(x.__tierless_caps()); continue; } return true; }   // a compiled closure is a value — complete only if its caps are; any other function is behavior
       if (x === null || typeof x !== "object" || seen.has(x)) continue;
       seen.add(x);
       if (x instanceof Date || x instanceof Uint8Array || GLOBAL_NAME.has(x)) continue;
@@ -295,7 +295,7 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
       if (Array.isArray(x)) { for (const e of x) work.push(e); }
       else if (x instanceof Map) { for (const [k, e] of x) { work.push(k); work.push(e); } }
       else if (x instanceof Set) { for (const e of x) work.push(e); }
-      else for (const k of Object.getOwnPropertyNames(x)) { const d = Object.getOwnPropertyDescriptor(x, k)!; if ("value" in d) work.push(d.value); }
+      else for (const k of [...Object.getOwnPropertyNames(x), ...Object.getOwnPropertySymbols(x)]) { const d = Object.getOwnPropertyDescriptor(x, k)!; if (!("value" in d)) return true; work.push(d.value); }   // an own accessor computes from anything: behavior
     }
     return false;
   };
@@ -307,11 +307,21 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
     if (typeof v === "bigint") return { k: "big", v: v.toString() };   // BigInt isn't JSON-safe
     if (typeof v === "function" && isCompiledFn(v)) {               // a compiled sync closure: program + caps, callable wherever the program is
       if (idOf.has(v)) return { k: "r", id: idOf.get(v) };
+      const fh = HYDRATED.get(v);                                     // a stub this tier decoded: it goes back as its home handle
+      if (fh) { const id = objs.length; idOf.set(v, id); objs.push({ k: "H", h: fh }); return { k: "r", id }; }
       const id = objs.length; idOf.set(v, id);
-      const slot: { k: "fn"; p: string; c: unknown; f: Record<string, unknown> } = { k: "fn", p: v.__tierless_program, c: null, f: {} };
+      // hm: the closure's home identity — it comes home as itself, and a tier without its
+      // program sees an opaque handle (the stop rule parks the touching segment home)
+      const slot: { k: "fn"; p: string; c: unknown; f: Record<string, unknown>; hm?: { owner: string; id: string } } = { k: "fn", p: v.__tierless_program, c: null, f: {}, ...(tier ? { hm: { owner: tier.id, id: tier.heapPut(v) } } : {}) };
       objs.push(slot);                                               // registered first: the caps may name the closure itself
       inCaps++;
-      try { const caps = v.__tierless_caps(); slot.c = caps !== null && typeof caps === "object" ? encData(caps) : enc(caps); } finally { inCaps--; }   // the builder's object is fresh each call: nothing at home aliases it
+      try {
+        const caps = v.__tierless_caps();
+        // the compiled builder returns a fresh plain object (nothing at home aliases it, so
+        // it needs no excision of its own); anything else takes the ordinary path
+        const fresh = caps !== null && typeof caps === "object" && (Object.getPrototypeOf(caps) === Object.prototype || Object.getPrototypeOf(caps) === null) && !isHandle(caps) && !(caps as { [VIEW]?: unknown })[VIEW] && !HYDRATED.has(caps);
+        slot.c = fresh ? encData(caps) : enc(caps);
+      } finally { inCaps--; }
       for (const k of Object.keys(v)) if (!k.startsWith("__tierless_")) slot.f[k] = enc((v as unknown as Record<string, unknown>)[k]);
       return { k: "r", id };
     }
@@ -380,13 +390,57 @@ export function toBigInt(s: string): bigint {
 }
 
 export function decodeGraph({ roots, objs }: EncodedGraph, { content = null, tier = null, programs = null }: DecodeOptions = {}): unknown[] {
-  const mkStub = (s: { p: string }): Function => {
-    const run = programs?.(s.p);
+  const mkStub = (s: { p: string }, run: ((caps: unknown, args: unknown[]) => unknown) | undefined): Function => {
     const stub = Object.assign((...a: unknown[]) => {
       if (!run) throw new Error("tierless: compiled closure " + s.p + " is not available on this tier");
       return run(stub.__tierless_caps(), a);
     }, { __tierless_program: s.p, __tierless_sync: true as const, __tierless_caps: (): unknown => undefined });
     return stub;
+  };
+  // a shipped closure (slot "fn"): coming home, the live closure itself; off-tier, a stub
+  // over this tier's program — or, without the program here, its opaque handle, so the
+  // stop rule parks the segment that would call it home (a stub that throws is the last
+  // resort, for a graph encoded with no tier)
+  const fnOwn = (s: { hm?: { owner: string; id: string } }): boolean => !!(tier && s.hm && s.hm.owner === tier.id);
+  const fnShell = (s: { p: string; hm?: { owner: string; id: string } }): unknown => {
+    if (fnOwn(s)) return home({ __tierless_handle__: true, owner: s.hm!.owner, id: s.hm!.id });
+    const run = programs?.(s.p);
+    if (!run && s.hm) return { __tierless_handle__: true, owner: s.hm.owner, id: s.hm.id, kind: "function" } as Handle;
+    const stub = mkStub(s, run);
+    if (s.hm) HYDRATED.set(stub, { __tierless_handle__: true, owner: s.hm.owner, id: s.hm.id, kind: "function" });
+    return stub;
+  };
+  // A copy (value twin) must hold no handle and no closure this tier can't run: a native
+  // method over the copy would reach them with no stop rule in between. The encoder
+  // promises that, but this side is a trust boundary (§7), so the promise is CHECKED here
+  // over the slot graph: a copy that would break it decodes as its handle instead.
+  const copyOk = new Map<number, boolean>();
+  const fnRunnable = (s: { p: string; hm?: { owner: string; id: string } }): boolean => fnOwn(s) || !!programs?.(s.p);
+  const refsOf = (n: any, out: number[]): void => { if (n && typeof n === "object" && n.k === "r") out.push(n.id); };
+  const slotRefs = (s: any): number[] => {
+    const out: number[] = [];
+    if (s.k === "a" || s.k === "set") for (const e of s.e) refsOf(e, out);
+    else if (s.k === "map") for (const [kn, vn] of s.e) { refsOf(kn, out); refsOf(vn, out); }
+    else if (s.k === "o") { for (const key in s.f) refsOf(s.f[key], out); if (s.sf) for (const [kn, vn] of s.sf) { refsOf(kn, out); refsOf(vn, out); } }
+    else if (s.k === "fn") { refsOf(s.c, out); for (const key in s.f) refsOf(s.f[key], out); }
+    else if (s.k === "H" && s.m) for (const key in s.m) refsOf(s.m[key], out);
+    return out;
+  };
+  const twinOk = (root: number): boolean => {
+    const known = copyOk.get(root); if (known !== undefined) return known;
+    copyOk.set(root, true);                                           // provisional, for cycles
+    const seen = new Set<number>([root]), work = [root];
+    let ok = true;
+    while (ok && work.length) {
+      const i = work.pop()!, s: any = objs[i];
+      if (s.k === "H") ok = !!(tier && s.h.owner === tier.id);        // a foreign handle: the copy would hide it
+      else if (s.k === "fn") { ok = fnRunnable(s); if (fnOwn(s)) continue; }   // a live closure of ours holds what it holds
+      else if (s.k === "o" && s.tw && i !== root) { if (tier && s.tw.owner === tier.id) continue; ok = twinOk(i); }   // a nested copy stands or falls on its own
+      if (!ok) break;
+      for (const j of slotRefs(s)) if (!seen.has(j)) { seen.add(j); work.push(j); }
+    }
+    copyOk.set(root, ok);
+    return ok;
   };
   const home = (h: Handle): unknown => {   // an owned handle resolves to the live object; foreign ones stay opaque leaves (or a VIEW)
     if (!tier || h.owner !== tier.id) return h.view ? viewFrom(h) : h;
@@ -399,15 +453,17 @@ export function decodeGraph({ roots, objs }: EncodedGraph, { content = null, tie
   // with its class — or, where the class isn't registered, its handle (the stop rule then
   // parks the touching segment home rather than run methods a copy wouldn't have)
   const twinHandle = (s: { tw: { owner: string; id: string }; cls?: string }): Handle => ({ __tierless_handle__: true, owner: s.tw.owner, id: s.tw.id, kind: "object", ...(s.cls ? { cls: s.cls } : {}) });
-  const twinShell = (s: { tw: { owner: string; id: string }; cls?: string; err?: number }): unknown => (tier && s.tw.owner === tier.id ? home(twinHandle(s)) : s.cls && protoFor(s.cls, !!s.err) ? {} : twinHandle(s));
-  const built: any[] = (objs as any[]).map((s) => (s.k === "a" ? [] : s.k === "o" ? (s.tw ? twinShell(s) : {}) : s.k === "map" ? new Map() : s.k === "set" ? new Set() : s.k === "symu" ? Symbol(s.d) : s.k === "fn" ? mkStub(s) : s.k === "c" ? (content && content.store.get(s.h)) : home(s.h))); // pre-create for cycles/sharing; k:"c" resolves to the held immutable subgraph
+  const twinShell = (s: { tw: { owner: string; id: string }; cls?: string; err?: number }, i: number): unknown => (tier && s.tw.owner === tier.id ? home(twinHandle(s)) : s.cls && protoFor(s.cls, !!s.err) && twinOk(i) ? {} : twinHandle(s));
+  const built: any[] = (objs as any[]).map((s, i) => (s.k === "a" ? [] : s.k === "o" ? (s.tw ? twinShell(s, i) : {}) : s.k === "map" ? new Map() : s.k === "set" ? new Set() : s.k === "symu" ? Symbol(s.d) : s.k === "fn" ? fnShell(s) : s.k === "c" ? (content && content.store.get(s.h)) : home(s.h))); // pre-create for cycles/sharing; k:"c" resolves to the held immutable subgraph
   const dec = (n: any): any => (n.k === "u" ? undefined : n.k === "big" ? toBigInt(n.v) : n.k === "glob" ? GLOBALS[n.name] : n.k === "symw" ? (Symbol as any)[n.name] : n.k === "symf" ? Symbol.for(n.key) : n.k === "p" ? n.v : built[n.id]);
   (objs as any[]).forEach((s, i) => {
     if (s.k === "a") for (const n of s.e) built[i].push(dec(n));
     else if (s.k === "o" && s.tw && (isHandle(built[i]) || (tier && s.tw.owner === tier.id))) { /* the handle, or the live instance: its fields are not the copy's */ }
-    else if (s.k === "o") { if (s.cls) { const p = protoFor(s.cls, !!s.err); if (p) Object.setPrototypeOf(built[i], p); } if (s.tw) hydrated(built[i], twinHandle(s)); for (const key in s.f) { if (key === "__proto__") continue; const val = dec(s.f[key]); if (s.h && s.h[key]) Object.defineProperty(built[i], key, { value: val, writable: true, enumerable: false, configurable: true }); else built[i][key] = val; } if (s.sf) for (const [kn, vn, en] of s.sf) { const key = dec(kn), val = dec(vn); if (en) built[i][key] = val; else Object.defineProperty(built[i], key, { value: val, writable: true, enumerable: false, configurable: true }); } }   // drop a hostile __proto__ key (our encoder strips it), consistent with wire-binary/wire-delta — never reconstruct it, even as an own property
+    // a data slot never decodes into a handle's shape (handles are slots of their own), nor rebuilds a hostile __proto__ key
+    else if (s.k === "o") { if (s.cls) { const p = protoFor(s.cls, !!s.err); if (p) Object.setPrototypeOf(built[i], p); } if (s.tw) hydrated(built[i], twinHandle(s)); for (const key in s.f) { if (key === "__proto__" || key === "__tierless_handle__") continue; const val = dec(s.f[key]); if (s.h && s.h[key]) Object.defineProperty(built[i], key, { value: val, writable: true, enumerable: false, configurable: true }); else built[i][key] = val; } if (s.sf) for (const [kn, vn, en] of s.sf) { const key = dec(kn), val = dec(vn); if (en) built[i][key] = val; else Object.defineProperty(built[i], key, { value: val, writable: true, enumerable: false, configurable: true }); } }   // drop a hostile __proto__ key (our encoder strips it), consistent with wire-binary/wire-delta — never reconstruct it, even as an own property
     else if (s.k === "map") for (const [kn, vn] of s.e) built[i].set(dec(kn), dec(vn));
     else if (s.k === "set") for (const vn of s.e) built[i].add(dec(vn));
+    else if (s.k === "fn" && (fnOwn(s) || isHandle(built[i]))) { /* the live closure, or its handle: nothing to fill */ }
     else if (s.k === "fn") { const caps = dec(s.c); built[i].__tierless_caps = () => caps; for (const key in s.f) { if (key === "__proto__") continue; built[i][key] = dec(s.f[key]); } }
     else if (s.k === "H" && s.m && built[i] && (built[i] as { [VIEW]?: unknown })[VIEW]) for (const key in s.m) { if (key === "__proto__") continue; built[i][key] = dec(s.m[key]); }   // a foreign view's shipped closures (an owned handle resolved to the live object needs nothing)
     // k:"H" -> built[i] is already the handle object; k:"c" -> already resolved to the held subgraph

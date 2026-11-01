@@ -78,6 +78,8 @@ const cases: Case[] = [
   { file: "test/e2e/migrate-live.mts",     needs: ["the migrate arm runs live: a chain is one crossing, home segments see the real instance"] },
   { file: "test/probes/store-compile.mts", needs: ["setup-store functions compile with call-time caps; captures rewrite precisely; the chain still batches"] },
   { file: "test/probes/borrowed-twin.mts", needs: ["a chain through a borrowed service runs on a session twin in one crossing"] },
+  { file: "test/probes/sync-closures.mts", needs: ["a library's sync closure ships as a value"] },
+  { file: "test/probes/value-twins.mts", needs: ["a copy is complete and comes home as the original, or it never left"] },
 ];
 
 let failed = 0;

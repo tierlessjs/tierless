@@ -55,16 +55,23 @@ mid-segment (design.md §8). So the check happens BEFORE the segment runs, in th
   i18next's `getFixedT` returning `t` — compiles into a program over explicit caps
   (captures, `this` as `__self`; module-level code stays a free reference); the kept
   closure is a stub carrying program name and caps builder. The codec ships it as program
-  + caps (slot `fn`) and the far tier calls its own copy of the program, synchronously. A
-  closure that writes a captured binding, awaits, or is a function expression using its own
-  `this` stays native. Every top-level class of the module is stamped (`shareClass`, module
-  hash + name) so instances keep their class across tiers.
+  + caps (slot `fn`) with its home identity: the far tier calls its own copy of the program,
+  synchronously; a tier without that program gets an opaque handle instead (the stop rule
+  parks the segment that would call it home); and coming home it is the original closure
+  again, never a fresh one. A closure that writes a captured binding, awaits, or is a
+  function expression using its own `this` stays native. Every top-level class of the
+  module is stamped (`shareClass`, module hash + name) so instances keep their class across
+  tiers.
 - **Value twins:** inside a shipped closure's caps the engine chooses data or stack per
-  value: a stamped instance that holds only data (no function, host object or handle
-  anywhere in it) and fits the threshold ships whole (slot `o` + `tw`, its home identity);
-  the copy is tracked like a session twin — its writes ride home as deltas, and it goes
-  home as its handle. Otherwise it excises and the stop rule parks the calling segment
-  home. `makeHost({ threshold })` is that policy knob. Measured on a reduced i18next shape
+  value: a stamped instance that holds only data (no function but a compiled closure whose
+  caps are data too, no host object, accessor or handle anywhere in it) and fits the
+  threshold ships whole (slot `o` + `tw`, its home identity); the copy is tracked like a
+  session twin — its writes ride home as deltas, and it goes home as the original.
+  Otherwise it excises and the stop rule parks the calling segment home. The receiving
+  tier re-checks the promise over the slot graph (§7: a copy that would hide a foreign
+  handle, or a closure it can't run, decodes as its handle) — `test/probes/value-twins.mts`
+  holds these invariants over 400 random graphs. `makeHost({ threshold })` is the policy
+  knob. Measured on a reduced i18next shape
   (`test/probes/sync-closures.mts`): a 3-key instance ships in 376 B and a chain calling
   `t` between two twin calls is one crossing instead of two; a 3,001-key instance stays
   home at the default 8 KB and ships (211 KB) at 1 MB.

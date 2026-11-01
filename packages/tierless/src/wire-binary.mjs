@@ -14,7 +14,10 @@ import { W, R, isVarInt, writeMagic, checkMagic, makeInterner, writeStrings, rea
 // SMW1 decoder would read a flags-3 record as the old boolean form and parse the cls
 // bytes as the next field, corrupting the frame. The magic bump makes a version-skewed
 // peer fail cleanly at checkMagic instead.
-const MAGIC = "SMW2";
+// SMW3: slot tags 10 (a compiled closure: program, home identity, caps, own props) and
+// 11 (a value twin's home identity, wrapping an object slot); a handle's flag bit 16
+// (shipped closures beside a view). An SMW2 reader would reject tag 10 as a bad slot.
+const MAGIC = "SMW3";
 // The writer/hardened reader, magic header, string table, and frame flatten/rebuild live in
 // wire-io.mts (one copy, shared with the delta wire). This file owns only what is binary-
 // format-specific: the shape table, the node/slot tag encodings, and the numeric-array packs.
@@ -192,6 +195,10 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
         }
         else if (s.k === "fn") {
             intern(s.p);
+            if (s.hm) {
+                intern(s.hm.owner);
+                intern(String(s.hm.id));
+            }
             internNode(s.c);
             for (const k of Object.keys(s.f)) {
                 intern(k);
@@ -341,6 +348,11 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
         else if (s.k === "fn") {
             w.u8(10);
             w.varu(intern(s.p));
+            w.u8(s.hm ? 1 : 0);
+            if (s.hm) {
+                w.varu(intern(s.hm.owner));
+                w.varu(intern(String(s.hm.id)));
+            }
             writeNode(w, s.c, intern);
             const ks = Object.keys(s.f);
             w.varu(ks.length);
@@ -476,6 +488,12 @@ export function decodeWireBinary(bytes, { content = null, tier = null, programs 
         }
         else if (t === 10) {
             const p = S(r.varu());
+            const fl = r.u8();
+            let hm;
+            if (fl & 1) {
+                const owner = S(r.varu());
+                hm = { owner, id: S(r.varu()) };
+            }
             const c = readNode(r, S);
             const n = r.count();
             const f = {};
@@ -487,6 +505,8 @@ export function decodeWireBinary(bytes, { content = null, tier = null, programs 
                 f[key] = val;
             }
             slot = { k: "fn", p, c, f };
+            if (hm)
+                slot.hm = hm;
         }
         else if (t === 6) {
             const c = r.count(), sub = r.u8(), e = [];

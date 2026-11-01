@@ -20,10 +20,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { makeHost } from "tierless";
+import { makeHost, ownedUnit } from "tierless";
 import { makePeer, encodeMessage, decodeMessage, type Port } from "tierless/transport";
 import { encodeWireBinary, decodeWireBinary } from "tierless/wire";
 import { makeTier } from "tierless/heap";
+import { isHandle } from "tierless/graph";
 import { makeCheck } from "../lib/check.mts";
 
 const require = createRequire(import.meta.url);
@@ -219,6 +220,39 @@ check("big instance (over the threshold): still right, the engine parked the cal
   try { r3 = await mod.Dialog({ t: i18nBig.getFixedT("en", "master") }).save(1); } finally { mod.__bindTierlessMethods(null); }
   check("the same big instance under a 1 MB threshold ships whole: one crossing, right value", r3 === "20/2 big" && bytes.length === 1 && log3.join() === "server:a,server:b", JSON.stringify({ r3, bytes, log3 }));
   console.log("  (big instance shipped: " + bytes[0] + " wire bytes for " + Object.keys(big).length + " keys — the threshold is the engine's data-or-stack policy)");
+}
+
+// ---- a tier WITHOUT the closure's program: an opaque handle there, so the stop rule parks ---
+{
+  const partial = { PROGRAMS: { Dialog$save: mod.PROGRAMS.Dialog$save }, __unwind: mod.__unwind, __slots: mod.__slots };   // the component's program only
+  const counts4: Record<string, number> = {};
+  const cbs4: Array<((obj: unknown, bin: Uint8Array | null) => void) | null> = [null, null];
+  const port4 = (me: number): Port => ({
+    send(obj: any, bin?: Uint8Array): void { if (me === 0 && obj.kind === "request" && obj.payload?.type) counts4[obj.payload.type] = (counts4[obj.payload.type] || 0) + 1; const m = decodeMessage(encodeMessage(obj, bin)); queueMicrotask(() => cbs4[1 - me]?.(m.obj, m.bin)); },
+    onMessage(cb): void { cbs4[me] = cb; }, onClose(): void { /* in-process */ }, close(): void { /* in-process */ },
+  });
+  const log4: string[] = [];
+  makeHost({ bundle: partial as never, tier: "server", exec: (() => { throw new Error("none"); }) as never, twins: (cls) => (cls === "Client" ? new Client("server", log4) : undefined) }).answer(makePeer(port4(1)));
+  const peer4 = makePeer(port4(0));
+  const h4 = makeHost({ bundle, tier: "browser", exec: (() => { throw new Error("none"); }) as never });
+  (globalThis as Record<string, unknown>).__probeClient = new Client("browser", log4);
+  mod.__bindTierlessMethods((prog: string, caps: object, args: unknown[]) => h4.runLocal(peer4, prog, [caps, ...args], { migrate: () => true }));
+  let r4: unknown;
+  try { r4 = await mod.Dialog({ t }).save(1); } finally { mod.__bindTierlessMethods(null); }
+  check("a server without the closure's program: no throw — the call parks home and the chain re-migrates (two crossings), right value", r4 === "20/2 items" && counts4.resume === 2 && log4.join() === "server:a,server:b", JSON.stringify({ r4, counts4, log4 }));
+}
+
+// ---- identity: shipped out and back, the closure is the original object -----------------
+{
+  const browser = makeTier("browser"), server = makeTier("server");
+  const run = (name: string) => (mod.PROGRAMS[name] ? (caps: unknown, args: unknown[]) => { const stack: any[] = [{ fn: name, pc: 0, args: [caps, ...args] }]; for (;;) { const top = stack[stack.length - 1]; const r = mod.PROGRAMS[top.fn](top); if (r.op === "return") { stack.pop(); if (!stack.length) return r.value; stack[stack.length - 1].ret = r.value; } else if (r.op === "call") stack.push({ fn: r.fn, pc: 0, args: r.args }); else if (r.op === "check") continue; else throw new Error("parked " + r.op); } } : undefined);
+  const out = encodeWireBinary([{ fn: "x", pc: 0, args: [t] }], null, { tier: browser, excise: ownedUnit });
+  const far = decodeWireBinary(out, { tier: server, programs: run }).stack[0] as unknown as { args: unknown[] };
+  const t2 = far.args[0] as typeof t;
+  const back = decodeWireBinary(encodeWireBinary([far as never], null, { tier: server, excise: ownedUnit }), { tier: browser, programs: run }).stack[0] as unknown as { args: unknown[] };
+  check("shipped out and back, the closure is the original object (and its instance the live one)", t2 !== t && typeof t2 === "function" && t2("hello") === "Hello" && back.args[0] === t, String(back.args[0] === t));
+  const nowhere = decodeWireBinary(out, { tier: server, programs: () => undefined }).stack[0] as unknown as { args: unknown[] };
+  check("on a tier without the program it is an opaque handle, not a throwing stub", isHandle(nowhere.args[0]) && (nowhere.args[0] as { kind?: string }).kind === "function", JSON.stringify(nowhere.args[0]));
 }
 
 console.log(`\n${ok() ? "PASS" : "FAIL"} — a library's sync closure ships as a value: compiled over its caps, rebuilt with its class, run where the run is — or kept home by the codec's threshold`);

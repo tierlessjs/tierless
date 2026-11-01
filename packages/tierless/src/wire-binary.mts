@@ -16,7 +16,10 @@ import type { DeltaFrame, DeltaRequest } from "./wire-delta.mjs";
 // SMW1 decoder would read a flags-3 record as the old boolean form and parse the cls
 // bytes as the next field, corrupting the frame. The magic bump makes a version-skewed
 // peer fail cleanly at checkMagic instead.
-const MAGIC = "SMW2";
+// SMW3: slot tags 10 (a compiled closure: program, home identity, caps, own props) and
+// 11 (a value twin's home identity, wrapping an object slot); a handle's flag bit 16
+// (shipped closures beside a view). An SMW2 reader would reject tag 10 as a bad slot.
+const MAGIC = "SMW3";
 
 // The writer/hardened reader, magic header, string table, and frame flatten/rebuild live in
 // wire-io.mts (one copy, shared with the delta wire). This file owns only what is binary-
@@ -100,7 +103,7 @@ export function encodeWireBinary(stack: DeltaFrame[], request: DeltaRequest | nu
       if (s.sf) for (const [kn, vn] of s.sf) { internNode(kn); internNode(vn); }
     } else if (s.k === "H") { intern(s.h.owner); intern(String(s.h.id)); if (s.h.kind) intern(s.h.kind); if (s.h.cls) intern(s.h.cls); if (s.h.view) intern(s.h.view); for (const k of s.h.path ?? []) intern(k); if (s.m) for (const k of Object.keys(s.m)) { intern(k); internNode(s.m[k]); } }
     else if (s.k === "symu") { if (s.d !== undefined) intern(s.d); }
-    else if (s.k === "fn") { intern(s.p); internNode(s.c); for (const k of Object.keys(s.f)) { intern(k); internNode(s.f[k]); } }
+    else if (s.k === "fn") { intern(s.p); if (s.hm) { intern(s.hm.owner); intern(String(s.hm.id)); } internNode(s.c); for (const k of Object.keys(s.f)) { intern(k); internNode(s.f[k]); } }
   }
 
   // pass 2: write ------------------------------------------------------------------------
@@ -138,7 +141,7 @@ export function encodeWireBinary(stack: DeltaFrame[], request: DeltaRequest | nu
     else if (s.k === "set") { w.u8(3); w.varu(s.e.length); for (const e of s.e) writeNode(w, e, intern); }
     else if (s.k === "H") { w.u8(4); w.varu(intern(s.h.owner)); w.varu(intern(String(s.h.id))); w.u8((s.h.kind ? 1 : 0) | (s.h.cls ? 2 : 0) | (s.h.view ? 4 : 0) | (s.h.path ? 8 : 0) | (s.m ? 16 : 0)); if (s.h.kind) w.varu(intern(s.h.kind)); if (s.h.cls) w.varu(intern(s.h.cls)); if (s.h.view) w.varu(intern(s.h.view)); if (s.h.path) { w.varu(s.h.path.length); for (const k of s.h.path) w.varu(intern(k)); } if (s.m) { const ks = Object.keys(s.m); w.varu(ks.length); for (const k of ks) { w.varu(intern(k)); writeNode(w, s.m[k], intern); } } }
     else if (s.k === "symu") { w.u8(5); if (s.d !== undefined) { w.u8(1); w.varu(intern(s.d)); } else w.u8(0); }
-    else if (s.k === "fn") { w.u8(10); w.varu(intern(s.p)); writeNode(w, s.c, intern); const ks = Object.keys(s.f); w.varu(ks.length); for (const k of ks) { w.varu(intern(k)); writeNode(w, s.f[k], intern); } }
+    else if (s.k === "fn") { w.u8(10); w.varu(intern(s.p)); w.u8(s.hm ? 1 : 0); if (s.hm) { w.varu(intern(s.hm.owner)); w.varu(intern(String(s.hm.id))); } writeNode(w, s.c, intern); const ks = Object.keys(s.f); w.varu(ks.length); for (const k of ks) { w.varu(intern(k)); writeNode(w, s.f[k], intern); } }
   }
   return w.done();
 }
@@ -165,7 +168,7 @@ export function decodeWireBinary(bytes: Uint8Array | ArrayBufferLike, { content 
     else if (t === 3) { const c = r.count(), e: any[] = []; for (let j = 0; j < c; j++) e.push(readNode(r, S)); slot = { k: "set", e }; }
     else if (t === 4) { const owner = S(r.varu()), id = S(r.varu()); const h: Handle = { __tierless_handle__: true, owner, id }; const fl = r.u8(); if (fl & 1) h.kind = S(r.varu()) as "array" | "object"; if (fl & 2) h.cls = S(r.varu()); if (fl & 4) h.view = S(r.varu()); if (fl & 8) { const c = r.varu(); h.path = []; for (let j = 0; j < c; j++) h.path.push(S(r.varu())); } slot = { k: "H", h }; if (fl & 16) { const c = r.count(); const m: Record<string, unknown> = {}; for (let j = 0; j < c; j++) { const key = S(r.varu()); const val = readNode(r, S); if (key === "__proto__") continue; m[key] = val; } slot.m = m; } }
     else if (t === 5) { slot = { k: "symu", d: r.u8() ? S(r.varu()) : undefined }; }
-    else if (t === 10) { const p = S(r.varu()); const c = readNode(r, S); const n = r.count(); const f: Record<string, unknown> = {}; for (let j = 0; j < n; j++) { const key = S(r.varu()); const val = readNode(r, S); if (key === "__proto__") continue; f[key] = val; } slot = { k: "fn", p, c, f }; }
+    else if (t === 10) { const p = S(r.varu()); const fl = r.u8(); let hm: { owner: string; id: string } | undefined; if (fl & 1) { const owner = S(r.varu()); hm = { owner, id: S(r.varu()) }; } const c = readNode(r, S); const n = r.count(); const f: Record<string, unknown> = {}; for (let j = 0; j < n; j++) { const key = S(r.varu()); const val = readNode(r, S); if (key === "__proto__") continue; f[key] = val; } slot = { k: "fn", p, c, f }; if (hm) slot.hm = hm; }
     else if (t === 6) { const c = r.count(), sub = r.u8(), e: any[] = [];
       if (sub === 0) { for (let j = 0; j < c; j++) e.push({ k: "p", v: r.vari() }); }
       else if (sub === 1) { for (let j = 0; j < c; j++) e.push({ k: "p", v: r.f64() }); }

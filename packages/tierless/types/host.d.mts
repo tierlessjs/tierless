@@ -45,6 +45,7 @@ export interface MakeHostOpts {
         stability?: number;
     };
 }
+export declare function ownedUnit(v: unknown): boolean;
 export declare function makeHost({ bundle, tier, exec, owns, meta, trace, coherence: coherenceIn, twins, placement, threshold }: MakeHostOpts): Host;
 export declare function execOver(peer: Peer, req: ResourceRequest, meta?: Record<string, unknown>): Promise<unknown>;
 export declare function answerWith(peer: Peer, hostFor: (id: string) => Host | Promise<Host>, field?: string): void;

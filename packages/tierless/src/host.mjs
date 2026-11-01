@@ -13,6 +13,7 @@
 // number of sessions can be in flight on one peer concurrently; the transport's
 // correlation ids keep their bounces apart.
 import { makePump, initialStack, hydrateViews, twinDelta } from "./runtime.mjs";
+import { isCompiledFn } from "./graph.mjs";
 import { encodeWireBinary, decodeWireBinary, encodeArgs, decodeArgs } from "./wire-binary.mjs";
 import { RawJsonBody, RAW_TEXT } from "./transport.mjs";
 import { makeRecorder, decide, siteKey, argFeatures } from "./trace.mjs";
@@ -27,13 +28,18 @@ const isRecorder = (t) => typeof t.ship === "function";
 // wire anyway. NOT a serializability test: that is a codec capability, changes with the
 // codec, and can't see semantic pins at all. Depth-limited: pathological values pin
 // (fail closed), never hang.
-function ownsValues(v, depth = 0) {
+// `stubsOk`: a compiled sync closure (graph.mts isCompiledFn) is a VALUE the codec ships
+// with its caps, so inside a migrating stack it owns nothing; a resource REQUEST's args
+// still pin on it — a foreign exec can't run it.
+function ownsValues(v, depth = 0, stubsOk = false) {
     if (depth > 6)
         return true;
     if (v === null || v === undefined)
         return false;
     const t = typeof v;
-    if (t === "function" || t === "symbol")
+    if (t === "function")
+        return !(stubsOk && isCompiledFn(v));
+    if (t === "symbol")
         return true;
     if (t !== "object")
         return false;
@@ -44,14 +50,14 @@ function ownsValues(v, depth = 0) {
     if (v instanceof Date || v instanceof Uint8Array)
         return false;
     if (Array.isArray(v))
-        return v.some((x) => ownsValues(x, depth + 1));
+        return v.some((x) => ownsValues(x, depth + 1, stubsOk));
     // the graph codec descends Maps and Sets, so owned values hide in them too
     // (Object.values sees neither); Map KEYS cross as well
     if (v instanceof Map)
-        return [...v.entries()].some(([k, x]) => ownsValues(k, depth + 1) || ownsValues(x, depth + 1));
+        return [...v.entries()].some(([k, x]) => ownsValues(k, depth + 1, stubsOk) || ownsValues(x, depth + 1, stubsOk));
     if (v instanceof Set)
-        return [...v].some((x) => ownsValues(x, depth + 1));
-    return Object.values(v).some((x) => ownsValues(x, depth + 1)); // own enumerable props — what crosses; prototypes stay home like axios's JSON pass
+        return [...v].some((x) => ownsValues(x, depth + 1, stubsOk));
+    return Object.values(v).some((x) => ownsValues(x, depth + 1, stubsOk)); // own enumerable props — what crosses; prototypes stay home like axios's JSON pass
 }
 // The migrate arm's §5 excision predicate (docs/migrate-arm.md): consulted per VALUE while
 // the codec walks a shipping stack. Containers return false — the walk descends and each
@@ -59,9 +65,9 @@ function ownsValues(v, depth = 0) {
 // Prototyped instances excise as units even when their data would serialize: crossing
 // structurally would hand back a prototype-stripped copy, and a later segment that touches
 // the slot must see the SAME object (the stop rule guarantees that touch happens at home).
-function ownedUnit(v) {
+export function ownedUnit(v) {
     if (typeof v === "function")
-        return true;
+        return !isCompiledFn(v);
     if (v === null || typeof v !== "object")
         return false;
     if (Array.isArray(v) || v instanceof Map || v instanceof Set)
@@ -71,7 +77,7 @@ function ownedUnit(v) {
     const proto = Object.getPrototypeOf(v);
     if (proto !== Object.prototype && proto !== null)
         return true;
-    return ownsValues(v);
+    return ownsValues(v, 0, true);
 }
 let nextSid = 1;
 const TE = new TextEncoder();

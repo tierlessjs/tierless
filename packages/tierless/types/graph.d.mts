@@ -2,7 +2,7 @@ export interface Handle {
     __tierless_handle__: true;
     owner: string;
     id: string;
-    kind?: "array" | "object";
+    kind?: "array" | "object" | "function";
     /** Class identity of an excised compiled-class instance (the __tierless_cls stamp):
      *  what a dynamic call park dispatches on without the live object (migrate-arm.md). */
     cls?: string;
@@ -28,6 +28,12 @@ export declare function hydrated(twin: object, handle: Handle): void;
 /** The home handle of a twin on this tier (a session twin hydrated into a view, or a value
  *  twin a shipped closure brought), or undefined for any other object. */
 export declare function twinOf(o: object): Handle | undefined;
+interface CompiledFn {
+    __tierless_program: string;
+    __tierless_caps: () => unknown;
+    __tierless_sync: true;
+}
+export declare const isCompiledFn: (v: unknown) => v is CompiledFn;
 export declare function isHandle(x: unknown): x is Handle;
 export declare const GLOBALS: Record<string, unknown>;
 /** `claimed` (the encoder's excise predicate) marks values that ship as a handle whatever
@@ -86,3 +92,4 @@ export interface EncodedGraph {
 export declare function encodeGraph(values: unknown[], { tier, threshold, content, excise }?: EncodeOptions): EncodedGraph;
 export declare function toBigInt(s: string): bigint;
 export declare function decodeGraph({ roots, objs }: EncodedGraph, { content, tier, programs }?: DecodeOptions): unknown[];
+export {};
