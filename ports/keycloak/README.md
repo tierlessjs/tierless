@@ -233,6 +233,8 @@ moves the pass count by 7. Pass-parity gating excludes them from every number ab
 `autentication/flows.spec.ts:165` ends with a bind-flow save it doesn't wait for, then
 `deleteRealm`; the two overlap on the server (H2 deadlock on `REALM_EVENTS_LISTENERS` in
 `server.log`) and the test reads `unknown_error` — seen in 2 of 4 migrating runs and in
-none of 7 others, consistent with the ported path's extra hop landing the save later.
+none of 7 others when first found; since then also on the stock and nothing-migrating
+arms (`results/flows/` baseline-r1, fetch-r2; all 3 nothing-migrating runs of
+2026-11-01), so it is a race on every arm, not the ported path's.
 `users/main.spec.ts:90` fails on every arm: `User not found`, or an optimistic-lock
 conflict on the credential row, which also occurred with nothing migrating.
