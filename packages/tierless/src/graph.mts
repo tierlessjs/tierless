@@ -57,6 +57,16 @@ const SHARED = new Map<string, object>();
 const BUILTIN_ERRORS = new Set(["Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError", "URIError"]);
 /** Stamp a class's identity and register it on THIS tier, so its instances keep their class
  *  when copied across tiers — and, as a §5 handle's `cls`, can dispatch to a session twin. */
+/** Share a FUNCTION by name, the shareClass of plain helpers: register the same name on
+ *  each tier (the app's twins module), and a closure that captured it (an imported helper
+ *  such as a form-values converter) can call it wherever the run is — off-tier its caps
+ *  view carries the name, and this tier's registered copy stands in. Only for functions
+ *  that behave the same on every tier: pure, or reading only what both tiers have. */
+const SHARED_FN = new Map<string, Function>(), FN_NAME = new WeakMap<Function, string>();
+export function shareFunction(name: string, fn: Function): void {
+  SHARED_FN.set(name, fn);
+  FN_NAME.set(fn, name);
+}
 export function shareClass(name: string, cls: { prototype: object }): void {
   (cls.prototype as { __tierless_cls?: string }).__tierless_cls = name;
   SHARED.set(name, cls.prototype);
@@ -93,32 +103,54 @@ export function hydrated(twin: object, handle: Handle): void { HYDRATED.set(twin
 function isPrimitive(x: unknown): boolean {
   return x === null || typeof x === "string" || typeof x === "boolean" || (typeof x === "number" && Number.isFinite(x));
 }
-function viewOf(v: object): string {
-  const p: Record<string, unknown> = {}, c: Record<string, string> = {}, s: Record<string, Record<string, unknown>> = {}, o: string[] = [];
+// A view's shape, per object level: p primitives by value, c/s stamped members' classes and
+// data fields (twins), f shared functions by name, n nested plain objects as views of their
+// own, o every other member (a member handle). Nesting is bounded: past VIEW_DEPTH levels,
+// or an object with more than VIEW_KEYS own keys, a plain object stays a member handle.
+interface ViewData { p: Record<string, unknown>; c: Record<string, string>; s: Record<string, Record<string, unknown>>; f: Record<string, string>; n: Record<string, ViewData>; o: string[] }
+const VIEW_DEPTH = 3, VIEW_KEYS = 64;
+function viewData(v: object, depth: number): ViewData {
+  const d: ViewData = { p: {}, c: {}, s: {}, f: {}, n: {}, o: [] };
   for (const [k, x] of Object.entries(v)) {
     if (x === undefined) continue;                                 // absent and undefined read the same
-    if (isPrimitive(x)) { p[k] = x; continue; }
+    if (isPrimitive(x)) { d.p[k] = x; continue; }
+    if (typeof x === "function") { const name = FN_NAME.get(x as Function); if (name) d.f[k] = name; else d.o.push(k); continue; }
     const cls = stampOf(x);
-    if (!cls) { o.push(k); continue; }
-    c[k] = cls;
-    const data: Record<string, unknown> = {};
-    for (const [f, fv] of Object.entries(x as object)) {
-      if (holdsFunction(fv)) continue;                             // behavior, not state: {} after JSON would clobber the twin's own
-      try { const j = JSON.stringify(fv); if (j !== undefined) data[f] = JSON.parse(j); } catch { /* circular or unserializable: stays home */ }
+    if (cls) {
+      d.c[k] = cls;
+      const data: Record<string, unknown> = {};
+      for (const [f, fv] of Object.entries(x as object)) {
+        if (holdsFunction(fv)) continue;                           // behavior, not state: {} after JSON would clobber the twin's own
+        try { const j = JSON.stringify(fv); if (j !== undefined) data[f] = JSON.parse(j); } catch { /* circular or unserializable: stays home */ }
+      }
+      d.s[k] = data;
+      continue;
     }
-    s[k] = data;
+    const proto = Object.getPrototypeOf(x);
+    if ((proto === Object.prototype || proto === null) && depth + 1 < VIEW_DEPTH && Object.keys(x as object).length <= VIEW_KEYS) d.n[k] = viewData(x as object, depth + 1);
+    else d.o.push(k);
   }
-  return JSON.stringify({ p, c, s, o });
+  return d;
 }
-function viewFrom(h: Handle): Record<string, unknown> {
-  const d = JSON.parse(h.view!) as { p: Record<string, unknown>; c: Record<string, string>; s: Record<string, Record<string, unknown>>; o: string[] };
+function viewOf(v: object): string { return JSON.stringify(viewData(v, 0)); }
+// Built from the data, with VIEW naming the handle this level came from (the caps handle,
+// or a member handle for a nested level): encoded, a view goes home as that handle, and
+// any whole-object use of it (a write, a call with it as `this`) finds the handle and
+// parks home — only a member-precise read of a primitive stays.
+function viewBuild(d: ViewData, h: Handle): Record<string, unknown> {
   const v: Record<string, unknown> = {};
   Object.defineProperty(v, VIEW, { value: h });
+  const member = (k: string): Handle => ({ __tierless_handle__: true, owner: h.owner, id: h.id, path: [...(h.path ?? []), k] });
   for (const [k, x] of Object.entries(d.p)) v[k] = x;
-  const member = (k: string): Handle => ({ __tierless_handle__: true, owner: h.owner, id: h.id, path: [k] });
   for (const [k, cls] of Object.entries(d.c)) v[k] = { ...member(k), cls, ...(d.s[k] ? { state: d.s[k] } : {}) };
+  for (const [k, name] of Object.entries(d.f)) v[k] = SHARED_FN.get(name) ?? member(k);   // this tier's own copy, if registered here
+  for (const [k, nd] of Object.entries(d.n)) v[k] = viewBuild(nd, member(k));
   for (const k of d.o) v[k] = member(k);
   return v;
+}
+function viewFrom(h: Handle): Record<string, unknown> {
+  const { view: _v, ...handle } = h;                               // nested levels' handles carry no view of their own
+  return viewBuild(JSON.parse(h.view!) as ViewData, h.path ? handle : h);
 }
 function stampOf(v: unknown): string | undefined {
   const proto = v && typeof v === "object" ? Object.getPrototypeOf(v) : null;

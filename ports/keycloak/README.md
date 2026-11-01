@@ -134,12 +134,22 @@ profiling pages sent their trace once a second, and the harness closes a test's 
 without a pagehide, so short tests lost their records (the authorization spec alone
 delivered 1 record; 37 with the fix). Completed runs now send at once.
 
-Of the 6 dependent chains in the console, 3 now run in one crossing (this loader,
-`identity-providers/add/AdvancedSettings.tsx`'s loader, `DuplicateFlowModal`'s submit).
-The other 3 return to the browser mid-chain: a translated string as a call argument
-(`ResetPasswordDialog`), a nested borrowed object (`user.id`), and an imported helper
-(`convertFormValuesToObject` in `LinkIdentityProviderModal`). The permissions tab maps an
-async function over a list, which doesn't compile yet.
+Of the 6 dependent chains in the console, 4 now run all their calls in one crossing: this
+loader, `identity-providers/add/AdvancedSettings.tsx`'s loader, `DuplicateFlowModal`'s
+submit, and `LinkIdentityProviderModal`'s submit (in link mode). The other 2 keep most of
+their calls on the gateway:
+- `FlowDetails`' `executeChange` reads the borrowed `flow.alias`, a nested primitive the
+  caps view carries. Moving a sub-flow also fires `executeChange` once per child, a
+  borrowed function, so that case goes home after `addFlowToFlow`.
+- `ResetPasswordDialog` keeps `resetPassword` and `getCredentials` (which read the borrowed
+  `user.id`) on the gateway, then goes home for its last call, whose argument is a
+  translated string: the component's `t()` reads translations loaded in the browser,
+  which the gateway doesn't have.
+
+`LinkIdentityProviderModal` calls an imported helper, `convertFormValuesToObject`, between
+admin-client calls. The twins module shares it by name (`shareFunction` on both tiers), so
+it runs on the gateway; its browser-only imports are stubbed in the gateway's bundle
+(`twinsStubs`), which stays at 3 KB.
 
 ## The whole suite
 

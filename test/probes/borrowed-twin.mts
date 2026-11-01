@@ -34,7 +34,7 @@ import { pathToFileURL } from "node:url";
 import { makeHost } from "tierless";
 import { makePeer, encodeMessage, decodeMessage, type Port } from "tierless/transport";
 import { memorySink, buildProfile, loadProfile, methodMigrate } from "tierless/trace";
-import { shareClass } from "tierless/graph";
+import { shareClass, shareFunction } from "tierless/graph";
 
 const require = createRequire(import.meta.url);
 const { compile } = require("../../packages/tierless/src/transform.cjs");
@@ -261,6 +261,23 @@ export function Perms() {
     return report(c, xs.length);                 // a borrowed function: runs at home, sees c
   });
 }
+export function conv(x) { return x * 3; }     // an imported helper, shared by name below
+export function Profile(props) {
+  const { client } = useClient();
+  const { user } = props;                        // a borrowed OBJECT: ResetPasswordDialog's user.id shape
+  useFetch(async () => {
+    const a = await client.scopes.a(user.id);
+    return await client.scopes.b(a + user.meta.n);
+  });
+}
+export function Linker() {
+  const { client } = useClient();
+  useFetch(async () => {                         // LinkIdentityProviderModal: a helper between calls
+    const a = await client.scopes.a(1);
+    const c = conv(a);
+    return await client.scopes.b(c);
+  });
+}
 export function Creator(props) {
   const { client } = useClient();
   const { refresh } = props;                     // a borrowed FUNCTION (ClientScopeForm's save shape)
@@ -294,9 +311,9 @@ export function Details(props) {
   writeFileSync(join(dir, "comp.mjs"), ccode);
   const dslots = (await import(pathToFileURL(join(dir, "comp.mjs")).href)).__slots["Details$useFetch0"] as Record<string, string[]>;
   const dall = Object.values(dslots).flat();
-  check("stop rule: borrowed primitives are recorded by member, and the throw branch is a checkpoint (its t() call needs the whole caps only on that side)",
+  check("stop rule: borrowed primitives are recorded by member, and the throw branch is a checkpoint (its t() call refs the borrowed function, only on that side)",
     dall.includes("args[0].id") && dall.includes("args[0].step") && /if \(F\.b < 0\) \{ F\.pc = \d+; \} else \{ F\.pc = \d+; \} return \{ op: "check" \};/.test(ccode)
-      && Object.values(dslots).filter((r) => r.includes("args[0]")).length === 1, JSON.stringify(dslots));
+      && !dall.includes("args[0]") && Object.values(dslots).filter((r) => r.includes("args[0].t")).length === 1, JSON.stringify(dslots));
   const cmod = await import(pathToFileURL(join(dir, "comp.mjs")).href);
   const cbundle = { PROGRAMS: cmod.PROGRAMS, __unwind: cmod.__unwind, __slots: cmod.__slots };
   const cpeer = connect(cbundle, (cls) => (cls === "Client" ? twin : undefined));
@@ -380,6 +397,27 @@ export function Details(props) {
     cmod.__bindTierlessMethods(null);
     check("a borrowed function awaited off migrated caps runs at HOME (it lives there), the chain still right",
       (rc as unknown as number) === 20 && seenR.join() === "2" && log[0] === "server:a", JSON.stringify({ rc, seenR, log, counts }));
+  }
+  {
+    const run = async (mk: () => void): Promise<{ r: unknown; resumes: number; log: string[] }> => {
+      cmod.__bindTierlessMethods((prog: string, caps: object, args: unknown[]) => chost.runLocal(cpeer, prog, [caps, ...args], { migrate: () => true }));
+      reset();
+      (globalThis as Record<string, unknown>).__probeClient = new Client("browser", log);
+      mk();
+      const r = await fans[fans.length - 1]();
+      cmod.__bindTierlessMethods(null);
+      return { r, resumes: counts.resume ?? 0, log: [...log] };
+    };
+    const pr = await run(() => cmod.Profile({ user: { id: 4, name: "u", meta: { n: 2 }, roles: ["x"] } }));
+    check("a nested borrowed object's primitives (user.id, user.meta.n) travel with the run: both calls ONE crossing",
+      (pr.r as unknown as number) === 70 && pr.resumes === 1 && pr.log.join() === "server:a,server:b", JSON.stringify(pr));
+    const unshared = await run(() => cmod.Linker());
+    check("an UNshared helper between twin calls goes home to run it (correct: the run returns, then re-migrates at the next call)",
+      (unshared.r as unknown as number) === 60 && unshared.resumes === 2, JSON.stringify(unshared));
+    shareFunction("conv", cmod.conv);
+    const shared = await run(() => cmod.Linker());
+    check("a SHARED helper (shareFunction) runs where the run is: both calls ONE crossing",
+      (shared.r as unknown as number) === 60 && shared.resumes === 1 && shared.log.join() === "server:a,server:b", JSON.stringify(shared));
   }
   check("dependent chain reading borrowed primitives: all three calls on the twin in ONE crossing",
     r4 === 67 && dcounts.resume === 1, JSON.stringify({ r4, dcounts }));

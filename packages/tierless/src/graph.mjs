@@ -37,6 +37,16 @@ const SHARED = new Map();
 const BUILTIN_ERRORS = new Set(["Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError", "URIError"]);
 /** Stamp a class's identity and register it on THIS tier, so its instances keep their class
  *  when copied across tiers — and, as a §5 handle's `cls`, can dispatch to a session twin. */
+/** Share a FUNCTION by name, the shareClass of plain helpers: register the same name on
+ *  each tier (the app's twins module), and a closure that captured it (an imported helper
+ *  such as a form-values converter) can call it wherever the run is — off-tier its caps
+ *  view carries the name, and this tier's registered copy stands in. Only for functions
+ *  that behave the same on every tier: pure, or reading only what both tiers have. */
+const SHARED_FN = new Map(), FN_NAME = new WeakMap();
+export function shareFunction(name, fn) {
+    SHARED_FN.set(name, fn);
+    FN_NAME.set(fn, name);
+}
 export function shareClass(name, cls) {
     cls.prototype.__tierless_cls = name;
     SHARED.set(name, cls.prototype);
@@ -80,48 +90,73 @@ export function hydrated(twin, handle) { HYDRATED.set(twin, handle); }
 function isPrimitive(x) {
     return x === null || typeof x === "string" || typeof x === "boolean" || (typeof x === "number" && Number.isFinite(x));
 }
-function viewOf(v) {
-    const p = {}, c = {}, s = {}, o = [];
+const VIEW_DEPTH = 3, VIEW_KEYS = 64;
+function viewData(v, depth) {
+    const d = { p: {}, c: {}, s: {}, f: {}, n: {}, o: [] };
     for (const [k, x] of Object.entries(v)) {
         if (x === undefined)
             continue; // absent and undefined read the same
         if (isPrimitive(x)) {
-            p[k] = x;
+            d.p[k] = x;
+            continue;
+        }
+        if (typeof x === "function") {
+            const name = FN_NAME.get(x);
+            if (name)
+                d.f[k] = name;
+            else
+                d.o.push(k);
             continue;
         }
         const cls = stampOf(x);
-        if (!cls) {
-            o.push(k);
+        if (cls) {
+            d.c[k] = cls;
+            const data = {};
+            for (const [f, fv] of Object.entries(x)) {
+                if (holdsFunction(fv))
+                    continue; // behavior, not state: {} after JSON would clobber the twin's own
+                try {
+                    const j = JSON.stringify(fv);
+                    if (j !== undefined)
+                        data[f] = JSON.parse(j);
+                }
+                catch { /* circular or unserializable: stays home */ }
+            }
+            d.s[k] = data;
             continue;
         }
-        c[k] = cls;
-        const data = {};
-        for (const [f, fv] of Object.entries(x)) {
-            if (holdsFunction(fv))
-                continue; // behavior, not state: {} after JSON would clobber the twin's own
-            try {
-                const j = JSON.stringify(fv);
-                if (j !== undefined)
-                    data[f] = JSON.parse(j);
-            }
-            catch { /* circular or unserializable: stays home */ }
-        }
-        s[k] = data;
+        const proto = Object.getPrototypeOf(x);
+        if ((proto === Object.prototype || proto === null) && depth + 1 < VIEW_DEPTH && Object.keys(x).length <= VIEW_KEYS)
+            d.n[k] = viewData(x, depth + 1);
+        else
+            d.o.push(k);
     }
-    return JSON.stringify({ p, c, s, o });
+    return d;
 }
-function viewFrom(h) {
-    const d = JSON.parse(h.view);
+function viewOf(v) { return JSON.stringify(viewData(v, 0)); }
+// Built from the data, with VIEW naming the handle this level came from (the caps handle,
+// or a member handle for a nested level): encoded, a view goes home as that handle, and
+// any whole-object use of it (a write, a call with it as `this`) finds the handle and
+// parks home — only a member-precise read of a primitive stays.
+function viewBuild(d, h) {
     const v = {};
     Object.defineProperty(v, VIEW, { value: h });
+    const member = (k) => ({ __tierless_handle__: true, owner: h.owner, id: h.id, path: [...(h.path ?? []), k] });
     for (const [k, x] of Object.entries(d.p))
         v[k] = x;
-    const member = (k) => ({ __tierless_handle__: true, owner: h.owner, id: h.id, path: [k] });
     for (const [k, cls] of Object.entries(d.c))
         v[k] = { ...member(k), cls, ...(d.s[k] ? { state: d.s[k] } : {}) };
+    for (const [k, name] of Object.entries(d.f))
+        v[k] = SHARED_FN.get(name) ?? member(k); // this tier's own copy, if registered here
+    for (const [k, nd] of Object.entries(d.n))
+        v[k] = viewBuild(nd, member(k));
     for (const k of d.o)
         v[k] = member(k);
     return v;
+}
+function viewFrom(h) {
+    const { view: _v, ...handle } = h; // nested levels' handles carry no view of their own
+    return viewBuild(JSON.parse(h.view), h.path ? handle : h);
 }
 function stampOf(v) {
     const proto = v && typeof v === "object" ? Object.getPrototypeOf(v) : null;

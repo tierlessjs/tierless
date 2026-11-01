@@ -18,8 +18,7 @@ export interface Handle {
     /** A stamped member handle's data fields as they shipped, for its twin. Not re-encoded. */
     state?: Record<string, unknown>;
 }
-/** Stamp a class's identity and register it on THIS tier, so its instances keep their class
- *  when copied across tiers — and, as a §5 handle's `cls`, can dispatch to a session twin. */
+export declare function shareFunction(name: string, fn: Function): void;
 export declare function shareClass(name: string, cls: {
     prototype: object;
 }): void;

@@ -759,20 +759,30 @@ function compileFn(node) {
         // (F.args[0].svc) is emitted as the slot plus `path` (suspInfo), so it is exempt the
         // same way: the pump walks the path and parks home itself when it meets a handle it
         // can't resolve. Argument expressions always stay scanned.
+        const capsFn = t.isIdentifier(node.params[0], { name: "__caps" }); // a closure program: frame arg 0 is its caps
         const refsOf = (id) => {
             const out = new Set();
             const text = caseText.get(id).replace(/\bop: "dyn", recv: F\.(?:args\[\d+\]|[A-Za-z_$][\w$]*)(?=,)/g, 'op: "dyn"');
-            for (const m of text.matchAll(/\bF\.([A-Za-z_$][\w$]*)(\[(\d+)\])?(?:\.([A-Za-z_$][\w$]*))?/g)) {
+            for (const m of text.matchAll(/\bF\.([A-Za-z_$][\w$]*)(\[(\d+)\])?((?:\??\.[A-Za-z_$][\w$]*)*)/g)) {
                 if (m[1] === "pc")
                     continue;
                 const slot = m[1] === "args" && m[3] !== undefined ? `args[${m[3]}]` : m[1];
-                // a plain READ of one member records the member ("args[0].id"): a caps VIEW's
-                // primitive members may be read off-tier (graph.mts "views"). A call (the method
-                // sees the whole object as `this`), a write or a delete (it must land on the home
-                // object) records the whole slot.
+                // a plain READ records its member chain ("args[0].user.id"): a caps VIEW's
+                // primitives, nested ones too, may be read off-tier (graph.mts "views"). A write
+                // or a delete (it must land on the home object) records the whole slot. A call's
+                // receiver is the chain minus its last member — except a closure's own capture:
+                // `F.args[0].helper(x)` is the source's plain `helper(x)`, so the function value
+                // itself is the ref (a shared function stays; a borrowed one goes home).
+                const members = m[4] ? m[4].split(/\??\./).slice(1) : [];
                 const after = text.slice(m.index + m[0].length), before = text.slice(0, m.index);
-                const whole = m[4] === undefined || /^\s*(?:\(|\+\+|--|(?:\*\*|<<|>>>?|&&|\|\||\?\?|[-+*\/%&|^])?=(?!=))/.test(after) || /(?:\+\+|--|\bdelete)\s*$/.test(before);
-                out.add(whole ? slot : `${slot}.${m[4]}`);
+                const write = /^\s*(?:\+\+|--|(?:\*\*|<<|>>>?|&&|\|\||\?\?|[-+*\/%&|^])?=(?!=))/.test(after) || /(?:\+\+|--|\bdelete)\s*$/.test(before);
+                if (write || !members.length) {
+                    out.add(slot);
+                    continue;
+                }
+                const call = /^\s*(?:\?\.)?\(/.test(after);
+                const chain = call && !(capsFn && slot === "args[0]" && members.length === 1) ? members.slice(0, -1) : members;
+                out.add([slot, ...chain].join("."));
             }
             return out;
         };
@@ -1190,17 +1200,15 @@ function desugarBindings(fnPath) {
     desugarForEach(fnPath, fresh); // then loops (a for-of binding may itself be a pattern)
     desugarDestructuring(fnPath, fresh); // finally every pattern, incl. those the two passes above introduced
 }
-// A frame is { fn, pc, args, ret, __h, __c, __err, __t0…, <locals> }: a local or param
-// with one of those names would BE that field once it lowers to F.<name> — `const args =
+// A frame is { fn, pc, args, ret, __h, __c, __err, __t0…, <locals> }: a local with one of
+// those names would BE that field once it lowers to F.<name> (params lower to F.args[i],
+// so they can't clash) — `const args =
 // {…}` overwrote the frame's own arguments (Keycloak's group picker read F.args[0] as its
 // caps and got the query object). Rename them first, scope-aware, so nested closures that
 // read them follow. `F` itself is the frame.
 const FRAME_FIELD = (name) => name === "F" || name === "fn" || name === "pc" || name === "args" || name === "ret" || name.startsWith("__");
 function renameFrameClashes(p) {
     const clash = new Set();
-    for (const x of p.node.params)
-        if (t.isIdentifier(x) && FRAME_FIELD(x.name))
-            clash.add(x.name);
     p.traverse({
         VariableDeclarator(v) { if (v.getFunctionParent()?.node === p.node && t.isIdentifier(v.node.id) && FRAME_FIELD(v.node.id.name))
             clash.add(v.node.id.name); },

@@ -143,17 +143,21 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
     const need = slots?.[top.fn]?.[top.pc];
     if (!need) return null;
     for (const ref of need) {
-      // "slot" or "slot.member" (the compiler records a plain member read precisely, so a
-      // caps VIEW's primitive members don't send the run home — graph.mts "views")
-      const dot = ref.indexOf("."), k = dot < 0 ? ref : ref.slice(0, dot);
+      // "slot" or "slot.m1.m2…": the compiler records a plain member read as its chain, so
+      // a caps VIEW's primitives (nested ones too) don't send the run home
+      const [k, ...chain] = ref.split(".");
       let v = k === "args" ? top.args
         : k.startsWith("args[") ? (Array.isArray(top.args) ? top.args[Number(k.slice(5, -1))] : top.args)
         : (top as Record<string, unknown>)[k];
-      if (dot >= 0 && v !== null && typeof v === "object" && !isHandle(v)) {
-        // an own DATA member is exactly what the read gets; a getter or inherited member
-        // could reach anything, so those check the whole object
-        const d = Object.getOwnPropertyDescriptor(v, ref.slice(dot + 1));
+      for (const m of chain) {
+        if (v === null || typeof v !== "object" || isHandle(v)) break;
+        const d = Object.getOwnPropertyDescriptor(v, m);
+        // an own DATA member is exactly what the read gets; a view omits only undefined
+        // members; a getter or inherited member could reach anything, so those check the
+        // object itself
         if (d && "value" in d) v = d.value;
+        else if (!d && (v as { [VIEW]?: unknown })[VIEW]) v = undefined;
+        else break;
       }
       const h = findHandle(v);
       if (h) return { op: "home", tier: h.owner, name: k, args: [] };

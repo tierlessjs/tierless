@@ -5,7 +5,7 @@
 // on cycles; this asserts the graph codec handles all of it, plus the exotic value types
 // (undefined, BigInt) that aren't JSON-native. The §5 layer (src/heap.mjs makeTier)
 // supplies the tier whose heap a big subgraph excises into as a handle.
-import { encodeGraph, decodeGraph, isHandle } from "tierless/graph";
+import { encodeGraph, decodeGraph, isHandle, shareFunction } from "tierless/graph";
 import { makeTier } from "tierless/heap";
 import { makeCheck } from "../lib/check.mts";
 
@@ -58,17 +58,22 @@ check("BigInt survives exactly (> MAX_SAFE_INTEGER)", bi.n === 9007199254740993n
   class Api { realm = "r1"; go(): void { /* behavior */ } }
   (Api.prototype as unknown as { __tierless_cls: string }).__tierless_cls = "Api";
   const home = makeTier("browser");
-  const caps = { id: "f1", n: 3, on: true, nil: null, gone: undefined, t: (k: string) => k, form: { a: 1 }, api: new Api() };
+  const conv = (o: object): object => ({ ...o, converted: true });   // a pure helper, shared by name
+  shareFunction("conv", conv);
+  const caps = { id: "f1", n: 3, on: true, nil: null, gone: undefined, t: (k: string) => k, form: { a: 1, deep: { b: "x", list: [1] } }, api: new Api(), conv };
   const enc = encodeGraph([caps], { tier: home, excise: (v) => v === caps });
   const [view] = decodeGraph(JSON.parse(JSON.stringify(enc)), { tier: makeTier("server") }) as any[];
   check("view: primitive members arrive as values", view.id === "f1" && view.n === 3 && view.on === true && view.nil === null && !("gone" in view));
-  check("view: function and object members arrive as member handles of the caps' handle",
-    isHandle(view.t) && isHandle(view.form) && view.t.id === view.form.id && view.t.path?.[0] === "t" && view.form.path?.[0] === "form");
+  check("view: a function member arrives as a member handle of the caps' handle", isHandle(view.t) && view.t.path?.join() === "t");
+  check("view: a plain object member arrives as a nested view — primitives in place, deeper levels too, an array a member handle",
+    !isHandle(view.form) && view.form.a === 1 && view.form.deep.b === "x" && isHandle(view.form.deep.list) && view.form.deep.list.path?.join() === "form,deep,list");
+  check("view: a shared function arrives as this tier's own copy", view.conv === conv);
   check("view: a stamped member carries its class and data fields (no functions)",
     isHandle(view.api) && view.api.cls === "Api" && view.api.state?.realm === "r1" && !("go" in (view.api.state ?? {})));
-  const back = encodeGraph([view, view.form], { tier: makeTier("server") });
-  const [homeCaps, homeForm] = decodeGraph(JSON.parse(JSON.stringify(back)), { tier: home }) as any[];
-  check("view: going home it decodes to the LIVE object, and a member handle to the live member", homeCaps === caps && homeForm === caps.form);
+  const back = encodeGraph([view, view.form, view.form.deep, view.t], { tier: makeTier("server") });
+  const [homeCaps, homeForm, homeDeep, homeT] = decodeGraph(JSON.parse(JSON.stringify(back)), { tier: home }) as any[];
+  check("view: going home it decodes to the LIVE object, a nested view to the live member, a member handle to the live member",
+    homeCaps === caps && homeForm === caps.form && homeDeep === caps.form.deep && homeT === caps.t);
   const sized = encodeGraph([{ big: caps }], { tier: home, threshold: 16 });
   check("view: an object excised only for SIZE ships no view (its contents are the point of keeping it home)", !JSON.stringify(sized).includes('"view"'));
 }

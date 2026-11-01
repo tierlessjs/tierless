@@ -45,10 +45,13 @@ mid-segment (design.md §8). So the check happens BEFORE the segment runs, in th
   **checkpoint** (it returns `{op:"check"}` once decided), so only the side taken counts;
   branches inside an in-step loop are not checkpoints.
 - **Caps views:** a closure's caps object excises whole (writes land at home), but off
-  its home tier it decodes as a view: primitive members are values, other members are
-  member handles (stamped ones carry class and state for twins). With member-precise
-  refs, a segment that reads a borrowed `id` or `realm` stays put; one that calls a
-  borrowed `t()` goes home.
+  its home tier it decodes as a view: primitive members are values, plain-object members
+  are nested views (3 levels, 64 keys each), functions registered with `shareFunction` are
+  this tier's own copy, and other members are member handles (stamped ones carry class
+  and state for twins). The compiler records a read as its member chain
+  (`args[0].user.id`), so a segment that reads a borrowed primitive stays put; one that
+  calls a borrowed function that isn't shared (`t()`), or uses a view object as a whole,
+  goes home.
 - **Hydration:** when a migrated stack arrives, a view member that has a session twin
   here becomes the twin itself (`hydrateViews`). Plain code the machine runs — an inline
   `async p => await client.x(p)` handed to `Promise.all` — then calls the twin natively,
