@@ -50,8 +50,24 @@ mid-segment (design.md §8). So the check happens BEFORE the segment runs, in th
   this tier's own copy, and other members are member handles (stamped ones carry class
   and state for twins). The compiler records a read as its member chain
   (`args[0].user.id`), so a segment that reads a borrowed primitive stays put; one that
-  calls a borrowed function that isn't shared (`t()`), or uses a view object as a whole,
-  goes home.
+  calls a borrowed native function, or uses a view object as a whole, goes home.
+- **Shipped sync closures (`syncClosures`):** a `const f = () => …` in a class method —
+  i18next's `getFixedT` returning `t` — compiles into a program over explicit caps
+  (captures, `this` as `__self`; module-level code stays a free reference); the kept
+  closure is a stub carrying program name and caps builder. The codec ships it as program
+  + caps (slot `fn`) and the far tier calls its own copy of the program, synchronously. A
+  closure that writes a captured binding, awaits, or is a function expression using its own
+  `this` stays native. Every top-level class of the module is stamped (`shareClass`, module
+  hash + name) so instances keep their class across tiers.
+- **Value twins:** inside a shipped closure's caps the engine chooses data or stack per
+  value: a stamped instance that holds only data (no function, host object or handle
+  anywhere in it) and fits the threshold ships whole (slot `o` + `tw`, its home identity);
+  the copy is tracked like a session twin — its writes ride home as deltas, and it goes
+  home as its handle. Otherwise it excises and the stop rule parks the calling segment
+  home. `makeHost({ threshold })` is that policy knob. Measured on a reduced i18next shape
+  (`test/probes/sync-closures.mts`): a 3-key instance ships in 376 B and a chain calling
+  `t` between two twin calls is one crossing instead of two; a 3,001-key instance stays
+  home at the default 8 KB and ships (211 KB) at 1 MB.
 - **Hydration:** when a migrated stack arrives, a view member that has a session twin
   here becomes the twin itself (`hydrateViews`). Plain code the machine runs — an inline
   `async p => await client.x(p)` handed to `Promise.all` — then calls the twin natively,
@@ -67,6 +83,22 @@ mid-segment (design.md §8). So the check happens BEFORE the segment runs, in th
 - **Carry home:** the stack that parks home after a serviced request carries the value
   in `frame.ret` (already part of the encoded frame); ship `(stack, null)` — the
   existing resume path pumps straight on from `ret`. No new message type; no re-servicing.
+
+### The i18next experiment (2026-11-01): what stops the real library
+
+Goal: `t()` called mid-chain with no port code. The real i18next ESM compiles with the
+pass (11 closures become programs, 1 is refused for writing a capture) and its `t`
+translates Keycloak's 4,170 keys identically through the stub
+(`test/probes/sync-closures-i18next.mts`). Its instance stays home under any threshold:
+it holds 39 function values — 17 methods bound as own properties (`bindMemberFunctions`),
+15 closures its constructors make (`formatter.formats.*`), 7 object-literal handlers — and,
+in the console, react-i18next registers a `languageChanged` listener per mounted
+`useTranslation()` (394 files), closures over React state setters that `translate` can
+reach (`emit('missingKey')`). A copy of that instance can't be sound, so the engine's
+"keep it home" is the right answer. The sound route without port code would compile
+i18next's classes as machines and give stamped handles a data view, so `translate` reads
+`options` and `store.data` in place; not built — no compiled Keycloak program calls `t()`
+before a later server call, so there is nothing to measure.
 
 ## Protocol shape (no new messages)
 
