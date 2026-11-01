@@ -369,7 +369,10 @@ Keycloak is also the first corpus app where chain MIGRATION is measured on unmod
 code: its client-scope loaders (three awaited admin-client calls in one component
 function) compile with `closures` and run on a session twin as one crossing. At 80 ms RTT
 over the two specs that exercise them, the same build is 5% faster with chains migrating
-than without (3 rounds, 17 of 21 tests faster); details in the port README.
+than without (3 rounds, 17 of 21 tests faster). Over the whole suite (434 tests, 3 rounds
+at 80 ms RTT + 20 Mbit/s, 293 migrated crossings per run) the same build waits 2.6% less
+I/O time with chains migrating than without (361 tests compared), and 7.3% less than
+stock (375); wall clock within 0.3%. Details in the port README.
 
 How a ported bundle is served by `kc.sh` rather than Vite, settled by reading the tree:
 
