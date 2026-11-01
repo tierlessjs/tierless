@@ -141,6 +141,31 @@ The other 3 return to the browser mid-chain: a translated string as a call argum
 (`convertFormValuesToObject` in `LinkIdentityProviderModal`). The permissions tab maps an
 async function over a list, which doesn't compile yet.
 
+## The whole suite
+
+All 434 tests, three rounds of three arms at 80 ms RTT + 20 Mbit/s
+(`ports/keycloak/drive-full.sh`, rows in `results/full-20mbit/`), the profile learned from
+one full-suite profiling run and locked. Per test the median I/O wait over rounds; a test
+counts only if it passed in every run of both arms compared:
+
+| | migration alone (fetch → profile) | against stock (baseline → profile) | nothing migrating (baseline → fetch) |
+|---|---|---|---|
+| tests compared | 361 | 375 | 361 |
+| I/O wait | −2.6% (625.1 → 608.8 s) | **−7.3%** (684.1 → 634.4 s) | −4.8% (657.0 → 625.3 s) |
+| tests waiting less / median per test | 185 / −2 ms | 340 / −86 ms | 337 / −85 ms |
+| wall clock | 0.0% | +0.3% | +0.3% |
+
+The profile migrates 293 crossings per run (292 in round 3). Migration alone is
+concentrated: the client-scopes subtab tests (`clients/scope.spec.ts:141–170`) wait
+640–670 ms less each, `client-scope/mappers.spec.ts:41` 840 ms, `clients/saml.spec.ts:136`
+780 ms; three tests wait 220–230 ms more (two a11y checks in `autentication/flows.spec.ts`,
+`organization/members.spec.ts:41`), not investigated. The ported build with nothing
+migrating already waits 4.8% less than stock, as in the per-spec runs above.
+
+Per run 369–383 tests pass; 33–44 "did not run" are Playwright skipping the rest of a
+serial `describe` after a failure. 27 tests fail in at least one of the 9 runs: 19 in
+every arm, 5 only in one of the two ported arms (never both), 2 only in stock.
+
 ## Running it
 
 ```sh
