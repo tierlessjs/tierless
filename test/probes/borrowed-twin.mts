@@ -261,6 +261,15 @@ export function Perms() {
     return report(c, xs.length);                 // a borrowed function: runs at home, sees c
   });
 }
+export function Creator(props) {
+  const { client } = useClient();
+  const { refresh } = props;                     // a borrowed FUNCTION (ClientScopeForm's save shape)
+  useFetch(async () => {
+    const a = await client.scopes.a(1);
+    await refresh(a);                            // awaited directly off the caps, between twin calls
+    return await client.scopes.b(a);
+  });
+}
 export function Details(props) {
   const { client } = useClient();
   const { id, step } = props;
@@ -361,6 +370,17 @@ export function Details(props) {
   cmod.__bindTierlessMethods(null);
   check("a hydrated twin that escaped into a local goes home as the LIVE client, not a copy of the twin",
     r7 === 2 && seen[0] === (globalThis as Record<string, unknown>).__probeClient && log.join(",") === "server:list,server:a", JSON.stringify({ r7, log, same: seen[0] === (globalThis as Record<string, unknown>).__probeClient }));
+  {
+    const seenR: number[] = [];
+    cmod.__bindTierlessMethods((prog: string, caps: object, args: unknown[]) => chost.runLocal(cpeer, prog, [caps, ...args], { migrate: () => true }));
+    reset();
+    (globalThis as Record<string, unknown>).__probeClient = new Client("browser", log);
+    cmod.Creator({ refresh: async (x: number) => { seenR.push(x); } });
+    const rc = await fans[fans.length - 1]();
+    cmod.__bindTierlessMethods(null);
+    check("a borrowed function awaited off migrated caps runs at HOME (it lives there), the chain still right",
+      (rc as unknown as number) === 20 && seenR.join() === "2" && log[0] === "server:a", JSON.stringify({ rc, seenR, log, counts }));
+  }
   check("dependent chain reading borrowed primitives: all three calls on the twin in ONE crossing",
     r4 === 67 && dcounts.resume === 1, JSON.stringify({ r4, dcounts }));
   check("the branch that calls a borrowed function still runs it at home: right error",

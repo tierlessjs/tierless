@@ -286,6 +286,11 @@ export function makePump(bundle, { twins } = {}) {
                 // recv — correct as-is); a STORE function's is its OWN caps, which only its
                 // closure can build — the compiler stamps the builder for exactly this dispatch
                 // (recv here is the CALLER's caps, the wrong frame for the sibling).
+                // a member HANDLE: a caps view's borrowed function (`await save(x)` off a migrated
+                // closure's caps). It runs where it lives — park home with the call, the view
+                // as receiver (it decodes back to the live caps there)
+                if (isHandle(f))
+                    return { op: "home", tier: f.owner, name: "dyn:" + [...path, r.member].join("."), args: [r.recv, ...r.args] };
                 if (f && typeof f.__tierless_program === "string")
                     stack.push({ fn: f.__tierless_program, pc: 0, args: [f.__tierless_caps ? f.__tierless_caps() : recv, ...r.args] });
                 else {
