@@ -127,6 +127,7 @@ function allowlist(ast) {
 let blocks, suspSet, AUTO_DEREF = false, AUTO_WRITEBACK = false, TRACK_WRITES = false;
 let SOURCE_MAP = false, curLine = 0, srcFile = "", fnSites = {}; // --source-map: stamp each block with its source line so a migrated frame reports file:line, not just a pc
 let CLOSURES = false; // opts.closures: compile async functions declared in component/hook bodies
+let SYNC_CLOSURES = false; // opts.syncClosures: sync closures a class method creates become shippable values
 let fnSlots = {}; // §5 stop rule: per program per state, the frame slots its segment references (docs/migrate-arm.md)
 const nb = () => { const b = { lines: [], term: null }; if (SOURCE_MAP)
     b.line = curLine; blocks.push(b); return blocks.length - 1; };
@@ -1467,6 +1468,147 @@ function compileClassMethods(ast, progs, meta, rest) {
     }
     rest.push(...stubProps); // `kept` is generated from rest — program-body pushes would never emit
 }
+// The `syncClosures` option. A library's factory method hands the app a closure over the
+// instance (i18next's getFixedT returns `t`, closing over `this`, a key prefix and
+// itself); a component captures `t`, and a migrated chain that calls it had to go home,
+// because a native closure's environment can't be read. Compiled, the closure is a
+// program plus explicit caps — the same shape a migrated method's stack has — so the
+// codec can ship it (graph.mts "fn") and the far tier runs its own copy of the program.
+// What makes the caps real over there is the SAME per-value rule as any migrated value:
+// the instance ships whole when under the codec's threshold, else as a handle, and the
+// stop rule (runtime.mts findHandle) sends the calling segment home in that case.
+//
+// Scope: `const NAME = <sync arrow|function>` statements directly in a class method's
+// body. Captures are the method's bindings and module bindings the closure reads (a
+// write to one can't be carried: the closure stays native); `this` captures as `__self`.
+function convertSyncClosures(ast, progs, meta, rest) {
+    const moduleHash = fnv1a(gen(ast.program));
+    const compiledClasses = new Set(meta.methods.filter((m) => m.program).map((m) => m.class));
+    const stamps = [];
+    traverse(ast, { ClassDeclaration(cp) {
+            const topLevel = cp.parentPath.isExportNamedDeclaration() ? !!cp.parentPath.parentPath?.isProgram() : cp.parentPath.isProgram();
+            if (!cp.node.id || !topLevel)
+                return;
+            const clsName = cp.node.id.name;
+            // identity: a compiled class keeps its bare name (its machines and twins key on it);
+            // any other class is named by module + class, so two modules' `Logger`s stay apart
+            const clsId = compiledClasses.has(clsName) ? clsName : `${moduleHash}:${clsName}`;
+            stamps.push(t.expressionStatement(t.callExpression(t.identifier("__tlShareClass"), [t.stringLiteral(clsId), t.identifier(clsName)])));
+            for (const mp of cp.get("body.body")) {
+                if (!mp.isClassMethod() || mp.node.kind !== "method" || mp.node.static || mp.node.computed || !t.isIdentifier(mp.node.key))
+                    continue;
+                const mName = mp.node.key.name;
+                if (compiledClasses.has(clsName) && meta.methods.some((m) => m.class === clsName && m.method === mName && m.program))
+                    continue; // its body is the stub now
+                for (const sp of mp.get("body").get("body")) {
+                    if (!sp.isVariableDeclaration())
+                        continue;
+                    for (const dp of sp.get("declarations")) {
+                        const init = dp.get("init");
+                        if (!t.isIdentifier(dp.node.id) || Array.isArray(init) || !(init.isArrowFunctionExpression() || init.isFunctionExpression()) || init.node.async || init.node.generator)
+                            continue;
+                        const fnName = dp.node.id.name, progName = `${clsName}$${mName}$${fnName}`;
+                        try {
+                            const captures = lowerSyncClosure(init, mp.node, progName, `${clsName}.${mName}.${fnName}`, progs, meta);
+                            const origName = "__tierless_orig_" + fnName;
+                            sp.insertBefore(t.variableDeclaration("const", [t.variableDeclarator(t.identifier(origName), init.node)]));
+                            dp.node.init = t.arrowFunctionExpression([t.restElement(t.identifier("__tl_args"))], t.callExpression(t.identifier(origName), [t.spreadElement(t.identifier("__tl_args"))]));
+                            const capsLit = t.objectExpression([
+                                ...(captures.self ? [t.objectProperty(t.identifier("__self"), t.thisExpression())] : []),
+                                ...captures.names.map((n) => t.objectProperty(t.identifier(n), t.identifier(n), false, true)),
+                            ]);
+                            sp.insertAfter([
+                                t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier(fnName), t.identifier("__tierless_caps")), t.arrowFunctionExpression([], capsLit))),
+                                t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier(fnName), t.identifier("__tierless_sync")), t.booleanLiteral(true))),
+                                t.expressionStatement(t.assignmentExpression("=", t.memberExpression(t.identifier(fnName), t.identifier("__tierless_program")), t.stringLiteral(progName))),
+                            ]);
+                            meta.methods.push({ class: clsName, method: `${mName}.${fnName}`, program: progName });
+                        }
+                        catch (e) {
+                            meta.methods.push({ class: clsName, method: `${mName}.${fnName}`, program: null, error: e.message.split("\n")[0] });
+                        }
+                    }
+                }
+            }
+        } });
+    if (!stamps.length)
+        return;
+    rest.unshift(t.importDeclaration([t.importSpecifier(t.identifier("__tlShareClass"), t.identifier("shareClass"))], t.stringLiteral("tierless/graph")));
+    rest.push(...stamps);
+}
+// One sync closure -> program `prog(__caps, ...params)`: captured names read through
+// __caps, `this` (the method's, through arrows) through __caps.__self. Returns what the
+// kept stub must put in the caps literal.
+function lowerSyncClosure(fnPath, method, progName, label, progs, meta) {
+    const fn = fnPath.node;
+    const names = [];
+    const seen = new Set();
+    const within = (p, anc) => p === anc || !!p.findParent((q) => q === anc);
+    fnPath.traverse({ ReferencedIdentifier(ip) {
+            const name = ip.node.name;
+            if (name === "arguments")
+                throw new Error(`tierless: ${label} reads \`arguments\` — the closure stays native`);
+            if (seen.has(name))
+                return;
+            const b = ip.scope.getBinding(name);
+            if (!b || within(b.scope.path, fnPath))
+                return; // its own local, or a true global
+            // module-level CODE (a function or class declared or imported at module scope) is the
+            // same on every tier that loads this module, where the program also lives: a free
+            // reference, not a capture. Module-level DATA is captured like a method's local.
+            if (b.scope.path.isProgram() && (b.kind === "hoisted" || b.kind === "module" || b.path.isClassDeclaration()
+                || (b.kind === "const" && b.path.isVariableDeclarator() && (t.isFunction(b.path.node.init) || t.isClass(b.path.node.init)))))
+                return;
+            seen.add(name);
+            names.push(name);
+            for (const v of b.constantViolations)
+                if (within(v, fnPath))
+                    throw new Error(`tierless: ${label} assigns to captured binding '${name}' — a caps snapshot can't carry the write; the closure stays native`);
+        } });
+    let self = false;
+    fnPath.traverse({ ThisExpression(tp) {
+            let f = tp.getFunctionParent();
+            while (f && f.isArrowFunctionExpression() && f.node !== fn)
+                f = f.getFunctionParent();
+            if (f && f.node === fn && t.isArrowFunctionExpression(fn))
+                self = true; // an arrow's this is the method's
+            else if (f && f.node === fn)
+                throw new Error(`tierless: ${label} is a function expression using its own \`this\` — the closure stays native`);
+        } });
+    if (self && method.kind !== "method")
+        throw new Error(`tierless: ${label} captures this outside a method`);
+    const body = t.isBlockStatement(fn.body) ? t.cloneNode(fn.body, true) : t.blockStatement([t.returnStatement(t.cloneNode(fn.body, true))]);
+    const fnNode = t.functionDeclaration(t.identifier(progName), [t.identifier("__caps"), ...fn.params.map((x) => t.cloneNode(x, true))], body);
+    const file = t.file(t.program([fnNode]));
+    const capSet = new Set(names);
+    traverse(file, { ReferencedIdentifier(ip) {
+            if (!capSet.has(ip.node.name) || ip.scope.getBinding(ip.node.name))
+                return; // bound in the copy = shadowed
+            ip.replaceWith(t.memberExpression(t.identifier("__caps"), t.identifier(ip.node.name)));
+        } });
+    traverse(file, { ThisExpression(tp) {
+            let f = tp.getFunctionParent();
+            while (f && f.isArrowFunctionExpression())
+                f = f.getFunctionParent();
+            if (f && f.node === fnNode)
+                tp.replaceWith(t.memberExpression(t.identifier("__caps"), t.identifier("__self")));
+        } });
+    allowlist(file);
+    rewriteDynAwaits(file, fnNode);
+    traverse(file, { AwaitExpression(ap) {
+            if (ap.getFunctionParent()?.node !== fnNode)
+                return;
+            throw new Error(`tierless: ${label} awaits (line ${ap.node.loc?.start.line ?? "?"}) — a sync closure can't; the closure stays native`);
+        } });
+    let mpath = null;
+    traverse(file, { FunctionDeclaration(p) { if (p.node.id?.name === progName) {
+            mpath = p;
+            p.stop();
+        } } });
+    progs.push(lower(mpath));
+    meta.programs.push(progName);
+    return { names, self };
+}
 // Residual awaits of MEMBER CALLS become dynamic call parks (docs/migrate-arm.md
 // slice 3): `await x.m(a)` -> `yield D(x, "m", a)` — resolved at RUNTIME by the pump.
 // Shared by the method and store-function lowerings; awaits that survive it reject.
@@ -1795,6 +1937,8 @@ function compile(src, preamble) {
         } // a pure helper can still mutate continuation state
     }
     compileClassMethods(ast, progs, meta, rest); // class methods with tier calls (their nodes sit in `rest` — the stub swap lands in `kept`)
+    if (SYNC_CLOSURES)
+        convertSyncClosures(ast, progs, meta, rest); // after: it keeps a compiled class's bare identity
     compileStoreFunctions(ast, progs, meta); // setup-store functions (defineStore closures) — stub swaps mutate nodes already in `rest`
     const head = preamble + (TRACK_WRITES ? "\n" + TRACK_PREAMBLE : "");
     const kept = rest.length ? rest.map(gen).join("\n") + "\n" : ""; // imports / top-level state the module declared
@@ -1899,6 +2043,7 @@ function configure(opts = {}) {
     TRACK_WRITES = !!opts.trackWrites;
     SOURCE_MAP = !!opts.sourceMap;
     CLOSURES = !!opts.closures;
+    SYNC_CLOSURES = !!opts.syncClosures;
     srcFile = opts.filename || "<tierless>";
     TIER_OF = { ...DEFAULT_RESOURCES, ...(opts.resources || {}) };
 }

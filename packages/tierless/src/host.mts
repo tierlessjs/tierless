@@ -50,6 +50,10 @@ export interface MakeHostOpts {
    *  class-stamped handles resolve to LOCAL instances here. Opt-in per class; key on
    *  `handle` (owner + heap id) when instances are stateful — see PumpOpts.twins. */
   twins?: (cls: string, handle?: { id: string; owner: string; path?: string[]; state?: Record<string, unknown> }) => object | undefined;
+  /** The migrate arm's per-value size limit (bytes, approximate): a value over it crosses
+   *  as a §5 handle instead of by copy — the engine's move-the-data-or-the-stack choice.
+   *  Default 8192 (wire-binary). */
+  threshold?: number;
   /** §6 placement for the full-tierless drive path (docs/migrate-arm.md "§6 decide"):
    *  at each park the driver prices fetch-vs-migrate from the LOCKED profile — migrate
    *  ships the whole continuation (type:"resume"), fetch pulls just the value
@@ -106,11 +110,27 @@ let nextSid = 1;
 const TE = new TextEncoder();
 const TD = new TextDecoder();
 
-export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn, twins, placement }: MakeHostOpts): Host {
+export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn, twins, placement, threshold }: MakeHostOpts): Host {
   const placeProfile = placement?.profile ?? null;
   const placeMode = placement?.mode ?? "trajectory";
   const placeStability = placement?.stability ?? 0.9;
   const pump = makePump(bundle, { twins });
+  // a shipped sync closure (graph.mts "fn") runs its program HERE, synchronously: a sync
+  // body has no awaits, so a park is a compiler bug and throws rather than hangs
+  const runSync = (fn: string, args: unknown[]): unknown => {
+    const stack: Frame[] = [{ fn, pc: 0, args }];
+    for (;;) {
+      const top = stack[stack.length - 1];
+      const r = bundle.PROGRAMS[top.fn](top);
+      if (r.op === "return") { stack.pop(); if (!stack.length) return r.value; stack[stack.length - 1].ret = r.value; }
+      else if (r.op === "call") stack.push({ fn: r.fn, pc: 0, args: r.args });
+      else if (r.op === "check") continue;
+      else if (r.op === "throw") { stack.pop(); if (!bundle.__unwind(stack, r.value)) throw r.value; }
+      else throw new Error("tierless: compiled closure " + fn + " parked (" + r.op + ") in a synchronous call");
+    }
+  };
+  const programs = (name: string): ((caps: unknown, args: unknown[]) => unknown) | undefined => (bundle.PROGRAMS[name] ? (caps, args) => runSync(name, [caps, ...args]) : undefined);
+  const dopts = { programs };
   const coherence = coherenceIn && usesHeap(bundle) ? coherenceIn : undefined;   // per-bundle gate (see MakeHostOpts.coherence)
   const ownsBase: (tier: string) => boolean = owns || ((t) => t === tier);
   // The host also owns the heap pseudo-tiers ("@deref"/"@writeback"): a handle read or a
@@ -162,7 +182,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
   async function settle(peer: Peer, { obj: reply, bin }: { obj: HostReply; bin: Uint8Array | null }): Promise<PumpResult> {
     if (reply.type === "error") throw new Error(reply.message);
     if (reply.type === "done") return { done: true, value: reply.value };
-    const { stack, request } = decodeWireBinary(bin!);
+    const { stack, request } = decodeWireBinary(bin!, dopts);
     return runPump(peer, stack as Frame[], request as ResourceRequest | null);   // a "suspend" reply's bin always decodes to what the sender's PumpResult shipped — a real continuation stack + ResourceRequest
   }
 
@@ -217,10 +237,11 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
     // correctness"): the home tier applies them to the live instances before the
     // awaiting code resumes — read-your-writes without an extra crossing
     const twinDeltas: import("./types.mjs").TwinDelta[] = [];
-    const sink = twins ? { twinDelta: (d: import("./types.mjs").TwinDelta) => twinDeltas.push(d) } : undefined;
+    const sink = { twinDelta: (d: import("./types.mjs").TwinDelta) => twinDeltas.push(d) };
     // borrowed members with a twin here become the twin (hydrateViews); their changes
-    // are diffed once, at the reply, since plain code may have called them anywhere
-    const wet = twins ? hydrateViews(stack, twins) : [];
+    // are diffed once, at the reply, since plain code may have called them anywhere.
+    // Value twins (a shipped closure's instance) are tracked the same way, twins registry or not.
+    const wet = hydrateViews(stack, twins ?? (() => undefined));
     const carry = (): { twinDeltas?: import("./types.mjs").TwinDelta[] } => {
       for (const { twin, where, pre } of wet.splice(0)) { const d = twinDelta(pre, twin, where); if (d) twinDeltas.push(d); }
       return twinDeltas.length ? { twinDeltas } : {};
@@ -343,7 +364,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
         const top = stack[stack.length - 1];
         if (!parked || (migrate && migrate(parked, { fn: top.fn, pc: top.pc, entry }))) {
           if (!heapTier) { const objs = new Map<string, unknown>(); let n = 0; heapTier = { id: tier, heapPut: (v) => { const k = "l" + n++; objs.set(k, v); return k; }, heapGet: (hid) => objs.get(hid) }; }
-          const enc = (): Uint8Array => encodeWireBinary(stack, req, { tier: heapTier!, excise: ownedUnit });
+          const enc = (): Uint8Array => encodeWireBinary(stack, req, { tier: heapTier!, excise: ownedUnit, ...(threshold ? { threshold } : {}) });
           const reply = await peer.request({ type: "resume", sid, ...meta }, rec ? rec.ship(stack, req, enc, "migrate") : enc());
           // twin write-back (docs/migrate-arm.md "twins and correctness"): apply the
           // fields the session twins mutated to OUR live instances BEFORE the awaiting
@@ -361,7 +382,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
           }
           if (reply.obj.type === "error") throw new Error(reply.obj.message);
           if (reply.obj.type === "done") return reply.obj.value;
-          const back = decodeWireBinary(reply.bin!, { tier: heapTier });
+          const back = decodeWireBinary(reply.bin!, { tier: heapTier, programs });
           stack = back.stack as Frame[];
           request = back.request as PumpRequest | null;   // op:"home" -> pump steps on from ret; a browser-owned resource -> pump services it here
           continue;
@@ -372,17 +393,17 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
     // The answering half, exposed as plain handlers so a dispatcher can route by meta.
     // A missing payload sid (an older peer) falls back to the connection-lifetime scope "".
     handleStart: (payload, bin, peer) => {
-      const stack = initialStack(payload.entry, decodeArgs(bin!));
+      const stack = initialStack(payload.entry, decodeArgs(bin!, dopts));
       if (rec && typeof payload.__trace === "string") rec.stamp(stack, payload.__trace);
       return step(peer, (payload && payload.sid) || "", stack, null);
     },
-    handleResume: (payload, bin, peer) => { const { stack, request } = decodeWireBinary(bin!); return step(peer, (payload && payload.sid) || "", stack as Frame[], request as ResourceRequest | null); },
+    handleResume: (payload, bin, peer) => { const { stack, request } = decodeWireBinary(bin!, dopts); return step(peer, (payload && payload.sid) || "", stack as Frame[], request as ResourceRequest | null); },
     // Serve a BURST of fetched resources in one crossing (the browser's microtask
     // batcher, docs/migrate-arm.md "burst coalescing"): bin is a vector of the same
     // per-exec payloads, results return per-element — value or shaped error — so each
     // caller's catch sees exactly what its own single exec would have produced.
     handleExecBatch: async (payload, bin) => {
-      const items = decodeArgs(bin!) as [string, unknown[]][];
+      const items = decodeArgs(bin!, dopts) as [string, unknown[]][];
       const results = await Promise.all(items.map(async ([name, rargs]) => {
         try {
           return { ok: true, value: await exec({ op: "resource", tier: payload.tier || tier, name, args: rargs }) };
@@ -399,7 +420,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
     // reads error.response.data for its own error handling, on either tier.
     handleExec: async (payload, bin) => {
       try {
-        const [name, rargs] = decodeArgs(bin!) as [string, unknown[]];
+        const [name, rargs] = decodeArgs(bin!, dopts) as [string, unknown[]];
         // raw: THIS reply goes straight out, so an unparsed JSON body can ride the
         // frame's binary slot — the exec skips a parse and the encoder skips a
         // stringify of the whole body (transport.mts RawJsonBody). Only here: the

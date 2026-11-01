@@ -10,7 +10,7 @@
 // differ — so one continuation flows back and forth across the wire, finishing wherever
 // the last resource lands. The {stack, request} it hands back is serialized for the
 // socket by the binary wire codec (wire-binary.mjs); host.mjs assembles that loop.
-import { isHandle, VIEW, hydrated } from "./graph.mjs";
+import { isHandle, VIEW, hydrated, twinOf } from "./graph.mjs";
 const image = (v) => { try {
     return JSON.stringify(v);
 }
@@ -53,27 +53,78 @@ export function twinDelta(pre, twin, where) {
 export function hydrateViews(stack, twins) {
     const out = [];
     const seen = new Set();
-    const views = new Set();
+    const add = (twin, h) => {
+        if (seen.has(twin))
+            return;
+        seen.add(twin);
+        out.push({ twin, where: { owner: h.owner, id: h.id, ...(h.path ? { path: h.path } : {}) }, pre: twinImage(twin) });
+    };
+    // the walk reaches what the codec built: plain containers, views (nested ones too), a
+    // shipped sync closure's caps (graph.mts "fn") and value twins — a copied instance a
+    // shipped closure brought (graph.mts twinOf), tracked like a session twin so its writes
+    // ride home, and walked for the value twins it holds in turn
+    const visited = new Set(), work = [];
     for (const f of stack)
-        for (const v of [...(Array.isArray(f.args) ? f.args : []), ...Object.values(f)]) {
-            if (v && typeof v === "object" && v[VIEW])
-                views.add(v);
+        for (const v of [...(Array.isArray(f.args) ? f.args : []), ...Object.values(f)])
+            work.push(v);
+    while (work.length) {
+        const v = work.pop();
+        if (v === null || (typeof v !== "object" && typeof v !== "function") || visited.has(v))
+            continue;
+        visited.add(v);
+        if (typeof v === "function") {
+            const c = v;
+            if (c.__tierless_sync && typeof c.__tierless_caps === "function")
+                work.push(c.__tierless_caps());
+            continue;
         }
-    for (const view of views)
-        for (const [k, h] of Object.entries(view)) {
-            if (!isHandle(h) || !h.cls)
-                continue;
-            const twin = twins(h.cls, { id: h.id, owner: h.owner, ...(h.path ? { path: h.path } : {}), ...(h.state ? { state: h.state } : {}) });
-            if (!twin)
-                continue;
-            view[k] = twin;
-            const { state: _s, ...handle } = h;
-            hydrated(twin, handle);
-            if (!seen.has(twin)) {
-                seen.add(twin);
-                out.push({ twin, where: { owner: h.owner, id: h.id, ...(h.path ? { path: h.path } : {}) }, pre: twinImage(twin) });
+        const vt = twinOf(v);
+        if (vt) {
+            add(v, vt);
+            for (const x of Object.values(v))
+                work.push(x);
+            continue;
+        }
+        if (v[VIEW]) {
+            const view = v;
+            for (const [k, h] of Object.entries(view)) {
+                if (!isHandle(h)) {
+                    work.push(h);
+                    continue;
+                }
+                if (!h.cls)
+                    continue;
+                const twin = twins(h.cls, { id: h.id, owner: h.owner, ...(h.path ? { path: h.path } : {}), ...(h.state ? { state: h.state } : {}) });
+                if (!twin)
+                    continue;
+                view[k] = twin;
+                const { state: _s, ...handle } = h;
+                hydrated(twin, handle);
+                add(twin, handle);
+            }
+            continue;
+        }
+        if (Array.isArray(v)) {
+            for (const x of v)
+                work.push(x);
+        }
+        else if (v instanceof Map) {
+            for (const [k, x] of v) {
+                work.push(k);
+                work.push(x);
             }
         }
+        else if (v instanceof Set) {
+            for (const x of v)
+                work.push(x);
+        }
+        else {
+            const p = Object.getPrototypeOf(v);
+            if (p === Object.prototype || p === null)
+                for (const x of Object.values(v))
+                    work.push(x);
+        }
+    }
     return out;
 }
 export const initialStack = (fn, args = []) => [{ fn, pc: 0, args }];
@@ -122,9 +173,19 @@ export function makePump(bundle, { twins } = {}) {
             const v = work.pop();
             if (isHandle(v))
                 return v;
-            if (v === null || typeof v !== "object" || seen.has(v))
+            if (v === null || (typeof v !== "object" && typeof v !== "function") || seen.has(v))
                 continue;
             seen.add(v);
+            // a shipped sync closure (graph.mts "fn") is as real as its caps: a handle in them
+            // (its library instance was excised for size) means calling it here would fail,
+            // so the segment that calls it goes home — the engine's move-the-data-or-the-stack
+            // choice, made per value by the codec's threshold, enforced here
+            if (typeof v === "function") {
+                const c = v;
+                if (c.__tierless_sync && typeof c.__tierless_caps === "function")
+                    work.push(c.__tierless_caps());
+                continue;
+            }
             if (Array.isArray(v))
                 for (const x of v)
                     work.push(x);

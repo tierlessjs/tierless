@@ -134,6 +134,10 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
             intern(s.cah);
         if (s.cls !== undefined)
             intern(s.cls); // a content-addressed subgraph shipped inline once: intern its hash so the receiver caches it
+        if (s.tw !== undefined) {
+            intern(s.tw.owner);
+            intern(String(s.tw.id));
+        }
         if (s.k === "c") {
             intern(s.h);
         } // a content-ref leaf: just the hash crosses
@@ -176,10 +180,23 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
                 intern(s.h.view);
             for (const k of s.h.path ?? [])
                 intern(k);
+            if (s.m)
+                for (const k of Object.keys(s.m)) {
+                    intern(k);
+                    internNode(s.m[k]);
+                }
         }
         else if (s.k === "symu") {
             if (s.d !== undefined)
                 intern(s.d);
+        }
+        else if (s.k === "fn") {
+            intern(s.p);
+            internNode(s.c);
+            for (const k of Object.keys(s.f)) {
+                intern(k);
+                internNode(s.f[k]);
+            }
         }
     }
     // pass 2: write ------------------------------------------------------------------------
@@ -215,6 +232,11 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
             w.varu(intern(s.cls));
             w.u8(s.err ? 1 : 0);
         } // wrap: the object that follows carries this class (graph.mts shareClass)
+        if (s.tw !== undefined) {
+            w.u8(11);
+            w.varu(intern(s.tw.owner));
+            w.varu(intern(String(s.tw.id)));
+        } // wrap: the object that follows is a value twin of this home instance
         if (s.k === "a") {
             // typed-array fast path: an array of only number primitives pays no per-element tag.
             const nums = s.e.length && s.e.every((n) => n.k === "p" && typeof n.v === "number") ? s.e.map((n) => n.v) : null;
@@ -286,7 +308,7 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
             w.u8(4);
             w.varu(intern(s.h.owner));
             w.varu(intern(String(s.h.id)));
-            w.u8((s.h.kind ? 1 : 0) | (s.h.cls ? 2 : 0) | (s.h.view ? 4 : 0) | (s.h.path ? 8 : 0));
+            w.u8((s.h.kind ? 1 : 0) | (s.h.cls ? 2 : 0) | (s.h.view ? 4 : 0) | (s.h.path ? 8 : 0) | (s.m ? 16 : 0));
             if (s.h.kind)
                 w.varu(intern(s.h.kind));
             if (s.h.cls)
@@ -298,6 +320,14 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
                 for (const k of s.h.path)
                     w.varu(intern(k));
             }
+            if (s.m) {
+                const ks = Object.keys(s.m);
+                w.varu(ks.length);
+                for (const k of ks) {
+                    w.varu(intern(k));
+                    writeNode(w, s.m[k], intern);
+                }
+            }
         }
         else if (s.k === "symu") {
             w.u8(5);
@@ -308,10 +338,21 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
             else
                 w.u8(0);
         }
+        else if (s.k === "fn") {
+            w.u8(10);
+            w.varu(intern(s.p));
+            writeNode(w, s.c, intern);
+            const ks = Object.keys(s.f);
+            w.varu(ks.length);
+            for (const k of ks) {
+                w.varu(intern(k));
+                writeNode(w, s.f[k], intern);
+            }
+        }
     }
     return w.done();
 }
-export function decodeWireBinary(bytes, { content = null, tier = null } = {}) {
+export function decodeWireBinary(bytes, { content = null, tier = null, programs = null } = {}) {
     const r = new R(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), "wire-binary");
     checkMagic(r, MAGIC);
     const strs = readStrings(r);
@@ -341,13 +382,17 @@ export function decodeWireBinary(bytes, { content = null, tier = null } = {}) {
     const readSlot = () => {
         let t = r.u8();
         let cah;
-        let cls, err = 0;
-        while (t === 8 || t === 9) {
+        let cls, err = 0, tw;
+        while (t === 8 || t === 9 || t === 11) {
             if (t === 8)
                 cah = S(r.varu());
-            else {
+            else if (t === 9) {
                 cls = S(r.varu());
                 err = r.u8();
+            }
+            else {
+                const owner = S(r.varu());
+                tw = { owner, id: S(r.varu()) };
             }
             t = r.u8();
         } // content-cache wrapper — unwrapped ITERATIVELY so a hostile 0x08 chain can't blow the stack
@@ -413,9 +458,35 @@ export function decodeWireBinary(bytes, { content = null, tier = null } = {}) {
                     h.path.push(S(r.varu()));
             }
             slot = { k: "H", h };
+            if (fl & 16) {
+                const c = r.count();
+                const m = {};
+                for (let j = 0; j < c; j++) {
+                    const key = S(r.varu());
+                    const val = readNode(r, S);
+                    if (key === "__proto__")
+                        continue;
+                    m[key] = val;
+                }
+                slot.m = m;
+            }
         }
         else if (t === 5) {
             slot = { k: "symu", d: r.u8() ? S(r.varu()) : undefined };
+        }
+        else if (t === 10) {
+            const p = S(r.varu());
+            const c = readNode(r, S);
+            const n = r.count();
+            const f = {};
+            for (let j = 0; j < n; j++) {
+                const key = S(r.varu());
+                const val = readNode(r, S);
+                if (key === "__proto__")
+                    continue;
+                f[key] = val;
+            }
+            slot = { k: "fn", p, c, f };
         }
         else if (t === 6) {
             const c = r.count(), sub = r.u8(), e = [];
@@ -447,6 +518,8 @@ export function decodeWireBinary(bytes, { content = null, tier = null } = {}) {
             if (err)
                 slot.err = 1;
         }
+        if (tw !== undefined && slot.k === "o")
+            slot.tw = tw;
         return slot;
     };
     const objs = [];
@@ -455,11 +528,11 @@ export function decodeWireBinary(bytes, { content = null, tier = null } = {}) {
         for (let i = 0; i < n; i++)
             objs.push(readSlot());
     }
-    const vals = decodeGraph({ roots, objs }, { content, tier });
+    const vals = decodeGraph({ roots, objs }, { content, tier, programs });
     return rebuildStack(frames, req, vals);
 }
 // A fresh start ships only the entry args — no continuation and no resource yet. Carry them through
 // the same value-root machinery (handles, cycles, and all), rather than hand-rolling a placeholder
 // ResourceRequest with a fake op: there is no request, so only `args` round-trips.
 export const encodeArgs = (args, opts = {}) => encodeWireBinary([], { op: "", tier: "", name: "", args }, opts);
-export const decodeArgs = (bytes) => decodeWireBinary(bytes).request?.args ?? [];
+export const decodeArgs = (bytes, opts) => decodeWireBinary(bytes, opts).request?.args ?? [];

@@ -29,6 +29,10 @@ export interface MakeHostOpts {
         path?: string[];
         state?: Record<string, unknown>;
     }) => object | undefined;
+    /** The migrate arm's per-value size limit (bytes, approximate): a value over it crosses
+     *  as a §5 handle instead of by copy — the engine's move-the-data-or-the-stack choice.
+     *  Default 8192 (wire-binary). */
+    threshold?: number;
     /** §6 placement for the full-tierless drive path (docs/migrate-arm.md "§6 decide"):
      *  at each park the driver prices fetch-vs-migrate from the LOCKED profile — migrate
      *  ships the whole continuation (type:"resume"), fetch pulls just the value
@@ -41,7 +45,7 @@ export interface MakeHostOpts {
         stability?: number;
     };
 }
-export declare function makeHost({ bundle, tier, exec, owns, meta, trace, coherence: coherenceIn, twins, placement }: MakeHostOpts): Host;
+export declare function makeHost({ bundle, tier, exec, owns, meta, trace, coherence: coherenceIn, twins, placement, threshold }: MakeHostOpts): Host;
 export declare function execOver(peer: Peer, req: ResourceRequest, meta?: Record<string, unknown>): Promise<unknown>;
 export declare function answerWith(peer: Peer, hostFor: (id: string) => Host | Promise<Host>, field?: string): void;
 export declare function batchExec(peer: Peer): Peer;

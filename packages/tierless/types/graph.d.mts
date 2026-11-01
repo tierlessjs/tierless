@@ -25,6 +25,9 @@ export declare function shareClass(name: string, cls: {
 export declare function protoFor(cls: string, err: boolean): object | undefined;
 export declare const VIEW: unique symbol;
 export declare function hydrated(twin: object, handle: Handle): void;
+/** The home handle of a twin on this tier (a session twin hydrated into a view, or a value
+ *  twin a shipped closure brought), or undefined for any other object. */
+export declare function twinOf(o: object): Handle | undefined;
 export declare function isHandle(x: unknown): x is Handle;
 export declare const GLOBALS: Record<string, unknown>;
 /** `claimed` (the encoder's excise predicate) marks values that ship as a handle whatever
@@ -71,6 +74,10 @@ export interface DecodeOptions {
         id: string;
         heapGet(hid: string): unknown;
     } | null;
+    /** This tier's compiled programs, for a shipped sync closure (slot "fn"): a runner for
+     *  the named program, or undefined when this tier's bundle doesn't hold it (the stub
+     *  then throws when called). */
+    programs?: ((name: string) => ((caps: unknown, args: unknown[]) => unknown) | undefined) | null;
 }
 export interface EncodedGraph {
     roots: unknown[];
@@ -78,4 +85,4 @@ export interface EncodedGraph {
 }
 export declare function encodeGraph(values: unknown[], { tier, threshold, content, excise }?: EncodeOptions): EncodedGraph;
 export declare function toBigInt(s: string): bigint;
-export declare function decodeGraph({ roots, objs }: EncodedGraph, { content, tier }?: DecodeOptions): unknown[];
+export declare function decodeGraph({ roots, objs }: EncodedGraph, { content, tier, programs }?: DecodeOptions): unknown[];

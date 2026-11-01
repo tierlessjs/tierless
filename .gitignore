@@ -20,3 +20,6 @@ ports/work/
 # arm-run stdout from the port drivers: the .jsonl artifacts beside them are the record
 ports/*/results/**/*.log
 ports/results-recheck/*.log
+
+# generated modules the probes compile and import in place (tierless/* must resolve)
+test/.gen/

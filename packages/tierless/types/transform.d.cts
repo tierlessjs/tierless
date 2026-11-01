@@ -10,6 +10,14 @@ interface CompileOptions {
     /** Also compile async functions declared in a component or hook body (a top-level
      *  function) that make 2+ tier-reaching awaits — the loaders React apps write. */
     closures?: boolean;
+    /** Make the SYNC closures a class method creates (`const t = (k) => this.translate(k)`)
+     *  shippable values: each becomes a program over its caps (`this` included as
+     *  `__self`), and the kept closure is a stub carrying both, which the codec ships as
+     *  program + caps (graph.mts "fn") instead of leaving it behind as a handle. Every
+     *  class in the module also gets a tier-independent identity (module hash + name,
+     *  registered with shareClass), so a shipped instance rebuilds with its prototype on
+     *  any tier that loads the module. */
+    syncClosures?: boolean;
 }
 interface CompileMeta {
     programs: string[];

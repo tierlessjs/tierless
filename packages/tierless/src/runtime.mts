@@ -11,7 +11,7 @@
 // the last resource lands. The {stack, request} it hands back is serialized for the
 // socket by the binary wire codec (wire-binary.mjs); host.mjs assembles that loop.
 
-import { isHandle, VIEW, hydrated } from "./graph.mjs";
+import { isHandle, VIEW, hydrated, twinOf } from "./graph.mjs";
 import type { Bundle, Frame, Exec, ResourceRequest, HomePark, Pump, TwinDelta } from "./types.mjs";
 
 // ---- twins' state, diffed ------------------------------------------------------------
@@ -54,18 +54,42 @@ export function twinDelta(pre: Record<string, string | undefined>, twin: object,
 export function hydrateViews(stack: Frame[], twins: NonNullable<PumpOpts["twins"]>): Array<{ twin: object; where: TwinWhere; pre: Record<string, string | undefined> }> {
   const out: Array<{ twin: object; where: TwinWhere; pre: Record<string, string | undefined> }> = [];
   const seen = new Set<object>();
-  const views = new Set<Record<string, unknown>>();
-  for (const f of stack) for (const v of [...(Array.isArray(f.args) ? f.args : []), ...Object.values(f)]) {
-    if (v && typeof v === "object" && (v as { [VIEW]?: unknown })[VIEW]) views.add(v as Record<string, unknown>);
-  }
-  for (const view of views) for (const [k, h] of Object.entries(view)) {
-    if (!isHandle(h) || !h.cls) continue;
-    const twin = twins(h.cls, { id: h.id, owner: h.owner, ...(h.path ? { path: h.path } : {}), ...(h.state ? { state: h.state } : {}) });
-    if (!twin) continue;
-    view[k] = twin;
-    const { state: _s, ...handle } = h;
-    hydrated(twin, handle);
-    if (!seen.has(twin)) { seen.add(twin); out.push({ twin, where: { owner: h.owner, id: h.id, ...(h.path ? { path: h.path } : {}) }, pre: twinImage(twin) }); }
+  const add = (twin: object, h: { owner: string; id: string; path?: string[] }): void => {
+    if (seen.has(twin)) return;
+    seen.add(twin);
+    out.push({ twin, where: { owner: h.owner, id: h.id, ...(h.path ? { path: h.path } : {}) }, pre: twinImage(twin) });
+  };
+  // the walk reaches what the codec built: plain containers, views (nested ones too), a
+  // shipped sync closure's caps (graph.mts "fn") and value twins — a copied instance a
+  // shipped closure brought (graph.mts twinOf), tracked like a session twin so its writes
+  // ride home, and walked for the value twins it holds in turn
+  const visited = new Set<unknown>(), work: unknown[] = [];
+  for (const f of stack) for (const v of [...(Array.isArray(f.args) ? f.args : []), ...Object.values(f)]) work.push(v);
+  while (work.length) {
+    const v = work.pop();
+    if (v === null || (typeof v !== "object" && typeof v !== "function") || visited.has(v)) continue;
+    visited.add(v);
+    if (typeof v === "function") { const c = v as { __tierless_sync?: boolean; __tierless_caps?: () => unknown }; if (c.__tierless_sync && typeof c.__tierless_caps === "function") work.push(c.__tierless_caps()); continue; }
+    const vt = twinOf(v as object);
+    if (vt) { add(v as object, vt); for (const x of Object.values(v as object)) work.push(x); continue; }
+    if ((v as { [VIEW]?: unknown })[VIEW]) {
+      const view = v as Record<string, unknown>;
+      for (const [k, h] of Object.entries(view)) {
+        if (!isHandle(h)) { work.push(h); continue; }
+        if (!h.cls) continue;
+        const twin = twins(h.cls, { id: h.id, owner: h.owner, ...(h.path ? { path: h.path } : {}), ...(h.state ? { state: h.state } : {}) });
+        if (!twin) continue;
+        view[k] = twin;
+        const { state: _s, ...handle } = h;
+        hydrated(twin, handle);
+        add(twin, handle);
+      }
+      continue;
+    }
+    if (Array.isArray(v)) { for (const x of v) work.push(x); }
+    else if (v instanceof Map) { for (const [k, x] of v) { work.push(k); work.push(x); } }
+    else if (v instanceof Set) { for (const x of v) work.push(x); }
+    else { const p = Object.getPrototypeOf(v); if (p === Object.prototype || p === null) for (const x of Object.values(v as object)) work.push(x); }
   }
   return out;
 }
@@ -130,8 +154,13 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump {
     while (work.length) {
       const v = work.pop();
       if (isHandle(v)) return v;
-      if (v === null || typeof v !== "object" || seen.has(v)) continue;
+      if (v === null || (typeof v !== "object" && typeof v !== "function") || seen.has(v)) continue;
       seen.add(v);
+      // a shipped sync closure (graph.mts "fn") is as real as its caps: a handle in them
+      // (its library instance was excised for size) means calling it here would fail,
+      // so the segment that calls it goes home — the engine's move-the-data-or-the-stack
+      // choice, made per value by the codec's threshold, enforced here
+      if (typeof v === "function") { const c = (v as { __tierless_caps?: () => unknown; __tierless_sync?: boolean }); if (c.__tierless_sync && typeof c.__tierless_caps === "function") work.push(c.__tierless_caps()); continue; }
       if (Array.isArray(v)) for (const x of v) work.push(x);
       else if (v instanceof Map) for (const [k, x] of v) { work.push(k); work.push(x); }
       else if (v instanceof Set) for (const x of v) work.push(x);
