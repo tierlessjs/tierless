@@ -123,6 +123,39 @@ export default function tierless(opts = {}) {
     const appMachines = new Map();
     let root = process.cwd(); // Vite root, captured in configResolved (for the build emit path)
     let aliases = {}; // string finds from Vite's resolved alias, for the server-machine bundle
+    // module code by name (transform.cts moduleCode): an import a component closure calls
+    // is a free reference only when the module it resolves to, with its whole graph, can
+    // load on the gateway — no UI code (a .tsx/.jsx file, react, a UI kit) reachable from it,
+    // listed browser-bound modules stubbed, assets empty. Judged by an esbuild metafile
+    // probe of the resolved file, once per file per build.
+    const serverSafe = new Map();
+    const UI_INPUT = /\.(tsx|jsx|vue|svelte)$|(?:^|\/)node_modules\/(?:react|react-dom|react-router|react-router-dom|@patternfly|@mui|@chakra-ui|antd|vue|svelte)(?:\/|$)/;
+    const isServerSafe = async (rid) => {
+        const hit = serverSafe.get(rid);
+        if (hit !== undefined)
+            return hit;
+        let safe = false;
+        try {
+            const esbuild = createRequire(path.join(root, "package.json"))("esbuild");
+            const stubIds = new Set(twinsStubs);
+            const res = await esbuild.build({
+                entryPoints: [rid], bundle: true, write: false, metafile: true, format: "esm", platform: "node", target: "es2022",
+                alias: aliases, loader: Object.fromEntries(ASSET_EXTS.map((ext) => [ext, "empty"])), external: ["tierless", "tierless/*"], logLevel: "silent",
+                plugins: [{ name: "tierless-stubs", setup(b) {
+                            b.onResolve({ filter: /.*/ }, (a) => (stubIds.has(a.path) || [...stubIds].some((id) => a.path.startsWith(id + "/")) ? { path: a.path, namespace: "tierless-stub" } : undefined));
+                            b.onLoad({ filter: /.*/, namespace: "tierless-stub" }, () => ({ contents: "module.exports = {};", loader: "js" }));
+                        } }],
+            });
+            safe = !Object.keys(res.metafile.inputs).some((f) => UI_INPUT.test(f));
+        }
+        catch {
+            safe = false;
+        } // unresolvable or unbundleable: not for the gateway
+        serverSafe.set(rid, safe);
+        return safe;
+    };
+    // a browser asset a module imports for its side (styles, images, fonts): nothing on the gateway
+    const ASSET_EXTS = [".css", ".scss", ".sass", ".less", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".woff", ".woff2"];
     // A framework build (Nuxt) runs the SAME plugin object through two sequential Vite
     // builds: client, then server (nitro/SSR). The machine world — compiled methods, the
     // manifest, the coverage artifact — is the CLIENT build's: bindMethods routes through
@@ -191,7 +224,21 @@ export default function tierless(opts = {}) {
                     // fast refresh); lowering it here would emit React.createElement it never imports
                     const stripped = esbuild.transformSync(code, { loader, format: "esm", target: "es2022", sourcefile: cleanId, jsx: "preserve" });
                     const { compile } = require("./transform.cjs");
-                    const { code: compiled, meta } = compile(stripped.code, { ...compilerOptions, resources: { "this.http": "server", ...(resources || {}) }, filename: id, preamble: "" });
+                    // module code by name: the import sources whose graphs can load on the gateway
+                    // (unless the app set moduleCode itself)
+                    let moduleCode = compilerOptions.moduleCode;
+                    if (moduleCode === undefined) {
+                        const specs = [...new Set([...stripped.code.matchAll(/^\s*import\s+(?:[^'";]*?\s+from\s+)?["']([^"']+)["']/gm)].map((m) => m[1]))];
+                        const ok = [];
+                        for (const spec of specs) {
+                            const r = await this.resolve?.(spec, cleanId, { skipSelf: true });
+                            const rid = typeof r?.id === "string" ? r.id.split("?")[0] : null;
+                            if (rid && !rid.startsWith("\0") && await isServerSafe(rid))
+                                ok.push(spec);
+                        }
+                        moduleCode = ok;
+                    }
+                    const { code: compiled, meta } = compile(stripped.code, { ...compilerOptions, moduleCode, resources: { "this.http": "server", ...(resources || {}) }, filename: id, preamble: "" });
                     const some = meta.methods.some((m) => m.program);
                     coverage.set(rel, { compiled: some, methods: meta.methods });
                     if (explicit)
@@ -254,6 +301,7 @@ export default function tierless(opts = {}) {
             machines.clear();
             appMachines.clear();
             coverage.clear();
+            serverSafe.clear();
         } }, // fresh CLIENT build: transform repopulates the maps (an SSR build must not wipe them)
         // Build: emit the server side of what the client build just produced. For every "use tierless"
         // module the transform compiled, write its machine (byte-identical to `tierless build --bare` —
@@ -307,8 +355,7 @@ export default function tierless(opts = {}) {
             if (twinsStubs.length)
                 writeFileSync(stubPath, "module.exports = new Proxy({}, { get: (_, k) => (k === \"__esModule\" ? undefined : () => { throw new Error(\"tierless twin stub called: \" + String(k) + \" — audit the twins list\"); }) });\n");
             const stubAliases = Object.fromEntries(twinsStubs.map((id) => [id, stubPath])); // exact ids beat the '@' prefix: esbuild prefers the longest alias match
-            // a browser asset a module imports for its side (styles, images, fonts): nothing on the gateway
-            const assetLoaders = Object.fromEntries([".css", ".scss", ".sass", ".less", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".woff", ".woff2"].map((ext) => [ext, "empty"]));
+            const assetLoaders = Object.fromEntries(ASSET_EXTS.map((ext) => [ext, "empty"]));
             if (appMachines.size) {
                 const esbuild = createRequire(path.join(root, "package.json"))("esbuild");
                 for (const [wireId, { code, resolveDir }] of appMachines) {

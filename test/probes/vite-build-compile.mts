@@ -110,6 +110,33 @@ const value = await bhost.runLocal(makePeer(mkPort(0, true)), "Svc$chain", [{ ht
 check("the emitted machine served the whole chain server-side — top-level const + arrow helper included", value === "<[v:n7]>" && served.join(",") === "/a/7,/b/n7", JSON.stringify({ value, served }));
 check("one resume crossing, zero execs", msgCounts.resume === 1 && !msgCounts.exec, JSON.stringify(msgCounts));
 
+// ---- module code by name: the plugin vets each import's graph ------------------------
+// A component closure calling an imported helper keeps it a free reference when the
+// helper's module can load on the gateway (a plain .mjs), and captures it into the caps
+// when the module is UI code (a .jsx file): the machine bundle must never carry a
+// component tree. The verdict comes from an esbuild metafile probe of the resolved file.
+{
+  writeFileSync(join(dir, "src", "helpers", "badge.jsx"), `export const badge = (s) => "*" + s;\n`);
+  const compId = join(dir, "src", "comp.ts");
+  writeFileSync(compId, `import { fmt } from '@/helpers/fmt.mjs'
+import { badge } from '@/helpers/badge.jsx'
+function useClient() { return { client: (globalThis as any).__probeClient }; }
+export function Comp() {
+  const { client } = useClient();
+  const loader = async (n: number) => { const a = await client.scopes.a(n); const s = fmt(a); const b = await client.scopes.b(s); return badge(b); };
+  return { loader };
+}
+`);
+  const plugin2: any = tierless({ apiUrl: "http://127.0.0.1:1", compile: ["src/comp.ts"], compilerOptions: { closures: true }, runtime: pathToFileURL(join(SRC_DIR, "browser.mjs")).href });
+  plugin2.configResolved({ root: dir, resolve: { alias: [{ find: "@", replacement: join(dir, "src") }] } });
+  const ctx = { resolve: async (spec: string) => ({ id: join(dir, "src", spec.replace(/^@\//, "")) }) };   // Vite's plugin context: resolves the alias
+  const out2 = await plugin2.transform.call(ctx, readFileSync(compId, "utf8"), compId);
+  const slots2 = JSON.parse(/__slots = (\{.*?\});/s.exec(out2?.code ?? "")?.[1] ?? "{}")["Comp$loader"] as Record<string, string[]> | undefined;
+  const refs2 = new Set(Object.values(slots2 ?? {}).flat());
+  check("module code by name: the plain-module helper is a free reference (no args[0].fmt ref, fmt called directly), the .jsx helper stays a capture (args[0].badge)",
+    !!out2 && !refs2.has("args[0].fmt") && refs2.has("args[0].badge") && /\bfmt\(F\.a\)/.test(out2.code), [...refs2].join(",") + " | " + (out2?.code.match(/fmt\([^)]*\)/)?.[0] ?? "no fmt call"));
+}
+
 const { pass, fail } = counts();
 console.log(fail === 0
   ? `\nOK — vite build emits a machine-only server bundle for compiled app modules; the gateway resumes a migrated chain from it (${pass} checks)`

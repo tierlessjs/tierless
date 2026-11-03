@@ -128,7 +128,7 @@ let blocks, suspSet, AUTO_DEREF = false, AUTO_WRITEBACK = false, TRACK_WRITES = 
 let SOURCE_MAP = false, curLine = 0, srcFile = "", fnSites = {}; // --source-map: stamp each block with its source line so a migrated frame reports file:line, not just a pc
 let CLOSURES = false; // opts.closures: compile async functions declared in component/hook bodies
 let SYNC_CLOSURES = false; // opts.syncClosures: sync closures a class method creates become shippable values
-let MODULE_CODE = true; // opts.moduleCode (default on): module code a component closure only calls is a free reference, not a capture
+let MODULE_CODE = true; // opts.moduleCode: module code a component closure only calls is a free reference, not a capture — true: any import; a list: imports from those sources (module-level functions always)
 let SYNC_CALLS = false; // opts.syncCalls: sync calls to values (a captured function, a method of this/a local) are pump-dispatched parks
 let SYNC_METHODS = false; // opts.syncMethods: every method of a top-level class compiles, tier calls or not (a library's machines)
 let MODULE_FNS = new Set(); // the module's top-level functions (a lowered body is an isolated file: module scope is known by name only)
@@ -2192,8 +2192,16 @@ function lowerCapsUnit(u, progs, meta) {
     // Used as a value (passed on, a member read), it stays a capture: a module singleton
     // (a router, an i18n instance) is browser-owned and fences through the caps like any
     // owned slot.
-    const moduleCode = (b) => b.kind === "module" || (b.scope.path.isProgram() && (b.kind === "hoisted" || b.path.isClassDeclaration()
-        || (b.kind === "const" && b.path.isVariableDeclarator() && (t.isFunction(b.path.node.init) || t.isClass(b.path.node.init)))));
+    const moduleCode = (b) => {
+        if (MODULE_CODE === false)
+            return false;
+        if (b.kind === "module") { // an import: any source, or one the build vetted as loadable off the browser (vite.mts serverSafe)
+            const decl = b.path.parentPath?.node;
+            return MODULE_CODE === true || (t.isImportDeclaration(decl) && MODULE_CODE.includes(decl.source.value));
+        }
+        return b.scope.path.isProgram() && (b.kind === "hoisted" || b.path.isClassDeclaration()
+            || (b.kind === "const" && b.path.isVariableDeclarator() && (t.isFunction(b.path.node.init) || t.isClass(b.path.node.init))));
+    };
     const onlyCalled = (b) => b.referencePaths.filter((r) => within(r, u.fnPath)).every((r) => r.parentPath?.isCallExpression() && r.parentPath.node.callee === r.node);
     u.fnPath.traverse({ ReferencedIdentifier(ip) {
             const name = ip.node.name;
@@ -2630,7 +2638,7 @@ function configure(opts = {}) {
     SOURCE_MAP = !!opts.sourceMap;
     CLOSURES = !!opts.closures;
     SYNC_CLOSURES = !!opts.syncClosures;
-    MODULE_CODE = opts.moduleCode !== false;
+    MODULE_CODE = opts.moduleCode === undefined ? true : opts.moduleCode;
     SYNC_CALLS = !!opts.syncCalls;
     SYNC_METHODS = !!opts.syncMethods;
     cbCounter = 0; // generated names restart per compile: the same source compiles to the same bytes

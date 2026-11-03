@@ -21,9 +21,11 @@ interface CompileOptions {
     /** Module code a component closure only CALLS — an import, a module-level function —
      *  is a free reference in its program (the gateway's bundle carries it: vite.mts bundles
      *  the import; browser-bound modules it drags in need `twinsStubs`), and an awaited
-     *  call of one is a park the pump settles where the run is. Default on; false captures
-     *  every outside binding into the caps, as before. */
-    moduleCode?: boolean;
+     *  call of one is a park the pump settles where the run is. true (the default): any
+     *  import; a list: only imports from those sources (the Vite plugin passes the ones
+     *  whose module graph is free of UI code); false: every outside binding captures, as
+     *  before. Module-level functions and classes are free unless false. */
+    moduleCode?: boolean | string[];
     /** Sync calls of VALUES (a captured function, a method of this or of a local) become
      *  pump-dispatched parks: a program runs as a sub-frame under the stop rule, a live
      *  function natively, a borrowed one at home. Module code stays a plain call. */
