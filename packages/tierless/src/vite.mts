@@ -22,6 +22,7 @@
 import { createRequire } from "node:module";
 import { writeFileSync, mkdirSync, readFileSync, appendFileSync, existsSync, rmSync } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { WS_PATH } from "./ws-path.mjs";
 import type { Server as HttpServer } from "node:http";
@@ -211,23 +212,26 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
   // listed browser-bound modules stubbed, assets empty. Judged by an esbuild metafile
   // probe of the resolved file, once per file per build.
   const serverSafe = new Map<string, boolean>();
+  const serverSafeWhy = new Map<string, string>();   // for TIERLESS_DEBUG_MODULECODE: why a file was judged unsafe
   const UI_INPUT = /\.(tsx|jsx|vue|svelte)$|(?:^|\/)node_modules\/(?:react|react-dom|react-router|react-router-dom|@patternfly|@mui|@chakra-ui|antd|vue|svelte)(?:\/|$)/;
-  const isServerSafe = async (rid: string): Promise<boolean> => {
+  // the SYNC API, a child process per call: Vite stops esbuild's shared async service
+  // mid-build, and a probe on it would answer "service stopped" (judged unsafe). Stubs are
+  // aliases to an empty module (esbuild plugins need the async API), as the real bundles'.
+  let probeStub: string | undefined;
+  const isServerSafe = (rid: string): boolean => {
     const hit = serverSafe.get(rid); if (hit !== undefined) return hit;
     let safe = false;
     try {
-      const esbuild = createRequire(path.join(root, "package.json"))("esbuild") as { build: (opts: object) => Promise<{ metafile: { inputs: Record<string, unknown> } }> };
-      const stubIds = new Set(twinsStubs);
-      const res = await esbuild.build({   // async: esbuild plugins need the async API
+      const esbuild = createRequire(path.join(root, "package.json"))("esbuild") as { buildSync: (opts: object) => { metafile: { inputs: Record<string, unknown> } } };
+      if (!probeStub) { probeStub = path.join(os.tmpdir(), `tierless-probe-stub-${process.pid}.cjs`); writeFileSync(probeStub, "module.exports = {};\n"); }
+      const res = esbuild.buildSync({
         entryPoints: [rid], bundle: true, write: false, metafile: true, format: "esm", platform: "node", target: "es2022",
-        alias: aliases, loader: Object.fromEntries(ASSET_EXTS.map((ext) => [ext, "empty"])), external: ["tierless", "tierless/*"], logLevel: "silent",
-        plugins: [{ name: "tierless-stubs", setup(b: { onResolve(o: object, f: (a: { path: string }) => unknown): void; onLoad(o: object, f: () => unknown): void }): void {
-          b.onResolve({ filter: /.*/ }, (a) => (stubIds.has(a.path) || [...stubIds].some((id) => a.path.startsWith(id + "/")) ? { path: a.path, namespace: "tierless-stub" } : undefined));
-          b.onLoad({ filter: /.*/, namespace: "tierless-stub" }, () => ({ contents: "module.exports = {};", loader: "js" }));
-        } }],
+        alias: { ...aliases, ...Object.fromEntries(twinsStubs.map((id) => [id, probeStub])) }, loader: Object.fromEntries(ASSET_EXTS.map((ext) => [ext, "empty"])), external: ["tierless", "tierless/*"], logLevel: "silent",
       });
-      safe = !Object.keys(res.metafile.inputs).some((f) => UI_INPUT.test(f));
-    } catch { safe = false; }   // unresolvable or unbundleable: not for the gateway
+      const ui = Object.keys(res.metafile.inputs).find((f) => UI_INPUT.test(f));
+      safe = !ui;
+      if (ui) serverSafeWhy.set(rid, "reaches " + ui);
+    } catch (e) { safe = false; serverSafeWhy.set(rid, "build: " + String((e as Error).message || e).split("\n")[0].slice(0, 160)); }   // unresolvable or unbundleable: not for the gateway
     serverSafe.set(rid, safe);
     return safe;
   };
@@ -308,13 +312,15 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
           let moduleCode = compilerOptions.moduleCode;
           if (moduleCode === undefined) {
             const specs = [...new Set([...stripped.code.matchAll(/^\s*import\s+(?:[^'";]*?\s+from\s+)?["']([^"']+)["']/gm)].map((m) => m[1]))];
-            const ok: string[] = [];
+            const ok: string[] = [], why: string[] = [];
             for (const spec of specs) {
               const r = await this.resolve?.(spec, cleanId, { skipSelf: true });
               const rid = typeof r?.id === "string" ? r.id.split("?")[0] : null;
-              if (rid && !rid.startsWith("\0") && await isServerSafe(rid)) ok.push(spec);
+              if (rid && !rid.startsWith("\0") && isServerSafe(rid)) ok.push(spec);
+              else why.push(`-${spec} (${rid ? serverSafeWhy.get(rid) ?? "unsafe" : "unresolved: " + JSON.stringify(r)})`);
             }
             moduleCode = ok;
+            if (typeof process !== "undefined" && process.env?.TIERLESS_DEBUG_MODULECODE) console.error(`tierless: moduleCode ${rel}: ${ok.length}/${specs.length} imports free — ${ok.map((x) => "+" + x).join(" ")} ${why.join(" ")}`);
           }
           const { code: compiled, meta } = compile(stripped.code, { ...compilerOptions, moduleCode, resources: { "this.http": "server", ...(resources || {}) }, filename: id, preamble: "" });
           const some = meta.methods.some((m: { program: string | null }) => m.program);
