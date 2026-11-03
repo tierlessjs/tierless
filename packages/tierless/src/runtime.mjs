@@ -626,6 +626,22 @@ export function makePump(bundle, { twins } = {}) {
                         throw err;
                 }
             };
+            // module code called by name (compiler DF): the receiver IS the function — this
+            // tier's copy of the module's code, called here; a compiled one runs as a
+            // sub-frame; a handle (the code of a module this tier never loaded) parks home
+            if (r.fn) {
+                const f = r.recv;
+                const name = "call:" + r.member;
+                if (isHandle(f))
+                    return { op: "home", tier: f.owner, name, args: [f, ...r.args] };
+                if (f && typeof f.__tierless_program === "string") {
+                    stack.push({ fn: f.__tierless_program, pc: 0, args: [f.__tierless_caps ? f.__tierless_caps() : undefined, ...r.args] });
+                    return null;
+                }
+                offer?.({ name, args: r.args }, false); // a touch to record, not a migrate point
+                await settle(() => f(...r.args));
+                return null;
+            }
             // run the member on a twin (or on an object reached through one), and ship the
             // twin's own data-field changes home so the awaiting code reads its writes
             const onTwin = async (twin, target, where) => {
@@ -758,6 +774,12 @@ export function makePump(bundle, { twins } = {}) {
             const park = await dispatchDyn(stack, { recv, ...(path.length ? { path } : {}), member, args });
             if (park)
                 return { done: false, request: park, stack }; // still no meaning here: park onward (misrouted stack)
+        }
+        else if (incoming && incoming.op === "home" && incoming.name.startsWith("call:")) {
+            const [f, ...args] = incoming.args;
+            const park = await dispatchDyn(stack, { recv: f, member: incoming.name.slice(5), args, fn: 1 });
+            if (park)
+                return { done: false, request: park, stack };
         }
         else if (incoming && incoming.op === "home" && (incoming.name.startsWith("dyns:") || incoming.name.startsWith("callv:"))) {
             const sync = incoming.name.startsWith("dyns:");

@@ -51,10 +51,11 @@ export interface TierlessPluginOptions {
      *  per session — a migrated chain then settles its method calls server-side on REAL
      *  instances of the app's own classes, and their state changes ride the reply home. */
     twins?: string;
-    /** Module ids (as the app imports them, e.g. '@/message') to STUB in the twins server
-     *  bundle: browser-bound modules a twinned class's FILE drags in but its methods never
-     *  touch (toast helpers, the router). Stubbed as a runtime Proxy of no-op functions —
-     *  loading succeeds, and any twin-path call into one is a loud runtime error to audit. */
+    /** Module ids (as the app imports them, e.g. '@/message') to STUB in the server bundles
+     *  (the twins module and the compiled machines): browser-bound modules a twinned
+     *  class's file, or module code a machine calls by name, drags in but never touches off
+     *  the browser (toast helpers, the router). Stubbed as a runtime Proxy of no-op functions —
+     *  loading succeeds, and any server-side call into one is a loud runtime error to audit. */
     twinsStubs?: string[];
 }
 export interface TierlessPlugin {

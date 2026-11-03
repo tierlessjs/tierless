@@ -144,10 +144,11 @@ export interface TierlessPluginOptions {
    *  per session — a migrated chain then settles its method calls server-side on REAL
    *  instances of the app's own classes, and their state changes ride the reply home. */
   twins?: string;
-  /** Module ids (as the app imports them, e.g. '@/message') to STUB in the twins server
-   *  bundle: browser-bound modules a twinned class's FILE drags in but its methods never
-   *  touch (toast helpers, the router). Stubbed as a runtime Proxy of no-op functions —
-   *  loading succeeds, and any twin-path call into one is a loud runtime error to audit. */
+  /** Module ids (as the app imports them, e.g. '@/message') to STUB in the server bundles
+   *  (the twins module and the compiled machines): browser-bound modules a twinned
+   *  class's file, or module code a machine calls by name, drags in but never touches off
+   *  the browser (toast helpers, the router). Stubbed as a runtime Proxy of no-op functions —
+   *  loading succeeds, and any server-side call into one is a loud runtime error to audit. */
   twinsStubs?: string[];
 }
 export interface TierlessPlugin {
@@ -364,6 +365,13 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
       // Node-loadable file, aliases resolved from the app's own Vite config. Errors here
       // are BUILD errors: a machine import that can't resolve fails the build, never a
       // half-emitted gateway.
+      // stub file is CJS ON PURPOSE: named imports from CJS resolve at RUNTIME, so one
+      // Proxy covers every name a stubbed browser module exports
+      const stubPath = path.join(outDir, "__tl_twin_stub.cjs");
+      if (twinsStubs.length) writeFileSync(stubPath, "module.exports = new Proxy({}, { get: (_, k) => (k === \"__esModule\" ? undefined : () => { throw new Error(\"tierless twin stub called: \" + String(k) + \" — audit the twins list\"); }) });\n");
+      const stubAliases = Object.fromEntries(twinsStubs.map((id) => [id, stubPath]));   // exact ids beat the '@' prefix: esbuild prefers the longest alias match
+      // a browser asset a module imports for its side (styles, images, fonts): nothing on the gateway
+      const assetLoaders = Object.fromEntries([".css", ".scss", ".sass", ".less", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".woff", ".woff2"].map((ext) => [ext, "empty"]));
       if (appMachines.size) {
         const esbuild = createRequire(path.join(root, "package.json"))("esbuild") as {
           buildSync: (opts: object) => void;
@@ -376,7 +384,9 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
             // a CJS dep in the graph (axios & co) compiles to require() calls — give the
             // ESM output a real require for node builtins instead of esbuild's throw-shim
             banner: { js: 'import { createRequire as __tlCreateRequire } from "node:module"; const require = __tlCreateRequire(import.meta.url);' },
-            outfile: path.join(outDir, name), alias: aliases, logLevel: "silent",
+            // module code the programs call by name (transform.cts moduleCode) rides in:
+            // listed browser-bound modules stub, assets are empty
+            outfile: path.join(outDir, name), alias: { ...aliases, ...stubAliases }, loader: assetLoaders, logLevel: "silent",
           });
           modules[wireId] = name;
         }
@@ -387,10 +397,6 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
       if (twinsModule) {
         const esbuild = createRequire(path.join(root, "package.json"))("esbuild") as { buildSync: (opts: object) => void };
         twinsOut = "twins.server.mjs";
-        // stub file is CJS ON PURPOSE: named imports from CJS resolve at RUNTIME, so one
-        // Proxy covers every name a stubbed browser module exports
-        const stubPath = path.join(outDir, "__tl_twin_stub.cjs");
-        if (twinsStubs.length) writeFileSync(stubPath, "module.exports = new Proxy({}, { get: (_, k) => (k === \"__esModule\" ? undefined : () => { throw new Error(\"tierless twin stub called: \" + String(k) + \" — audit the twins list\"); }) });\n");
         esbuild.buildSync({
           entryPoints: [path.resolve(root, twinsModule)],
           bundle: true, format: "esm", platform: "node", target: "es2022",
@@ -400,7 +406,7 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
           // module registers into (shareClass). A bundled copy kept its own class registry,
           // so a shared class never regained its prototype on the gateway's codec.
           external: ["tierless", "tierless/*"],
-          alias: { ...aliases, ...Object.fromEntries(twinsStubs.map((id) => [id, stubPath])) },   // exact ids beat the '@' prefix: esbuild prefers the longest alias match
+          alias: { ...aliases, ...stubAliases }, loader: assetLoaders,
           logLevel: "silent",
         });
       }

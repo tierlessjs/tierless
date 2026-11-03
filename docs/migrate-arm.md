@@ -84,6 +84,18 @@ mid-segment (design.md §8). So the check happens BEFORE the segment runs, in th
   reads `arguments`, or is a function expression using its own `this` stays native. Every
   top-level class of the module is stamped (`shareClass`, module hash + name) so instances
   keep their class across tiers.
+- **Module code by name (`moduleCode`, default on):** a component closure captures every
+  outside binding into its caps — except module code it only CALLS: an import or a
+  module-level function (`addTrailingSlash(url)`, `await fetchWithError(url, init)`) is
+  the same on every tier that loads the module, so the program references it freely and
+  the gateway's bundle carries it (vite.mts bundles the import; browser-bound modules it
+  drags in are stubbed by `twinsStubs`, assets are empty). An awaited call of one is a
+  park (`call:<name>`) the pump settles where the run is: this tier's function, a compiled
+  one as a sub-frame, a handle home. Used as a value — passed on, a member read — an
+  import stays a capture: a module singleton (a router, an i18n instance) is browser-owned
+  and fences through the caps. Found by the gateway's park log (`TIERLESS_PARK_LOG`): 34
+  of the 38 home parks on the Keycloak chain specs were loaders parking on a captured
+  helper right after their first twin call — a migration that gained nothing.
 - **Sync calls of values (`syncCalls`, `syncMethods`):** a synchronous call of a value a
   segment holds — a captured `t(k)`, `this.translate(k)`, `lib.get(k)`, `h.call(this, k)`
   on a local arrow — lowers to a park the pump resolves where the run is: a shipped

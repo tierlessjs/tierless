@@ -25,7 +25,7 @@ export type MachineResult =
   // meaning the PUMP resolves — a session twin's method (class-stamped handle), a
   // nested machine (stamped stub), or a plain promise settled in place. Never crosses
   // a wire as-is; only its consequences do.
-  | { op: "dyn"; recv: unknown; path?: string[]; member: string; args: unknown[]; sync?: 1; opt?: 1 }
+  | { op: "dyn"; recv: unknown; path?: string[]; member: string; args: unknown[]; sync?: 1; opt?: 1; fn?: 1 }
   /** a SYNC call of a value the segment holds (compiler rewriteSyncCalls): recv[path…] is the callee */
   | { op: "callv"; recv: unknown; path?: string[]; args: unknown[] };
 

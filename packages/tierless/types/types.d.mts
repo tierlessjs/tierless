@@ -31,6 +31,7 @@ export type MachineResult = {
     args: unknown[];
     sync?: 1;
     opt?: 1;
+    fn?: 1;
 }
 /** a SYNC call of a value the segment holds (compiler rewriteSyncCalls): recv[path…] is the callee */
  | {

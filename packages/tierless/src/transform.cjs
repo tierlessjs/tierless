@@ -128,6 +128,7 @@ let blocks, suspSet, AUTO_DEREF = false, AUTO_WRITEBACK = false, TRACK_WRITES = 
 let SOURCE_MAP = false, curLine = 0, srcFile = "", fnSites = {}; // --source-map: stamp each block with its source line so a migrated frame reports file:line, not just a pc
 let CLOSURES = false; // opts.closures: compile async functions declared in component/hook bodies
 let SYNC_CLOSURES = false; // opts.syncClosures: sync closures a class method creates become shippable values
+let MODULE_CODE = true; // opts.moduleCode (default on): module code a component closure only calls is a free reference, not a capture
 let SYNC_CALLS = false; // opts.syncCalls: sync calls to values (a captured function, a method of this/a local) are pump-dispatched parks
 let SYNC_METHODS = false; // opts.syncMethods: every method of a top-level class compiles, tier calls or not (a library's machines)
 let MODULE_FNS = new Set(); // the module's top-level functions (a lowered body is an isolated file: module scope is known by name only)
@@ -159,6 +160,11 @@ function suspInfo(s) {
         // callee where the run is (a program, a live function) or parks the call home
         const { root, path } = slotPath(a[0]);
         return { assign, op: `{ op: "callv", recv: ${gen(root)}, path: ${JSON.stringify(path)}, args: [${a.slice(1).map(gen).join(", ")}] }` };
+    }
+    if (cn === "DF") {
+        // DF(f, "name", ...args) — an AWAITED call of module code by name (rewriteDynAwaits):
+        // the function itself is the receiver; the pump calls it where the run is
+        return { assign, op: `{ op: "dyn", recv: ${gen(a[0])}, member: ${gen(a[1])}, fn: 1, args: [${a.slice(2).map(gen).join(", ")}] }` };
     }
     if (cn === "D" || cn === "DS" || cn === "DSO") {
         // D(recv, "member", ...args) — the DYNAMIC call park (docs/migrate-arm.md slice 3).
@@ -234,8 +240,8 @@ function containsSuspCall(node) {
 // which is all compileStmt knows how to lower. This is what lets ordinary code compile:
 // `return f(x)`, `out = api.get()`, `a + f(x)`, `g(f(x))`, `if (api.check())`, `while (...)`.
 const isResYield = (n) => !!n && t.isYieldExpression(n) && t.isCallExpression(n.argument) && t.isIdentifier(n.argument.callee, { name: "R" });
-const isDynYield = (n) => !!n && t.isYieldExpression(n) && t.isCallExpression(n.argument) && (t.isIdentifier(n.argument.callee, { name: "D" }) || t.isIdentifier(n.argument.callee, { name: "DS" }) || t.isIdentifier(n.argument.callee, { name: "DSO" })); // the dynamic call park (slice 3); DS: its sync form; DSO: a sync optional call `o.m?.()`
-const isAsyncDynYield = (n) => isDynYield(n) && t.isIdentifier(n.argument.callee, { name: "D" });
+const isDynYield = (n) => !!n && t.isYieldExpression(n) && t.isCallExpression(n.argument) && (t.isIdentifier(n.argument.callee, { name: "D" }) || t.isIdentifier(n.argument.callee, { name: "DF" }) || t.isIdentifier(n.argument.callee, { name: "DS" }) || t.isIdentifier(n.argument.callee, { name: "DSO" })); // the dynamic call park (slice 3); DS: its sync form; DSO: a sync optional call `o.m?.()`
+const isAsyncDynYield = (n) => isDynYield(n) && (t.isIdentifier(n.argument.callee, { name: "D" }) || t.isIdentifier(n.argument.callee, { name: "DF" }));
 const isCallvYield = (n) => !!n && t.isYieldExpression(n) && t.isCallExpression(n.argument) && t.isIdentifier(n.argument.callee, { name: "C" }); // a sync call of a VALUE (rewriteSyncCalls)
 const isSuspCallNode = (n) => !!n && t.isCallExpression(n) && t.isIdentifier(n.callee) && suspSet.has(n.callee.name);
 const isSuspExpr = (n) => isResYield(n) || isDynYield(n) || isCallvYield(n) || isSuspCallNode(n);
@@ -1842,11 +1848,19 @@ function lowerSyncClosure(fnPath, selfOk, progName, label, progs, meta) {
 // enclosing function, arrows included) — an await inside a nested function is that
 // closure's own suspension: it stays plain JS, runs wherever its segment runs, and any
 // escaping promise is ownedUnit, so the §5 stop rule fences it.
-function rewriteDynAwaits(file, fnNode) {
+function rewriteDynAwaits(file, fnNode, freeFns) {
     traverse(file, { AwaitExpression(ap) {
             if (ap.getFunctionParent()?.node !== fnNode)
                 return;
             const arg = ap.node.argument;
+            // `await f(a)` where f is MODULE CODE the closure calls by name (lowerCapsUnit): the
+            // call itself parks — the pump calls this tier's f where the run is
+            if (t.isCallExpression(arg) && t.isIdentifier(arg.callee) && freeFns?.has(arg.callee.name) && !ap.scope.getBinding(arg.callee.name) && !arg.arguments.some((x) => t.isSpreadElement(x))) {
+                const y = t.yieldExpression(t.callExpression(t.identifier("DF"), [arg.callee, t.stringLiteral(arg.callee.name), ...arg.arguments]));
+                y.loc = ap.node.loc;
+                ap.replaceWith(y);
+                return;
+            }
             if (t.isCallExpression(arg) && t.isMemberExpression(arg.callee) && !arg.callee.computed && t.isIdentifier(arg.callee.property) && !arg.arguments.some((x) => t.isSpreadElement(x))) {
                 const y = t.yieldExpression(t.callExpression(t.identifier("D"), [arg.callee.object, t.stringLiteral(arg.callee.property.name), ...arg.arguments]));
                 y.loc = ap.node.loc;
@@ -2074,7 +2088,7 @@ function arrowBound(cp, name, fnNode) {
     return t.isArrowFunctionExpression(init) || (t.isCallExpression(init) && t.isArrowFunctionExpression(init.callee) && init.arguments.length === 1 && t.isArrowFunctionExpression(init.arguments[0]));
 }
 function rewriteSyncCalls(file, fnNode) {
-    const SPECIAL = new Set(["R", "D", "DS", "DSO", "C", "deref"]);
+    const SPECIAL = new Set(["R", "D", "DF", "DS", "DSO", "C", "deref"]);
     traverse(file, { CallExpression(cp) {
             if (cp.getFunctionParent()?.node !== fnNode)
                 return; // a nested function's call: plain JS
@@ -2169,7 +2183,18 @@ function lowerCapsUnit(u, progs, meta) {
     // bindings themselves) — the function stays original.
     const captures = [];
     const seen = new Set();
+    const free = new Set();
     const within = (p, anc) => p === anc || !!p.findParent((q) => q === anc);
+    // MODULE CODE — an import, or a function or class declared at module scope — that the
+    // closure only CALLS is the same on every tier that loads this module, where the
+    // program also lives: a free reference, not a capture (docs/migrate-arm.md "module code
+    // by name"); the gateway's bundle carries it (vite.mts bundles the import, stubs listed).
+    // Used as a value (passed on, a member read), it stays a capture: a module singleton
+    // (a router, an i18n instance) is browser-owned and fences through the caps like any
+    // owned slot.
+    const moduleCode = (b) => b.kind === "module" || (b.scope.path.isProgram() && (b.kind === "hoisted" || b.path.isClassDeclaration()
+        || (b.kind === "const" && b.path.isVariableDeclarator() && (t.isFunction(b.path.node.init) || t.isClass(b.path.node.init)))));
+    const onlyCalled = (b) => b.referencePaths.filter((r) => within(r, u.fnPath)).every((r) => r.parentPath?.isCallExpression() && r.parentPath.node.callee === r.node);
     u.fnPath.traverse({ ReferencedIdentifier(ip) {
             const name = ip.node.name;
             if (name === "arguments" && t.isArrowFunctionExpression(fn) && ip.getFunctionParent()?.node === fn)
@@ -2179,6 +2204,11 @@ function lowerCapsUnit(u, progs, meta) {
             const b = ip.scope.getBinding(name);
             if (!b || within(b.scope.path, u.fnPath))
                 return; // fn-local or a true global: stays as-is
+            if (MODULE_CODE && moduleCode(b) && onlyCalled(b)) {
+                seen.add(name);
+                free.add(name);
+                return;
+            }
             seen.add(name);
             captures.push(name);
             for (const v of b.constantViolations)
@@ -2198,7 +2228,7 @@ function lowerCapsUnit(u, progs, meta) {
             ip.replaceWith(t.memberExpression(t.identifier("__caps"), t.identifier(ip.node.name)));
         } });
     allowlist(file);
-    rewriteDynAwaits(file, fnNode);
+    rewriteDynAwaits(file, fnNode, free);
     let yields = 0;
     traverse(file, { YieldExpression(yp) { if (isResYield(yp.node) || isAsyncDynYield(yp.node))
             yields++; } });
@@ -2600,6 +2630,7 @@ function configure(opts = {}) {
     SOURCE_MAP = !!opts.sourceMap;
     CLOSURES = !!opts.closures;
     SYNC_CLOSURES = !!opts.syncClosures;
+    MODULE_CODE = opts.moduleCode !== false;
     SYNC_CALLS = !!opts.syncCalls;
     SYNC_METHODS = !!opts.syncMethods;
     cbCounter = 0; // generated names restart per compile: the same source compiles to the same bytes

@@ -419,7 +419,7 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump & { run
     // (name "dyn:<member>", args [recv, ...callArgs]) and the owner re-dispatches it
     // here before stepping on, or the resume would read a stale ret.
     // Returns a park to ship, or null when the call settled (ret set / frame pushed / unwound).
-    const dispatchDyn = async (stack: Frame[], r: { recv: unknown; path?: string[]; member: string; args: unknown[] }, offer?: (req: { name: string; args: unknown[] }, migratable?: boolean) => boolean): Promise<HomePark | null> => {
+    const dispatchDyn = async (stack: Frame[], r: { recv: unknown; path?: string[]; member: string; args: unknown[]; fn?: 1 }, offer?: (req: { name: string; args: unknown[] }, migratable?: boolean) => boolean): Promise<HomePark | null> => {
       const top = stack[stack.length - 1];
       // a THUNK, invoked inside the try: a synchronous throw from the member call
       // itself (a getter, a sync method body) unwinds exactly like a rejection —
@@ -427,6 +427,18 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump & { run
       const settle = async (call: () => unknown): Promise<void> => {
         try { top.ret = await call(); } catch (err) { if (!__unwind(stack, err)) throw err; }
       };
+      // module code called by name (compiler DF): the receiver IS the function — this
+      // tier's copy of the module's code, called here; a compiled one runs as a
+      // sub-frame; a handle (the code of a module this tier never loaded) parks home
+      if (r.fn) {
+        const f = r.recv as ((...a: unknown[]) => unknown) & { __tierless_program?: string; __tierless_caps?: () => object };
+        const name = "call:" + r.member;
+        if (isHandle(f)) return { op: "home", tier: (f as Handle).owner, name, args: [f, ...r.args] };
+        if (f && typeof f.__tierless_program === "string") { stack.push({ fn: f.__tierless_program, pc: 0, args: [f.__tierless_caps ? f.__tierless_caps() : undefined, ...r.args] }); return null; }
+        offer?.({ name, args: r.args }, false);   // a touch to record, not a migrate point
+        await settle(() => f(...r.args));
+        return null;
+      }
       // run the member on a twin (or on an object reached through one), and ship the
       // twin's own data-field changes home so the awaiting code reads its writes
       const onTwin = async (twin: object, target: unknown, where: TwinWhere): Promise<void> => {
@@ -522,6 +534,10 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump & { run
       const member = path.pop()!;
       const park = await dispatchDyn(stack, { recv, ...(path.length ? { path } : {}), member, args });
       if (park) return { done: false, request: park, stack };   // still no meaning here: park onward (misrouted stack)
+    } else if (incoming && incoming.op === "home" && incoming.name.startsWith("call:")) {
+      const [f, ...args] = incoming.args;
+      const park = await dispatchDyn(stack, { recv: f, member: incoming.name.slice(5), args, fn: 1 });
+      if (park) return { done: false, request: park, stack };
     } else if (incoming && incoming.op === "home" && (incoming.name.startsWith("dyns:") || incoming.name.startsWith("callv:"))) {
       const sync = incoming.name.startsWith("dyns:");
       const [recv, ...args] = incoming.args;

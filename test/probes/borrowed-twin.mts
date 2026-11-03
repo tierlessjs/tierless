@@ -223,6 +223,17 @@ const noTwin = connect(bundle);
 {
   const COMP = `"use tierless";
 function useClient() { return { client: globalThis.__probeClient }; }
+export async function fetchish(x) { return x + 100; }   // an async module helper (fetchWithError's shape)
+export function Helpers(props) {
+  const { client } = useClient();
+  const loader = async (n) => {                  // module code called by name between twin calls
+    const a = await client.scopes.a(conv(n));    // a sync module function: a free reference, not a capture
+    const f = await fetchish(a);                 // an awaited one: the call parks, settled where the run is
+    const b = await client.scopes.b(f + props.k);
+    return b;
+  };
+  return { loader };
+}
 export function Section(props) {
   const { client } = useClient();
   const label = props.label;
@@ -342,6 +353,21 @@ export function Details(props) {
   cmod.Details({ id: 1, step: 5 });
   const r4 = await ((globalThis as Record<string, unknown>).__probeFetches as Array<() => Promise<number>>)[2]();
   const dcounts = { ...counts };
+  // module code by name: the loader's program references conv/fetchish freely (no caps
+  // member, no park on them); migrated, both twin calls and the helper calls run on the
+  // server in ONE crossing, the awaited helper settled there
+  const hslots = new Set(Object.values(cmod.__slots["Helpers$loader"] as Record<string, string[]>).flat());
+  check("module code the closure only calls is not captured: no args[0].conv / args[0].fetchish ref; the await is a call park (op dyn, fn: 1)",
+    !hslots.has("args[0].conv") && !hslots.has("args[0].fetchish") && ![...hslots].some((r) => r.startsWith("args[0].conv") || r.startsWith("args[0].fetchish")) && ccode.includes('recv: fetchish, member: "fetchish", fn: 1'), [...hslots].join(",") + " | " + (ccode.match(/op: "dyn", recv: fetchish[^}]*/)?.[0] ?? "no DF"));
+  cmod.__bindTierlessMethods(null);
+  reset();
+  (globalThis as Record<string, unknown>).__probeClient = new Client("browser", log);
+  const h0 = await cmod.Helpers({ k: 7 }).loader(1);
+  const hlog0 = log.join(",");
+  cmod.__bindTierlessMethods((prog: string, caps: object, args: unknown[]) => chost.runLocal(cpeer, prog, [caps, ...args], { migrate: () => true }));
+  reset();
+  const h1 = await cmod.Helpers({ k: 7 }).loader(1);
+  check("module code by name, migrated: same value as at home, both twin calls on the server, ONE crossing", h1 === h0 && hlog0 === "browser:a,browser:b" && log.join(",") === "server:a,server:b" && counts.resume === 1 && !counts.exec, JSON.stringify({ h0, h1, hlog0, log, counts }));
   reset();
   cmod.Details({ id: -9, step: 5 });
   let r5: unknown;
@@ -412,8 +438,12 @@ export function Details(props) {
     check("a nested borrowed object's primitives (user.id, user.meta.n) travel with the run: both calls ONE crossing",
       (pr.r as unknown as number) === 70 && pr.resumes === 1 && pr.log.join() === "server:a,server:b", JSON.stringify(pr));
     const unshared = await run(() => cmod.Linker());
-    check("an UNshared helper between twin calls goes home to run it (correct: the run returns, then re-migrates at the next call)",
-      (unshared.r as unknown as number) === 60 && unshared.resumes === 2, JSON.stringify(unshared));
+    check("a module helper between twin calls runs on the server by name (moduleCode, the default): both calls ONE crossing, no shareFunction needed",
+      (unshared.r as unknown as number) === 60 && unshared.resumes === 1 && unshared.log.join() === "server:a,server:b", JSON.stringify(unshared));
+    const captured = compile(COMP, { filename: "comp.js", closures: true, moduleCode: false });
+    writeFileSync(join(dir, "comp-captured.mjs"), captured.code);
+    const lslots = new Set(Object.values((await import(pathToFileURL(join(dir, "comp-captured.mjs")).href)).__slots["Linker$useFetch0"] as Record<string, string[]>).flat());
+    check("moduleCode: false captures the helper into the caps instead (args[0].conv in the table: the run would go home to call it)", lslots.has("args[0].conv"), [...lslots].join(","));
     shareFunction("conv", cmod.conv);
     const shared = await run(() => cmod.Linker());
     check("a SHARED helper (shareFunction) runs where the run is: both calls ONE crossing",
