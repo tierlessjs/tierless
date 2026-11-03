@@ -120,10 +120,13 @@ check("one resume crossing, zero execs", msgCounts.resume === 1 && !msgCounts.ex
   const compId = join(dir, "src", "comp.ts");
   writeFileSync(compId, `import { fmt } from '@/helpers/fmt.mjs'
 import { badge } from '@/helpers/badge.jsx'
+const KINDS = { badge };
+function kind(s: string) { return KINDS.badge(s); }   // a module helper over a table of UI imports: must stay a capture
+function twice(s: string) { return fmt(fmt(s)); }   // a module helper over a safe import: free
 function useClient() { return { client: (globalThis as any).__probeClient }; }
 export function Comp() {
   const { client } = useClient();
-  const loader = async (n: number) => { const a = await client.scopes.a(n); const s = fmt(a); const b = await client.scopes.b(s); return badge(b); };
+  const loader = async (n: number) => { const a = await client.scopes.a(n); const s = twice(fmt(a)); const b = await client.scopes.b(s); return kind(badge(b)); };
   return { loader };
 }
 `);
@@ -133,8 +136,8 @@ export function Comp() {
   const out2 = await plugin2.transform.call(ctx, readFileSync(compId, "utf8"), compId);
   const slots2 = JSON.parse(/__slots = (\{.*?\});/s.exec(out2?.code ?? "")?.[1] ?? "{}")["Comp$loader"] as Record<string, string[]> | undefined;
   const refs2 = new Set(Object.values(slots2 ?? {}).flat());
-  check("module code by name: the plain-module helper is a free reference (no args[0].fmt ref, fmt called directly), the .jsx helper stays a capture (args[0].badge)",
-    !!out2 && !refs2.has("args[0].fmt") && refs2.has("args[0].badge") && /\bfmt\(F\.a\)/.test(out2.code), [...refs2].join(",") + " | " + (out2?.code.match(/fmt\([^)]*\)/)?.[0] ?? "no fmt call"));
+  check("module code by name: the plain-module helper and a module function over it are free references (no args[0].fmt / args[0].twice ref); the .jsx helper and a module function reaching it stay captures (args[0].badge, args[0].kind)",
+    !!out2 && !refs2.has("args[0].fmt") && !refs2.has("args[0].twice") && refs2.has("args[0].badge") && refs2.has("args[0].kind") && /\btwice\(fmt\(F\.a\)\)/.test(out2.code), [...refs2].join(",") + " | " + (out2?.code.match(/twice\([^;]*\)/)?.[0] ?? "no twice call"));
 }
 
 const { pass, fail } = counts();

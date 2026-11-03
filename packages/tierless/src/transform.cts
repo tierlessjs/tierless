@@ -1849,14 +1849,37 @@ function lowerCapsUnit(u: CapsUnit, progs: string[], meta: CompileMeta): string[
   // Used as a value (passed on, a member read), it stays a capture: a module singleton
   // (a router, an i18n instance) is browser-owned and fences through the caps like any
   // owned slot.
-  const moduleCode = (b: import("@babel/traverse").Binding): boolean => {
+  // …and a module-level binding is safe only if everything ITS declaration reaches at
+  // module scope is: allowed imports, and module-level bindings safe in turn (a helper
+  // over a table of imported components would drag the components into the gateway's
+  // bundle — it stays a capture)
+  type Binding = import("@babel/traverse").Binding;
+  const importAllowed = (b: Binding): boolean => { const decl = b.path.parentPath?.node; return MODULE_CODE === true || (Array.isArray(MODULE_CODE) && t.isImportDeclaration(decl) && MODULE_CODE.includes(decl.source.value)); };
+  const safeTop = new Map<Binding, boolean>();
+  const safeAtTop = (b: Binding): boolean => {
+    if (b.kind === "module") return importAllowed(b);
+    if (!b.scope.path.isProgram()) return false;
+    const hit = safeTop.get(b); if (hit !== undefined) return hit;
+    safeTop.set(b, true);                                            // a cycle through itself is fine
+    let ok = true;
+    const decl = b.path;
+    decl.traverse({
+      ReferencedIdentifier(ip) {
+        if (!ok) return;
+        const ib = ip.scope.getBinding(ip.node.name);
+        if (!ib || within(ib.scope.path, decl)) return;             // its own local, or a global
+        if (!safeAtTop(ib)) ok = false;
+      },
+      "JSXElement|JSXFragment"() { ok = false; },
+    });
+    safeTop.set(b, ok);
+    return ok;
+  };
+  const moduleCode = (b: Binding): boolean => {
     if (MODULE_CODE === false) return false;
-    if (b.kind === "module") {   // an import: any source, or one the build vetted as loadable off the browser (vite.mts serverSafe)
-      const decl = b.path.parentPath?.node;
-      return MODULE_CODE === true || (t.isImportDeclaration(decl) && MODULE_CODE.includes(decl.source.value));
-    }
+    if (b.kind === "module") return importAllowed(b);               // an import: any source, or one the build vetted as loadable off the browser (vite.mts serverSafe)
     return b.scope.path.isProgram() && (b.kind === "hoisted" || b.path.isClassDeclaration()
-      || (b.kind === "const" && b.path.isVariableDeclarator() && (t.isFunction(b.path.node.init) || t.isClass(b.path.node.init))));
+      || (b.kind === "const" && b.path.isVariableDeclarator() && (t.isFunction(b.path.node.init) || t.isClass(b.path.node.init)))) && safeAtTop(b);
   };
   const onlyCalled = (b: import("@babel/traverse").Binding): boolean => b.referencePaths.filter((r) => within(r, u.fnPath)).every((r) => r.parentPath?.isCallExpression() && (r.parentPath.node as t.CallExpression).callee === r.node);
   u.fnPath.traverse({ ReferencedIdentifier(ip) {

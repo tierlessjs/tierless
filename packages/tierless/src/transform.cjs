@@ -2185,22 +2185,41 @@ function lowerCapsUnit(u, progs, meta) {
     const seen = new Set();
     const free = new Set();
     const within = (p, anc) => p === anc || !!p.findParent((q) => q === anc);
-    // MODULE CODE — an import, or a function or class declared at module scope — that the
-    // closure only CALLS is the same on every tier that loads this module, where the
-    // program also lives: a free reference, not a capture (docs/migrate-arm.md "module code
-    // by name"); the gateway's bundle carries it (vite.mts bundles the import, stubs listed).
-    // Used as a value (passed on, a member read), it stays a capture: a module singleton
-    // (a router, an i18n instance) is browser-owned and fences through the caps like any
-    // owned slot.
+    const importAllowed = (b) => { const decl = b.path.parentPath?.node; return MODULE_CODE === true || (Array.isArray(MODULE_CODE) && t.isImportDeclaration(decl) && MODULE_CODE.includes(decl.source.value)); };
+    const safeTop = new Map();
+    const safeAtTop = (b) => {
+        if (b.kind === "module")
+            return importAllowed(b);
+        if (!b.scope.path.isProgram())
+            return false;
+        const hit = safeTop.get(b);
+        if (hit !== undefined)
+            return hit;
+        safeTop.set(b, true); // a cycle through itself is fine
+        let ok = true;
+        const decl = b.path;
+        decl.traverse({
+            ReferencedIdentifier(ip) {
+                if (!ok)
+                    return;
+                const ib = ip.scope.getBinding(ip.node.name);
+                if (!ib || within(ib.scope.path, decl))
+                    return; // its own local, or a global
+                if (!safeAtTop(ib))
+                    ok = false;
+            },
+            "JSXElement|JSXFragment"() { ok = false; },
+        });
+        safeTop.set(b, ok);
+        return ok;
+    };
     const moduleCode = (b) => {
         if (MODULE_CODE === false)
             return false;
-        if (b.kind === "module") { // an import: any source, or one the build vetted as loadable off the browser (vite.mts serverSafe)
-            const decl = b.path.parentPath?.node;
-            return MODULE_CODE === true || (t.isImportDeclaration(decl) && MODULE_CODE.includes(decl.source.value));
-        }
+        if (b.kind === "module")
+            return importAllowed(b); // an import: any source, or one the build vetted as loadable off the browser (vite.mts serverSafe)
         return b.scope.path.isProgram() && (b.kind === "hoisted" || b.path.isClassDeclaration()
-            || (b.kind === "const" && b.path.isVariableDeclarator() && (t.isFunction(b.path.node.init) || t.isClass(b.path.node.init))));
+            || (b.kind === "const" && b.path.isVariableDeclarator() && (t.isFunction(b.path.node.init) || t.isClass(b.path.node.init)))) && safeAtTop(b);
     };
     const onlyCalled = (b) => b.referencePaths.filter((r) => within(r, u.fnPath)).every((r) => r.parentPath?.isCallExpression() && r.parentPath.node.callee === r.node);
     u.fnPath.traverse({ ReferencedIdentifier(ip) {
