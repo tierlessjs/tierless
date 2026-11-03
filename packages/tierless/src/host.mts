@@ -36,6 +36,9 @@ export interface MakeHostOpts {
   exec: Exec;
   owns?: (tier: string) => boolean;
   meta?: Record<string, unknown>;
+  /** Observes every §5 HOME PARK a migrated-in step ends at — the stack's top frame and
+   *  the slot (or sync call) that sent it home — to see where runs still return. */
+  onPark?: (park: { fn: string; pc: number; name: string; tier: string; stack: string[] }) => void;
   /** Trace recording (trajectory design §3): head-sampled per run, the flag rides the
    *  continuation itself (F0.__trace), records stream to the sink. Absent = zero cost.
    *  Pass a pre-built Recorder to keep a handle on it (e.g. its `dropped` counter). */
@@ -115,7 +118,7 @@ let nextSid = 1;
 const TE = new TextEncoder();
 const TD = new TextDecoder();
 
-export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn, twins, placement, threshold }: MakeHostOpts): Host {
+export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn, twins, placement, threshold, onPark }: MakeHostOpts): Host {
   const placeProfile = placement?.profile ?? null;
   const placeMode = placement?.mode ?? "trajectory";
   const placeStability = placement?.stability ?? 0.9;
@@ -248,6 +251,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
       const res = await runPump(peer, stack, incoming, sink);
       const deltas = viewDeltas(views);
       if (res.done) return { obj: { type: "done", value: res.value, ...carry() }, ...binOf(deltas) };
+      if (onPark && res.request.op === "home") { const t = res.stack[res.stack.length - 1]; onPark({ fn: t.fn, pc: t.pc, name: res.request.name, tier: res.request.tier, stack: res.stack.map((f) => f.fn + "@" + f.pc) }); }
       return { obj: { type: "suspend", ...carry() }, bin: ship(sid, res, deltas) };
     } catch (e: any) {
       rec?.end(flag, "error");

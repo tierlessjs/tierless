@@ -155,7 +155,7 @@ async function serveSessionOn(peer: Peer, req: IncomingMessage, cfg: { resolveBu
   if (coherence) coherence.serve(peer);
   const hosts = new Map<string, import("./types.mjs").Host>();     // moduleId -> host (stateless; cached per connection)
   const hostFor = async (id: string) => {
-    if (!hosts.has(id)) hosts.set(id, makeHost({ bundle: await cfg.resolveBundle(id), tier: cfg.tier, exec, meta: id ? { module: id } : {}, coherence, twins }));
+    if (!hosts.has(id)) hosts.set(id, makeHost({ bundle: await cfg.resolveBundle(id), tier: cfg.tier, exec, meta: id ? { module: id } : {}, coherence, twins, onPark: parkLog }));
     return hosts.get(id)!;
   };
   answerWith(peer, hostFor);                                        // browser-started sessions (actions) + bounces
@@ -169,6 +169,10 @@ async function serveSessionOn(peer: Peer, req: IncomingMessage, cfg: { resolveBu
 // see what content a session's bytes actually are. Debug instrument: measurable
 // decode cost per message, so it stays behind the env gate.
 const wireLogFile = (): string | undefined => (typeof process !== "undefined" ? process.env?.TIERLESS_WIRE_LOG : undefined);
+// TIERLESS_PARK_LOG=<file>: every §5 home park a migrated-in step ends at, appended as JSON
+// lines {fn, pc, name, tier, stack} (host.mts onPark) — where runs still return home
+const parkLogFile = typeof process !== "undefined" ? process.env?.TIERLESS_PARK_LOG : undefined;
+const parkLog = parkLogFile ? (p: object): void => { try { fs.appendFileSync(parkLogFile, JSON.stringify({ ts: Date.now(), ...p }) + "\n"); } catch { /* full disk etc. */ } } : undefined;
 const wireLogLine = (o: Record<string, unknown>): void => {
   const file = wireLogFile();
   if (!file) return;

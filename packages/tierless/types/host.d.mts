@@ -9,6 +9,15 @@ export interface MakeHostOpts {
     exec: Exec;
     owns?: (tier: string) => boolean;
     meta?: Record<string, unknown>;
+    /** Observes every §5 HOME PARK a migrated-in step ends at — the stack's top frame and
+     *  the slot (or sync call) that sent it home — to see where runs still return. */
+    onPark?: (park: {
+        fn: string;
+        pc: number;
+        name: string;
+        tier: string;
+        stack: string[];
+    }) => void;
     /** Trace recording (trajectory design §3): head-sampled per run, the flag rides the
      *  continuation itself (F0.__trace), records stream to the sink. Absent = zero cost.
      *  Pass a pre-built Recorder to keep a handle on it (e.g. its `dropped` counter). */
@@ -46,7 +55,7 @@ export interface MakeHostOpts {
     };
 }
 export declare function ownedUnit(v: unknown): boolean;
-export declare function makeHost({ bundle, tier, exec, owns, meta, trace, coherence: coherenceIn, twins, placement, threshold }: MakeHostOpts): Host;
+export declare function makeHost({ bundle, tier, exec, owns, meta, trace, coherence: coherenceIn, twins, placement, threshold, onPark }: MakeHostOpts): Host;
 export declare function execOver(peer: Peer, req: ResourceRequest, meta?: Record<string, unknown>): Promise<unknown>;
 export declare function answerWith(peer: Peer, hostFor: (id: string) => Host | Promise<Host>, field?: string): void;
 export declare function batchExec(peer: Peer): Peer;

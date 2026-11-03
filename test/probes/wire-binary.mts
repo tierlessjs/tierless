@@ -99,7 +99,7 @@ check(`a 1000-int column packs tightly (${idBin} B binary vs ${idJson} B JSON = 
   const back = decodeWireBinary(bytes, { tier: home });
   check("binary: view deltas decode with their fields, path and gone keys", back.deltas.length === 3 && back.deltas[0].path?.join() === "opts" && back.deltas[0].gone?.join() === "old" && back.deltas[2].owner === "other");
   check("binary: our deltas landed on the live object — fields set, keys gone, an array shortened", live.opts.sep === "-" && !("old" in live.opts) && (live.opts as any).re instanceof RegExp && live.list.length === 2 && live.list[0] === 9);
-  check("binary: a delta value shared with a frame slot is one object at home", (live.opts as any).added === back.stack[0].args[0] && (live.opts as any).added.fresh === true);
+  check("binary: a delta value shared with a frame slot is one object at home", (live.opts as any).added === (back.stack[0].args as unknown[])[0] && (live.opts as any).added.fresh === true);
   check("binary: a delta owned elsewhere is not applied", !("not" in live));
 }
 

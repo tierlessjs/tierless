@@ -82,7 +82,7 @@ export function ownedUnit(v) {
 let nextSid = 1;
 const TE = new TextEncoder();
 const TD = new TextDecoder();
-export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn, twins, placement, threshold }) {
+export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn, twins, placement, threshold, onPark }) {
     const placeProfile = placement?.profile ?? null;
     const placeMode = placement?.mode ?? "trajectory";
     const placeStability = placement?.stability ?? 0.9;
@@ -230,6 +230,10 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
             const deltas = viewDeltas(views);
             if (res.done)
                 return { obj: { type: "done", value: res.value, ...carry() }, ...binOf(deltas) };
+            if (onPark && res.request.op === "home") {
+                const t = res.stack[res.stack.length - 1];
+                onPark({ fn: t.fn, pc: t.pc, name: res.request.name, tier: res.request.tier, stack: res.stack.map((f) => f.fn + "@" + f.pc) });
+            }
             return { obj: { type: "suspend", ...carry() }, bin: ship(sid, res, deltas) };
         }
         catch (e) {
