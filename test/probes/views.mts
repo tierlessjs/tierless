@@ -53,7 +53,9 @@ export function Dialog(props) {
   async function replaceMember(id) { const a = await client.scopes.a(id); lib.opts = { sep: "x" }; return await client.scopes.b(a, lib.opts.sep); }
   async function writeGetter(id) { const a = await client.scopes.a(id); lib.size = 1; return await client.scopes.b(a, lib.size); }
   async function useRegExp(id) { const a = await client.scopes.a(id); const m = lib.re.test("abc"); return await client.scopes.b(a, m); }
-  return { readNamed, readComputed, readArray, readGetter, callMethod, write, push, pass, writeComputed, writeMany, replaceMember, writeGetter, useRegExp };
+  async function stringifyPlain(id) { const a = await client.scopes.a(id); const s = JSON.stringify(lib.opts); return await client.scopes.b(a, s); }
+  async function stringifyInst(id) { const a = await client.scopes.a(id); const s = JSON.stringify(lib); return await client.scopes.b(a, s.length); }
+  return { readNamed, readComputed, readArray, readGetter, callMethod, write, push, pass, writeComputed, writeMany, replaceMember, writeGetter, useRegExp, stringifyPlain, stringifyInst };
 }`;
 const { code, meta } = compile(SRC, { filename: "views.js", closures: true });
 const GEN = fileURLToPath(new URL("../.gen/", import.meta.url));
@@ -61,7 +63,7 @@ mkdirSync(GEN, { recursive: true });
 writeFileSync(join(GEN, "views.mjs"), code);
 const mod = await import(pathToFileURL(join(GEN, "views.mjs")).href);
 const bundle = { PROGRAMS: mod.PROGRAMS, __unwind: mod.__unwind, __slots: mod.__slots };
-check("the thirteen chains compiled", (meta.methods as Array<{ program: string | null }>).filter((m) => m.program).length === 13, JSON.stringify(meta.methods));
+check("the fifteen chains compiled", (meta.methods as Array<{ program: string | null }>).filter((m) => m.program).length === 15, JSON.stringify(meta.methods));
 const refsAt = (prog: string): string => JSON.stringify(mod.__slots[prog]);
 check("the compiler records the computed read as a move through computed access (\"[..]=\": three levels) and the named read as a plain chain",
   refsAt("Dialog$readComputed").includes('"args[0].lib.data[..]="') && refsAt("Dialog$readNamed").includes('"args[0].lib.opts.sep="'), refsAt("Dialog$readComputed") + " " + refsAt("Dialog$readNamed"));
@@ -119,6 +121,8 @@ await stays("a write (the view takes it; the delta lands at home)", "write", [1]
 await stays("an element write, a delete, a new member, an instance field, a nested update", "writeMany", [1], "2/9:undefined:2:5", new Lib(), (l) => l.list[0] === 9 && !("sep" in l.opts) && (l.opts.extra as { n: number }).n === 2 && l.hits === 5);
 await stays("a member replaced by a local object (a copy lands at home)", "replaceMember", [1], "2/x", new Lib(), (l) => l.opts.sep === "x");
 await stays("a RegExp member (a copy) used natively", "useRegExp", [1], "2/true");
+await stays("JSON.stringify of a complete plain view (exact: plain data all the way down)", "stringifyPlain", [1], '2/{"sep":"."}');
+await home("JSON.stringify of an instance view (a toJSON could be missed: the home object decides)", "stringifyInst", [1], "2/" + JSON.stringify(new Lib()).length);
 await home("a write to a name the prototype has (an accessor: the setter runs at home)", "writeGetter", [1], "2/30", new Lib(), (l) => l.sizeSet === 1);
 await home("an array push", "push", [1], "2/4", new Lib(), (l) => l.list.length === 4 && l.list[3] === 9);
 await home("the object passed to a native helper", "pass", [1], "2/2", new Lib(), (l) => (l.opts as { touched?: boolean }).touched === true);

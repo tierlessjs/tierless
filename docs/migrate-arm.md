@@ -60,8 +60,10 @@ mid-segment (design.md §8). So the check happens BEFORE the segment runs, in th
   of an object/array literal in a move statement) needs the chain to walk; a move through
   one computed level (`"[]="`) needs the object indexed to answer any key (a plain view or
   a local object, not an instance view); through more levels (`"[..]="`), or as a value
-  (`"[]"`), the object reached must be complete; a value read of a view object, a call on
-  it, or passing it to native code finds its handle and goes home.
+  (`"[]"`), the object reached must be complete — as must the argument of `JSON.stringify`
+  (plain data all the way down, so the text is exact; an instance view's `toJSON` could be
+  missed); a value read of a view object, a call on it, or passing it to other native code
+  finds its handle and goes home.
 - **Writable views:** a write (`"!"` names the member: `args[0].opts.sep!`; `"[]!"`
   through a computed key) lands on the view when the object written is a plain view, a
   local object, or a registered class's instance view whose prototype lacks the member (a

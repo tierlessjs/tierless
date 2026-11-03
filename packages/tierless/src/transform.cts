@@ -738,6 +738,11 @@ function compileFn(node: t.FunctionDeclaration): string {
         // …or the sole argument of a shallow pure builtin that answers the same for a view
         // (Array.isArray: a view array is an array; Object.keys: a view has the original's own keys)
         const pureArg = /\b(?:Array\.isArray|Object\.keys)\($/.test(before) && /^\s*\)/.test(tail);
+        // …or the sole argument of a DEEP pure builtin (JSON.stringify): exact over a
+        // COMPLETE object — plain data all the way down, no handle, no instance view whose
+        // toJSON could be missed — so it needs the "[..]" mode (runtime.mts parkHome)
+        const deepPureArg = /\bJSON\.stringify\($/.test(before) && /^\s*\)/.test(tail);
+        if (deepPureArg && !call) { out.add([slot, ...members].join(".") + "[..]"); continue; }
         const test = !call && (/^\s*(?:[!=]==?)\s*(?:null|undefined|void 0)\b/.test(tail) || /(?:!|\btypeof\s*)$/.test(before) || cond || pureArg);
         // a read whose value only MOVES into a frame slot: the whole right side of
         // `F.x = …;`, or a bare operand of ||, &&, ?? or ?: inside it (the slot's later

@@ -151,14 +151,25 @@ admin-client calls. The twins module shares it by name (`shareFunction` on both 
 it runs on the gateway; its browser-only imports are stubbed in the gateway's bundle
 (`twinsStubs`), which stays at 3 KB.
 
-Checked end to end after these compiler and runtime changes (last on 2026-11-01, with
-writable views and the stop rule's write and computed-access modes): the ported arm
-rebuilt, the four specs that exercise the chains (`autentication/flows.spec.ts`,
-`identity-providers/saml.spec.ts`, `organization/idp.spec.ts`, `users/main.spec.ts`)
-profiled and run on the locked profile at 80 ms — 47 of 48 pass (the failure is
-`flows.spec.ts:165`, under "Known failures"), 64 migrated crossings. With nothing
-migrating, 45 of 48: `flows.spec.ts:165` and `:217` (the unlimited-bandwidth race above)
-and one 180 s timeout in `users/main.spec.ts:285` that passed when the spec was re-run.
+Checked end to end after these compiler and runtime changes (last on 2026-11-03, with
+writable views, the stop rule's write and computed-access modes, and module code by
+name): the ported arm rebuilt, the four specs that exercise the chains
+(`autentication/flows.spec.ts`, `identity-providers/saml.spec.ts`,
+`organization/idp.spec.ts`, `users/main.spec.ts`) profiled and run on the locked profile
+at 80 ms — 48 of 48 pass, 64 migrated crossings. With nothing migrating, 45 of 48:
+`flows.spec.ts:165` and `:217` (the unlimited-bandwidth race above) and a 180 s timeout
+in `users/main.spec.ts:285`, seen in 2 of 4 nothing-migrating runs and in no migrating
+run, not investigated.
+
+Where the 64 migrated runs come home (`TIERLESS_PARK_LOG`, the gateway's park log):
+before module code by name, 38 parks at 7 sites, 34 of them a loader parking on a
+captured helper (`addTrailingSlash`, `getAuthorizationHeaders`, `fetchWithError`) right
+after its first twin call — a migration that gained nothing. After: 30 parks at 6 sites,
+`RequiredActions.loadActions` whole on the gateway; `AuthenticationSection.loader` now
+runs its REST fetch there and comes home only for `useLocaleSort`'s sort; the rest park
+on hook results and callbacks (`addAlert`, `navigate`, `onClose`, `t`) after their last
+server call, which costs no extra crossing; `RealmSettingsTabs.save` parks on
+`JSON.stringify(savedRealm)`.
 
 ## The whole suite
 
