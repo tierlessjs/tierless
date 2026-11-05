@@ -1,0 +1,111 @@
+{"id":"clients/main.spec.ts:43 › Clients test › Should test clientId required","status":"passed","retry":0,"durationMs":10674,"startMs":1793902909902,"ioWaitMs":1670}
+{"id":"clients/main.spec.ts:48 › Clients test › Cancel create should return to clients","status":"passed","retry":0,"durationMs":8772,"startMs":1793902923254,"ioWaitMs":1617}
+{"id":"clients/main.spec.ts:54 › Clients test › Should be able to create a client","status":"passed","retry":0,"durationMs":9668,"startMs":1793902932042,"ioWaitMs":1797}
+{"id":"clients/main.spec.ts:67 › Clients test › Should fail creating client that already exists","status":"passed","retry":0,"durationMs":9476,"startMs":1793902941726,"ioWaitMs":1709}
+{"id":"clients/main.spec.ts:82 › Clients test › Create client","status":"passed","retry":0,"durationMs":10689,"startMs":1793902951216,"ioWaitMs":2080}
+{"id":"clients/main.spec.ts:112 › Clients test › Search for clients","status":"passed","retry":0,"durationMs":8137,"startMs":1793902961922,"ioWaitMs":1769}
+{"id":"clients/main.spec.ts:133 › Clients test › Clients import › Import client","status":"passed","retry":0,"durationMs":8873,"startMs":1793902970070,"ioWaitMs":1558}
+{"id":"clients/registration-policies.spec.ts:45 › Client registration policies tab › Anonymous client policies subtab › check anonymous clients list is not empty","status":"passed","retry":0,"durationMs":7846,"startMs":1793902980417,"ioWaitMs":1307}
+{"id":"clients/registration-policies.spec.ts:50 › Client registration policies tab › Anonymous client policies subtab › add anonymous client registration policy","status":"passed","retry":0,"durationMs":8790,"startMs":1793902989126,"ioWaitMs":1959}
+{"id":"clients/registration-policies.spec.ts:64 › Client registration policies tab › Anonymous client policies subtab › edit anonymous client registration policy","status":"passed","retry":0,"durationMs":8679,"startMs":1793902997927,"ioWaitMs":1939}
+{"id":"clients/registration-policies.spec.ts:78 › Client registration policies tab › Anonymous client policies subtab › delete anonymous client registration policy","status":"passed","retry":0,"durationMs":8031,"startMs":1793903006618,"ioWaitMs":1772}
+{"id":"clients/registration-policies.spec.ts:97 › Client registration policies tab › Authenticated client policies subtab › check authenticated clients list is not empty","status":"passed","retry":0,"durationMs":7816,"startMs":1793903014661,"ioWaitMs":1659}
+{"id":"clients/registration-policies.spec.ts:102 › Client registration policies tab › Authenticated client policies subtab › add authenticated client registration policy","status":"passed","retry":0,"durationMs":8767,"startMs":1793903022493,"ioWaitMs":1969}
+{"id":"clients/registration-policies.spec.ts:116 › Client registration policies tab › Authenticated client policies subtab › edit authenticated client registration policy","status":"passed","retry":0,"durationMs":8578,"startMs":1793903031278,"ioWaitMs":1944}
+{"id":"clients/registration-policies.spec.ts:129 › Client registration policies tab › Authenticated client policies subtab › delete authenticated client registration policy","status":"passed","retry":0,"durationMs":8070,"startMs":1793903039871,"ioWaitMs":1807}
+{"id":"clients/registration-policies.spec.ts:151 › Accessibility tests for client registration policies › Check accessibility violations","status":"passed","retry":0,"durationMs":8208,"startMs":1793903048699,"ioWaitMs":1271}
+{"id":"clients/role.spec.ts:80 › Roles tab test › should fail to create client role with empty name","status":"passed","retry":0,"durationMs":9880,"startMs":1793903056946,"ioWaitMs":1524}
+{"id":"clients/role.spec.ts:92 › Roles tab test › should create client role","status":"passed","retry":0,"durationMs":10341,"startMs":1793903067994,"ioWaitMs":1977}
+{"id":"clients/role.spec.ts:102 › Roles tab test › should update client role description","status":"failed","retry":0,"durationMs":14452,"startMs":1793903078353,"ioWaitMs":1804}
+{"id":"clients/role.spec.ts:114 › Roles tab test › should add and delete attribute to client role","status":"skipped","retry":0,"durationMs":0,"startMs":1793903093579,"ioWaitMs":0}
+{"id":"clients/role.spec.ts:133 › Roles tab test › should fail to create duplicate client role","status":"skipped","retry":0,"durationMs":0,"startMs":1793903093580,"ioWaitMs":0}
+{"id":"clients/role.spec.ts:146 › Roles tab test › should search existing and non-existing client role","status":"skipped","retry":0,"durationMs":0,"startMs":1793903093580,"ioWaitMs":0}
+{"id":"clients/role.spec.ts:166 › Roles tab test › should handle associated realm roles","status":"skipped","retry":0,"durationMs":0,"startMs":1793903093580,"ioWaitMs":0}
+{"id":"clients/role.spec.ts:183 › Roles tab test › should handle associated client roles","status":"skipped","retry":0,"durationMs":0,"startMs":1793903093580,"ioWaitMs":0}
+{"id":"clients/role.spec.ts:194 › Roles tab test › should delete client role","status":"skipped","retry":0,"durationMs":0,"startMs":1793903093580,"ioWaitMs":0}
+{"id":"clients/role.spec.ts:204 › Roles tab test › Should delete client role from role details test","status":"skipped","retry":0,"durationMs":0,"startMs":1793903093580,"ioWaitMs":0}
+{"id":"clients/saml.spec.ts:59 › Fine Grain SAML Endpoint Configuration › should set Terms of service URL","status":"passed","retry":0,"durationMs":8698,"startMs":1793903094852,"ioWaitMs":1153}
+{"id":"clients/saml.spec.ts:75 › Fine Grain SAML Endpoint Configuration › should show error for invalid terms of service URL","status":"passed","retry":0,"durationMs":8621,"startMs":1793903104787,"ioWaitMs":1449}
+{"id":"clients/saml.spec.ts:107 › Clients SAML tests › should display the saml sections on details screen","status":"passed","retry":0,"durationMs":8261,"startMs":1793903113617,"ioWaitMs":1057}
+{"id":"clients/saml.spec.ts:113 › Clients SAML tests › should save force name id format","status":"passed","retry":0,"durationMs":8479,"startMs":1793903123685,"ioWaitMs":1363}
+{"id":"clients/saml.spec.ts:119 › Clients SAML tests › should not disable signature when cancel","status":"passed","retry":0,"durationMs":8353,"startMs":1793903132181,"ioWaitMs":1344}
+{"id":"clients/saml.spec.ts:127 › Clients SAML tests › should disable client signature","status":"passed","retry":0,"durationMs":8484,"startMs":1793903140553,"ioWaitMs":1437}
+{"id":"clients/saml.spec.ts:136 › Clients SAML tests › should enable Encryption keys config","status":"passed","retry":0,"durationMs":12312,"startMs":1793903149053,"ioWaitMs":3613}
+{"id":"clients/saml.spec.ts:190 › Clients SAML tests › should check SAML capabilities","status":"passed","retry":0,"durationMs":8858,"startMs":1793903161376,"ioWaitMs":1266}
+{"id":"clients/saml.spec.ts:212 › Clients SAML tests › should check access settings","status":"passed","retry":0,"durationMs":8998,"startMs":1793903170253,"ioWaitMs":1559}
+{"id":"clients/scope.spec.ts:105 › Client details - Client scopes subtab › Should list client scopes","status":"passed","retry":0,"durationMs":10717,"startMs":1793903179458,"ioWaitMs":1646}
+{"id":"clients/scope.spec.ts:111 › Client details - Client scopes subtab › Should search existing client scope by name","status":"passed","retry":0,"durationMs":9443,"startMs":1793903192382,"ioWaitMs":1894}
+{"id":"clients/scope.spec.ts:117 › Client details - Client scopes subtab › Should search non-existent client scope by name","status":"passed","retry":0,"durationMs":9576,"startMs":1793903201838,"ioWaitMs":1897}
+{"id":"clients/scope.spec.ts:122 › Client details - Client scopes subtab › Should add client scope with optional assigned type","status":"passed","retry":0,"durationMs":10110,"startMs":1793903211430,"ioWaitMs":2090}
+{"id":"clients/scope.spec.ts:141 › Client details - Client scopes subtab › Should change item AssignedType to default from search bar","status":"passed","retry":0,"durationMs":10345,"startMs":1793903221560,"ioWaitMs":2274}
+{"id":"clients/scope.spec.ts:155 › Client details - Client scopes subtab › Should show items on next page are more than 11","status":"passed","retry":0,"durationMs":9649,"startMs":1793903231920,"ioWaitMs":1880}
+{"id":"clients/scope.spec.ts:161 › Client details - Client scopes subtab › Should remove client scope","status":"passed","retry":0,"durationMs":9988,"startMs":1793903241584,"ioWaitMs":2261}
+{"id":"clients/scope.spec.ts:170 › Client details - Client scopes subtab › Should remove multiple client scopes from search bar","status":"passed","retry":0,"durationMs":10491,"startMs":1793903251584,"ioWaitMs":2189}
+{"id":"clients/scope.spec.ts:216 › Client scopes evaluate subtab › check effective protocol mappers list","status":"passed","retry":0,"durationMs":10051,"startMs":1793903262649,"ioWaitMs":1601}
+{"id":"clients/scope.spec.ts:226 › Client scopes evaluate subtab › check generated id token and user info","status":"passed","retry":0,"durationMs":9982,"startMs":1793903274078,"ioWaitMs":2103}
+{"id":"events/list.spec.ts:64 › Events tests › User events list empty › Show empty when no save events","status":"passed","retry":0,"durationMs":8147,"startMs":1793903284625,"ioWaitMs":1408}
+{"id":"events/list.spec.ts:97 › Events tests › User events with events › Expand item to see more information","status":"passed","retry":0,"durationMs":7557,"startMs":1793903293575,"ioWaitMs":1519}
+{"id":"events/list.spec.ts:102 › Events tests › User events with events › Search by user ID","status":"passed","retry":0,"durationMs":6981,"startMs":1793903311145,"ioWaitMs":1149}
+{"id":"events/list.spec.ts:116 › Events tests › User events with events › Filters the type select options while typing","status":"passed","retry":0,"durationMs":7389,"startMs":1793903318140,"ioWaitMs":1241}
+{"id":"events/list.spec.ts:134 › Events tests › User events with events › Check accessibility on user events tab","status":"passed","retry":0,"durationMs":6355,"startMs":1793903325544,"ioWaitMs":1041}
+{"id":"events/list.spec.ts:138 › Events tests › User events with events › Check accessibility on admin events tab","status":"passed","retry":0,"durationMs":8010,"startMs":1793903331919,"ioWaitMs":1229}
+{"id":"events/list.spec.ts:143 › Events tests › User events with events › creating user","status":"passed","retry":0,"durationMs":7393,"startMs":1793903339950,"ioWaitMs":1309}
+{"id":"groups/attributes.spec.ts:30 › Attributes › Add/remove attribute","status":"failed","retry":0,"durationMs":7988,"startMs":1793903347864,"ioWaitMs":1545}
+{"id":"groups/list.spec.ts:51 › Group test › Create group test","status":"passed","retry":0,"durationMs":9154,"startMs":1793903357294,"ioWaitMs":1606}
+{"id":"groups/list.spec.ts:70 › Group test › Fail to create group with empty name","status":"passed","retry":0,"durationMs":7684,"startMs":1793903367231,"ioWaitMs":1234}
+{"id":"groups/list.spec.ts:78 › Group test › Fail to create group with duplicated name","status":"passed","retry":0,"durationMs":8154,"startMs":1793903374937,"ioWaitMs":1417}
+{"id":"groups/list.spec.ts:105 › Search group under current group › Search group that exists","status":"passed","retry":0,"durationMs":8146,"startMs":1793903384064,"ioWaitMs":1230}
+{"id":"groups/list.spec.ts:110 › Search group under current group › Search group that does not exists","status":"passed","retry":0,"durationMs":8178,"startMs":1793903392226,"ioWaitMs":1225}
+{"id":"groups/list.spec.ts:115 › Search group under current group › Duplicate group from item bar","status":"failed","retry":0,"durationMs":13136,"startMs":1793903400417,"ioWaitMs":1243}
+{"id":"groups/list.spec.ts:122 › Search group under current group › Delete group from item bar","status":"skipped","retry":0,"durationMs":0,"startMs":1793903413623,"ioWaitMs":0}
+{"id":"groups/list.spec.ts:129 › Search group under current group › Delete group from search bar","status":"skipped","retry":0,"durationMs":0,"startMs":1793903413623,"ioWaitMs":0}
+{"id":"groups/list.spec.ts:137 › Search group under current group › Edit group","status":"skipped","retry":0,"durationMs":0,"startMs":1793903413623,"ioWaitMs":0}
+{"id":"groups/list.spec.ts:147 › Search group under current group › Delete group from group details","status":"skipped","retry":0,"durationMs":0,"startMs":1793903413623,"ioWaitMs":0}
+{"id":"groups/list.spec.ts:155 › Search group under current group › Check a11y violations on groups page","status":"skipped","retry":0,"durationMs":0,"startMs":1793903413623,"ioWaitMs":0}
+{"id":"groups/members.spec.ts:66 › Members › Add member from search bar","status":"passed","retry":0,"durationMs":8723,"startMs":1793903414919,"ioWaitMs":1133}
+{"id":"groups/members.spec.ts:71 › Members › Show members with sub-group users","status":"passed","retry":0,"durationMs":9952,"startMs":1793903425072,"ioWaitMs":2692}
+{"id":"groups/members.spec.ts:96 › Members › Add member from empty state","status":"passed","retry":0,"durationMs":9443,"startMs":1793903435043,"ioWaitMs":2173}
+{"id":"groups/members.spec.ts:104 › Members › Leave group from search bar","status":"passed","retry":0,"durationMs":8818,"startMs":1793903444500,"ioWaitMs":1944}
+{"id":"groups/members.spec.ts:114 › Members › Leave group from item bar","status":"passed","retry":0,"durationMs":8552,"startMs":1793903453333,"ioWaitMs":1882}
+{"id":"groups/members.spec.ts:123 › Members › Show memberships from item bar","status":"passed","retry":0,"durationMs":9127,"startMs":1793903461903,"ioWaitMs":2156}
+{"id":"groups/role.spec.ts:51 › Role mappings › Check empty state","status":"passed","retry":0,"durationMs":7755,"startMs":1793903472069,"ioWaitMs":1129}
+{"id":"groups/role.spec.ts:55 › Role mappings › Assign roles from empty state","status":"passed","retry":0,"durationMs":8698,"startMs":1793903480376,"ioWaitMs":1680}
+{"id":"groups/role.spec.ts:64 › Role mappings › Check hide inherited roles option","status":"passed","retry":0,"durationMs":8293,"startMs":1793903489086,"ioWaitMs":1664}
+{"id":"groups/role.spec.ts:72 › Role mappings › Remove roles","status":"passed","retry":0,"durationMs":8636,"startMs":1793903497396,"ioWaitMs":1863}
+{"id":"identity-providers/default-trust.spec.ts:33 › Default Trust identity provider test › should only show trust material settings","status":"failed","retry":0,"durationMs":10802,"startMs":1793903506320,"ioWaitMs":1487}
+{"id":"identity-providers/default-trust.spec.ts:57 › Default Trust identity provider test › should create and edit a Default Trust provider","status":"skipped","retry":0,"durationMs":0,"startMs":1793903517186,"ioWaitMs":0}
+{"id":"identity-providers/jwt-authorization-grant.spec.ts:26 › JWT Authorization Grant identity provider test › should create a JWT Authorization Grant provider with JWKS url","status":"passed","retry":0,"durationMs":8691,"startMs":1793903518337,"ioWaitMs":1701}
+{"id":"identity-providers/jwt-authorization-grant.spec.ts:71 › JWT Authorization Grant identity provider test › should create a JWT Authorization Grant provider with public key pem","status":"passed","retry":0,"durationMs":9840,"startMs":1793903527168,"ioWaitMs":2049}
+{"id":"identity-providers/kubernetes.spec.ts:17 › Kubernetes identity provider test › should create a Kubernetes provider","status":"passed","retry":0,"durationMs":8381,"startMs":1793903537069,"ioWaitMs":1682}
+{"id":"identity-providers/kubernetes.spec.ts:41 › Kubernetes identity provider test › should set and persist federated client assertion max expiration","status":"passed","retry":0,"durationMs":8499,"startMs":1793903545466,"ioWaitMs":1851}
+{"id":"identity-providers/oidc.spec.ts:36 › OIDC identity provider test › should create an OIDC provider using discovery url","status":"failed","retry":0,"durationMs":15524,"startMs":1793903554167,"ioWaitMs":1740}
+{"id":"identity-providers/oidc.spec.ts:93 › Edit OIDC Provider › should add OIDC mapper of type Attribute Importer","status":"passed","retry":0,"durationMs":9492,"startMs":1793903571203,"ioWaitMs":1773}
+{"id":"identity-providers/oidc.spec.ts:102 › Edit OIDC Provider › should add OIDC mapper of type Claim To Role","status":"passed","retry":0,"durationMs":9317,"startMs":1793903580844,"ioWaitMs":1788}
+{"id":"identity-providers/oidc.spec.ts:109 › Edit OIDC Provider › should cancel the addition of the OIDC mapper","status":"passed","retry":0,"durationMs":9367,"startMs":1793903590186,"ioWaitMs":1689}
+{"id":"identity-providers/saml-signature-defaults.spec.ts:7 › should enable SAML signature switches by default","status":"timedOut","retry":0,"durationMs":180025,"startMs":1793903599591,"ioWaitMs":535}
+{"id":"identity-providers/saml.spec.ts:29 › SAML identity provider test › should create a SAML provider using entity descriptor","status":"passed","retry":0,"durationMs":11079,"startMs":1793903781162,"ioWaitMs":1517}
+{"id":"identity-providers/saml.spec.ts:55 › SAML identity provider test › should add auth constraints to existing SAML provider","status":"passed","retry":0,"durationMs":8569,"startMs":1793903792555,"ioWaitMs":1554}
+{"id":"identity-providers/saml.spec.ts:78 › SAML identity provider test › should add SAML mapper of type SAML mapper","status":"passed","retry":0,"durationMs":9121,"startMs":1793903801141,"ioWaitMs":1880}
+{"id":"identity-providers/saml.spec.ts:78 › SAML identity provider test › should add SAML mapper of type SAML Username Template Importer Mapper","status":"passed","retry":0,"durationMs":8855,"startMs":1793903810275,"ioWaitMs":1813}
+{"id":"identity-providers/saml.spec.ts:78 › SAML identity provider test › should add SAML mapper of type Hardcoded User Session Attribute","status":"passed","retry":0,"durationMs":9605,"startMs":1793903819142,"ioWaitMs":1902}
+{"id":"identity-providers/saml.spec.ts:78 › SAML identity provider test › should add SAML mapper of type Attribute Importer","status":"passed","retry":0,"durationMs":9590,"startMs":1793903828762,"ioWaitMs":1942}
+{"id":"identity-providers/saml.spec.ts:78 › SAML identity provider test › should add SAML mapper of type Hardcoded Role","status":"passed","retry":0,"durationMs":9569,"startMs":1793903838367,"ioWaitMs":1857}
+{"id":"identity-providers/saml.spec.ts:78 › SAML identity provider test › should add SAML mapper of type SAML Attribute To Role","status":"passed","retry":0,"durationMs":9470,"startMs":1793903847959,"ioWaitMs":1858}
+{"id":"identity-providers/saml.spec.ts:87 › SAML identity provider test › should edit SAML settings","status":"passed","retry":0,"durationMs":10583,"startMs":1793903857449,"ioWaitMs":2278}
+{"id":"identity-providers/spiffe.spec.ts:17 › SPIFFE identity provider test › should create a SPIFFE provider","status":"passed","retry":0,"durationMs":8355,"startMs":1793903868060,"ioWaitMs":1666}
+{"id":"masthead/main.spec.ts:24 › Masthead tests › Desktop view › Go to account console and back to admin console","status":"passed","retry":0,"durationMs":6059,"startMs":1793903876581,"ioWaitMs":1049}
+{"id":"masthead/main.spec.ts:31 › Masthead tests › Desktop view › Sign out reaches to log in screen","status":"passed","retry":0,"durationMs":7602,"startMs":1793903882655,"ioWaitMs":1326}
+{"id":"masthead/main.spec.ts:36 › Masthead tests › Desktop view › Go to realm info","status":"passed","retry":0,"durationMs":7348,"startMs":1793903890278,"ioWaitMs":1035}
+{"id":"masthead/main.spec.ts:43 › Masthead tests › Desktop view › Should go to documentation page","status":"passed","retry":0,"durationMs":5568,"startMs":1793903897640,"ioWaitMs":1045}
+{"id":"masthead/main.spec.ts:51 › Masthead tests › Desktop view › Enable/disable help mode in desktop mode","status":"passed","retry":0,"durationMs":7197,"startMs":1793903903225,"ioWaitMs":1039}
+{"id":"masthead/main.spec.ts:63 › Masthead tests › Desktop view › Check a11y violations on load/ masthead","status":"passed","retry":0,"durationMs":4180,"startMs":1793903910437,"ioWaitMs":360}
+{"id":"masthead/main.spec.ts:88 › Masthead tests › Login works for unprivileged users › Login without privileges to see admin console","status":"passed","retry":0,"durationMs":11236,"startMs":1793903914632,"ioWaitMs":1956}
+{"id":"masthead/main.spec.ts:105 › Masthead tests › Mobile view › Mobile menu is shown when in mobile view","status":"passed","retry":0,"durationMs":5583,"startMs":1793903927243,"ioWaitMs":1051}
+{"id":"masthead/main.spec.ts:109 › Masthead tests › Mobile view › Enable/disable help mode in mobile view","status":"passed","retry":0,"durationMs":5579,"startMs":1793903932838,"ioWaitMs":1025}
+{"id":"masthead/main.spec.ts:117 › Masthead tests › Mobile view › Check a11y violations on load/ masthead","status":"passed","retry":0,"durationMs":4300,"startMs":1793903938433,"ioWaitMs":355}
+{"id":"masthead/realm.spec.ts:49 › Realm tests › should fail creating duplicated or empty name realm","status":"passed","retry":0,"durationMs":7213,"startMs":1793903942759,"ioWaitMs":1220}
+{"id":"masthead/realm.spec.ts:64 › Realm tests › should create Test realm","status":"passed","retry":0,"durationMs":8374,"startMs":1793903949988,"ioWaitMs":2331}
+{"id":"masthead/realm.spec.ts:75 › Realm tests › CRUD test of Disabled realm","status":"failed","retry":0,"durationMs":14298,"startMs":1793903958375,"ioWaitMs":2616}
+{"id":"masthead/realm.spec.ts:97 › Realm tests › should create realm from new a realm","status":"skipped","retry":0,"durationMs":0,"startMs":1793903973549,"ioWaitMs":0}
+{"id":"masthead/realm.spec.ts:114 › Realm tests › should create realm with special characters","status":"skipped","retry":0,"durationMs":0,"startMs":1793903973549,"ioWaitMs":0}
+{"id":"masthead/realm.spec.ts:122 › Realm tests › should disable preview if json very long","status":"skipped","retry":0,"durationMs":0,"startMs":1793903973549,"ioWaitMs":0}
