@@ -1,12 +1,18 @@
 export declare function hashOf(obj: unknown): string;
+/** Bytes of shipped views one side holds for a peer before the oldest go (per direction). */
+export declare const CONTENT_CACHE_BYTES: number;
 export declare class ContentStore {
-    private _byHash;
+    private _held;
     private _byObj;
-    constructor();
+    private _bytes;
+    private _budget;
+    constructor(budget?: number);
     register(obj: object): string;
     hashFor(obj: object): string | undefined;
     has(h: string): boolean;
     get(h: string): unknown;
-    put(h: string, obj: unknown): void;
+    /** receiver: hold a decoded subgraph by hash (and the producer's record of the same: `add`) */
+    put(h: string, obj: unknown, size?: number): void;
+    add(h: string, size?: number): void;
 }
-export declare const newPeerView: () => Set<string>;
+export declare const newPeerView: () => ContentStore;

@@ -98,7 +98,7 @@ void mathRef;
 const store = new ContentStore();
 const h = store.register({ a: 1 });
 void store.get(h); void store.has(h); void store.hashFor({ a: 1 });
-const peer = newPeerView(); peer.add(h);   // 0-arg factory returning a Set, not newPeerView(store)
+const peer = newPeerView(); peer.add(h); peer.add(h, 512);   // 0-arg factory returning the peer's mirror (a ContentStore), not newPeerView(store); size optional
 void hashOf({ a: 1 });
 const heap = new Heap("t1");
 const handle = heap.put({ a: 1 }); void heap.get(handle.id); void heap.version(handle.id); heap.drop(handle.id);

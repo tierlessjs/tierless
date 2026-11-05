@@ -26,14 +26,19 @@ import type { DeltaFrame, DeltaRequest } from "./wire-delta.mjs";
 // SMW5: a deltas section after the frame header — the writes a run made to views of
 // the receiver's objects (runtime.mts viewDelta), each field a graph root — and node tag
 // 12, a RegExp by value.
-const MAGIC = "SMW5";
+// SMW6: views by content — slot tag 15 (a view the peer holds: handle + content hash) and
+// a size after the hash in the content-cache wrapper (tag 8), so both sides bound their
+// caches by the same numbers.
+const MAGIC = "SMW6";
 
 // The writer/hardened reader, magic header, string table, and frame flatten/rebuild live in
 // wire-io.mts (one copy, shared with the delta wire). This file owns only what is binary-
 // format-specific: the shape table, the node/slot tag encodings, and the numeric-array packs.
 // node tags: 0 ref, 1 int, 2 float, 3 str, 4 true, 5 false, 6 null, 7 undef, 8 bigint, 9 glob, 10 symw, 11 symf
 // slot tags: 0 array, 1 object, 2 map, 3 set, 4 handle, 5 unique-symbol, 6 numeric-array,
-//            7 content-ref leaf (peer holds the hash), 8 content-cache wrapper (ship inline once, cache under hash)
+//            7 content-ref leaf (peer holds the hash), 8 content-cache wrapper (ship inline once, cache under hash + size),
+//            9 class wrapper, 10 compiled closure, 11 value-twin wrapper, 12 view, 13 shared function, 14 bound method,
+//            15 view by content (handle + hash the peer holds)
 
 const zlen = (x: number): number => { let v = x >= 0 ? x * 2 : -x * 2 - 1, n = 1; while (v >= 128) { v = Math.floor(v / 128); n++; } return n; };  // bytes of zigzag varint(x)
 
@@ -133,6 +138,7 @@ export function encodeWireBinary(stack: DeltaFrame[], request: DeltaRequest | nu
       if (s.sf) for (const [kn, vn] of s.sf) { internNode(kn); internNode(vn); }
     } else if (s.k === "H") { internHandle(s.h); if (s.st !== undefined) internNode(s.st); }
     else if (s.k === "v") { internHandle(s.h); if (s.e) { for (const e of s.e) internNode(e); } else for (const k of Object.keys(s.f)) { intern(k); internNode(s.f[k]); } }
+    else if (s.k === "cv") { internHandle(s.h); intern(s.c); }        // a view by content: handle + the hash the peer holds
     else if (s.k === "sf") { intern(s.name); internHandle(s.h); }
     else if (s.k === "bnd") { intern(s.cls); intern(s.name); intern(s.hm.owner); intern(String(s.hm.id)); internNode(s.s); for (const e of s.a) internNode(e); }
     else if (s.k === "symu") { if (s.d !== undefined) intern(s.d); }
@@ -157,7 +163,7 @@ export function encodeWireBinary(stack: DeltaFrame[], request: DeltaRequest | nu
   for (let i = 0; i < graph.objs.length; i++) {
     const s: any = graph.objs[i];
     if (s.k === "c") { w.u8(7); w.varu(intern(s.h)); continue; }        // content-ref leaf: the peer holds it, so only the hash crosses
-    if (s.cah !== undefined) { w.u8(8); w.varu(intern(s.cah)); }        // wrap: cache the slot that follows under this hash (shipped inline once)
+    if (s.cah !== undefined) { w.u8(8); w.varu(intern(s.cah)); w.varu(s.csz ?? 0); }   // wrap: cache the slot that follows under this hash, at this size (shipped inline once)
     if (s.cls !== undefined) { w.u8(9); w.varu(intern(s.cls)); w.u8(s.err ? 1 : 0); }   // wrap: the object that follows carries this class (graph.mts shareClass)
     if (s.tw !== undefined) { w.u8(11); w.varu(intern(s.tw.owner)); w.varu(intern(String(s.tw.id))); }   // wrap: the object that follows is a value twin of this home instance
     if (s.k === "a") {
@@ -181,6 +187,7 @@ export function encodeWireBinary(stack: DeltaFrame[], request: DeltaRequest | nu
     else if (s.k === "set") { w.u8(3); w.varu(s.e.length); for (const e of s.e) writeNode(w, e, intern); }
     else if (s.k === "H") { w.u8(4); writeHandle(w, s.h, intern, s.st !== undefined); if (s.st !== undefined) writeNode(w, s.st, intern); }
     else if (s.k === "v") { w.u8(12); writeHandle(w, s.h, intern, false); if (s.e) { w.u8(1); w.varu(s.e.length); for (const e of s.e) writeNode(w, e, intern); } else { w.u8(0); const ks = Object.keys(s.f); w.varu(ks.length); for (const k of ks) { w.varu(intern(k)); writeNode(w, s.f[k], intern); } } }
+    else if (s.k === "cv") { w.u8(15); writeHandle(w, s.h, intern, false); w.varu(intern(s.c)); }
     else if (s.k === "sf") { w.u8(13); w.varu(intern(s.name)); writeHandle(w, s.h, intern, false); }
     else if (s.k === "bnd") { w.u8(14); w.varu(intern(s.cls)); w.varu(intern(s.name)); w.varu(intern(s.hm.owner)); w.varu(intern(String(s.hm.id))); writeNode(w, s.s, intern); w.varu(s.a.length); for (const e of s.a) writeNode(w, e, intern); }
     else if (s.k === "symu") { w.u8(5); if (s.d !== undefined) { w.u8(1); w.varu(intern(s.d)); } else w.u8(0); }
@@ -209,11 +216,12 @@ export function decodeWireBinary(bytes: Uint8Array | ArrayBufferLike, { content 
   const roots: any[] = []; { const n = r.count(); for (let i = 0; i < n; i++) roots.push(readNode(r, S)); }
   const readSlot = (): any => {
     let t = r.u8();
-    let cah: string | undefined;
+    let cah: string | undefined, csz = 0;
     let cls: string | undefined, err = 0, tw: { owner: string; id: string } | undefined;
-    while (t === 8 || t === 9 || t === 11) { if (t === 8) cah = S(r.varu()); else if (t === 9) { cls = S(r.varu()); err = r.u8(); } else { const owner = S(r.varu()); tw = { owner, id: S(r.varu()) }; } t = r.u8(); }                                      // content-cache wrapper — unwrapped ITERATIVELY so a hostile 0x08 chain can't blow the stack
+    while (t === 8 || t === 9 || t === 11) { if (t === 8) { cah = S(r.varu()); csz = r.varu(); } else if (t === 9) { cls = S(r.varu()); err = r.u8(); } else { const owner = S(r.varu()); tw = { owner, id: S(r.varu()) }; } t = r.u8(); }                                      // content-cache wrapper — unwrapped ITERATIVELY so a hostile 0x08 chain can't blow the stack
     let slot: any;
     if (t === 7) slot = { k: "c", h: S(r.varu()) };                                         // content-ref leaf — decodeGraph resolves it against the content store
+    else if (t === 15) { const { h } = readHandle(r, S); slot = { k: "cv", h, c: S(r.varu()) }; }   // a view by content — decodeGraph copies it from the content held here
     else if (t === 0) { const c = r.count(), e: any[] = []; for (let j = 0; j < c; j++) e.push(readNode(r, S)); slot = { k: "a", e }; }
     else if (t === 1) { const sh = SH(r.varu()); const f: Record<string, unknown> = {}, h: Record<string, number> = {}; for (const [si, ne] of sh) { const key = S(si); const val = readNode(r, S); if (key === "__proto__") continue; f[key] = val; if (ne) h[key] = 1; } slot = { k: "o", f }; if (Object.keys(h).length) slot.h = h; const sfn = r.count(); if (sfn) { slot.sf = []; for (let j = 0; j < sfn; j++) { const kn = readNode(r, S), vn = readNode(r, S); slot.sf.push([kn, vn, r.u8()]); } } }
     else if (t === 2) { const c = r.count(), e: [any, any][] = []; for (let j = 0; j < c; j++) e.push([readNode(r, S), readNode(r, S)]); slot = { k: "map", e }; }
@@ -231,7 +239,7 @@ export function decodeWireBinary(bytes: Uint8Array | ArrayBufferLike, { content 
       else throw new RangeError("wire-binary: bad numeric-array sub-kind " + sub);
       slot = { k: "a", e }; }
     else throw new RangeError("wire-binary: bad slot tag " + t);
-    if (cah !== undefined) slot.cah = cah;
+    if (cah !== undefined) { slot.cah = cah; slot.csz = csz; }
     if (cls !== undefined && slot.k === "o") { slot.cls = cls; if (err) slot.err = 1; }
     if (tw !== undefined && slot.k === "o") slot.tw = tw;
     return slot;

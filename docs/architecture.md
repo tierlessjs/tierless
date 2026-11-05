@@ -106,7 +106,10 @@ each distinct object is one entry and every reference is `{k:"r", id}`. That:
 - **content-addresses immutable subgraphs** — a registered immutable subgraph (code,
   class shapes, config) ships inline once and then by content hash, resolving on the
   peer to the copy it cached (`content.mts`); the same by-reference idea as globals,
-  generalized from well-known names to any immutable subgraph;
+  generalized from well-known names to any immutable subgraph. A view's plain data
+  member travels the same way without registration: hashed as it ships, cached by the
+  receiver, named by its hash on every later crossing while its content stands
+  (docs/migrate-arm.md "views by content");
 - carries the non-JSON cases faithfully (`undefined`, BigInt, symbols, Map/Set,
   non-enumerable + symbol-keyed props) and ships host globals and well-known symbols
   by reference rather than copying them.

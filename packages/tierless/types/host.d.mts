@@ -1,3 +1,4 @@
+import { type ContentStoreView, type ContentPeerView } from "./graph.mjs";
 import { type RecorderOpts, type Recorder, type Profile } from "./trace.mjs";
 import { type Coherence } from "./coherence.mjs";
 import type { Bundle, Exec, ResourceRequest, Peer, Host } from "./types.mjs";
@@ -42,6 +43,13 @@ export interface MakeHostOpts {
      *  as a §5 handle instead of by copy — the engine's move-the-data-or-the-stack choice.
      *  Default 8192 (wire-binary). */
     threshold?: number;
+    /** Views by content for this connection (docs/migrate-arm.md "views by content"): what
+     *  the peer holds of ours (`peer`) and what we hold of the peer's (`store`), one pair per
+     *  socket shared by every module-host on it — each side's pair mirrors the other's. */
+    content?: {
+        store: ContentStoreView;
+        peer: ContentPeerView;
+    };
     /** §6 placement for the full-tierless drive path (docs/migrate-arm.md "§6 decide"):
      *  at each park the driver prices fetch-vs-migrate from the LOCKED profile — migrate
      *  ships the whole continuation (type:"resume"), fetch pulls just the value
@@ -55,7 +63,7 @@ export interface MakeHostOpts {
     };
 }
 export declare function ownedUnit(v: unknown): boolean;
-export declare function makeHost({ bundle, tier, exec, owns, meta, trace, coherence: coherenceIn, twins, placement, threshold, onPark }: MakeHostOpts): Host;
+export declare function makeHost({ bundle, tier, exec, owns, meta, trace, coherence: coherenceIn, twins, placement, threshold, content, onPark }: MakeHostOpts): Host;
 export declare function execOver(peer: Peer, req: ResourceRequest, meta?: Record<string, unknown>): Promise<unknown>;
 export declare function answerWith(peer: Peer, hostFor: (id: string) => Host | Promise<Host>, field?: string): void;
 export declare function batchExec(peer: Peer): Peer;

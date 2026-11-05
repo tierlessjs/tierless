@@ -13,7 +13,7 @@
 // number of sessions can be in flight on one peer concurrently; the transport's
 // correlation ids keep their bounces apart.
 import { makePump, initialStack, hydrateViews, twinDelta, viewDelta, type TrackedView } from "./runtime.mjs";
-import { isCompiledFn, applyDeltas } from "./graph.mjs";
+import { isCompiledFn, applyDeltas, type ContentStoreView, type ContentPeerView } from "./graph.mjs";
 import { encodeWireBinary, decodeWireBinary, encodeArgs, decodeArgs } from "./wire-binary.mjs";
 import { RawJsonBody, RAW_TEXT } from "./transport.mjs";
 import { makeRecorder, decide, siteKey, argFeatures, type RecorderOpts, type Recorder, type Profile } from "./trace.mjs";
@@ -58,6 +58,10 @@ export interface MakeHostOpts {
    *  as a §5 handle instead of by copy — the engine's move-the-data-or-the-stack choice.
    *  Default 8192 (wire-binary). */
   threshold?: number;
+  /** Views by content for this connection (docs/migrate-arm.md "views by content"): what
+   *  the peer holds of ours (`peer`) and what we hold of the peer's (`store`), one pair per
+   *  socket shared by every module-host on it — each side's pair mirrors the other's. */
+  content?: { store: ContentStoreView; peer: ContentPeerView };
   /** §6 placement for the full-tierless drive path (docs/migrate-arm.md "§6 decide"):
    *  at each park the driver prices fetch-vs-migrate from the LOCKED profile — migrate
    *  ships the whole continuation (type:"resume"), fetch pulls just the value
@@ -118,7 +122,7 @@ let nextSid = 1;
 const TE = new TextEncoder();
 const TD = new TextDecoder();
 
-export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn, twins, placement, threshold, onPark }: MakeHostOpts): Host {
+export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn, twins, placement, threshold, content, onPark }: MakeHostOpts): Host {
   const placeProfile = placement?.profile ?? null;
   const placeMode = placement?.mode ?? "trajectory";
   const placeStability = placement?.stability ?? 0.9;
@@ -126,13 +130,16 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
   // a shipped closure invoked natively off its tier runs its program through the pump's
   // synchronous runner (runtime.mts runSync)
   const programs = (name: string): ((caps: unknown, args: unknown[]) => unknown) | undefined => (bundle.PROGRAMS[name] ? (caps, args) => pump.runSync(name, [caps, ...args]) : undefined);
-  const dopts = { programs };
+  const dopts = { programs, ...(content ? { content } : {}) };
   const coherence = coherenceIn && usesHeap(bundle) ? coherenceIn : undefined;   // per-bundle gate (see MakeHostOpts.coherence)
   const ownsBase: (tier: string) => boolean = owns || ((t) => t === tier);
   // The host also owns the heap pseudo-tiers ("@deref"/"@writeback"): a handle read or a
   // mutation's propagation is serviced HERE (this tier), never migrated.
   const ownsHere: (tier: string) => boolean = coherence ? ((t) => ownsBase(t) || coherence.owns(t)) : ownsBase;
-  const encOpts = (sid: string): EncodeOptions => (coherence ? coherence.encodeOpts(sid) : {});
+  const encOpts = (sid: string): EncodeOptions => ({ ...(coherence ? coherence.encodeOpts(sid) : {}), ...(content ? { content } : {}) });
+  // pricing a migrate (drive, below) encodes a frame that may never ship: it reads what the
+  // peer holds by content and records nothing — the frame that ships does
+  const priceOpts = (sid: string): EncodeOptions => ({ ...encOpts(sid), ...(content ? { content: { store: content.store, peer: { has: (h: string) => content.peer.has(h), add: () => {} } } } : {}) });
   const rec: Recorder | null = trace ? (isRecorder(trace) ? trace : makeRecorder(trace)) : null;
 
   // The exec the pump runs, bound to the peer the current message rides: an "@deref" is a
@@ -203,8 +210,9 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
       let fetchIt = false;
       if (placeProfile && req.op === "resource") {
         const top = cur.stack[cur.stack.length - 1];
-        wire = encodeWireBinary(cur.stack, req, encOpts(sid));
+        wire = encodeWireBinary(cur.stack, req, priceOpts(sid));
         fetchIt = decide(wire.length, siteKey(top.fn, top.pc, req.name), placeProfile, { mode: placeMode, stability: placeStability, argFeatures: argFeatures(req.args) }).choice === "fetch";
+        if (content) wire = null;   // priced read-only: the migrate branch encodes the frame it ships
       }
       if (fetchIt) {
         // the fetch arm: pull only (name, args) over the peer, resume the stack HERE with
@@ -370,7 +378,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
           if (!heapTier) { const objs = new Map<string, unknown>(); let n = 0; heapTier = { id: tier, heapPut: (v) => { const k = "l" + n++; objs.set(k, v); return k; }, heapGet: (hid) => objs.get(hid) }; }
           // the stack may hold views of the PEER's objects from an earlier round: their
           // writes here ride along (viewDeltas)
-          const enc = (): Uint8Array => encodeWireBinary(stack, req, { tier: heapTier!, excise: ownedUnit, ...(threshold ? { threshold } : {}), deltas: viewDeltas(views) });
+          const enc = (): Uint8Array => encodeWireBinary(stack, req, { tier: heapTier!, excise: ownedUnit, ...(threshold ? { threshold } : {}), ...(content ? { content } : {}), deltas: viewDeltas(views) });
           const reply = await peer.request({ type: "resume", sid, ...meta }, rec ? rec.ship(stack, req, enc, "migrate") : enc());
           // write-back (docs/migrate-arm.md "twins and correctness", "writable views"):
           // the fields the session twins and the views mutated land on OUR live objects
@@ -379,10 +387,10 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
           // are real, exactly as they would be had the code run here. Twin deltas ride
           // the JSON header; view deltas the graph (decoding applies them).
           applyDeltas(heapTier, (reply.obj.twinDeltas as TwinDelta[] | undefined) ?? []);
-          if (reply.obj.type !== "suspend") { if (reply.bin) decodeWireBinary(reply.bin, { tier: heapTier, programs }); }
+          if (reply.obj.type !== "suspend") { if (reply.bin) decodeWireBinary(reply.bin, { ...dopts, tier: heapTier }); }
           if (reply.obj.type === "error") throw new Error(reply.obj.message);
           if (reply.obj.type === "done") return reply.obj.value;
-          const back = decodeWireBinary(reply.bin!, { tier: heapTier, programs });
+          const back = decodeWireBinary(reply.bin!, { ...dopts, tier: heapTier });
           stack = back.stack as Frame[];
           request = back.request as PumpRequest | null;   // op:"home" -> pump steps on from ret; a browser-owned resource -> pump services it here
           views = hydrateViews(stack, twins ?? (() => undefined)).views;

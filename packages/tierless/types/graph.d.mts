@@ -57,15 +57,37 @@ export interface EncodeTier {
     id: string;
     heapPut(v: unknown): string;
 }
+/** What this tier holds by content hash (content.mts ContentStore): registered immutable
+ *  subgraphs, and the data views the peer shipped. `size` is the producer's measure of a
+ *  view, carried on the wire so both sides bound their caches identically. */
 export interface ContentStoreView {
     hashFor(v: object): string | undefined;
     get(h: string): unknown;
-    put(h: string, v: unknown): void;
+    put(h: string, v: unknown, size?: number): void;
 }
+/** What the peer holds, as the producer tracks it: mirrors the peer's store exactly, so a
+ *  hash this says the peer has resolves there. */
 export interface ContentPeerView {
     has(h: string): boolean;
-    add(h: string): void;
+    add(h: string, size?: number): void;
 }
+/** A streaming 64-bit content hash as 16 hex chars: two 32-bit lanes of a multiply-xor mix
+ *  (cyrb53's constants), browser-safe. Not cryptographic — a session-local name. */
+export declare class Hasher {
+    private a;
+    private b;
+    private mix;
+    tag(t: number): this;
+    int(n: number): this;
+    str(s: string): this;
+    hex(): string;
+}
+/** The content hash of a plain DATA subgraph at view depth `depth`: own enumerable members of
+ *  plain objects and arrays, primitives, RegExps, sharing by first occurrence — exactly what
+ *  a complete view of `root` carries. undefined when anything else is reachable (a function,
+ *  an instance, a host object, another tier's object, a level a view would not reach): such
+ *  a view is not data, and is never cached by content. */
+export declare function viewHash(root: object, depth: number): string | undefined;
 export interface EncodeOptions {
     tier?: EncodeTier | null;
     threshold?: number;

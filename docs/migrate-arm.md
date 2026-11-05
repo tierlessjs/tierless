@@ -136,6 +136,21 @@ mid-segment (design.md §8). So the check happens BEFORE the segment runs, in th
   and the stop rule sees a live object, so a list-then-fan-out loader is one crossing.
   Twins' field changes are diffed once per crossing; a twin that escaped into a local is
   encoded back as its member handle going home.
+- **Views by content:** a plain data member of a view (a library instance's table; an
+  excised plain object itself) is hashed as it ships (`viewHash`: own members of plain
+  objects and arrays, primitives, RegExps — anything else, or a member a view would leave
+  home, and it is not data). The receiver caches what arrived complete under the hash;
+  while the content stands, every later crossing on that connection carries the member's
+  handle and the hash (slot `cv`, 48 bytes) and the receiver hands the run a fresh copy
+  under the handle of this crossing, so writes and parks work as on a shipped view. A
+  change at home is a new hash: the member ships once more. Each side keeps one pair per
+  socket (`makeHost({ content })`: what the peer holds of ours, what we hold of the
+  peer's); the pair mirrors the peer's by construction — same hashes, same order, the
+  size on the wire — and drops the oldest past 16 MB, so a hash the producer sends is one
+  the receiver holds (a miss is a `RangeError`, never an empty member). Members under
+  2 KB ship as bytes (cheaper than a hash per crossing). The threshold still decides what
+  ships at all: a held member costs its reference against the budget, but the first ship
+  must fit. Measured on real i18next below.
 - **Pump stop rule:** before stepping a frame, if any slot referenced by the current
   state holds a handle → park with `{op:"home", tier: handle.owner}` and ship the stack
   there. The pump stays tier-agnostic: no configuration, the VALUES say where segments
@@ -158,16 +173,17 @@ between two gateway calls, with the instance excised as a view:
 | threshold | crossings | shipped | where `t()` ran |
 |---|---|---|---|
 | 8 KB (default) | 2 | 15 KB | home: the 337 KB table is a member handle, `resolve` parks at it |
-| 4 MB | 1 | 338 KB | gateway: `translate → resolve → interpolate` over the view, no copy |
+| 4 MB, first run on a connection | 1 | 338 KB | gateway: `translate → resolve → interpolate` over the view, no copy |
+| 4 MB, later runs on it | 1 | 7 KB | gateway, over a copy of the table it holds (views by content) |
+| 4 MB, after `addResource` at home | 1 | 338 KB, then 7 KB | gateway: a new hash ships once, the new key translates there |
 
 What the chain needed, each found by tracing the park and fixed generally (above): moves
 into literals and conditions, a registered class's missing members, a RegExp by value,
 writes to the view (`resetRegExp` rewrites three regexps per call — the same objects, so
 no delta), one-level computed reads, boxed captured writes (`nest`'s `handleHasOptions`),
-`call`/`apply` on arrows, and `bindMemberFunctions`' bound methods. Not measured on
-Keycloak: no compiled Keycloak program calls `t()` before a later server call. The table
-ships on every crossing at 4 MB; shipping it once per session (content addressing) is
-the next step for that arm.
+`call`/`apply` on arrows, `bindMemberFunctions`' bound methods, and the table by content.
+Not measured on Keycloak: no compiled Keycloak program calls `t()` before a later server
+call, and the port runs at the default threshold.
 
 ## Protocol shape (no new messages)
 

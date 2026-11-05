@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { makeHost } from "tierless";
 import { makePeer, encodeMessage, decodeMessage, type Port } from "tierless/transport";
+import { ContentStore, newPeerView } from "tierless/content";
 import { makeCheck } from "../lib/check.mts";
 
 const require = createRequire(import.meta.url);
@@ -80,7 +81,10 @@ class Client {
 }
 (Client.prototype as unknown as { __tierless_cls: string }).__tierless_cls = "Client";
 
-const run = async (threshold?: number): Promise<{ labels: string[]; resumes: number; bytes: number; log: string[] }> => {
+// one connection (a socket's two hosts, each with its views-by-content pair), on which the
+// dialog can run more than once: crossings and shipped bytes are counted per run
+type Run = { labels: string[]; resumes: number; bytes: number; log: string[] };
+const connect = (threshold?: number): { save: (keys: string[]) => Promise<Run> } => {
   const log: string[] = []; let resumes = 0, bytes = 0;
   const cbs: Array<((obj: unknown, bin: Uint8Array | null) => void) | null> = [null, null];
   const mkPort = (me: number): Port => ({
@@ -90,19 +94,25 @@ const run = async (threshold?: number): Promise<{ labels: string[]; resumes: num
     },
     onMessage(cb): void { cbs[me] = cb; }, onClose(): void { /* in-process */ }, close(): void { /* in-process */ },
   });
+  const content = (): { store: ContentStore; peer: ContentStore } => ({ store: new ContentStore(), peer: newPeerView() });
   const twin = new Client("server", log);
-  makeHost({ bundle: bundle as never, tier: "server", exec: (() => { throw new Error("none"); }) as never, twins: (cls) => (cls === "Client" ? twin : undefined) }).answer(makePeer(mkPort(1)));
+  makeHost({ bundle: bundle as never, tier: "server", exec: (() => { throw new Error("none"); }) as never, twins: (cls) => (cls === "Client" ? twin : undefined), content: content() }).answer(makePeer(mkPort(1)));
   const peer = makePeer(mkPort(0));
-  const bhost = makeHost({ bundle: bundle as never, tier: "browser", exec: (() => { throw new Error("none"); }) as never, ...(threshold ? { threshold } : {}) });
+  const bhost = makeHost({ bundle: bundle as never, tier: "browser", exec: (() => { throw new Error("none"); }) as never, ...(threshold ? { threshold } : {}), content: content() });
   (globalThis as Record<string, unknown>).__probeClient = new Client("browser", log);
-  dlg.__bindTierlessMethods((prog: string, caps: object, args: unknown[]) => bhost.runLocal(peer, prog, [caps, ...args], { migrate: () => true }));
-  try { return { labels: await dlg.Dialog({ t }).save(1, sample) as string[], resumes, bytes, log }; } finally { dlg.__bindTierlessMethods(null); }
+  return { save: async (keys) => {
+    resumes = 0; bytes = 0; log.length = 0;
+    dlg.__bindTierlessMethods((prog: string, caps: object, args: unknown[]) => bhost.runLocal(peer, prog, [caps, ...args], { migrate: () => true }));
+    try { return { labels: await dlg.Dialog({ t }).save(1, keys) as string[], resumes, bytes, log: [...log] }; } finally { dlg.__bindTierlessMethods(null); }
+  } };
 };
+const run = (threshold?: number): Promise<Run> => connect(threshold).save(sample);
 
 const r1 = await run();
 check("default threshold: every sampled key translates right", r1.labels.length === sample.length && r1.labels.every((l, i) => l === homeSample[i]), r1.labels.length + " labels");
 console.log(`  default threshold (8 KB): ${r1.resumes} crossing(s), ${r1.bytes} B shipped, calls ran ${r1.log.join(",")}`);
-const r2 = await run(1 << 22);
+const c2 = connect(1 << 22);
+const r2 = await c2.save(sample);
 check("4 MB threshold: every sampled key translates right", r2.labels.length === sample.length && r2.labels.every((l, i) => l === homeSample[i]), r2.labels.length + " labels");
 // the instance is behavior AND data: under the default threshold its 337 KB table is a
 // member handle, so t() parks home between the two calls (two crossings); with the table
@@ -112,6 +122,20 @@ check("4 MB threshold: t() runs on the gateway over the instance's view — one 
 check("4 MB threshold: the crossing carries the table once (under 400 KB)", r2.bytes < 400 * 1024, r2.bytes + " B");
 check("home translates all " + keys.length + " keys through the compiled stub exactly as the native closure would", home.length === keys.length && home.every((l, i) => l === i18n.t(keys[i], { lng: "en", ns: "master" })), "");
 console.log(`  4 MB threshold: ${r2.resumes} crossing(s), ${r2.bytes} B shipped, calls ran ${r2.log.join(",")}`);
+
+// VIEWS BY CONTENT (graph.mts viewOf): the gateway holds the table from the first run, so a
+// second run on the same connection ships the instance's view with the table named by its
+// hash — one crossing still, a few KB instead of 338. A change to the table at home is a
+// new hash: it ships once more, then by hash again.
+const r3 = await c2.save(sample);
+check("4 MB threshold, second run on the connection: one crossing, the table by hash (under 24 KB shipped)", r3.resumes === 1 && r3.bytes < 24 * 1024, r3.resumes + " crossing(s), " + r3.bytes + " B");
+check("…and every sampled key still translates right on the gateway", r3.labels.length === sample.length && r3.labels.every((l, i) => l === homeSample[i]), r3.labels.length + " labels");
+i18n.addResource("en", "master", "probeAdded", "added at home after the first runs");
+const r4 = await c2.save([...sample, "probeAdded"]);
+check("the table changed at home: shipped once more (over 300 KB), the new key translates on the gateway", r4.resumes === 1 && r4.bytes > 300 * 1024 && r4.labels[r4.labels.length - 1] === "added at home after the first runs", r4.bytes + " B, last label " + JSON.stringify(r4.labels[r4.labels.length - 1]));
+const r5 = await c2.save(sample);
+check("…then by hash again", r5.resumes === 1 && r5.bytes < 24 * 1024, r5.bytes + " B");
+console.log(`  4 MB threshold, same connection: run 2 ${r3.bytes} B, after addResource ${r4.bytes} B, run 4 ${r5.bytes} B`);
 
 // why: what the instance holds that is BEHAVIOR (a function the copy can't carry), by kind
 {

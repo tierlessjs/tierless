@@ -20,6 +20,7 @@ import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { makeHost, answerWith } from "./host.mjs";
 import { makeCoherence } from "./coherence.mjs";
+import { ContentStore, newPeerView } from "./content.mjs";
 import { makePeer, wsPort } from "./transport.mjs";
 import { decodeArgs } from "./wire-binary.mjs";
 import { h2Port, isWebSocketConnect } from "./transport-h2.mjs";
@@ -97,10 +98,11 @@ async function serveSessionOn(peer, req, cfg) {
     const coherence = cfg.heap ? makeCoherence(cfg.tier) : undefined;
     if (coherence)
         coherence.serve(peer);
+    const content = { store: new ContentStore(), peer: newPeerView() }; // views by content: this connection's pair (host.mts MakeHostOpts.content)
     const hosts = new Map(); // moduleId -> host (stateless; cached per connection)
     const hostFor = async (id) => {
         if (!hosts.has(id))
-            hosts.set(id, makeHost({ bundle: await cfg.resolveBundle(id), tier: cfg.tier, exec, meta: id ? { module: id } : {}, coherence, twins, onPark: parkLog }));
+            hosts.set(id, makeHost({ bundle: await cfg.resolveBundle(id), tier: cfg.tier, exec, meta: id ? { module: id } : {}, coherence, content, twins, onPark: parkLog }));
         return hosts.get(id);
     };
     answerWith(peer, hostFor); // browser-started sessions (actions) + bounces

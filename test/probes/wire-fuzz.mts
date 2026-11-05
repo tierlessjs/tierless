@@ -186,6 +186,22 @@ check("every truncation of a content wire throws cleanly (the new tags stay boun
 let stackSafe = false; const evilCah = new Uint8Array(64); evilCah.set([83, 77, 87, 49], 0); for (let k = 4; k < 64; k++) evilCah[k] = 8;  // a chain of content-cache wrappers (tag 8)
 try { decodeWireBinary(evilCah, { content: { store: new ContentStore() } }); } catch (e) { stackSafe = e instanceof RangeError; }
 check("a hostile chain of content-cache wrappers fails cleanly, not by stack overflow", stackSafe);
+// views by content (slot tag 15): a data member of a view crosses by hash once the peer holds it; every
+// truncation of such a wire throws cleanly, and a hash the receiver does not hold is a RangeError
+{
+  const vt = makeTier("b"), table: Record<string, string> = {}; for (let i = 0; i < 200; i++) table["k" + i] = "value number " + i + " padded out a little";
+  class Box { table = table; }
+  const box = new Box(), vp = { store: new ContentStore(), peer: newPeerView() }, vr = { store: new ContentStore() };
+  const vsend = (): Uint8Array => encodeWireBinary([{ fn: "F", pc: 0, box, args: [] }], null, { tier: vt, excise: (v) => v === box, threshold: 1 << 20, content: vp });
+  decodeWireBinary(vsend(), { content: vr });
+  const cvWire = vsend();
+  const cvTop = decodeWireBinary(cvWire, { content: vr }).stack[0] as any;
+  check(`a view's data member crosses by hash once held (${cvWire.length} B) and reads back whole`, cvWire.length < 1000 && cvTop.box.table.k199 === table.k199);
+  let vTrunc = 0; for (let len = 0; len < cvWire.length; len++) { try { decodeWireBinary(cvWire.subarray(0, len), { content: vr }); } catch (e) { if (e instanceof Error) vTrunc++; } }
+  check("every truncation of a view-by-content wire throws cleanly", vTrunc === cvWire.length);
+  let notHeld = false; try { decodeWireBinary(cvWire, { content: { store: new ContentStore() } }); } catch (e) { notHeld = e instanceof RangeError; }
+  check("a view hash the receiver does not hold is a RangeError", notHeld);
+}
 
 console.log(`\n${pass ? "PASS" : "FAIL"} — binary wire codec: property round-trips, differential vs JSON, boundaries, and decode robustness all hold`);
 process.exit(pass ? 0 : 1);

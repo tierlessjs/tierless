@@ -82,7 +82,7 @@ export function ownedUnit(v) {
 let nextSid = 1;
 const TE = new TextEncoder();
 const TD = new TextDecoder();
-export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn, twins, placement, threshold, onPark }) {
+export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence: coherenceIn, twins, placement, threshold, content, onPark }) {
     const placeProfile = placement?.profile ?? null;
     const placeMode = placement?.mode ?? "trajectory";
     const placeStability = placement?.stability ?? 0.9;
@@ -90,13 +90,16 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
     // a shipped closure invoked natively off its tier runs its program through the pump's
     // synchronous runner (runtime.mts runSync)
     const programs = (name) => (bundle.PROGRAMS[name] ? (caps, args) => pump.runSync(name, [caps, ...args]) : undefined);
-    const dopts = { programs };
+    const dopts = { programs, ...(content ? { content } : {}) };
     const coherence = coherenceIn && usesHeap(bundle) ? coherenceIn : undefined; // per-bundle gate (see MakeHostOpts.coherence)
     const ownsBase = owns || ((t) => t === tier);
     // The host also owns the heap pseudo-tiers ("@deref"/"@writeback"): a handle read or a
     // mutation's propagation is serviced HERE (this tier), never migrated.
     const ownsHere = coherence ? ((t) => ownsBase(t) || coherence.owns(t)) : ownsBase;
-    const encOpts = (sid) => (coherence ? coherence.encodeOpts(sid) : {});
+    const encOpts = (sid) => ({ ...(coherence ? coherence.encodeOpts(sid) : {}), ...(content ? { content } : {}) });
+    // pricing a migrate (drive, below) encodes a frame that may never ship: it reads what the
+    // peer holds by content and records nothing — the frame that ships does
+    const priceOpts = (sid) => ({ ...encOpts(sid), ...(content ? { content: { store: content.store, peer: { has: (h) => content.peer.has(h), add: () => { } } } } : {}) });
     const rec = trace ? (isRecorder(trace) ? trace : makeRecorder(trace)) : null;
     // The exec the pump runs, bound to the peer the current message rides: an "@deref" is a
     // coherent fetch back over `peer` on a cache miss; an "@writeback" proposes the mutated
@@ -171,8 +174,10 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
             let fetchIt = false;
             if (placeProfile && req.op === "resource") {
                 const top = cur.stack[cur.stack.length - 1];
-                wire = encodeWireBinary(cur.stack, req, encOpts(sid));
+                wire = encodeWireBinary(cur.stack, req, priceOpts(sid));
                 fetchIt = decide(wire.length, siteKey(top.fn, top.pc, req.name), placeProfile, { mode: placeMode, stability: placeStability, argFeatures: argFeatures(req.args) }).choice === "fetch";
+                if (content)
+                    wire = null; // priced read-only: the migrate branch encodes the frame it ships
             }
             if (fetchIt) {
                 // the fetch arm: pull only (name, args) over the peer, resume the stack HERE with
@@ -386,7 +391,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                     }
                     // the stack may hold views of the PEER's objects from an earlier round: their
                     // writes here ride along (viewDeltas)
-                    const enc = () => encodeWireBinary(stack, req, { tier: heapTier, excise: ownedUnit, ...(threshold ? { threshold } : {}), deltas: viewDeltas(views) });
+                    const enc = () => encodeWireBinary(stack, req, { tier: heapTier, excise: ownedUnit, ...(threshold ? { threshold } : {}), ...(content ? { content } : {}), deltas: viewDeltas(views) });
                     const reply = await peer.request({ type: "resume", sid, ...meta }, rec ? rec.ship(stack, req, enc, "migrate") : enc());
                     // write-back (docs/migrate-arm.md "twins and correctness", "writable views"):
                     // the fields the session twins and the views mutated land on OUR live objects
@@ -397,13 +402,13 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                     applyDeltas(heapTier, reply.obj.twinDeltas ?? []);
                     if (reply.obj.type !== "suspend") {
                         if (reply.bin)
-                            decodeWireBinary(reply.bin, { tier: heapTier, programs });
+                            decodeWireBinary(reply.bin, { ...dopts, tier: heapTier });
                     }
                     if (reply.obj.type === "error")
                         throw new Error(reply.obj.message);
                     if (reply.obj.type === "done")
                         return reply.obj.value;
-                    const back = decodeWireBinary(reply.bin, { tier: heapTier, programs });
+                    const back = decodeWireBinary(reply.bin, { ...dopts, tier: heapTier });
                     stack = back.stack;
                     request = back.request; // op:"home" -> pump steps on from ret; a browser-owned resource -> pump services it here
                     views = hydrateViews(stack, twins ?? (() => undefined)).views;

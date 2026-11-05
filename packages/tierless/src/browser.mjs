@@ -14,6 +14,7 @@
 // mode, ui.* if you pin some); actions that never touch one simply run out on the server.
 import { makeHost, answerWith, batchExec, execOver } from "./host.mjs";
 import { makeCoherence } from "./coherence.mjs";
+import { ContentStore, newPeerView } from "./content.mjs";
 import { methodMigrate, profileCovers, httpTraceSink } from "./trace.mjs";
 import { makePeer, wsPort, onEvent, pushExecLog } from "./transport.mjs";
 import { WS_PATH } from "./ws-path.mjs";
@@ -167,11 +168,12 @@ traceUrl = globalThis.__TIERLESS_TRACE__ ?? stored("tierlessTraceUrl"), profileU
     const coherence = heap ? makeCoherence(tier) : undefined;
     if (coherence)
         coherence.serve(peer);
+    const content = { store: new ContentStore(), peer: newPeerView() }; // views by content: this connection's pair (host.mts MakeHostOpts.content)
     const hosts = new Map(); // moduleId -> host
     const register = (module, b) => {
         const id = module || "";
         if (!hosts.has(id))
-            hosts.set(id, makeHost({ bundle: b, tier, exec: exec, meta: id ? { module: id } : {}, coherence, ...(appTrace ? { trace: appTrace } : {}) })); // exec is optional here (actions-only pages never own a resource); makeHost only calls it when one is
+            hosts.set(id, makeHost({ bundle: b, tier, exec: exec, meta: id ? { module: id } : {}, coherence, content, ...(appTrace ? { trace: appTrace } : {}) })); // exec is optional here (actions-only pages never own a resource); makeHost only calls it when one is
         return hosts.get(id);
     };
     if (bundle)

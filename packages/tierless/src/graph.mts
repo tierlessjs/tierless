@@ -213,14 +213,101 @@ export interface EncodeTier {
   id: string;
   heapPut(v: unknown): string;
 }
+/** What this tier holds by content hash (content.mts ContentStore): registered immutable
+ *  subgraphs, and the data views the peer shipped. `size` is the producer's measure of a
+ *  view, carried on the wire so both sides bound their caches identically. */
 export interface ContentStoreView {
   hashFor(v: object): string | undefined;
   get(h: string): unknown;
-  put(h: string, v: unknown): void;
+  put(h: string, v: unknown, size?: number): void;
 }
+/** What the peer holds, as the producer tracks it: mirrors the peer's store exactly, so a
+ *  hash this says the peer has resolves there. */
 export interface ContentPeerView {
   has(h: string): boolean;
-  add(h: string): void;
+  add(h: string, size?: number): void;
+}
+
+/** A streaming 64-bit content hash as 16 hex chars: two 32-bit lanes of a multiply-xor mix
+ *  (cyrb53's constants), browser-safe. Not cryptographic — a session-local name. */
+export class Hasher {
+  private a = 0xdeadbeef | 0;
+  private b = 0x41c6ce57 | 0;
+  private mix(c: number): void { this.a = Math.imul(this.a ^ c, 2654435761); this.b = Math.imul(this.b ^ c, 1597334677); }
+  tag(t: number): this { this.mix(t); return this; }
+  int(n: number): this { this.mix(n | 0); this.mix(Math.floor(n / 4294967296) | 0); return this; }
+  str(s: string): this { this.mix(s.length); for (let i = 0; i < s.length; i++) this.mix(s.charCodeAt(i)); return this; }
+  hex(): string {
+    let a = Math.imul(this.a ^ (this.a >>> 16), 2246822507); a ^= Math.imul(this.b ^ (this.b >>> 13), 3266489909);
+    let b = Math.imul(this.b ^ (this.b >>> 16), 2246822507); b ^= Math.imul(a ^ (a >>> 13), 3266489909);
+    return (b >>> 0).toString(16).padStart(8, "0") + (a >>> 0).toString(16).padStart(8, "0");
+  }
+}
+/** The content hash of a plain DATA subgraph at view depth `depth`: own enumerable members of
+ *  plain objects and arrays, primitives, RegExps, sharing by first occurrence — exactly what
+ *  a complete view of `root` carries. undefined when anything else is reachable (a function,
+ *  an instance, a host object, another tier's object, a level a view would not reach): such
+ *  a view is not data, and is never cached by content. */
+export function viewHash(root: object, depth: number): string | undefined {
+  const h = new Hasher();
+  const seen = new Map<object, number>();
+  const walk = (x: unknown, d: number): boolean => {
+    if (x === undefined) { h.tag(1); return true; }
+    if (x === null) { h.tag(2); return true; }
+    switch (typeof x) {
+      case "string": h.tag(3).str(x); return true;
+      case "number": h.tag(4).str(Object.is(x, -0) ? "-0" : String(x)); return true;
+      case "boolean": h.tag(x ? 5 : 6); return true;
+      case "bigint": h.tag(7).str(x.toString()); return true;
+      case "object": break;
+      default: return false;                                            // a function or a symbol: behavior, or identity
+    }
+    const o = x as object;
+    if (isHandle(o) || HYDRATED.has(o) || (o as { [VIEW]?: unknown })[VIEW] || GLOBAL_NAME.has(o)) return false;
+    if (o instanceof RegExp) { h.tag(9).str(o.source).str(o.flags).int(o.lastIndex); return true; }
+    const i = seen.get(o);
+    if (i !== undefined) { h.tag(8).int(i); return true; }
+    if (d > 8) return false;                                            // a view stops nesting here: this member would be a handle
+    seen.set(o, seen.size);
+    if (Array.isArray(o)) { h.tag(10).int(o.length); for (const e of o) if (!walk(e, d + 1)) return false; return true; }
+    const proto = Object.getPrototypeOf(o);
+    if (proto !== Object.prototype && proto !== null) return false;    // an instance, a Map, a Date…: not a plain view's data
+    const keys = Object.keys(o);
+    h.tag(11).int(keys.length);
+    for (const k of keys) { if (k === "__proto__") continue; h.str(k); if (!walk((o as Record<string, unknown>)[k], d + 1)) return false; }
+    return true;
+  };
+  return walk(root, depth) ? h.hex() : undefined;
+}
+/** A data view under `CONTENT_MIN` bytes is cheaper to ship than to hash each crossing. */
+const CONTENT_MIN = 2048;
+/** What a content reference (slot "cv": handle + hash) costs against a view's budget. */
+const CONTENT_REF = 48;
+/** A fresh copy of a cached data view under handle `h`: the shape its first ship decoded
+ *  to, every nested view's handle re-rooted at `h` (a member handle names the home object
+ *  by path, and the home id is minted per crossing). */
+function cloneView(src: object, h: Handle): object {
+  const drop = ((src as { [VIEW]?: Handle })[VIEW]?.path ?? []).length;
+  const seen = new Map<object, object>();
+  const go = (x: unknown): unknown => {
+    if (x === null || typeof x !== "object") return x;
+    if (x instanceof RegExp) return reOf({ s: x.source, f: x.flags, li: x.lastIndex });
+    const hit = seen.get(x);
+    if (hit) return hit;
+    const out: Record<string, unknown> | unknown[] = Array.isArray(x) ? [] : {};
+    const vh = (x as { [VIEW]?: Handle })[VIEW];
+    if (vh) {
+      const nh: Handle = { __tierless_handle__: true, owner: h.owner, id: h.id };
+      if (vh.kind) nh.kind = vh.kind;
+      const path = [...(h.path ?? []), ...(vh.path ?? []).slice(drop)]; if (path.length) nh.path = path;
+      Object.defineProperty(out, VIEW, { value: nh });
+    }
+    seen.set(x, out);
+    if (Array.isArray(x)) for (const e of x) (out as unknown[]).push(go(e));
+    else for (const k of Object.keys(x)) (out as Record<string, unknown>)[k] = go((x as Record<string, unknown>)[k]);
+    return out;
+  };
+  return go(src) as object;
 }
 export interface EncodeOptions {
   tier?: EncodeTier | null;
@@ -280,7 +367,24 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
     const proto = Object.getPrototypeOf(v);
     return { __tierless_handle__: true, ...h, kind: Array.isArray(v) ? "array" : "object", ...(cls ? { cls } : {}), ...(!Array.isArray(v) && proto !== Object.prototype && proto !== null ? { inst: true as const } : {}) };
   };
-  const refH = (h: Handle, st?: unknown): any => { const id = objs.length; objs.push({ k: "H", h, ...(st !== undefined ? { st } : {}) }); return { k: "r", id }; };
+  // VIEWS BY CONTENT (docs/migrate-arm.md "views by content"): a plain data view the peer
+  // already holds crosses as its handle and hash (slot "cv": the handle for writes and
+  // parks, the hash for the members); one it holds not yet ships inline tagged with the
+  // hash and its size, once — only when it shipped COMPLETE (no member stayed home, nothing
+  // shared with the rest of the graph), so the hash names exactly what the receiver cached.
+  // Data inside a cached view is covered by it.
+  let inCache = 0, leaks = 0, cacheBase = 0;
+  const refH = (h: Handle, st?: unknown): any => { leaks++; const id = objs.length; objs.push({ k: "H", h, ...(st !== undefined ? { st } : {}) }); return { k: "r", id }; };
+  const viewOf = (x: object, mh: Handle, depth: number, size: number, budget: { left: number }, encode: () => any): any => {
+    const ch = content && !inCache && !mh.inst && size >= CONTENT_MIN && size <= budget.left ? viewHash(x, depth) : undefined;
+    if (ch === undefined) return encode();
+    if (content!.peer.has(ch)) { budget.left -= CONTENT_REF; const id = objs.length; idOf.set(x, id); objs.push({ k: "cv", h: mh, c: ch }); return { k: "r", id }; }
+    inCache++; const l0 = leaks, b0 = cacheBase; cacheBase = objs.length;
+    const r = encode();
+    inCache--; cacheBase = b0;
+    if (leaks === l0) { objs[r.id].cah = ch; objs[r.id].csz = size; content!.peer.add(ch, size); }
+    return r;
+  };
   // the view of v under handle h: own data members by the rules above, within `budget` bytes
   const viewSlot = (v: object, h: Handle, depth: number, budget: { left: number }): any => {
     const id = objs.length; idOf.set(v, id);
@@ -299,10 +403,10 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
         return refH(member(k));
       }
       if (isHandle(x) || HYDRATED.has(x) || (x as { [VIEW]?: unknown })[VIEW] || GLOBAL_NAME.has(x)) return enc(x);   // another tier's object, or a twin/view/global here
-      if (idOf.has(x) && objs[idOf.get(x)!].k === "v") return { k: "r", id: idOf.get(x) };   // the same object's view again (never a data copy: a view parks writes, a copy would lose them)
+      if (idOf.has(x) && (objs[idOf.get(x)!].k === "v" || objs[idOf.get(x)!].k === "cv")) { if (inCache && idOf.get(x)! < cacheBase) leaks++; return { k: "r", id: idOf.get(x) }; }   // the same object's view again (never a data copy: a view parks writes, a copy would lose them); shared with something outside the view being cached, that view is not self-contained
       if (viewable(x) && depth < 8 && !onPath.has(x)) {
         const size = approxSize(x, budget.left);
-        if (size <= budget.left) { budget.left -= size; onPath.add(x); const r = viewSlot(x, handleFor(x, member(k)), depth + 1, budget); onPath.delete(x); return r; }
+        if (size <= budget.left) { const mh = handleFor(x, member(k)); return viewOf(x, mh, depth + 1, size, budget, () => { budget.left -= size; onPath.add(x); const r = viewSlot(x, mh, depth + 1, budget); onPath.delete(x); return r; }); }
       }
       const mh = handleFor(x, member(k));                              // a member handle: class and data fields ride for a session twin
       const st = mh.cls ? twinState(x) : undefined;
@@ -317,7 +421,7 @@ export function encodeGraph(values: unknown[], { tier = null, threshold = 64 * 1
   // writes coherent (heap.mts), and its contents are the point of keeping it home
   const exciseTo = (v: unknown, owned: boolean): any => {
     const h = v !== null && typeof v === "object" ? handleFor(v, { owner: tier!.id, id: tier!.heapPut(v) }) : { __tierless_handle__: true as const, owner: tier!.id, id: tier!.heapPut(v), kind: "object" as const };
-    if (owned && viewable(v)) { onPath.add(v); const r = viewSlot(v, h, 0, { left: threshold }); onPath.delete(v); return r; }
+    if (owned && viewable(v)) { const o = v, budget = { left: threshold }; return viewOf(o, h, 0, approxSize(o, threshold), budget, () => { onPath.add(o); const r = viewSlot(o, h, 0, budget); onPath.delete(o); return r; }); }
     const id = objs.length; idOf.set(v, id); objs.push({ k: "H", h }); return { k: "r", id };
   };
 
@@ -532,7 +636,7 @@ export function decodeGraph({ roots, objs }: EncodedGraph, { content = null, tie
     let ok = true;
     while (ok && work.length) {
       const i = work.pop()!, s: any = objs[i];
-      if (s.k === "H" || s.k === "v") ok = !!(tier && s.h.owner === tier.id);        // a foreign handle or view: the copy would hide it
+      if (s.k === "H" || s.k === "v" || s.k === "cv") ok = !!(tier && s.h.owner === tier.id);   // a foreign handle or view: the copy would hide it
       else if (s.k === "sf") ok = SHARED_FN.has(s.name) || !!(tier && s.h.owner === tier.id);
       else if (s.k === "bnd") ok = fnOwn(s);
       else if (s.k === "fn") { ok = fnRunnable(s); if (fnOwn(s)) continue; }   // a live closure of ours holds what it holds
@@ -560,7 +664,16 @@ export function decodeGraph({ roots, objs }: EncodedGraph, { content = null, tie
   // registered copy, else the member handle it would be (the stop rule parks on it)
   const viewOwn = (s: { h: Handle }): boolean => !!(tier && s.h.owner === tier.id);
   const viewShell = (s: { h: Handle; e?: unknown[] }): unknown => { if (viewOwn(s)) return home(s.h); const base: object = s.e ? [] : {}; Object.defineProperty(base, VIEW, { value: s.h }); return base; };
-  const built: any[] = (objs as any[]).map((s, i) => (s.k === "a" ? [] : s.k === "o" ? (s.tw ? twinShell(s, i) : {}) : s.k === "v" ? viewShell(s) : s.k === "sf" ? (SHARED_FN.get(s.name) ?? home(s.h)) : s.k === "map" ? new Map() : s.k === "set" ? new Set() : s.k === "symu" ? Symbol(s.d) : s.k === "fn" ? fnShell(s) : s.k === "bnd" ? bndShell(s) : s.k === "c" ? (content && content.store.get(s.h)) : home(s.h))); // pre-create for cycles/sharing; k:"c" resolves to the held immutable subgraph
+  // a view by content (slot "cv"): the data the peer shipped under this hash before, as a
+  // fresh copy under the handle it carries now. A hash not held here means the two caches
+  // are out of step — loud, never a silently empty member.
+  const cvShell = (s: { h: Handle; c: string }): unknown => {
+    if (viewOwn(s)) return home(s.h);
+    const held = content?.store.get(s.c);
+    if (held === null || typeof held !== "object") throw new RangeError("wire: view content " + s.c + " is not held here");
+    return cloneView(held, s.h);
+  };
+  const built: any[] = (objs as any[]).map((s, i) => (s.k === "a" ? [] : s.k === "o" ? (s.tw ? twinShell(s, i) : {}) : s.k === "v" ? viewShell(s) : s.k === "cv" ? cvShell(s) : s.k === "sf" ? (SHARED_FN.get(s.name) ?? home(s.h)) : s.k === "map" ? new Map() : s.k === "set" ? new Set() : s.k === "symu" ? Symbol(s.d) : s.k === "fn" ? fnShell(s) : s.k === "bnd" ? bndShell(s) : s.k === "c" ? (content && content.store.get(s.h)) : home(s.h))); // pre-create for cycles/sharing; k:"c" resolves to the held immutable subgraph
   const dec = (n: any): any => (n.k === "u" ? undefined : n.k === "big" ? toBigInt(n.v) : n.k === "glob" ? GLOBALS[n.name] : n.k === "symw" ? (Symbol as any)[n.name] : n.k === "symf" ? Symbol.for(n.key) : n.k === "re" ? reOf(n) : n.k === "p" ? n.v : built[n.id]);
   (objs as any[]).forEach((s, i) => {
     if (s.k === "a") for (const n of s.e) built[i].push(dec(n));
@@ -574,8 +687,11 @@ export function decodeGraph({ roots, objs }: EncodedGraph, { content = null, tie
     else if (s.k === "fn") { const caps = dec(s.c); built[i].__tierless_caps = () => caps; for (const key in s.f) { if (key === "__proto__") continue; built[i][key] = dec(s.f[key]); } }
     else if (s.k === "v" && !viewOwn(s)) { if (s.e) { for (const n of s.e) built[i].push(dec(n)); } else for (const key in s.f) { if (key === "__proto__" || key === "__tierless_handle__") continue; built[i][key] = dec(s.f[key]); } }
     else if (s.k === "H" && s.st !== undefined && isHandle(built[i])) built[i].state = dec(s.st);   // a stamped member handle's data fields, for a session twin
-    // k:"H" -> built[i] is already the handle object; k:"c" -> already resolved to the held subgraph; an own "v" is the live object
-    if (content && s.cah !== undefined) content.store.put(s.cah, built[i]);   // first arrival of an immutable subgraph: cache it by hash for later hash-only refs
+    // k:"H" -> built[i] is already the handle object; k:"c"/"cv" -> already resolved from the content held here; an own "v" is the live object
   });
+  // first arrivals by content, cached once every slot is filled: a registered immutable
+  // subgraph as the object itself (identity by content), a data view as a pristine copy
+  // (the run writes to the one it got)
+  if (content) (objs as any[]).forEach((s, i) => { if (s.cah !== undefined) content.store.put(s.cah, s.k === "v" ? cloneView(built[i], s.h) : built[i], s.csz ?? 0); });
   return roots.map(dec);
 }

@@ -23,13 +23,18 @@ import { W, R, isVarInt, writeMagic, checkMagic, makeInterner, writeStrings, rea
 // SMW5: a deltas section after the frame header — the writes a run made to views of
 // the receiver's objects (runtime.mts viewDelta), each field a graph root — and node tag
 // 12, a RegExp by value.
-const MAGIC = "SMW5";
+// SMW6: views by content — slot tag 15 (a view the peer holds: handle + content hash) and
+// a size after the hash in the content-cache wrapper (tag 8), so both sides bound their
+// caches by the same numbers.
+const MAGIC = "SMW6";
 // The writer/hardened reader, magic header, string table, and frame flatten/rebuild live in
 // wire-io.mts (one copy, shared with the delta wire). This file owns only what is binary-
 // format-specific: the shape table, the node/slot tag encodings, and the numeric-array packs.
 // node tags: 0 ref, 1 int, 2 float, 3 str, 4 true, 5 false, 6 null, 7 undef, 8 bigint, 9 glob, 10 symw, 11 symf
 // slot tags: 0 array, 1 object, 2 map, 3 set, 4 handle, 5 unique-symbol, 6 numeric-array,
-//            7 content-ref leaf (peer holds the hash), 8 content-cache wrapper (ship inline once, cache under hash)
+//            7 content-ref leaf (peer holds the hash), 8 content-cache wrapper (ship inline once, cache under hash + size),
+//            9 class wrapper, 10 compiled closure, 11 value-twin wrapper, 12 view, 13 shared function, 14 bound method,
+//            15 view by content (handle + hash the peer holds)
 const zlen = (x) => { let v = x >= 0 ? x * 2 : -x * 2 - 1, n = 1; while (v >= 128) {
     v = Math.floor(v / 128);
     n++;
@@ -258,6 +263,10 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
                     internNode(s.f[k]);
                 }
         }
+        else if (s.k === "cv") {
+            internHandle(s.h);
+            intern(s.c);
+        } // a view by content: handle + the hash the peer holds
         else if (s.k === "sf") {
             intern(s.name);
             internHandle(s.h);
@@ -332,7 +341,8 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
         if (s.cah !== undefined) {
             w.u8(8);
             w.varu(intern(s.cah));
-        } // wrap: cache the slot that follows under this hash (shipped inline once)
+            w.varu(s.csz ?? 0);
+        } // wrap: cache the slot that follows under this hash, at this size (shipped inline once)
         if (s.cls !== undefined) {
             w.u8(9);
             w.varu(intern(s.cls));
@@ -435,6 +445,11 @@ export function encodeWireBinary(stack, request, { tier = null, threshold = 8192
                 }
             }
         }
+        else if (s.k === "cv") {
+            w.u8(15);
+            writeHandle(w, s.h, intern, false);
+            w.varu(intern(s.c));
+        }
         else if (s.k === "sf") {
             w.u8(13);
             w.varu(intern(s.name));
@@ -526,11 +541,13 @@ export function decodeWireBinary(bytes, { content = null, tier = null, programs 
     }
     const readSlot = () => {
         let t = r.u8();
-        let cah;
+        let cah, csz = 0;
         let cls, err = 0, tw;
         while (t === 8 || t === 9 || t === 11) {
-            if (t === 8)
+            if (t === 8) {
                 cah = S(r.varu());
+                csz = r.varu();
+            }
             else if (t === 9) {
                 cls = S(r.varu());
                 err = r.u8();
@@ -544,6 +561,10 @@ export function decodeWireBinary(bytes, { content = null, tier = null, programs 
         let slot;
         if (t === 7)
             slot = { k: "c", h: S(r.varu()) }; // content-ref leaf — decodeGraph resolves it against the content store
+        else if (t === 15) {
+            const { h } = readHandle(r, S);
+            slot = { k: "cv", h, c: S(r.varu()) };
+        } // a view by content — decodeGraph copies it from the content held here
         else if (t === 0) {
             const c = r.count(), e = [];
             for (let j = 0; j < c; j++)
@@ -674,8 +695,10 @@ export function decodeWireBinary(bytes, { content = null, tier = null, programs 
         }
         else
             throw new RangeError("wire-binary: bad slot tag " + t);
-        if (cah !== undefined)
+        if (cah !== undefined) {
             slot.cah = cah;
+            slot.csz = csz;
+        }
         if (cls !== undefined && slot.k === "o") {
             slot.cls = cls;
             if (err)
