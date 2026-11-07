@@ -18,16 +18,18 @@ import { fileURLToPath } from "node:url";
 const SRC = fileURLToPath(new URL("../src/", import.meta.url));
 const STAMP = path.join(SRC, "build-stamp.mts");
 
-/** sha256 over every .mts source, sorted by path — the stamp file itself excluded (it
- *  cannot contain its own hash). .mjs build outputs are excluded too: they are DERIVED,
- *  so including them would make the stamp depend on whether a build had already run. */
+/** sha256 over every .mts and .cts source (the compiler, transform.cts, decides what a
+ *  bundle's machines look like — it was missing here, and a compiler edit went unstamped),
+ *  sorted by path — the stamp file itself excluded (it cannot contain its own hash). .mjs
+ *  and .cjs build outputs are excluded too: they are DERIVED, so including them would make
+ *  the stamp depend on whether a build had already run. */
 export function sourceHash() {
   const files = [];
   const walk = (d) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const p = path.join(d, e.name);
       if (e.isDirectory()) walk(p);
-      else if (e.name.endsWith(".mts") && p !== STAMP) files.push(p);
+      else if (/\.(mts|cts)$/.test(e.name) && p !== STAMP) files.push(p);
     }
   };
   walk(SRC);
