@@ -157,13 +157,14 @@ rebuilt, the four specs that exercise the chains (`autentication/flows.spec.ts`,
 `identity-providers/saml.spec.ts`, `organization/idp.spec.ts`, `users/main.spec.ts`) and
 the seven realm-settings spec files whose saves migrate, run on the locked profile at
 80 ms + 20 Mbit/s: 78 of 81 pass. `realm-settings/oid4vci-attributes.spec.ts:365` fails
-on every arm in every run. Two fail only when the save migrates, in every profile run:
-`oid4vci-attributes.spec.ts:315` saves twice and the second save persisted the value from
-before the test's edit (the refresh after the first save resets the form while the test
-edits it; it also failed in 3 of 6 stock and nothing-migrating runs), and
-`users/main.spec.ts:285` saves its attribute (the PUT succeeds) and then hangs on a later
-form step until the 180 s timeout (on 2026-11-03 it hung the same way in 2 of 4
-nothing-migrating runs). Neither is root-caused.
+on every arm in every run. The other two are flaky across arms, more often when the save
+migrates: `oid4vci-attributes.spec.ts:315` saves twice and the second save persisted the
+value from before the test's edit (the refresh after the first save resets the form while
+the test edits it) — it failed in all 6 migrating runs of the full suite and in 3 of 6
+others; `users/main.spec.ts:285` saves its attribute (the PUT succeeds) and then hangs on a
+later form step until the 180 s timeout — it hung here and in a repeat, passed in all 3
+re-measured migrating runs below, and hung in 2 of 4 nothing-migrating runs on 2026-11-03.
+Neither is root-caused.
 
 The first full-suite run after module code by name found a compiler bug: the gateway
 bundle keeps only the imports the machine text references, and a spread's dots
@@ -184,27 +185,36 @@ crossing.
 ## The whole suite
 
 All 434 tests, three rounds of three arms at 80 ms RTT + 20 Mbit/s
-(`ports/keycloak/drive-full.sh`, rows in `results/full-20mbit/`), the profile learned from
-one full-suite profiling run and locked. Per test the median I/O wait over rounds; a test
-counts only if it passed in every run of both arms compared:
+(`ports/keycloak/drive-full.sh`, rows in `results/full-20mbit-v2/`), the profile learned
+from one full-suite profiling run and locked. Per test the median I/O wait over rounds; a
+test counts only if it passed in every run of both arms compared:
 
 | | migration alone (fetch → profile) | against stock (baseline → profile) | nothing migrating (baseline → fetch) |
 |---|---|---|---|
-| tests compared | 361 | 375 | 361 |
-| I/O wait | −2.6% (625.1 → 608.8 s) | **−7.3%** (684.1 → 634.4 s) | −4.8% (657.0 → 625.3 s) |
-| tests waiting less / median per test | 185 / −2 ms | 340 / −86 ms | 337 / −85 ms |
-| wall clock | 0.0% | +0.3% | +0.3% |
+| tests compared | 357 | 356 | 368 |
+| I/O wait | −4.9% (616.4 → 585.9 s) | **−10.0%** (648.6 → 583.6 s) | −5.3% (672.1 → 636.2 s) |
+| tests waiting less / median per test | 307 / −25 ms | 345 / −113 ms | 347 / −88 ms |
+| wall clock | −2.0% | −2.2% | −0.1% |
 
-The profile migrates 293 crossings per run (292 in round 3). Migration alone is
+The profile migrates 292 crossings per run (291 in round 3). Migration alone is
 concentrated: the client-scopes subtab tests (`clients/scope.spec.ts:141–170`) wait
-640–670 ms less each, `client-scope/mappers.spec.ts:41` 840 ms, `clients/saml.spec.ts:136`
-780 ms; three tests wait 220–230 ms more (two a11y checks in `autentication/flows.spec.ts`,
-`organization/members.spec.ts:41`), not investigated. The ported build with nothing
-migrating already waits 4.8% less than stock, as in the per-spec runs above.
+700–730 ms less each, `client-scope/mappers.spec.ts:41` 1,040 ms,
+`client-scope/main.spec.ts:198` 690 ms; three tests wait 130–180 ms more
+(`realm-settings/security-defenses.spec.ts:52`, `groups/members.spec.ts:66`,
+`realm-settings/localization.spec.ts:38`), not investigated. The ported build with
+nothing migrating already waits 5.3% less than stock, as in the per-spec runs above.
 
-Per run 369–383 tests pass; 33–44 "did not run" are Playwright skipping the rest of a
-serial `describe` after a failure. 27 tests fail in at least one of the 9 runs: 19 in
-every arm, 5 only in one of the two ported arms (never both), 2 only in stock.
+Measured 2026-11-05 to 07. The profile rows are from a second pass after the compiler fix
+above, on a console rebuilt from the fixed framework; the stock and nothing-migrating rows
+are from the first pass (the fetch arm migrates nothing, so the fix does not reach it).
+Before module code by name (`results/full-20mbit/`, 2026-11-01), the same three columns
+read −2.6%, −7.3% and −4.8%.
+
+Per run 366–382 tests pass; 34–49 "did not run" are Playwright skipping the rest of a
+serial `describe` after a failure. 27 tests fail in at least one of the 9 runs: 14 in
+every run, 2 only in stock, 3 only in a ported arm (`realm-roles/main.spec.ts:117` in 2
+of 3 migrating runs — flaky on both arms in earlier runs; `user-federation/kerberos.spec.ts:108`
+and `realm-settings/userprofile.spec.ts:207` only with nothing migrating); the rest mix arms.
 
 ## Running it
 

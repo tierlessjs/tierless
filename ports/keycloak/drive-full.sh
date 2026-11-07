@@ -9,12 +9,14 @@
 #
 # Resumable: every step is skipped once its output exists, so after a container restart
 # the same command continues. Each run is split into SHARDS Playwright shards, so a restart
-# costs one shard, not a whole run. Rows land in ports/keycloak/results/full-<label>/.
+# costs one shard, not a whole run. Rows land in ports/keycloak/results/full-<label>/
+# (OUT=<dir> to put a measurement beside an earlier one: results/full-20mbit-v2 is the
+# second pass, after module code by name).
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 RTT="${RTT_MS:-80}"; BPS="${TIERLESS_BPS:-20000000}"; ROUNDS="${ROUNDS:-3}"; SHARDS="${SHARDS:-4}"
 LABEL="$([ "$BPS" != 0 ] && echo "$((BPS / 1000000))mbit" || echo "rtt$RTT")"
-OUT=ports/keycloak/results/full-$LABEL
+OUT="${OUT:-ports/keycloak/results/full-$LABEL}"
 PROFILE="$PWD/ports/work/keycloak/profile-full.json"
 mkdir -p ports/work
 for arm in "" --baseline; do
