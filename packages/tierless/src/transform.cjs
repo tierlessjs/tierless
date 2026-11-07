@@ -2594,10 +2594,11 @@ function compile(src, preamble) {
         // preceded by '.' or a word char: `__caps.router` is a property walk through the
         // caps handle, not a use of the router import.
         // not preceded by . (property walk), a word char, or a quote (a dyn park's member
-        // STRING names the callee — it is data, not a binding reference)
+        // STRING names the callee — it is data, not a binding reference); a spread
+        // `...getHeaders(token)` IS a reference — the dot before the name is the spread's
         // ...and a whole identifier: `Section$loader` (a component closure's program name)
         // is not a use of `Section`, and \b would say it is — `$` is an identifier char
-        const refdIn = (name, text) => new RegExp(`(?<![.\\w$"'])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w$])`).test(text);
+        const refdIn = (name, text) => new RegExp(`(?<![\\w$"'])(?:(?<=\\.\\.\\.)|(?<!\\.))${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w$])`).test(text);
         let machineText = progs.join(",\n");
         const included = new Set();
         // referenced TOP-LEVEL BINDINGS (const config values, arrow helpers) join the closure

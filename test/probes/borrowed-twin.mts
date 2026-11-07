@@ -224,11 +224,12 @@ const noTwin = connect(bundle);
   const COMP = `"use tierless";
 function useClient() { return { client: globalThis.__probeClient }; }
 export async function fetchish(x) { return x + 100; }   // an async module helper (fetchWithError's shape)
+export function hdrs(tok) { return { Authorization: "Bearer " + tok }; }   // referenced ONLY through a spread below
 export function Helpers(props) {
   const { client } = useClient();
   const loader = async (n) => {                  // module code called by name between twin calls
     const a = await client.scopes.a(conv(n));    // a sync module function: a free reference, not a capture
-    const f = await fetchish(a);                 // an awaited one: the call parks, settled where the run is
+    const f = await fetchish(a, { ...hdrs(a) }); // an awaited one: the call parks, settled where the run is
     const b = await client.scopes.b(f + props.k);
     return b;
   };
@@ -359,6 +360,11 @@ export function Details(props) {
   const hslots = new Set(Object.values(cmod.__slots["Helpers$loader"] as Record<string, string[]>).flat());
   check("module code the closure only calls is not captured: no args[0].conv / args[0].fetchish ref; the await is a call park (op dyn, fn: 1)",
     !hslots.has("args[0].conv") && !hslots.has("args[0].fetchish") && ![...hslots].some((r) => r.startsWith("args[0].conv") || r.startsWith("args[0].fetchish")) && ccode.includes('recv: fetchish, member: "fetchish", fn: 1'), [...hslots].join(",") + " | " + (ccode.match(/op: "dyn", recv: fetchish[^}]*/)?.[0] ?? "no DF"));
+  // the server module keeps what the machine text references — through a spread too: the
+  // dots of `...hdrs(a)` are not a property walk (Keycloak's save spreads
+  // getAuthorizationHeaders(token) into its headers; the import was dropped and the gateway
+  // threw ReferenceError on every realm-settings save)
+  check("server code keeps a helper the machine reaches only through a spread (`...hdrs(a)`)", typeof cmeta.serverCode === "string" && /function hdrs\(/.test(cmeta.serverCode) && /function conv\(/.test(cmeta.serverCode), String(cmeta.serverCode).match(/function \w+\(/g)?.join(" ") ?? "no functions");
   cmod.__bindTierlessMethods(null);
   reset();
   (globalThis as Record<string, unknown>).__probeClient = new Client("browser", log);
