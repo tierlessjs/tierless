@@ -151,25 +151,35 @@ admin-client calls. The twins module shares it by name (`shareFunction` on both 
 it runs on the gateway; its browser-only imports are stubbed in the gateway's bundle
 (`twinsStubs`), which stays at 3 KB.
 
-Checked end to end after these compiler and runtime changes (last on 2026-11-03, with
-writable views, the stop rule's write and computed-access modes, and module code by
-name): the ported arm rebuilt, the four specs that exercise the chains
-(`autentication/flows.spec.ts`, `identity-providers/saml.spec.ts`,
-`organization/idp.spec.ts`, `users/main.spec.ts`) profiled and run on the locked profile
-at 80 ms — 48 of 48 pass, 64 migrated crossings. With nothing migrating, 45 of 48:
-`flows.spec.ts:165` and `:217` (the unlimited-bandwidth race above) and a 180 s timeout
-in `users/main.spec.ts:285`, seen in 2 of 4 nothing-migrating runs and in no migrating
-run, not investigated.
+Checked end to end after these compiler and runtime changes (last on 2026-11-07, with
+module code by name, views by content and the compiler fix below): the ported arm
+rebuilt, the four specs that exercise the chains (`autentication/flows.spec.ts`,
+`identity-providers/saml.spec.ts`, `organization/idp.spec.ts`, `users/main.spec.ts`) and
+the seven realm-settings spec files whose saves migrate, run on the locked profile at
+80 ms + 20 Mbit/s: 78 of 81 pass. `realm-settings/oid4vci-attributes.spec.ts:365` fails
+on every arm in every run. Two fail only when the save migrates, in every profile run:
+`oid4vci-attributes.spec.ts:315` saves twice and the second save persisted the value from
+before the test's edit (the refresh after the first save resets the form while the test
+edits it; it also failed in 3 of 6 stock and nothing-migrating runs), and
+`users/main.spec.ts:285` saves its attribute (the PUT succeeds) and then hangs on a later
+form step until the 180 s timeout (on 2026-11-03 it hung the same way in 2 of 4
+nothing-migrating runs). Neither is root-caused.
 
-Where the 64 migrated runs come home (`TIERLESS_PARK_LOG`, the gateway's park log):
-before module code by name, 38 parks at 7 sites, 34 of them a loader parking on a
-captured helper (`addTrailingSlash`, `getAuthorizationHeaders`, `fetchWithError`) right
-after its first twin call — a migration that gained nothing. After: 30 parks at 6 sites,
-`RequiredActions.loadActions` whole on the gateway; `AuthenticationSection.loader` now
-runs its REST fetch there and comes home only for `useLocaleSort`'s sort; the rest park
-on hook results and callbacks (`addAlert`, `navigate`, `onClose`, `t`) after their last
-server call, which costs no extra crossing; `RealmSettingsTabs.save` parks on
-`JSON.stringify(savedRealm)`.
+The first full-suite run after module code by name found a compiler bug: the gateway
+bundle keeps only the imports the machine text references, and a spread's dots
+(`...getAuthorizationHeaders(token)`) read as a property walk, so the import was dropped
+and every migrated realm-settings save died with a `ReferenceError` the browser saw as a
+silent rejection — 10 tests failing in all three profile runs and in no other arm. Fixed
+in the compiler (a probe checks a helper reached only through a spread rides along); the
+profile arm was re-measured.
+
+Where migrated runs come home (`TIERLESS_PARK_LOG`, the gateway's park log), on the 81
+tests above: 59 parks at 9 sites. `RealmSettingsTabs.save` runs its PUT on the gateway
+and comes home at `addAlert` in 21 of 26 saves (5 came home before the PUT, at the token
+and base-URL read); `AuthenticationSection.loader` runs its REST fetch there and comes
+home for `useLocaleSort`'s sort (24); the rest park on hook results and callbacks
+(`addAlert`, `navigate`, `onClose`) after their last server call, which costs no extra
+crossing.
 
 ## The whole suite
 
