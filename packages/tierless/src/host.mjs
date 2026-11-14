@@ -154,8 +154,8 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
     // Interpret a peer reply: done -> final value; suspend -> pump the migrated stack here
     // (which may end done, or park at another foreign resource for the caller to bounce).
     async function settle(peer, { obj: reply, bin }) {
-        if (reply.type === "error")
-            throw new Error(reply.message);
+        if (reply.type === "error" || reply.type === "refused")
+            throw new Error(reply.message); // the drive path has no fetch arm to fall back on
         if (reply.type === "done")
             return { done: true, value: reply.value };
         const { stack, request } = decodeWireBinary(bin, dopts);
