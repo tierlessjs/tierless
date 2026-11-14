@@ -252,12 +252,21 @@ export function Sibs(props) {
     const s = await client.scopes.a(step);
     return await kind(s);
   };
+  async function walk(x) {                       // a sibling that calls ITSELF: its own name is among its captures
+    const a = await client.scopes.a(x);
+    if (a < 3) return await walk(a);
+    return await client.scopes.b(a);
+  }
+  const deep = async (id) => {                   // awaits the recursive sibling: a direct call that still carries the function
+    const s = await client.scopes.c(id);
+    return await walk(s);
+  };
   const passes = async (id) => {                 // the sibling used as a VALUE too: stays a captured call
     const s = await client.scopes.a(id);
     const r = await kind(s);
     return [r, typeof kind].join(":");
   };
-  return { load, shadow, passes };
+  return { load, shadow, passes, deep };
 }
 export function Section(props) {
   const { client } = useClient();
@@ -413,6 +422,26 @@ export function Details(props) {
     reset();
     const s1 = JSON.stringify(await cmod.Sibs({ step: 3 }).load(1));
     check("sibling call, migrated: same value as at home, all three twin calls on the server, ONE crossing", s1 === s0 && slog0 === "browser:a,browser:b,browser:c" && log.join(",") === "server:a,server:b,server:c" && counts.resume === 1 && !counts.exec, JSON.stringify({ s0, s1, slog0, log, counts }));
+    // CLOSED NAMES (transform.cts assertClosed): the compiled module reads from outside only
+    // what its source did, plus builtins — checked by the compiler on every emit; here on
+    // this module, and on the helper itself
+    const { undeclared } = require("../../packages/tierless/src/transform.cjs") as { undeclared: (code: string) => string[] };
+    const srcReads = new Set(undeclared(COMP));
+    check("closed names: a module's free identifiers are found (b, c, d; not its own a, f, x)", undeclared("const a = b + c; function f(x) { return d + x; }").sort().join() === "b,c,d", undeclared("const a = b + c; function f(x) { return d + x; }").join());
+    check("closed names: the compiled component module reads nothing its source didn't (beyond builtins)", undeclared(ccode).every((n) => srcReads.has(n) || n in globalThis || n === "arguments"), undeclared(ccode).filter((n) => !srcReads.has(n) && !(n in globalThis)).join(","));
+    // a recursive sibling: the caller carries the function value in its caps FOR the callee
+    // (the callee's captures name it) and still calls it directly — never a bare name in
+    // the machine, which sits at module scope where the component's bindings don't exist
+    check("sibling call: a recursive sibling's own name rides in the caller's caps (walk: F.args[0].walk), not as a bare identifier",
+      /op: "call", fn: "Sibs\$walk", args: \[\{ client: F\.args\[0\]\.client, walk: F\.args\[0\]\.walk \}, F\.s\]/.test(ccode) && /__TIERLESS_METHOD__\("Sibs\$deep", \{ client, walk \}/.test(ccode),
+      (ccode.match(/op: "call", fn: "Sibs\$walk"[^;]*/)?.[0] ?? "no call") + " | " + (ccode.match(/__TIERLESS_METHOD__\("Sibs\$deep", \{[^}]*\}/)?.[0] ?? ""));
+    cmod.__bindTierlessMethods(null);
+    reset();
+    const d0 = await cmod.Sibs({ step: 3 }).deep(0), dlog0 = log.join(",");
+    cmod.__bindTierlessMethods((prog: string, caps: object, args: unknown[]) => chost.runLocal(cpeer, prog, [caps, ...args], { migrate: () => true }));
+    reset();
+    const d1 = await cmod.Sibs({ step: 3 }).deep(0);
+    check("recursive sibling, migrated: same value and the same calls as at home", d1 === d0 && log.map((l) => l.split(":")[1]).join(",") === dlog0.split(",").map((l) => l.split(":")[1]).join(","), JSON.stringify({ d0, d1, dlog0, log, counts }));
     reset();
     const sh1 = await cmod.Sibs({ step: 3 }).shadow(2);
     check("captured sibling call, migrated: still the right value (the call goes home, the sibling's own chain migrates again)", sh1 === sh0 && log.join(",") === "server:a,server:b,server:c", JSON.stringify({ sh0, sh1, log, counts }));

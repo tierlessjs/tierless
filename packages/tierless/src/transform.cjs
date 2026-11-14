@@ -2403,7 +2403,10 @@ function lowerCapsUnitNow(u, progs, meta) {
         direct.set(name, { progName: sib.unit.progName, captures: done.captures });
         captures.splice(captures.indexOf(name), 1);
         for (const n of done.captures) {
-            if (seen.has(n))
+            // already ours, or module code we reference by name. The callee's OWN name can be
+            // among its captures (it recurses, or hands itself on): then we carry the function
+            // value in our caps for it, and still call it directly
+            if (captures.includes(n) || free.has(n))
                 continue;
             const cb = done.capBindings.get(n);
             seen.add(n);
@@ -2421,13 +2424,9 @@ function lowerCapsUnitNow(u, progs, meta) {
     const fnNode = t.functionDeclaration(t.identifier(u.progName), [t.identifier("__caps"), ...fn.params.map((x) => t.cloneNode(x, true))], body);
     const file = t.file(t.program([fnNode]));
     const capSet = new Set(captures);
-    traverse(file, { ReferencedIdentifier(ip) {
-            if (!capSet.has(ip.node.name) || ip.scope.getBinding(ip.node.name))
-                return; // bound in the copy = shadowed
-            ip.replaceWith(t.memberExpression(t.identifier("__caps"), t.identifier(ip.node.name)));
-        } });
     // `await sibling(a)` -> Sibling$prog({ its captures, from ours }, a): a suspendable call
-    // (suspSet, for this unit's lowering only), lowered to op "call" — a sub-frame
+    // (suspSet, for this unit's lowering only), lowered to op "call" — a sub-frame. Before
+    // the caps rewrite: a sibling we also carry as a value (it recurses) is still called by name
     let siblingCalls = 0;
     if (direct.size)
         traverse(file, { AwaitExpression(ap) {
@@ -2445,6 +2444,11 @@ function lowerCapsUnitNow(u, progs, meta) {
                 ap.replaceWith(call);
                 siblingCalls++;
             } });
+    traverse(file, { ReferencedIdentifier(ip) {
+            if (!capSet.has(ip.node.name) || ip.scope.getBinding(ip.node.name))
+                return; // bound in the copy = shadowed
+            ip.replaceWith(t.memberExpression(t.identifier("__caps"), t.identifier(ip.node.name)));
+        } });
     const siblingProgs = [...direct.values()].map((d) => d.progName).filter((p) => !suspSet.has(p));
     for (const p of siblingProgs)
         suspSet.add(p);
@@ -2725,10 +2729,31 @@ function lowerMethod(clsName, mName, m, progName, tierSiblings = new Set()) {
         } } });
     return lower(path);
 }
+/** The names a module READS but never declares — its free identifiers (Babel's scope globals). */
+function undeclared(code) {
+    const ast = typeof code === "string" ? parser.parse(code, { sourceType: "module", plugins: ["jsx"] }) : code;
+    let out = [];
+    traverse(ast, { Program(p) { out = Object.keys(p.scope.globals); p.stop(); } });
+    return out;
+}
+/** A compiled module may read only what its SOURCE read from outside (its own globals) and
+ *  the language's builtins: a program that names anything else names something that is
+ *  not in scope where the program runs — a component-local binding left bare in a machine
+ *  at module scope, an import the server module dropped. Both have happened (a recursive
+ *  sibling's own name; a helper reached only through a spread), and both surfaced only as
+ *  a ReferenceError on the tier that ran the code. Checked on every emitted module; a
+ *  violation fails the compile (under the plugin's auto mode the module then runs stock). */
+const BUILTINS = new Set([...Object.getOwnPropertyNames(globalThis), "arguments"]);
+function assertClosed(what, code, origGlobals) {
+    const stray = undeclared(code).filter((n) => !origGlobals.has(n) && !BUILTINS.has(n));
+    if (stray.length)
+        throw new Error(`tierless: ${srcFile}: the compiled ${what} reads ${stray.map((n) => "'" + n + "'").join(", ")}, which nothing in it defines — a compiler defect; the module is left uncompiled`);
+}
 function compile(src, preamble) {
     // jsx: a component module arrives with its JSX preserved (vite.mts) — it passes through
     // the kept code untouched; a compiled unit may not contain any (lowerCapsUnit)
     const ast = parser.parse(src, { sourceType: "module", plugins: ["jsx"] });
+    const origGlobals = new Set(undeclared(ast)); // before any rewrite: what the source itself reads from outside
     allowlist(ast);
     checkNestedSuspensions(ast);
     USED_FORIN = false;
@@ -2870,6 +2895,11 @@ function compile(src, preamble) {
             DRIVER,
             `export const BUNDLE_HASH = ${JSON.stringify(hash)};`,
         ].filter(Boolean).join("\n") + "\n";
+    }
+    if (meta.programs.length) {
+        assertClosed("module", code, origGlobals);
+        if (meta.serverCode)
+            assertClosed("server module", meta.serverCode, origGlobals);
     }
     return { code, meta };
 }
@@ -3020,4 +3050,4 @@ function cliMain() {
 }
 if (require.main === module)
     cliMain();
-module.exports = { compile: compileModule, analyze, sliceModule, DEFAULT_RESOURCES };
+module.exports = { compile: compileModule, analyze, sliceModule, undeclared, DEFAULT_RESOURCES };

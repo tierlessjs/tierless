@@ -1,3 +1,4 @@
+import t = require("@babel/types");
 type ModuleCodeEntry = string | {
     source: string;
     names: string[];
@@ -15,6 +16,8 @@ interface ModuleSlice {
     }>;
 }
 declare function sliceModule(src: string, names: string[], importOk: (source: string) => boolean): ModuleSlice | null;
+/** The names a module READS but never declares — its free identifiers (Babel's scope globals). */
+declare function undeclared(code: string | t.File): string[];
 interface CompileOptions {
     /** Extra allow-list namespaces merged over { api: "server", commit: "browser" }. */
     resources?: Record<string, string>;
@@ -99,6 +102,7 @@ declare const _default: {
     compile: typeof compileModule;
     analyze: typeof analyze;
     sliceModule: typeof sliceModule;
+    undeclared: typeof undeclared;
     DEFAULT_RESOURCES: Record<string, string>;
 };
 export = _default;

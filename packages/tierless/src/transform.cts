@@ -2018,7 +2018,10 @@ function lowerCapsUnitNow(u: CapsUnit, progs: string[], meta: CompileMeta): { ca
     direct.set(name, { progName: sib.unit.progName, captures: done.captures });
     captures.splice(captures.indexOf(name), 1);
     for (const n of done.captures) {
-      if (seen.has(n)) continue;
+      // already ours, or module code we reference by name. The callee's OWN name can be
+      // among its captures (it recurses, or hands itself on): then we carry the function
+      // value in our caps for it, and still call it directly
+      if (captures.includes(n) || free.has(n)) continue;
       const cb = done.capBindings.get(n)!;
       seen.add(n); captures.push(n); capBindings.set(n, cb);
       for (const v of cb.constantViolations) if (within(v, u.fnPath)) throw new Error(`tierless: ${label} assigns to captured binding '${n}' — a caps snapshot can't carry the write; the function stays uncompiled`);
@@ -2032,12 +2035,9 @@ function lowerCapsUnitNow(u: CapsUnit, progs: string[], meta: CompileMeta): { ca
   const fnNode = t.functionDeclaration(t.identifier(u.progName), [t.identifier("__caps"), ...(fn.params.map((x) => t.cloneNode(x, true)) as t.FunctionDeclaration["params"])], body);
   const file = t.file(t.program([fnNode]));
   const capSet = new Set(captures);
-  traverse(file, { ReferencedIdentifier(ip) {
-    if (!capSet.has(ip.node.name) || ip.scope.getBinding(ip.node.name)) return;   // bound in the copy = shadowed
-    ip.replaceWith(t.memberExpression(t.identifier("__caps"), t.identifier(ip.node.name)));
-  } });
   // `await sibling(a)` -> Sibling$prog({ its captures, from ours }, a): a suspendable call
-  // (suspSet, for this unit's lowering only), lowered to op "call" — a sub-frame
+  // (suspSet, for this unit's lowering only), lowered to op "call" — a sub-frame. Before
+  // the caps rewrite: a sibling we also carry as a value (it recurses) is still called by name
   let siblingCalls = 0;
   if (direct.size) traverse(file, { AwaitExpression(ap) {
     if (ap.getFunctionParent()?.node !== fnNode) return;
@@ -2049,6 +2049,10 @@ function lowerCapsUnitNow(u: CapsUnit, progs: string[], meta: CompileMeta): { ca
     call.loc = ap.node.loc;
     ap.replaceWith(call);
     siblingCalls++;
+  } });
+  traverse(file, { ReferencedIdentifier(ip) {
+    if (!capSet.has(ip.node.name) || ip.scope.getBinding(ip.node.name)) return;   // bound in the copy = shadowed
+    ip.replaceWith(t.memberExpression(t.identifier("__caps"), t.identifier(ip.node.name)));
   } });
   const siblingProgs = [...direct.values()].map((d) => d.progName).filter((p) => !suspSet.has(p));
   for (const p of siblingProgs) suspSet.add(p);
@@ -2282,10 +2286,31 @@ function lowerMethod(clsName: string, mName: string, m: t.ClassMethod, progName:
   return lower(path!);
 }
 
+/** The names a module READS but never declares — its free identifiers (Babel's scope globals). */
+function undeclared(code: string | t.File): string[] {
+  const ast = typeof code === "string" ? parser.parse(code, { sourceType: "module", plugins: ["jsx"] }) as unknown as t.File : code;
+  let out: string[] = [];
+  traverse(ast, { Program(p) { out = Object.keys((p.scope as unknown as { globals: Record<string, unknown> }).globals); p.stop(); } });
+  return out;
+}
+/** A compiled module may read only what its SOURCE read from outside (its own globals) and
+ *  the language's builtins: a program that names anything else names something that is
+ *  not in scope where the program runs — a component-local binding left bare in a machine
+ *  at module scope, an import the server module dropped. Both have happened (a recursive
+ *  sibling's own name; a helper reached only through a spread), and both surfaced only as
+ *  a ReferenceError on the tier that ran the code. Checked on every emitted module; a
+ *  violation fails the compile (under the plugin's auto mode the module then runs stock). */
+const BUILTINS = new Set([...Object.getOwnPropertyNames(globalThis), "arguments"]);
+function assertClosed(what: string, code: string, origGlobals: Set<string>): void {
+  const stray = undeclared(code).filter((n) => !origGlobals.has(n) && !BUILTINS.has(n));
+  if (stray.length) throw new Error(`tierless: ${srcFile}: the compiled ${what} reads ${stray.map((n) => "'" + n + "'").join(", ")}, which nothing in it defines — a compiler defect; the module is left uncompiled`);
+}
+
 function compile(src: string, preamble: string): { code: string; meta: CompileMeta } {
   // jsx: a component module arrives with its JSX preserved (vite.mts) — it passes through
   // the kept code untouched; a compiled unit may not contain any (lowerCapsUnit)
   const ast = parser.parse(src, { sourceType: "module", plugins: ["jsx"] }) as unknown as t.File;
+  const origGlobals = new Set(undeclared(ast));                    // before any rewrite: what the source itself reads from outside
   allowlist(ast);
   checkNestedSuspensions(ast);
   USED_FORIN = false; USED_OBJREST = false;
@@ -2398,6 +2423,10 @@ function compile(src: string, preamble: string): { code: string; meta: CompileMe
       DRIVER,
       `export const BUNDLE_HASH = ${JSON.stringify(hash)};`,
     ].filter(Boolean).join("\n") + "\n";
+  }
+  if (meta.programs.length) {
+    assertClosed("module", code, origGlobals);
+    if (meta.serverCode) assertClosed("server module", meta.serverCode, origGlobals);
   }
   return { code, meta };
 }
@@ -2570,7 +2599,7 @@ export function run(stack) {
 export const start = (fn, args = []) => run([{ fn, pc: 0, args }]);
 `;
 
-export = { compile: compileModule, analyze, sliceModule, DEFAULT_RESOURCES };
+export = { compile: compileModule, analyze, sliceModule, undeclared, DEFAULT_RESOURCES };
 
 // ---- CLI ----
 function cliMain() {
