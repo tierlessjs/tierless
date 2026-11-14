@@ -131,6 +131,12 @@ export type HostReply =
 } | {
     type: "suspend";
     twinDeltas?: TwinDelta[];
+}
+/** This tier cannot run the stack it was sent — a frame names a program it does not
+ *  hold (its machine failed to load here). Nothing ran; the sender continues at home. */
+ | {
+    type: "refused";
+    message: string;
 } | {
     type: "error";
     message: string;

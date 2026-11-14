@@ -2204,6 +2204,15 @@ function sliceModule(src, names, importOk) {
                             exported.set(t.isIdentifier(s.exported) ? s.exported.name : s.exported.value, b);
                     }
             }
+            // an initializer that runs nothing when the module loads
+            const inert = (e) => !e || t.isFunction(e) || t.isClass(e) || t.isIdentifier(e) || t.isLiteral(e) && !(t.isTemplateLiteral(e) && e.expressions.some((x) => !inert(x)))
+                || (t.isObjectExpression(e) && e.properties.every((pr) => t.isObjectMethod(pr) || (t.isObjectProperty(pr) && (!pr.computed || inert(pr.key)) && inert(pr.value)) || (t.isSpreadElement(pr) && inert(pr.argument))))
+                || (t.isArrayExpression(e) && e.elements.every((x) => x === null || (t.isSpreadElement(x) ? inert(x.argument) : inert(x))))
+                || (t.isUnaryExpression(e) && e.operator !== "delete" && inert(e.argument)) || ((t.isBinaryExpression(e) || t.isLogicalExpression(e)) && inert(e.left) && inert(e.right))
+                || (t.isConditionalExpression(e) && inert(e.test) && inert(e.consequent) && inert(e.alternate))
+                || (t.isMemberExpression(e) && !e.computed && inert(e.object))
+                || ((t.isCallExpression(e) || t.isNewExpression(e)) && !!e.leadingComments?.some((c) => /[@#]__PURE__/.test(c.value)))
+                || (t.isParenthesizedExpression(e) && inert(e.expression));
             const closureOf = (root) => {
                 const decls = new Set(), imports = new Set(), work = [root];
                 while (work.length) {
@@ -2218,7 +2227,7 @@ function sliceModule(src, names, importOk) {
                         continue;
                     }
                     const d = b.path;
-                    if (b.constantViolations.length || !(d.isFunctionDeclaration() || d.isClassDeclaration() || (d.isVariableDeclarator() && t.isIdentifier(d.node.id))))
+                    if (b.constantViolations.length || !(d.isFunctionDeclaration() || d.isClassDeclaration() || (d.isVariableDeclarator() && t.isIdentifier(d.node.id) && inert(d.node.init))))
                         return null;
                     decls.add(b);
                     let ok = true;

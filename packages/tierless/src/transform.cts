@@ -1822,9 +1822,14 @@ const importedName = (spec: t.Node): string => (t.isImportSpecifier(spec) ? (t.i
 // (a .tsx exporting components beside `changeScope(adminClient, …)`) is not — but the
 // helper alone may be: its declaration, the module-level declarations it reaches, and the
 // imports those use. sliceModule extracts exactly that for the named exports that qualify:
-// no JSX in anything reached, no module-level binding that is reassigned (each tier would
-// hold its own), every reached import accepted by `importOk`. The slice is the same source
-// text the browser runs. Returns null when no requested export qualifies.
+// no JSX in anything reached, every reached import accepted by `importOk`, and every
+// reached module-level binding INERT — a function, a class, or a constant whose
+// initializer runs nothing at load (literals, references, a call the bundler marked pure:
+// a TypeScript enum). A binding that is reassigned, or built by running code
+// (`const avatarService = new AvatarService()`), is module STATE: each tier would hold its
+// own, and constructing it may need the browser (that one read window.API_URL and the
+// gateway could not load the bundle). The slice is the same source text the browser runs.
+// Returns null when no requested export qualifies.
 interface ModuleSlice { names: string[]; body: string; imports: Array<{ source: string; specifiers: Array<{ imported: string; local: string }> }> }
 function sliceModule(src: string, names: string[], importOk: (source: string) => boolean): ModuleSlice | null {
   const ast = parser.parse(src, { sourceType: "module", plugins: ["jsx"] }) as unknown as t.File;
@@ -1838,6 +1843,15 @@ function sliceModule(src: string, names: string[], importOk: (source: string) =>
       if (sp.node.declaration) for (const id of Object.keys(t.getBindingIdentifiers(sp.node.declaration))) { const b = scope.getBinding(id); if (b) exported.set(id, b); }
       for (const s of sp.node.specifiers) if (t.isExportSpecifier(s)) { const b = scope.getBinding(s.local.name); if (b) exported.set(t.isIdentifier(s.exported) ? s.exported.name : s.exported.value, b); }
     }
+    // an initializer that runs nothing when the module loads
+    const inert = (e: t.Node | null | undefined): boolean => !e || t.isFunction(e) || t.isClass(e) || t.isIdentifier(e) || t.isLiteral(e) && !(t.isTemplateLiteral(e) && e.expressions.some((x) => !inert(x)))
+      || (t.isObjectExpression(e) && e.properties.every((pr) => t.isObjectMethod(pr) || (t.isObjectProperty(pr) && (!pr.computed || inert(pr.key)) && inert(pr.value)) || (t.isSpreadElement(pr) && inert(pr.argument))))
+      || (t.isArrayExpression(e) && e.elements.every((x) => x === null || (t.isSpreadElement(x) ? inert(x.argument) : inert(x))))
+      || (t.isUnaryExpression(e) && e.operator !== "delete" && inert(e.argument)) || ((t.isBinaryExpression(e) || t.isLogicalExpression(e)) && inert(e.left) && inert(e.right))
+      || (t.isConditionalExpression(e) && inert(e.test) && inert(e.consequent) && inert(e.alternate))
+      || (t.isMemberExpression(e) && !e.computed && inert(e.object))
+      || ((t.isCallExpression(e) || t.isNewExpression(e)) && !!e.leadingComments?.some((c) => /[@#]__PURE__/.test(c.value)))
+      || (t.isParenthesizedExpression(e) && inert(e.expression));
     const closureOf = (root: B): { decls: Set<B>; imports: Set<B> } | null => {
       const decls = new Set<B>(), imports = new Set<B>(), work = [root];
       while (work.length) {
@@ -1849,7 +1863,7 @@ function sliceModule(src: string, names: string[], importOk: (source: string) =>
           imports.add(b); continue;
         }
         const d = b.path;
-        if (b.constantViolations.length || !(d.isFunctionDeclaration() || d.isClassDeclaration() || (d.isVariableDeclarator() && t.isIdentifier(d.node.id)))) return null;
+        if (b.constantViolations.length || !(d.isFunctionDeclaration() || d.isClassDeclaration() || (d.isVariableDeclarator() && t.isIdentifier(d.node.id) && inert(d.node.init)))) return null;
         decls.add(b);
         let ok = true;
         d.traverse({

@@ -394,7 +394,18 @@ export async function bundleResolverFromManifest(manifestPath) {
         for (const id of Object.keys(manifest.modules)) {
             if (!id.startsWith("m:"))
                 continue;
-            const b = await load(manifest.modules[id]);
+            // a machine that does not LOAD here (module code that needs the browser at import)
+            // must not take the session down: its programs are simply absent, a migration into
+            // one is refused (host.mts handleResume) and the run continues at home — while every
+            // other module, and every plain exec, works
+            let b;
+            try {
+                b = await load(manifest.modules[id]);
+            }
+            catch (e) {
+                console.error(`tierless: machine ${manifest.modules[id]} does not load on this tier — migrations into it are refused: ${String(e?.message || e).split("\n")[0]}`);
+                continue;
+            }
             for (const [k, v] of Object.entries(b.PROGRAMS)) {
                 if (merged.PROGRAMS[k] && merged.PROGRAMS[k] !== v)
                     throw new Error("tierless: program name collision across compiled app modules: " + k);
@@ -410,11 +421,9 @@ export async function bundleResolverFromManifest(manifestPath) {
     return async (moduleId) => {
         if (!moduleId)
             throw new Error("tierless: empty module id on the wire — a malformed client would suffix-match anything");
-        if (moduleId.startsWith("m:")) {
-            const m = await mergedApp();
-            if (m)
-                return m;
-        }
+        // no machine loaded at all: an app module still gets a host for its plain execs
+        if (moduleId.startsWith("m:"))
+            return (await mergedApp()) ?? { PROGRAMS: {}, __unwind: () => false };
         let file = manifest.modules[moduleId];
         if (!file) {
             // client built under a different absolute root (/build-a/... vs /build-b/...):

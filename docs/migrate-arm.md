@@ -107,8 +107,13 @@ mid-segment (design.md §8). So the check happens BEFORE the segment runs, in th
   `changeScope(adminClient, …)`) never loads whole on the gateway, but a named export that
   stands alone is sliced out of it (`sliceModule`): its declaration, the module-level
   declarations it reaches, and the imports those use — each of which must load whole. No
-  JSX anywhere in what is reached, and no module-level binding that is reassigned (each
-  tier would hold its own). The plugin writes the slice to a temp file and the machine's
+  JSX anywhere in what is reached, and every module-level binding reached must be inert: a
+  function, a class, or a constant whose initializer runs nothing at load (literals,
+  references, a call the bundler marked pure — a TypeScript enum). A binding that is
+  reassigned, or built by running code (`const avatarService = new AvatarService()`), is
+  module state: each tier would hold its own, and building it may need the browser — on
+  Vikunja that one read `window.API_URL` at import and the machine bundle did not load in
+  Node. The plugin writes the slice to a temp file and the machine's
   server module imports the name from it; the browser keeps importing the module itself,
   so both tiers run the same source text. Only app source is sliced (a package is taken
   whole or not at all), and a re-export is not followed.
@@ -218,6 +223,15 @@ Not measured on Keycloak: no compiled Keycloak program calls `t()` before a late
 call, and the port runs at the default threshold.
 
 ## Protocol shape (no new messages)
+
+One reply was added since: **`refused`**. A tier that receives a stack with a frame whose
+program it does not hold answers `{ type: "refused" }` before running anything — the case
+is a machine bundle that failed to load on the gateway (module code that needs the browser
+at import; the gateway skips such a bundle with one error line and keeps serving every
+other module and every plain exec). The sender still has the stack: an offered call is
+re-dispatched on the live local object, a resource park is fetched, the run goes on at
+home, and stacks through that program are not offered again. Before, one bundle that
+threw at import failed every crossing of every compiled app module.
 
 Browser runLocal grows a migrate branch: at a park it may ship `(stack, request)` as a
 `resume` to the gateway instead of exec-carrying. The gateway host — which for compiled

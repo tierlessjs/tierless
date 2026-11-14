@@ -446,6 +446,29 @@ export function Details(props) {
     const sh1 = await cmod.Sibs({ step: 3 }).shadow(2);
     check("captured sibling call, migrated: still the right value (the call goes home, the sibling's own chain migrates again)", sh1 === sh0 && log.join(",") === "server:a,server:b,server:c", JSON.stringify({ sh0, sh1, log, counts }));
   }
+  // A GATEWAY THAT CANNOT RUN THE STACK refuses it: a frame names a program the peer does
+  // not hold (its machine failed to load there — module code that needs the browser at
+  // import). Nothing ran; the run continues here on the live objects, with the right value,
+  // and stacks through those programs are not offered again.
+  {
+    const emptyPeer = connect({ PROGRAMS: {}, __unwind: () => false }, (cls) => (cls === "Client" ? twin : undefined));   // a server tier with no machine
+    const rhost = makeHost({ bundle: cbundle as never, tier: "browser", exec: (() => { throw new Error("browser owns nothing"); }) as never });
+    const warns: string[] = []; const warn0 = console.warn; console.warn = (...a: unknown[]) => { warns.push(a.join(" ")); };
+    try {
+      cmod.__bindTierlessMethods(null);
+      reset();
+      (globalThis as Record<string, unknown>).__probeClient = new Client("browser", log);
+      const r0 = JSON.stringify(await cmod.Sibs({ step: 3 }).load(1));
+      cmod.__bindTierlessMethods((prog: string, caps: object, args: unknown[]) => rhost.runLocal(emptyPeer, prog, [caps, ...args], { migrate: () => true }));
+      reset();
+      const r1 = JSON.stringify(await cmod.Sibs({ step: 3 }).load(1));
+      check("refused migration: the peer holds no program — one refused resume, then the whole chain runs here with the same value", r1 === r0 && log.join(",") === "browser:a,browser:b,browser:c" && counts.resume === 1, JSON.stringify({ r0, r1, log, counts }));
+      reset();
+      const r2 = JSON.stringify(await cmod.Sibs({ step: 3 }).load(1));
+      check("refused migration: the next run does not offer the stack again (no resume at all)", r2 === r0 && log.join(",") === "browser:a,browser:b,browser:c" && !counts.resume, JSON.stringify({ r2, log, counts }));
+      check("refused migration: said once, naming the program", warns.length === 1 && /no program Sibs\$load on tier server/.test(warns[0]), JSON.stringify(warns));
+    } finally { console.warn = warn0; }
+  }
   cmod.__bindTierlessMethods(null);
   reset();
   (globalThis as Record<string, unknown>).__probeClient = new Client("browser", log);

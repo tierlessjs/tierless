@@ -413,5 +413,27 @@ check("dyn home park: the uncompiled method ran on the LIVE home instance, value
   check("a handle inside a live class instance does NOT park (codec excises the instance whole)", r16d.done === true && r16d.value === "ok", JSON.stringify(r16d));
 }
 
+// ---- a peer that cannot run the stack REFUSES it ----------------------------------------
+// The gateway holds no program for a frame (its machine failed to load there): nothing
+// runs, the reply is "refused", and the run continues on the fetch arm — the same two
+// calls as execs, the same value — instead of surfacing an error to the app. Stacks
+// through that program are not offered again.
+{
+  const [bp, sp] = pair();
+  makeHost({ bundle: { PROGRAMS: {}, __unwind: () => false } as never, tier: "server", exec: serverExec as never }).answer(makePeer(sp));
+  const rhost = makeHost({ bundle, tier: "browser", exec: browserExec as never });
+  const rpeer: Peer = makePeer(bp);
+  const warns: string[] = []; const warn0 = console.warn; console.warn = (...a: unknown[]) => { warns.push(a.join(" ")); };
+  try {
+    reset();
+    const rv = await rhost.runLocal(rpeer, "Svc$chain", [new mod.Svc({ marker: true }), 7], migrate);
+    check("refused: the chain still returns the right value, both calls as fetch-arm execs on the server after ONE refused resume", rv === "got:n7" && served.join(",") === "/a/7,/b/n7" && counts.resume === 1 && counts.exec === 2, JSON.stringify({ rv, served, counts }));
+    reset();
+    const rv2 = await rhost.runLocal(rpeer, "Svc$chain", [new mod.Svc({ marker: true }), 8], migrate);
+    check("refused: the next run goes straight to the fetch arm (no resume)", rv2 === "got:n8" && !counts.resume && counts.exec === 2, JSON.stringify({ rv2, counts }));
+    check("refused: said once", warns.length === 1 && /no program Svc\$chain/.test(warns[0]), JSON.stringify(warns));
+  } finally { console.warn = warn0; }
+}
+
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
 console.log("\na chain migrates in one crossing; the stop rule, identity, and unwind hold; the profile decides");

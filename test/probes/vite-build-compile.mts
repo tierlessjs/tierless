@@ -6,6 +6,7 @@
 // here end to end — the emitted bundle services a 2-call chain in ONE resume crossing.
 import { writeFileSync, mkdtempSync, mkdirSync, existsSync, readFileSync, symlinkSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir as tmpdir0 } from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
@@ -175,6 +176,44 @@ export const view = () => <p/>;`;
     !!s1 && s1.names.join() === "doubled" && /function inner/.test(s1.body) && /export \{ local as doubled \}/.test(s1.body) && !/viaUi|view|rex/.test(s1.body)
       && JSON.stringify(s1.imports) === JSON.stringify([{ source: "./dep", specifiers: [{ imported: "a", local: "a1" }] }]), JSON.stringify(s1));
   check("slicer: nothing qualifies -> null", sliceModule(SRC, ["view", "viaUi"], () => false) === null);
+  // module-level bindings a slice reaches must be INERT: a function, a class, or a constant
+  // whose initializer runs nothing at load. A constant BUILT by running code is module
+  // state — each tier would construct its own, and constructing it may need the browser
+  // (Vikunja's models/user: `const avatarService = new AvatarService()` read window.API_URL
+  // at import and the gateway could not load the machine bundle)
+  const SRC2 = `class Service { constructor() { this.base = window.API_URL; } get(x) { return x; } }
+const svc = new Service();
+const TABLE = { a: 1, b: [2, 3], c: -1, d: \`t\` };
+var Kind = /* @__PURE__ */ ((Kind2) => { Kind2["A"] = "a"; return Kind2; })(Kind || {});
+export const viaSingleton = (x) => svc.get(x);
+export const viaTable = (x) => TABLE.a + x;
+export const viaEnum = (x) => x === Kind.A;
+export const made = () => new Service();`;
+  const s2 = sliceModule(SRC2, ["viaSingleton", "viaTable", "viaEnum", "made"], () => true);
+  check("slicer: an export over a module-level singleton built at load (`new Service()`) is not sliced; ones over a literal table, a pure-marked enum, or that construct inside the function are",
+    !!s2 && s2.names.join() === "viaTable,viaEnum,made" && !/const svc/.test(s2.body) && /const TABLE/.test(s2.body) && /var Kind/.test(s2.body) && /class Service/.test(s2.body), JSON.stringify(s2 && { names: s2.names, body: s2.body.slice(0, 300) }));
+}
+
+// ---- a machine bundle that does not load must not take the gateway down --------------
+// Compiled app modules run in one merged machine world; one bundle throwing at import
+// (module code that needs the browser) used to fail every crossing of every app module.
+// Now it is skipped with one error line: the others resolve, plain execs keep a host, and
+// a migration into the missing programs is refused (host.mts, test/probes/migrate-arm.mts).
+{
+  const mdir = mkdtempSync(join(tmpdir0(), "tl-manifest-"));
+  writeFileSync(join(mdir, "good.mjs"), `export const PROGRAMS = { G(F) { return { op: "return", value: 1 }; } }; export const __unwind = () => false;\n`);
+  writeFileSync(join(mdir, "bad.mjs"), `const base = window.API_URL; export const PROGRAMS = { B(F) { return { op: "return", value: base }; } }; export const __unwind = () => false;\n`);
+  writeFileSync(join(mdir, "tierless.manifest.json"), JSON.stringify({ modules: { "m:good": "good.mjs", "m:bad": "bad.mjs" } }));
+  const errs: string[] = []; const err0 = console.error; console.error = (...a: unknown[]) => { errs.push(a.join(" ")); };
+  let merged: { PROGRAMS: Record<string, unknown> } | null = null, onlyBad: { PROGRAMS: Record<string, unknown> } | null = null;
+  try {
+    merged = await (await bundleResolverFromManifest(join(mdir, "tierless.manifest.json")))("m:bad") as never;
+    writeFileSync(join(mdir, "only-bad.manifest.json"), JSON.stringify({ modules: { "m:bad": "bad.mjs" } }));
+    onlyBad = await (await bundleResolverFromManifest(join(mdir, "only-bad.manifest.json")))("m:bad") as never;
+  } finally { console.error = err0; }
+  check("gateway: a machine that throws at import is skipped — the merged world holds the other module's programs, and says which bundle failed and why",
+    !!merged && typeof merged.PROGRAMS.G === "function" && !("B" in merged.PROGRAMS) && errs.some((e) => /bad\.mjs does not load.*window is not defined/.test(e)), JSON.stringify({ programs: merged && Object.keys(merged.PROGRAMS), errs }));
+  check("gateway: with no machine loaded at all an app module still resolves (an exec-only bundle)", !!onlyBad && Object.keys(onlyBad.PROGRAMS).length === 0, JSON.stringify(onlyBad && Object.keys(onlyBad.PROGRAMS)));
 }
 
 const { pass, fail } = counts();

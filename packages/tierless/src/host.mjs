@@ -101,6 +101,11 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
     // peer holds by content and records nothing — the frame that ships does
     const priceOpts = (sid) => ({ ...encOpts(sid), ...(content ? { content: { store: content.store, peer: { has: (h) => content.peer.has(h), add: () => { } } } } : {}) });
     const rec = trace ? (isRecorder(trace) ? trace : makeRecorder(trace)) : null;
+    // programs the peer refused to run (runLocal): a stack through any of them is not offered
+    // again (a machine that did not load there lacks all of its module's programs; each is
+    // learned from at most one refused crossing)
+    const refusedFns = new Set();
+    const refusedStack = (st) => refusedFns.size > 0 && st.some((f) => refusedFns.has(f.fn));
     // The exec the pump runs, bound to the peer the current message rides: an "@deref" is a
     // coherent fetch back over `peer` on a cache miss; an "@writeback" proposes the mutated
     // snapshot to its owner over `peer` under an optimistic CAS. Every other owned resource
@@ -313,6 +318,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
             // and resolve back by identity when it returns. Scoped to this run — nothing leaks.
             let heapTier = null;
             let views = []; // views of the peer's objects the stack brought back (hydrateViews)
+            let refused = false; // the peer could not run this stack (reply "refused"): the rest of the run stays here
             for (;;) {
                 const c = carry;
                 carry = null;
@@ -332,7 +338,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                     const t = stack[stack.length - 1];
                     const req = { op: "resource", tier: "peer", name: r.name, args: r.args };
                     rec?.res(stack, req, undefined, -1);
-                    return migratable && migrate ? migrate(req, { fn: t.fn, pc: t.pc, entry }) : false;
+                    return migratable && migrate && !refused && !refusedStack(stack) ? migrate(req, { fn: t.fn, pc: t.pc, entry }) : false;
                 } : undefined;
                 const res = await pump(stack, ownsHere, onceExec, request, undefined, offer);
                 if (res.done) {
@@ -383,7 +389,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                 // can serve. Errors the compiled code catches unwind over there; only uncaught
                 // ones surface here, exactly as they would have escaped the local pump.
                 const top = stack[stack.length - 1];
-                if (!parked || (migrate && migrate(parked, { fn: top.fn, pc: top.pc, entry }))) {
+                if (!parked || (migrate && !refused && !refusedStack(stack) && migrate(parked, { fn: top.fn, pc: top.pc, entry }))) {
                     if (!heapTier) {
                         const objs = new Map();
                         let n = 0;
@@ -399,6 +405,29 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                     // ran at home. On ERROR replies too: mutations made before an uncaught throw
                     // are real, exactly as they would be had the code run here. Twin deltas ride
                     // the JSON header; view deltas the graph (decoding applies them).
+                    // REFUSED: the peer holds no program for a frame (its machine did not load there).
+                    // Nothing ran. The stack is still ours — this run continues on the fetch arm, and
+                    // later runs don't offer stacks through these programs again.
+                    if (reply.obj.type === "refused") {
+                        for (const f of stack)
+                            refusedFns.add(f.fn);
+                        if (!parked && request.tier !== "peer")
+                            throw new Error(reply.obj.message); // a §5 home park can only continue where the handle lives
+                        if (!refused)
+                            console.warn(reply.obj.message + " — continuing here");
+                        refused = true;
+                        // an offered call (tier "peer"): the pump re-dispatches it on the live local
+                        // object (its incoming park); a resource park: fetch the value instead
+                        if (parked) {
+                            try {
+                                carry = { value: await execOver(peer, req, meta) };
+                            }
+                            catch (e) {
+                                carry = { error: e };
+                            }
+                        }
+                        continue;
+                    }
                     applyDeltas(heapTier, reply.obj.twinDeltas ?? []);
                     if (reply.obj.type !== "suspend") {
                         if (reply.bin)
@@ -430,7 +459,15 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                 rec.stamp(stack, payload.__trace);
             return step(peer, (payload && payload.sid) || "", stack, null);
         },
-        handleResume: (payload, bin, peer) => { const { stack, request } = decodeWireBinary(bin, dopts); return step(peer, (payload && payload.sid) || "", stack, request); },
+        handleResume: async (payload, bin, peer) => {
+            const { stack, request } = decodeWireBinary(bin, dopts);
+            // a frame whose program this tier does not hold (its machine did not load here):
+            // refuse before running anything — the sender still has the stack and goes on at home
+            const missing = stack.find((f) => !bundle.PROGRAMS[f.fn]);
+            if (missing)
+                return { obj: { type: "refused", message: "tierless: no program " + missing.fn + " on tier " + tier } };
+            return step(peer, (payload && payload.sid) || "", stack, request);
+        },
         // Serve a BURST of fetched resources in one crossing (the browser's microtask
         // batcher, docs/migrate-arm.md "burst coalescing"): bin is a vector of the same
         // per-exec payloads, results return per-element — value or shaped error — so each
