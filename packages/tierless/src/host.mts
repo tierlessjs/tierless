@@ -191,7 +191,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
   // Interpret a peer reply: done -> final value; suspend -> pump the migrated stack here
   // (which may end done, or park at another foreign resource for the caller to bounce).
   async function settle(peer: Peer, { obj: reply, bin }: { obj: HostReply; bin: Uint8Array | null }): Promise<PumpResult> {
-    if (reply.type === "error") throw new Error(reply.message);
+    if (reply.type === "error" || reply.type === "refused") throw new Error(reply.message);   // the drive path has no fetch arm to fall back on
     if (reply.type === "done") return { done: true, value: reply.value };
     const { stack, request } = decodeWireBinary(bin!, dopts);
     return runPump(peer, stack as Frame[], request as ResourceRequest | null);   // a "suspend" reply's bin always decodes to what the sender's PumpResult shipped — a real continuation stack + ResourceRequest
