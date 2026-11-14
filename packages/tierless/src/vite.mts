@@ -235,6 +235,64 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
     serverSafe.set(rid, safe);
     return safe;
   };
+  // SLICES (transform.cts sliceModule): an import whose module does NOT load whole on the
+  // gateway — a .tsx that exports helpers beside its components — may still give up the
+  // named exports a closure calls: each with only the module-level code it reaches, every
+  // import of that code a module that does load whole. The slice is written beside the
+  // probe stub and the machine's server module imports the names from it; the browser keeps
+  // importing the module itself. Per target file: its type-stripped source and which of
+  // its imports qualify; per (file, names): the slice.
+  const sliceTargets = new Map<string, Promise<{ code: string; imports: Map<string, { abs: string | null; safe: boolean }> } | null>>();
+  const slices = new Map<string, { names: string[]; server: string } | null>();
+  const IMPORT_RE = /^\s*import\s+(?:([^'";]*?)\s+from\s+)?["']([^"']+)["']/gm;
+  const sliceTarget = (ctx: any, rid: string): Promise<{ code: string; imports: Map<string, { abs: string | null; safe: boolean }> } | null> => {
+    let hit = sliceTargets.get(rid);
+    if (!hit) {
+      hit = (async () => {
+        try {
+          const esbuild = createRequire(path.join(root, "package.json"))("esbuild") as { transformSync: (code: string, opts: object) => { code: string } };
+          const code = esbuild.transformSync(readFileSync(rid, "utf8"), { loader: /\.[tj]sx$/.test(rid) ? "tsx" : "ts", format: "esm", target: "es2022", sourcefile: rid, jsx: "preserve" }).code;
+          const imports = new Map<string, { abs: string | null; safe: boolean }>();
+          for (const m of code.matchAll(IMPORT_RE)) {
+            if (imports.has(m[2])) continue;
+            const r = await ctx.resolve?.(m[2], rid, { skipSelf: true });
+            const abs = typeof r?.id === "string" && !r.id.startsWith("\0") ? r.id.split("?")[0] : null;
+            imports.set(m[2], { abs, safe: !!abs && isServerSafe(abs) });
+          }
+          return { code, imports };
+        } catch { return null; }                                    // unreadable or unparseable: no slice
+      })();
+      sliceTargets.set(rid, hit);
+    }
+    return hit;
+  };
+  const sliceFor = async (ctx: any, rid: string, names: string[]): Promise<{ names: string[]; server: string } | null> => {
+    if (!names.length || !/\.(m?[tj]s|[tj]sx)$/.test(rid) || /(?:^|\/)node_modules\//.test(rid)) return null;   // app source only: a package is taken whole or not at all
+    const key = rid + "\0" + [...names].sort().join(",");
+    const hit = slices.get(key); if (hit !== undefined) return hit;
+    let out: { names: string[]; server: string } | null = null;
+    const target = await sliceTarget(ctx, rid);
+    if (target) {
+      try {
+        const { sliceModule } = require("./transform.cjs") as { sliceModule: (src: string, names: string[], importOk: (source: string) => boolean) => { names: string[]; body: string; imports: Array<{ source: string; specifiers: Array<{ imported: string; local: string }> }> } | null };
+        const sl = sliceModule(target.code, names, (source) => !!target.imports.get(source)?.safe);
+        if (sl) {
+          const clause = (sp: Array<{ imported: string; local: string }>): string => {
+            const def = sp.find((x) => x.imported === "default"), ns = sp.find((x) => x.imported === "*"), named = sp.filter((x) => x.imported !== "default" && x.imported !== "*");
+            return [def?.local, ns ? "* as " + ns.local : null, named.length ? "{ " + named.map((x) => (x.imported === x.local ? x.local : x.imported + " as " + x.local)).join(", ") + " }" : null].filter(Boolean).join(", ");
+          };
+          const dir = path.join(os.tmpdir(), `tierless-slices-${process.pid}`);
+          mkdirSync(dir, { recursive: true });
+          const server = path.join(dir, shortHash(key) + ".mjs");
+          writeFileSync(server, `// tierless slice: ${sl.names.join(", ")} of ${path.relative(root, rid)} with the module-level code they reach\n`
+            + sl.imports.map((im) => `import ${clause(im.specifiers)} from ${JSON.stringify(target.imports.get(im.source)!.abs)};\n`).join("") + sl.body + "\n");
+          out = { names: sl.names, server };
+        }
+      } catch { out = null; }
+    }
+    slices.set(key, out);
+    return out;
+  };
   // a browser asset a module imports for its side (styles, images, fonts): nothing on the gateway
   const ASSET_EXTS = [".css", ".scss", ".sass", ".less", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".woff", ".woff2"];
   // A framework build (Nuxt) runs the SAME plugin object through two sequential Vite
@@ -311,16 +369,23 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
           // (unless the app set moduleCode itself)
           let moduleCode = compilerOptions.moduleCode;
           if (moduleCode === undefined) {
-            const specs = [...new Set([...stripped.code.matchAll(/^\s*import\s+(?:[^'";]*?\s+from\s+)?["']([^"']+)["']/gm)].map((m) => m[1]))];
-            const ok: string[] = [], why: string[] = [];
-            for (const spec of specs) {
+            // each import source with the named exports this module takes from it
+            const specs = new Map<string, string[]>();
+            for (const m of stripped.code.matchAll(IMPORT_RE)) {
+              const named = /\{([^}]*)\}/.exec(m[1] ?? "")?.[1].split(",").map((x) => x.trim().split(/\s+as\s+/)[0]).filter(Boolean) ?? [];
+              specs.set(m[2], [...(specs.get(m[2]) ?? []), ...named]);
+            }
+            const ok: Array<string | { source: string; names: string[]; server: string }> = [], why: string[] = [];
+            for (const [spec, named] of specs) {
               const r = await this.resolve?.(spec, cleanId, { skipSelf: true });
               const rid = typeof r?.id === "string" ? r.id.split("?")[0] : null;
-              if (rid && !rid.startsWith("\0") && isServerSafe(rid)) ok.push(spec);
+              if (rid && !rid.startsWith("\0") && isServerSafe(rid)) { ok.push(spec); continue; }
+              const sl = rid && !rid.startsWith("\0") ? await sliceFor(this, rid, named) : null;   // not whole: the named exports that stand alone
+              if (sl) ok.push({ source: spec, ...sl });
               else why.push(`-${spec} (${rid ? serverSafeWhy.get(rid) ?? "unsafe" : "unresolved: " + JSON.stringify(r)})`);
             }
             moduleCode = ok;
-            if (typeof process !== "undefined" && process.env?.TIERLESS_DEBUG_MODULECODE) console.error(`tierless: moduleCode ${rel}: ${ok.length}/${specs.length} imports free — ${ok.map((x) => "+" + x).join(" ")} ${why.join(" ")}`);
+            if (typeof process !== "undefined" && process.env?.TIERLESS_DEBUG_MODULECODE) console.error(`tierless: moduleCode ${rel}: ${ok.length}/${specs.size} imports free — ${ok.map((x) => "+" + (typeof x === "string" ? x : x.source + "{" + x.names.join(",") + "}")).join(" ")} ${why.join(" ")}`);
           }
           const { code: compiled, meta } = compile(stripped.code, { ...compilerOptions, moduleCode, resources: { "this.http": "server", ...(resources || {}) }, filename: id, preamble: "" });
           const some = meta.methods.some((m: { program: string | null }) => m.program);
@@ -369,7 +434,7 @@ export default function tierless(opts: TierlessPluginOptions = {}): TierlessPlug
       // time if a machine import then fails to resolve — never silently misresolved).
       aliases = Object.fromEntries((config?.resolve?.alias || []).filter((a) => typeof a.find === "string").map((a) => [a.find as string, a.replacement]));
     },
-    buildStart(): void { if (!ssrBuild) { machines.clear(); appMachines.clear(); coverage.clear(); serverSafe.clear(); } },   // fresh CLIENT build: transform repopulates the maps (an SSR build must not wipe them)
+    buildStart(): void { if (!ssrBuild) { machines.clear(); appMachines.clear(); coverage.clear(); serverSafe.clear(); sliceTargets.clear(); slices.clear(); } },   // fresh CLIENT build: transform repopulates the maps (an SSR build must not wipe them)
 
     // Build: emit the server side of what the client build just produced. For every "use tierless"
     // module the transform compiled, write its machine (byte-identical to `tierless build --bare` —

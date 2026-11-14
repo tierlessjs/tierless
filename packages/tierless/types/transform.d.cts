@@ -1,3 +1,20 @@
+type ModuleCodeEntry = string | {
+    source: string;
+    names: string[];
+    server: string;
+};
+interface ModuleSlice {
+    names: string[];
+    body: string;
+    imports: Array<{
+        source: string;
+        specifiers: Array<{
+            imported: string;
+            local: string;
+        }>;
+    }>;
+}
+declare function sliceModule(src: string, names: string[], importOk: (source: string) => boolean): ModuleSlice | null;
 interface CompileOptions {
     /** Extra allow-list namespaces merged over { api: "server", commit: "browser" }. */
     resources?: Record<string, string>;
@@ -24,8 +41,10 @@ interface CompileOptions {
      *  call of one is a park the pump settles where the run is. true (the default): any
      *  import; a list: only imports from those sources (the Vite plugin passes the ones
      *  whose module graph is free of UI code); false: every outside binding captures, as
-     *  before. Module-level functions and classes are free unless false. */
-    moduleCode?: boolean | string[];
+     *  before. Module-level functions and classes are free unless false. A list entry
+     *  `{ source, names, server }` frees only those named exports of `source`, and the
+     *  machine's server module imports them from `server` instead (a slice: sliceModule). */
+    moduleCode?: boolean | ModuleCodeEntry[];
     /** Sync calls of VALUES (a captured function, a method of this or of a local) become
      *  pump-dispatched parks: a program runs as a sub-frame under the stop rule, a live
      *  function natively, a borrowed one at home. Module code stays a plain call. */
@@ -79,6 +98,7 @@ declare function analyze(src: string, opts?: CompileOptions): {
 declare const _default: {
     compile: typeof compileModule;
     analyze: typeof analyze;
+    sliceModule: typeof sliceModule;
     DEFAULT_RESOURCES: Record<string, string>;
 };
 export = _default;

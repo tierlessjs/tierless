@@ -103,6 +103,24 @@ mid-segment (design.md §8). So the check happens BEFORE the segment runs, in th
   (`TIERLESS_PARK_LOG`): 34 of the 38 home parks on the Keycloak chain specs were loaders
   parking on a captured helper right after their first twin call — a migration that gained
   nothing.
+- **Slices:** a module that mixes helpers with UI (a `.tsx` exporting components beside
+  `changeScope(adminClient, …)`) never loads whole on the gateway, but a named export that
+  stands alone is sliced out of it (`sliceModule`): its declaration, the module-level
+  declarations it reaches, and the imports those use — each of which must load whole. No
+  JSX anywhere in what is reached, and no module-level binding that is reassigned (each
+  tier would hold its own). The plugin writes the slice to a temp file and the machine's
+  server module imports the name from it; the browser keeps importing the module itself,
+  so both tiers run the same source text. Only app source is sliced (a package is taken
+  whole or not at all), and a re-export is not followed.
+- **Sibling calls:** a component's closure that only ever awaits a sibling closure by
+  name (`await determineScopeType(clientScope)` in a loader) calls the sibling's program
+  as a sub-frame (`op: "call"`), over caps built from its own: the sibling's captures join
+  the caller's caps and the function value is not captured at all — off its tier it would
+  be a handle, and the run would go home to call it. Requires the sibling to compile and
+  each of its captures to be the same binding at every call site; a shadowed capture, a
+  value use of the sibling, or a call in a nested function keeps the captured call. A
+  sub-frame call's arguments move into the callee's frame (the callee's states check what
+  they use).
 - **Sync calls of values (`syncCalls`, `syncMethods`):** a synchronous call of a value a
   segment holds — a captured `t(k)`, `this.translate(k)`, `lib.get(k)`, `h.call(this, k)`
   on a local arrow — lowers to a park the pump resolves where the run is: a shipped
@@ -151,6 +169,12 @@ mid-segment (design.md §8). So the check happens BEFORE the segment runs, in th
   2 KB ship as bytes (cheaper than a hash per crossing). The threshold still decides what
   ships at all: a held member costs its reference against the budget, but the first ship
   must fit. Measured on real i18next below.
+- **The view budget:** a view's primitives are charged first, so a large member that fits
+  cannot starve the small ones after it; and a member that fits pays its size once — its
+  own fields draw on that payment, so it ships whole or stays home whole. (Before, a
+  nested member was charged twice and lost fields over half the budget, and Keycloak's
+  save went home before its PUT in 17 of 81 runs to read a realm name that sat behind the
+  realm representation.)
 - **Pump stop rule:** before stepping a frame, if any slot referenced by the current
   state holds a handle → park with `{op:"home", tier: handle.owner}` and ship the stack
   there. The pump stays tier-agnostic: no configuration, the VALUES say where segments

@@ -493,27 +493,41 @@ export function encodeGraph(values, { tier = null, threshold = 64 * 1024, conten
             } // the same object's view again (never a data copy: a view parks writes, a copy would lose them); shared with something outside the view being cached, that view is not self-contained
             if (viewable(x) && depth < 8 && !onPath.has(x)) {
                 const size = approxSize(x, budget.left);
+                // a member that fits pays its size once and ships whole: its own members draw on
+                // that payment (drawing on the parent's budget again charged it twice, and a member
+                // over half the budget lost fields it had just been judged to fit with)
                 if (size <= budget.left) {
                     const mh = handleFor(x, member(k));
-                    return viewOf(x, mh, depth + 1, size, budget, () => { budget.left -= size; onPath.add(x); const r = viewSlot(x, mh, depth + 1, budget); onPath.delete(x); return r; });
+                    return viewOf(x, mh, depth + 1, size, budget, () => { budget.left -= size; onPath.add(x); const r = viewSlot(x, mh, depth + 1, { left: size }); onPath.delete(x); return r; });
                 }
             }
             const mh = handleFor(x, member(k)); // a member handle: class and data fields ride for a session twin
             const st = mh.cls ? twinState(x) : undefined;
             return refH(mh, st !== undefined ? enc(st) : undefined);
         };
+        // PRIMITIVES FIRST against the budget, members in their own order on the wire: a large
+        // member that just fits must not starve the small ones after it (a caps' realm name
+        // after its 8 KB realm representation became a handle, and the run went home to read it)
+        const small = (x) => x === null || (typeof x !== "object" && typeof x !== "function") || x instanceof RegExp;
         if (arr) {
-            for (let i = 0; i < v.length; i++)
-                slot.e.push(encMember(String(i), v[i]) ?? { k: "u" });
+            const a = v, first = new Map();
+            for (let i = 0; i < a.length; i++)
+                if (small(a[i]))
+                    first.set(i, encMember(String(i), a[i]));
+            for (let i = 0; i < a.length; i++)
+                slot.e.push((first.has(i) ? first.get(i) : encMember(String(i), a[i])) ?? { k: "u" });
         }
-        else
-            for (const key of Object.keys(v)) {
-                if (key === "__proto__")
-                    continue;
-                const n = encMember(key, v[key]);
+        else {
+            const o = v, keys = Object.keys(v).filter((k) => k !== "__proto__"), first = new Map();
+            for (const key of keys)
+                if (small(o[key]))
+                    first.set(key, encMember(key, o[key]));
+            for (const key of keys) {
+                const n = first.has(key) ? first.get(key) : encMember(key, o[key]);
                 if (n !== null)
                     slot.f[key] = n;
             }
+        }
         return { k: "r", id };
     };
     // `owned`: excised by ownership (a closure's caps, a live instance) — its view ships;

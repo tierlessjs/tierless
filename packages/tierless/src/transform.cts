@@ -160,7 +160,8 @@ let blocks: Block[], suspSet: Set<string>, AUTO_DEREF = false, AUTO_WRITEBACK = 
 let SOURCE_MAP = false, curLine = 0, srcFile = "", fnSites: Record<string, Record<number, number | undefined>> = {};   // --source-map: stamp each block with its source line so a migrated frame reports file:line, not just a pc
 let CLOSURES = false;   // opts.closures: compile async functions declared in component/hook bodies
 let SYNC_CLOSURES = false;   // opts.syncClosures: sync closures a class method creates become shippable values
-let MODULE_CODE: boolean | string[] = true;   // opts.moduleCode: module code a component closure only calls is a free reference, not a capture — true: any import; a list: imports from those sources (module-level functions always)
+type ModuleCodeEntry = string | { source: string; names: string[]; server: string };
+let MODULE_CODE: boolean | ModuleCodeEntry[] = true;   // opts.moduleCode: module code a component closure only calls is a free reference, not a capture — true: any import; a list: imports from those sources, or the named exports of one (module-level functions always)
 let SYNC_CALLS = false;      // opts.syncCalls: sync calls to values (a captured function, a method of this/a local) are pump-dispatched parks
 let SYNC_METHODS = false;    // opts.syncMethods: every method of a top-level class compiles, tier calls or not (a library's machines)
 let MODULE_FNS = new Set<string>();   // the module's top-level functions (a lowered body is an isolated file: module scope is known by name only)
@@ -748,7 +749,10 @@ function compileFn(node: t.FunctionDeclaration): string {
         // `F.x = …;`, or a bare operand of ||, &&, ?? or ?: inside it (the slot's later
         // uses have refs of their own)
         // …or the value a `return` hands to the caller's frame (its uses have refs there)
-        const moveStmt = /^\s*F\.(?:args\[\d+\]|[A-Za-z_$][\w$]*) = [^;]*;$/.test(line) || /^\s*return \{ op: "return", value: [^;]*\};$/.test(line);   // one statement: a park's `F.pc = n; return { op: "dyn", … }` is not a move
+        // …or the arguments of a sub-frame call: they move into the callee's frame, whose
+        // own states check what they use
+        const moveStmt = /^\s*F\.(?:args\[\d+\]|[A-Za-z_$][\w$]*) = [^;]*;$/.test(line) || /^\s*return \{ op: "return", value: [^;]*\};$/.test(line)   // one statement: a park's `F.pc = n; return { op: "dyn", … }` is not a move
+          || /^\s*F\.pc = \d+; return \{ op: "call", fn: "[^"]*", args: \[[^;]*\] \};$/.test(line);
         const operand = moveStmt && /(?:=|value:|\|\||&&|\?\?|\?|:)\s*$/.test(beforeL) && /^\s*(?:;|\}|\|\||&&|\?\?|\?|:)/.test(afterL);
         // …or a property/element of an object or array LITERAL built by such a statement
         // (`return { obj: x, k }`): the literal is fresh data that moves on; no call may
@@ -1809,6 +1813,78 @@ function rewriteSyncCalls(file: t.File, fnNode: t.FunctionDeclaration): void {
   } });
 }
 
+/** The exported name an import specifier brings in ("default", "*" for a namespace). */
+const importedName = (spec: t.Node): string => (t.isImportSpecifier(spec) ? (t.isIdentifier(spec.imported) ? spec.imported.name : spec.imported.value) : t.isImportDefaultSpecifier(spec) ? "default" : "*");
+
+// ---- SLICES: one export of a module, with only what it reaches ---------------------------
+// Module code by name needs the callee on the gateway. A module whose whole graph loads
+// there is imported as it is (vite.mts isServerSafe); a module that MIXES helpers with UI
+// (a .tsx exporting components beside `changeScope(adminClient, …)`) is not — but the
+// helper alone may be: its declaration, the module-level declarations it reaches, and the
+// imports those use. sliceModule extracts exactly that for the named exports that qualify:
+// no JSX in anything reached, no module-level binding that is reassigned (each tier would
+// hold its own), every reached import accepted by `importOk`. The slice is the same source
+// text the browser runs. Returns null when no requested export qualifies.
+interface ModuleSlice { names: string[]; body: string; imports: Array<{ source: string; specifiers: Array<{ imported: string; local: string }> }> }
+function sliceModule(src: string, names: string[], importOk: (source: string) => boolean): ModuleSlice | null {
+  const ast = parser.parse(src, { sourceType: "module", plugins: ["jsx"] }) as unknown as t.File;
+  let out: ModuleSlice | null = null;
+  traverse(ast, { Program(pp) {
+    type B = import("@babel/traverse").Binding;
+    const scope = pp.scope;
+    const exported = new Map<string, B>();                         // exported name -> the module-level binding behind it
+    for (const sp of pp.get("body")) {
+      if (!sp.isExportNamedDeclaration() || sp.node.source) continue;   // a re-export is another module's code: not sliced
+      if (sp.node.declaration) for (const id of Object.keys(t.getBindingIdentifiers(sp.node.declaration))) { const b = scope.getBinding(id); if (b) exported.set(id, b); }
+      for (const s of sp.node.specifiers) if (t.isExportSpecifier(s)) { const b = scope.getBinding(s.local.name); if (b) exported.set(t.isIdentifier(s.exported) ? s.exported.name : s.exported.value, b); }
+    }
+    const closureOf = (root: B): { decls: Set<B>; imports: Set<B> } | null => {
+      const decls = new Set<B>(), imports = new Set<B>(), work = [root];
+      while (work.length) {
+        const b = work.pop()!;
+        if (decls.has(b) || imports.has(b)) continue;
+        if (b.kind === "module") {
+          const decl = b.path.parentPath?.node;
+          if (!t.isImportDeclaration(decl) || !importOk(decl.source.value)) return null;
+          imports.add(b); continue;
+        }
+        const d = b.path;
+        if (b.constantViolations.length || !(d.isFunctionDeclaration() || d.isClassDeclaration() || (d.isVariableDeclarator() && t.isIdentifier(d.node.id)))) return null;
+        decls.add(b);
+        let ok = true;
+        d.traverse({
+          ReferencedIdentifier(ip) { const ib = ip.scope.getBinding(ip.node.name); if (ib && ib.scope.path.isProgram()) work.push(ib); },
+          "JSXElement|JSXFragment"() { ok = false; },
+        });
+        if (!ok) return null;
+      }
+      return { decls, imports };
+    };
+    const decls = new Set<B>(), imports = new Set<B>(), kept: Array<[string, B]> = [];
+    for (const name of new Set(names)) {
+      const b = exported.get(name), c = b && b.kind !== "module" ? closureOf(b) : null;
+      if (!c) continue;
+      kept.push([name, b!]);
+      for (const x of c.decls) decls.add(x);
+      for (const x of c.imports) imports.add(x);
+    }
+    if (kept.length) {
+      const body: string[] = [];
+      for (const sp of pp.get("body")) {
+        const d = sp.isExportNamedDeclaration() && sp.node.declaration ? sp.node.declaration : sp.node;
+        if (t.isFunctionDeclaration(d) || t.isClassDeclaration(d)) { if (d.id && [...decls].some((b) => b.path.node === d)) body.push(gen(d)); }
+        else if (t.isVariableDeclaration(d)) { const ds = d.declarations.filter((x) => [...decls].some((b) => b.path.node === x)); if (ds.length) body.push(gen(t.variableDeclaration(d.kind, ds))); }
+      }
+      body.push(`export { ${kept.map(([name, b]) => (b.identifier.name === name ? name : `${b.identifier.name} as ${name}`)).join(", ")} };`);
+      const bySource = new Map<string, Array<{ imported: string; local: string }>>();
+      for (const b of imports) { const src = (b.path.parentPath!.node as t.ImportDeclaration).source.value; (bySource.get(src) ?? bySource.set(src, []).get(src)!).push({ imported: importedName(b.path.node), local: b.identifier.name }); }
+      out = { names: kept.map(([name]) => name), body: body.join("\n"), imports: [...bySource].map(([source, specifiers]) => ({ source, specifiers })) };
+    }
+    pp.stop();
+  } });
+  return out;
+}
+
 // ---- closure functions as PROGRAMS (docs/migrate-arm.md slice 3) ------------------------
 // The units real apps write their request chains in are CLOSURES: Pinia setup-store
 // functions (`defineStore(key, () => { async function f() {...} })`), and — with the
@@ -1831,9 +1907,30 @@ interface CapsUnit {
   minParks: number;
 }
 
+// SIBLING CALLS — a component's named closure units, by the binding of their name and by
+// their function node. When one unit only ever AWAITS another by name (`await
+// determineScopeType(x)` in a loader), the call lowers to a sub-frame of the callee's
+// program over caps built from the CALLER's (the callee's captures join the caller's):
+// the chain stays one run on whichever tier it is, where a captured function value would
+// be a handle off its tier and send the run home to call it.
+type CapBinding = import("@babel/traverse").Binding;
+interface Sibling { unit: CapsUnit; done?: { captures: string[]; capBindings: Map<string, CapBinding> } | null | Error; busy?: boolean }
+let SIBLINGS = new Map<CapBinding, Sibling>();
+let SIBLING_OF = new Map<t.Node, Sibling>();
+
 /** Lower one closure unit; returns its captures, or null when it has too few parks.
- *  Throws (with the reason) when the function can't be carried. */
+ *  Throws (with the reason) when the function can't be carried. A named component unit
+ *  lowers once: a sibling that calls it may ask first (lowerCapsUnitNow "direct"). */
 function lowerCapsUnit(u: CapsUnit, progs: string[], meta: CompileMeta): string[] | null {
+  const sib = SIBLING_OF.get(u.fnPath.node);
+  if (!sib) return lowerCapsUnitNow(u, progs, meta)?.captures ?? null;
+  if (sib.done !== undefined) { if (sib.done instanceof Error) throw sib.done; return sib.done ? sib.done.captures : null; }
+  sib.busy = true;
+  try { sib.done = lowerCapsUnitNow(u, progs, meta); return sib.done ? sib.done.captures : null; }
+  catch (e) { sib.done = e as Error; throw e; }
+  finally { sib.busy = false; }
+}
+function lowerCapsUnitNow(u: CapsUnit, progs: string[], meta: CompileMeta): { captures: string[]; capBindings: Map<string, CapBinding> } | null {
   const fn = u.fnPath.node;
   const label = `${u.owner.replace(/^\w+:/, "")}.${u.fnName}`;
   // free bindings — the caps. EVERYTHING bound outside the function captures: closure
@@ -1844,6 +1941,7 @@ function lowerCapsUnit(u: CapsUnit, progs: string[], meta: CompileMeta): string[
   // binding can't be carried (the caps object is a snapshot of bindings, not the
   // bindings themselves) — the function stays original.
   const captures: string[] = [];
+  const capBindings = new Map<string, CapBinding>();
   const seen = new Set<string>();
   const free = new Set<string>();
   const within = (p: NodePath, anc: NodePath): boolean => p === anc || !!p.findParent((q) => q === anc);
@@ -1859,7 +1957,13 @@ function lowerCapsUnit(u: CapsUnit, progs: string[], meta: CompileMeta): string[
   // over a table of imported components would drag the components into the gateway's
   // bundle — it stays a capture)
   type Binding = import("@babel/traverse").Binding;
-  const importAllowed = (b: Binding): boolean => { const decl = b.path.parentPath?.node; return MODULE_CODE === true || (Array.isArray(MODULE_CODE) && t.isImportDeclaration(decl) && MODULE_CODE.includes(decl.source.value)); };
+  const importAllowed = (b: Binding): boolean => {
+    if (MODULE_CODE === true) return true;
+    const decl = b.path.parentPath?.node;
+    if (!Array.isArray(MODULE_CODE) || !t.isImportDeclaration(decl)) return false;
+    const src = decl.source.value, imported = importedName(b.path.node);
+    return MODULE_CODE.some((e) => (typeof e === "string" ? e === src : e.source === src && e.names.includes(imported)));
+  };
   const safeTop = new Map<Binding, boolean>();
   const safeAtTop = (b: Binding): boolean => {
     if (b.kind === "module") return importAllowed(b);
@@ -1894,9 +1998,32 @@ function lowerCapsUnit(u: CapsUnit, progs: string[], meta: CompileMeta): string[
     const b = ip.scope.getBinding(name);
     if (!b || within(b.scope.path, u.fnPath)) return;               // fn-local or a true global: stays as-is
     if (MODULE_CODE && moduleCode(b) && onlyCalled(b)) { seen.add(name); free.add(name); return; }
-    seen.add(name); captures.push(name);
+    seen.add(name); captures.push(name); capBindings.set(name, b);
     for (const v of b.constantViolations) if (within(v, u.fnPath)) throw new Error(`tierless: ${label} assigns to captured binding '${name}' — a caps snapshot can't carry the write; the function stays uncompiled`);
   } });
+  // sibling units this one only awaits by name: direct sub-frame calls (see SIBLINGS). The
+  // callee must compile, and each of its captures must be the SAME binding at every call
+  // site here (nothing in between shadows it) — then its caps are a subset of ours.
+  const direct = new Map<string, { progName: string; captures: string[] }>();
+  for (const name of [...captures]) {
+    const b = capBindings.get(name)!, sib = SIBLINGS.get(b);
+    if (!sib || sib.busy || sib.unit.fnPath.node === fn) continue;
+    const refs = b.referencePaths.filter((r) => within(r, u.fnPath));
+    const awaited = refs.every((r) => { const c = r.parentPath; return !!c && c.isCallExpression() && c.node.callee === r.node && !c.node.arguments.some((x) => t.isSpreadElement(x)) && !!c.parentPath?.isAwaitExpression() && c.getFunctionParent()?.node === fn; });
+    if (!awaited) continue;
+    try { lowerCapsUnit(sib.unit, progs, meta); } catch { continue; }
+    const done = sib.done;
+    if (!done || done instanceof Error) continue;
+    if (!done.captures.every((n) => { const cb = done.capBindings.get(n); return !!cb && refs.every((r) => r.scope.getBinding(n) === cb); })) continue;
+    direct.set(name, { progName: sib.unit.progName, captures: done.captures });
+    captures.splice(captures.indexOf(name), 1);
+    for (const n of done.captures) {
+      if (seen.has(n)) continue;
+      const cb = done.capBindings.get(n)!;
+      seen.add(n); captures.push(n); capBindings.set(n, cb);
+      for (const v of cb.constantViolations) if (within(v, u.fnPath)) throw new Error(`tierless: ${label} assigns to captured binding '${n}' — a caps snapshot can't carry the write; the function stays uncompiled`);
+    }
+  }
 
   // isolated machine copy: function prog(__caps, ...params) { body }, captures rewritten
   // to __caps.<name> — precisely, via the isolated file's own scope (a nested shadowing
@@ -1909,9 +2036,26 @@ function lowerCapsUnit(u: CapsUnit, progs: string[], meta: CompileMeta): string[
     if (!capSet.has(ip.node.name) || ip.scope.getBinding(ip.node.name)) return;   // bound in the copy = shadowed
     ip.replaceWith(t.memberExpression(t.identifier("__caps"), t.identifier(ip.node.name)));
   } });
+  // `await sibling(a)` -> Sibling$prog({ its captures, from ours }, a): a suspendable call
+  // (suspSet, for this unit's lowering only), lowered to op "call" — a sub-frame
+  let siblingCalls = 0;
+  if (direct.size) traverse(file, { AwaitExpression(ap) {
+    if (ap.getFunctionParent()?.node !== fnNode) return;
+    const arg = ap.node.argument;
+    if (!t.isCallExpression(arg) || !t.isIdentifier(arg.callee) || ap.scope.getBinding(arg.callee.name)) return;
+    const d = direct.get(arg.callee.name); if (!d) return;
+    const caps = t.objectExpression(d.captures.map((n) => t.objectProperty(t.identifier(n), capSet.has(n) ? t.memberExpression(t.identifier("__caps"), t.identifier(n)) : t.identifier(n))));
+    const call = t.callExpression(t.identifier(d.progName), [caps, ...(arg.arguments as t.Expression[])]);
+    call.loc = ap.node.loc;
+    ap.replaceWith(call);
+    siblingCalls++;
+  } });
+  const siblingProgs = [...direct.values()].map((d) => d.progName).filter((p) => !suspSet.has(p));
+  for (const p of siblingProgs) suspSet.add(p);
+  try {
   allowlist(file);
   rewriteDynAwaits(file, fnNode, free);
-  let yields = 0;
+  let yields = siblingCalls;                                       // a sibling call stands for the chain behind it
   traverse(file, { YieldExpression(yp) { if (isResYield(yp.node) || isAsyncDynYield(yp.node)) yields++; } });
   if (yields < u.minParks) return null;                            // too few tier-reaching awaits: stays a plain function
   if (SYNC_CALLS) { traverse(file, { FunctionDeclaration(fp) { if (fp.node === fnNode) { inlineArrayCallbacks(fp); fp.stop(); } } }); rewriteSyncCalls(file, fnNode); }                  // sync calls of values -> pump-dispatched parks
@@ -1930,7 +2074,8 @@ function lowerCapsUnit(u: CapsUnit, progs: string[], meta: CompileMeta): string[
   progs.push(lower(mpath!));
   meta.programs.push(u.progName);
   meta.methods.push({ class: u.owner, method: u.fnName, program: u.progName });
-  return captures;
+  return { captures, capBindings };
+  } finally { for (const p of siblingProgs) suspSet.delete(p); }
 }
 
 // the routing stub's body: the bound runtime runs the program over a CALL-TIME caps
@@ -2046,6 +2191,20 @@ function compileComponentFunctions(ast: t.File, progs: string[], meta: CompileMe
       if (!body.isBlockStatement()) continue;
       const owner = "fn:" + name;
       const argCount = new Map<string, number>();
+      // the container's named units, for sibling calls (SIBLINGS)
+      SIBLINGS = new Map(); SIBLING_OF = new Map();
+      const sibling = (b: CapBinding | undefined, fnName: string, fnPath: CapsUnit["fnPath"]): void => {
+        if (!b) return;
+        const s: Sibling = { unit: { owner, fnName, progName: name + "$" + fnName, fnPath, minParks: 2 } };
+        SIBLINGS.set(b, s); SIBLING_OF.set(fnPath.node, s);
+      };
+      for (const stmtPath of body.get("body")) {
+        if (stmtPath.isFunctionDeclaration() && stmtPath.node.async && stmtPath.node.id) sibling(body.scope.getBinding(stmtPath.node.id.name), stmtPath.node.id.name, stmtPath);
+        else if (stmtPath.isVariableDeclaration()) for (const d of stmtPath.get("declarations")) {
+          const init = d.get("init") as NodePath;
+          if (t.isIdentifier(d.node.id) && (init.isArrowFunctionExpression() || init.isFunctionExpression()) && init.node.async) sibling(body.scope.getBinding(d.node.id.name), d.node.id.name, init as CapsUnit["fnPath"]);
+        }
+      }
       for (const stmtPath of body.get("body")) {
         // async functions passed straight to a hook call: `useFetch(async () => {...}, ...)` as
         // a statement, or as a declarator's init (`const x = useQuery(async () => ...)`)
@@ -2073,6 +2232,7 @@ function compileComponentFunctions(ast: t.File, progs: string[], meta: CompileMe
         }
       }
     }
+    SIBLINGS = new Map(); SIBLING_OF = new Map();
     pp.stop();
   } });
 }
@@ -2219,7 +2379,15 @@ function compile(src: string, preamble: string): { code: string; meta: CompileMe
       // KEPT: the browser machine runs them; dropping them would make the tiers diverge.
       // A non-Node-safe one fails the emit-time bundling loudly instead.
       .filter((n) => n.specifiers.length === 0 || n.specifiers.some((s) => refd(s.local.name)))
-      .map((n) => gen(n));
+      // a SLICED source (moduleCode { source, names, server }): the named exports the
+      // machine calls come from the slice — the module itself never loads on the gateway
+      .flatMap((n) => {
+        const e = Array.isArray(MODULE_CODE) ? MODULE_CODE.find((x): x is Exclude<ModuleCodeEntry, string> => typeof x !== "string" && x.source === n.source.value) : undefined;
+        if (!e) return [gen(n)];
+        const used = n.specifiers.filter((sp) => refd(sp.local.name));
+        const fromSlice = used.filter((sp) => e.names.includes(importedName(sp))), others = used.filter((sp) => !fromSlice.includes(sp));
+        return [...(fromSlice.length ? [gen(t.importDeclaration(fromSlice, t.stringLiteral(e.server)))] : []), ...(others.length ? [gen(t.importDeclaration(others, n.source))] : [])];
+      });
     meta.serverCode = [
       ...keptImports,
       helpers.trimEnd(),
@@ -2266,8 +2434,10 @@ interface CompileOptions {
    *  call of one is a park the pump settles where the run is. true (the default): any
    *  import; a list: only imports from those sources (the Vite plugin passes the ones
    *  whose module graph is free of UI code); false: every outside binding captures, as
-   *  before. Module-level functions and classes are free unless false. */
-  moduleCode?: boolean | string[];
+   *  before. Module-level functions and classes are free unless false. A list entry
+   *  `{ source, names, server }` frees only those named exports of `source`, and the
+   *  machine's server module imports them from `server` instead (a slice: sliceModule). */
+  moduleCode?: boolean | ModuleCodeEntry[];
   /** Sync calls of VALUES (a captured function, a method of this or of a local) become
    *  pump-dispatched parks: a program runs as a sub-frame under the stop rule, a live
    *  function natively, a borrowed one at home. Module code stays a plain call. */
@@ -2400,7 +2570,7 @@ export function run(stack) {
 export const start = (fn, args = []) => run([{ fn, pc: 0, args }]);
 `;
 
-export = { compile: compileModule, analyze, DEFAULT_RESOURCES };
+export = { compile: compileModule, analyze, sliceModule, DEFAULT_RESOURCES };
 
 // ---- CLI ----
 function cliMain() {

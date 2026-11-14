@@ -267,5 +267,26 @@ export function Dialog2(props) {
   check(`300 random objects under random budgets: ${members} members read as the original, ${handles} member handles resolve at home, views come home as the original`, fails.length === 0, fails.slice(0, 3).join("; "));
 }
 
+// THE BUDGET, two rules (graph.mts viewSlot). Primitives are charged first: a large member
+// that fits must not starve the small ones after it. And a member that fits pays its size
+// once: its own fields draw on that payment, so it ships whole. (Keycloak's save captured
+// `realm` — the realm representation, 4–8 KB — before `realmName`: the name became a member
+// handle and 17 of 81 migrated saves went home to read it before their PUT.)
+{
+  const { encodeWireBinary, decodeWireBinary } = await import("tierless/wire");
+  const { makeTier } = await import("tierless/heap");
+  const { isHandle } = await import("tierless/graph");
+  const big = (n: number): Record<string, string> => { const o: Record<string, string> = {}; for (let i = 0; i < n; i++) o["k" + i] = "v".repeat(40); return o; };
+  const far = (root: object, threshold: number): Record<string, unknown> =>
+    (decodeWireBinary(encodeWireBinary([{ fn: "F", pc: 0, args: [], o: root }], null, { tier: makeTier("browser"), excise: (v) => v === root, threshold }), { tier: makeTier("server") }).stack[0] as unknown as { o: Record<string, unknown> }).o;
+  const name = "a-realm-name-of-thirty-six-chars-xyz";
+  const v = far({ realm: big(100), realmName: name, n: 7 }, 8192);               // realm ≈ 4.3 KB of the 8 KB budget
+  check("budget: small members after a large one that fits still ship (primitives first)", v.realmName === name && v.n === 7 && !isHandle(v.realm), JSON.stringify({ realmName: v.realmName, n: v.n, realmIsHandle: isHandle(v.realm) }));
+  const realm = v.realm as Record<string, unknown>;
+  check("budget: a member that fits ships whole — none of its fields stays home", !isHandle(realm) && Object.keys(realm).length === 100 && Object.values(realm).every((x) => x === "v".repeat(40)), isHandle(realm) ? "a handle" : Object.values(realm).filter((x) => isHandle(x)).length + " of " + Object.keys(realm).length + " fields are handles");
+  const v2 = far({ realm: big(400), realmName: name }, 8192);                     // realm ≈ 17 KB: over the budget
+  check("budget: a member over the budget stays home as one handle, and the small ones still ship", isHandle(v2.realm) && v2.realmName === name, JSON.stringify({ realmIsHandle: isHandle(v2.realm), realmName: v2.realmName }));
+}
+
 console.log(`\n${ok() ? "PASS" : "FAIL"} — a borrowed instance is readable and writable off-tier: data reads and writes stay (writes ride home as deltas), behavior parks`);
 process.exit(ok() ? 0 : 1);

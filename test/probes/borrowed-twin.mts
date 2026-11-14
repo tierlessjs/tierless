@@ -235,6 +235,30 @@ export function Helpers(props) {
   };
   return { loader };
 }
+export function Sibs(props) {
+  const { client } = useClient();
+  const { step } = props;
+  async function kind(x) {                       // a sibling unit: two calls of its own, its own captures (client, step)
+    const d = await client.scopes.b(x);
+    const o = await client.scopes.c(d + step);
+    return o;
+  }
+  const load = async (id) => {                   // EditClientScope's loader: one call, then the sibling, awaited by name
+    const s = await client.scopes.a(id);
+    return { s, kind: await kind(s) };
+  };
+  const shadow = async (id) => {                 // the capture step is another binding here: stays a captured call
+    const step = id * 2;
+    const s = await client.scopes.a(step);
+    return await kind(s);
+  };
+  const passes = async (id) => {                 // the sibling used as a VALUE too: stays a captured call
+    const s = await client.scopes.a(id);
+    const r = await kind(s);
+    return [r, typeof kind].join(":");
+  };
+  return { load, shadow, passes };
+}
 export function Section(props) {
   const { client } = useClient();
   const label = props.label;
@@ -365,6 +389,34 @@ export function Details(props) {
   // getAuthorizationHeaders(token) into its headers; the import was dropped and the gateway
   // threw ReferenceError on every realm-settings save)
   check("server code keeps a helper the machine reaches only through a spread (`...hdrs(a)`)", typeof cmeta.serverCode === "string" && /function hdrs\(/.test(cmeta.serverCode) && /function conv\(/.test(cmeta.serverCode), String(cmeta.serverCode).match(/function \w+\(/g)?.join(" ") ?? "no functions");
+  // SIBLING CALLS: a unit that only awaits a sibling unit by name calls its program as a
+  // sub-frame, over caps built from its own (the sibling's captures join the caller's, the
+  // function value itself is not captured) — the chain is one run wherever it is. Shadowed
+  // captures or a value use keep the captured call (which goes home off-tier).
+  {
+    const sl = cmod.__slots as Record<string, Record<string, string[]>>;
+    const all = (prog: string): string[] => Object.values(sl[prog] ?? {}).flat();
+    check("sibling call: `await kind(s)` lowers to a sub-frame of Sibs$kind over { client, step } from the caller's caps; the function is not captured",
+      /op: "call", fn: "Sibs\$kind", args: \[\{ client: F\.args\[0\]\.client, step: F\.args\[0\]\.step \}, F\.s\]/.test(ccode) && /__TIERLESS_METHOD__\("Sibs\$load", \{ client, step \}/.test(ccode) && !all("Sibs$load").some((r) => r.startsWith("args[0].kind")),
+      (ccode.match(/op: "call", fn: "Sibs\$kind"[^;]*/)?.[0] ?? "no call") + " | " + (ccode.match(/__TIERLESS_METHOD__\("Sibs\$load", \{[^}]*\}/)?.[0] ?? ""));
+    check("sibling call: its arguments MOVE into the callee's frame (refs with =), so a view among the caps doesn't send the run home at the call",
+      all("Sibs$load").includes("args[0].client=") && all("Sibs$load").includes("args[0].step="), JSON.stringify(sl["Sibs$load"]));
+    check("sibling call: a capture shadowed at the call site, or the sibling used as a value, keeps the captured (dyn) call",
+      /recv: F\.args\[0\], member: "kind"/.test(ccode.slice(ccode.indexOf("Sibs$shadow(F)"), ccode.indexOf("Sibs$passes(F)"))) && /recv: F\.args\[0\], member: "kind"/.test(ccode.slice(ccode.indexOf("Sibs$passes(F)"))),
+      "shadow/passes program text lacks the dyn call on the caps");
+    cmod.__bindTierlessMethods(null);
+    reset();
+    (globalThis as Record<string, unknown>).__probeClient = new Client("browser", log);
+    const s0 = JSON.stringify(await cmod.Sibs({ step: 3 }).load(1)), slog0 = log.join(",");
+    const sh0 = await cmod.Sibs({ step: 3 }).shadow(2);
+    cmod.__bindTierlessMethods((prog: string, caps: object, args: unknown[]) => chost.runLocal(cpeer, prog, [caps, ...args], { migrate: () => true }));
+    reset();
+    const s1 = JSON.stringify(await cmod.Sibs({ step: 3 }).load(1));
+    check("sibling call, migrated: same value as at home, all three twin calls on the server, ONE crossing", s1 === s0 && slog0 === "browser:a,browser:b,browser:c" && log.join(",") === "server:a,server:b,server:c" && counts.resume === 1 && !counts.exec, JSON.stringify({ s0, s1, slog0, log, counts }));
+    reset();
+    const sh1 = await cmod.Sibs({ step: 3 }).shadow(2);
+    check("captured sibling call, migrated: still the right value (the call goes home, the sibling's own chain migrates again)", sh1 === sh0 && log.join(",") === "server:a,server:b,server:c", JSON.stringify({ sh0, sh1, log, counts }));
+  }
   cmod.__bindTierlessMethods(null);
   reset();
   (globalThis as Record<string, unknown>).__probeClient = new Client("browser", log);
