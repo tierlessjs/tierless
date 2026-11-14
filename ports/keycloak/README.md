@@ -157,14 +157,24 @@ rebuilt, the four specs that exercise the chains (`autentication/flows.spec.ts`,
 `identity-providers/saml.spec.ts`, `organization/idp.spec.ts`, `users/main.spec.ts`) and
 the seven realm-settings spec files whose saves migrate, run on the locked profile at
 80 ms + 20 Mbit/s: 78 of 81 pass. `realm-settings/oid4vci-attributes.spec.ts:365` fails
-on every arm in every run. The other two are flaky across arms, more often when the save
-migrates: `oid4vci-attributes.spec.ts:315` saves twice and the second save persisted the
-value from before the test's edit (the refresh after the first save resets the form while
-the test edits it) — it failed in all 6 migrating runs of the full suite and in 3 of 6
-others; `users/main.spec.ts:285` saves its attribute (the PUT succeeds) and then hangs on a
-later form step until the 180 s timeout — it hung here and in a repeat, passed in all 3
-re-measured migrating runs below, and hung in 2 of 4 nothing-migrating runs on 2026-11-03.
-Neither is root-caused.
+on every arm in every run. The other two are flaky across arms.
+
+`oid4vci-attributes.spec.ts:315` races the console twice, on every arm (a step-logging
+copy of the test, 6 runs per arm, 2026-11-14). After a save the console re-fetches the
+realm and `setupForm` resets every field to the server's value; the test picks its next
+value 90–180 ms after the first save's alert, and when the reset lands after the pick the
+pick is wiped, the field the test wants next never renders, and the test waits out its
+timeout: 3 of 6 runs on stock, 4 of 6 with nothing migrating, 4 of 6 migrating. And its
+second wait matches the first save's alert, still on screen (alerts live 8 s), so it reads
+the server about 70 ms after clicking save: in an instrumented migrating run that read
+returned the old value, and the right one once the second alert was up 190 ms later. The
+save itself is correct on every arm; in the full suite the test failed in all 6 migrating
+runs and in 3 of 6 others.
+
+`users/main.spec.ts:285` saves its attribute (the PUT succeeds) and then hangs on a later
+form step until the 180 s timeout — it also edits a form right after a save's alert, but
+was not instrumented. It hung here and in a repeat, passed in all 3 re-measured migrating
+runs below, and hung in 2 of 4 nothing-migrating runs on 2026-11-03.
 
 The first full-suite run after module code by name found a compiler bug: the gateway
 bundle keeps only the imports the machine text references, and a spread's dots
