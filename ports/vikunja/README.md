@@ -27,7 +27,7 @@ plus `pnpm add tierless` (a dependency install, not a diff). What the patches do
    through to axios's own XHR adapter, decided per request by declared semantics plus
    an ownership scan, never by serialization failure alone.
 2. **The plugin line** sets `compile: 'auto'`: eligibility is the compiler's verdict
-   over every candidate module — 17 modules / 59 programs on this app (the build
+   over every candidate module — 17 modules / 60 programs on this app (the build
    writes what compiled and why to `dist-tierless/tierless.compile-coverage.json`;
    a copy is committed at `results/compile-coverage-auto.json`). Acceptance: their
    full suite scores identically to the stock exclusion set on both the old 4-file
@@ -174,6 +174,34 @@ CI boots. Nothing fails on the ported build that passes on stock. Re-verified
 2026-07-17 on the `compile: 'auto'` surface (17 modules / 59 programs): same 196
 passing, same 3 exclusions. The four additional tierless defects the widening
 surfaced — and fixed — are recorded in COMPILING.md.
+
+**Re-verified 2026-11-14** on the framework as it stands after the Keycloak work (module
+code by name, slices, sibling calls, views by content): 90 app modules considered, 17
+compiled, 60 programs, 18 machine bundles, all of which load in Node. The whole suite, once
+per run kind: nothing migrating 195 pass (the 3 exclusions plus `task/overview.spec.ts:120`,
+which then passed 3 of 3 alone); profiling 196; migrating on the locked profile 196, the
+same 3 exclusions. The migrating run made 3 migrated crossings in 199 tests — the one
+chain, `project$toggleSavedFilterFavorite` — beside 1,123 fetched requests, so this suite
+still gives migration nothing to shorten and was not timed again.
+
+The run found two tierless defects, both fixed with probes:
+
+- A slice (docs/migrate-arm.md) carried a module-level `new AvatarService()` to the
+  gateway, where it read `window`, and the whole machine bundle failed to load. A slice now
+  takes only module code that does nothing when loaded; a bundle that still fails to load
+  is skipped, and the gateway answers a stack it holds no program for with `refused`, so
+  the run goes on in the browser.
+- On a profile run every compiled call waited for the profile download before it started
+  (COMPILING.md). `user/email-confirmation.spec.ts:42` failed with 412 in every migrating
+  run. Calls now start at once and only a migrate decision waits.
+
+`email-confirmation.spec.ts:42` and `:104` remain a race, and the one place the port
+changes a test's odds. The test writes the confirm token after `load` (8 to 100 ms after,
+median 54) and counts on Login having read storage already. Login reads it once the boot
+request returns: 13 ms after `load` on stock, 15 ms on the port, 19 ms on the port with a
+profile (medians of 20). When the write wins, the first page posts the token and the reload
+posts it again. A step-logging copy of `:42`, 20 runs each: 0 failures on stock, 1 on the
+port, 4 on the port with a profile.
 
 The suite caught four real boundary defects on the way, each fixed in tierless
 rather than worked around: the interceptor chain must run browser-side (backend

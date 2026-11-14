@@ -216,11 +216,16 @@ the fetch arm makes 528, and its 84 parks a run are at 4 sites, all after the ru
 server call. The same 44 tests in the whole-suite rows, measured before these changes:
 −18.2% (90.1 → 73.7 s). So the saving did not move (16.2 s a run both times) although the
 migrating arm crosses less than it did: 329 crossings a run against 356, all of the
-difference resumes (109 against 136). A resume now takes 117 ms on average against 99 ms. The 15 tests that lost crossings save 10.0 s
-where they saved 8.5 s; the other 29 save 6.2 s where they saved 7.7 s. The two
-measurements are not like for like (4 shards of the 434-test run on the whole-suite
-profile; a 45-test run on its own profile), so the 1.5 s those 29 tests lost is not
-attributed to the framework or to the setting.
+difference resumes (109 against 136). A resume now takes 117 ms on average against 99 ms.
+The 15 tests that lost crossings save 10.0 s where they saved 8.5 s; the other 29 save
+6.2 s where they saved 7.7 s. The two measurements are not like for like (4 shards of the
+434-test run on the whole-suite profile; a 45-test run on its own profile), so the 1.5 s
+those 29 tests lost is not attributed to the framework or to the setting.
+
+Those rounds ran before one more fix: on a profile run every compiled call waited for the
+profile download before it started (docs/corpus.md, found on Vikunja). The console rebuilt
+with the fix, one migrating round over the same specs: 44 pass, the same 329 crossings
+and 84 parks, 75.7 s of I/O wait (the three rounds before: 75.4 to 76.6 s).
 
 Where migrated runs come home (`TIERLESS_PARK_LOG`, the gateway's park log), on the 81
 tests of 2026-11-07: 59 parks at 9 sites. `RealmSettingsTabs.save` runs its PUT on the gateway

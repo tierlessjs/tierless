@@ -207,9 +207,9 @@ export const made = () => new Service();`;
   const errs: string[] = []; const err0 = console.error; console.error = (...a: unknown[]) => { errs.push(a.join(" ")); };
   let merged: { PROGRAMS: Record<string, unknown> } | null = null, onlyBad: { PROGRAMS: Record<string, unknown> } | null = null;
   try {
-    merged = await (await bundleResolverFromManifest(join(mdir, "tierless.manifest.json")))("m:bad") as never;
+    merged = await (await bundleResolverFromManifest(join(mdir, "tierless.manifest.json")))("m:bad") as { PROGRAMS: Record<string, unknown> };
     writeFileSync(join(mdir, "only-bad.manifest.json"), JSON.stringify({ modules: { "m:bad": "bad.mjs" } }));
-    onlyBad = await (await bundleResolverFromManifest(join(mdir, "only-bad.manifest.json")))("m:bad") as never;
+    onlyBad = await (await bundleResolverFromManifest(join(mdir, "only-bad.manifest.json")))("m:bad") as { PROGRAMS: Record<string, unknown> };
   } finally { console.error = err0; }
   check("gateway: a machine that throws at import is skipped — the merged world holds the other module's programs, and says which bundle failed and why",
     !!merged && typeof merged.PROGRAMS.G === "function" && !("B" in merged.PROGRAMS) && errs.some((e) => /bad\.mjs does not load.*window is not defined/.test(e)), JSON.stringify({ programs: merged && Object.keys(merged.PROGRAMS), errs }));
