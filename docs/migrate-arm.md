@@ -120,7 +120,15 @@ mid-segment (design.md §8). So the check happens BEFORE the segment runs, in th
   each of its captures to be the same binding at every call site; a shadowed capture, a
   value use of the sibling, or a call in a nested function keeps the captured call. A
   sub-frame call's arguments move into the callee's frame (the callee's states check what
-  they use).
+  they use). A sibling that calls itself has its own name among its captures: the caller
+  carries the function value for it and still calls it directly.
+- **Closed names:** a compiled module, and its server module, may read from outside only
+  what the source module read plus the language's builtins (`assertClosed`). A program
+  naming anything else names something that is not in scope where it runs — an import
+  the server module dropped (a helper reached only through a spread), a component-local
+  binding left bare in a machine at module scope (a recursive sibling's name). Both
+  shipped once and surfaced as a `ReferenceError` on the tier that ran the code; now the
+  compile fails, and under the plugin's `compile: 'auto'` the module runs stock.
 - **Sync calls of values (`syncCalls`, `syncMethods`):** a synchronous call of a value a
   segment holds — a captured `t(k)`, `this.translate(k)`, `lib.get(k)`, `h.call(this, k)`
   on a local arrow — lowers to a park the pump resolves where the run is: a shipped

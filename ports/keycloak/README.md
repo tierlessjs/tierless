@@ -147,9 +147,13 @@ their calls on the gateway:
   which the gateway doesn't have.
 
 `LinkIdentityProviderModal` calls an imported helper, `convertFormValuesToObject`, between
-admin-client calls. The twins module shares it by name (`shareFunction` on both tiers), so
-it runs on the gateway; its browser-only imports are stubbed in the gateway's bundle
-(`twinsStubs`), which stays at 3 KB.
+admin-client calls, and `CreateClientScope` calls `changeScope` from a `.tsx` that also
+exports components. Neither module loads whole on the gateway (`util.ts` imports UI code),
+so the plugin slices the helper out with only the module code it reaches (docs/migrate-arm.md
+"slices") and the migrated chain runs it there. The port shares no function by name and
+stubs no module: patch 0004 is the plugin line (`compile: 'auto'`, `closures`, the twins
+module) and a 31-line twins module — two `shareClass` calls and the gateway-side client.
+The twins bundle is the admin client and its dependencies (346 KB).
 
 Checked end to end after these compiler and runtime changes (last on 2026-11-07, with
 module code by name, views by content and the compiler fix below): the ported arm
@@ -184,8 +188,28 @@ silent rejection — 10 tests failing in all three profile runs and in no other 
 in the compiler (a probe checks a helper reached only through a spread rides along); the
 profile arm was re-measured.
 
+**2026-11-14**, after sibling calls, slices, the view-budget fix and the reduced patch
+(docs/migrate-arm.md): the ported arm rebuilt (74 machine bundles, all load in Node, none
+reads a name it does not define), re-profiled over nine specs (the two client-scope specs,
+three realm-settings specs, the four chain specs: 80 tests) and run migrating at 80 ms +
+20 Mbit/s: 79 of 80 pass, 122 migrated crossings. `identity-providers/saml.spec.ts:87`
+timed out waiting for a Save button that stays disabled while the form is not dirty: it
+types into the form while the provider toggle's save is in flight, and that save's
+`reset()` wiped the edit — the same race as `:315` above, in a handler that is not
+compiled at all (one server call). The park log has 86 parks at 10 sites, every one after
+the run's last server call except `AuthenticationSection.loader`'s sort: the two helper
+calls that sent runs home mid-chain are gone (`EditClientScope`'s loader awaits its sibling
+`determineScopeType` as a sub-frame; `CreateClientScope` calls the sliced `changeScope` on
+the gateway), and all 13 realm-settings saves came home after their PUT (before, 5 of 26
+came home first for a realm name the view budget had starved). On the two client-scope
+specs the timing is unchanged — migration alone −14.6% (45.7 → 39.0 s, 21 of 21 tests in
+every run, `results/chains-20mbit-v2/`), as before — because those specs reach the changed
+sites twice a run (561 crossings over three runs against 567). Over the whole suite the
+old park log counted 29 `determineScopeType` and 16 `changeScope` parks per run; the
+whole-suite figures below predate these changes and were not re-measured.
+
 Where migrated runs come home (`TIERLESS_PARK_LOG`, the gateway's park log), on the 81
-tests above: 59 parks at 9 sites. `RealmSettingsTabs.save` runs its PUT on the gateway
+tests of 2026-11-07: 59 parks at 9 sites. `RealmSettingsTabs.save` runs its PUT on the gateway
 and comes home at `addAlert` in 21 of 26 saves (5 came home before the PUT, at the token
 and base-URL read); `AuthenticationSection.loader` runs its REST fetch there and comes
 home for `useLocaleSort`'s sort (24); the rest park on hook results and callbacks

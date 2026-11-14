@@ -1,0 +1,21 @@
+{"id":"client-scope/main.spec.ts:48 › Client scopes filtering › filters item by name","status":"passed","retry":0,"durationMs":10366,"startMs":1794685916445,"ioWaitMs":2388}
+{"id":"client-scope/main.spec.ts:60 › Client scopes filtering › filters items by assigned type 'default'","status":"passed","retry":0,"durationMs":9686,"startMs":1794685926938,"ioWaitMs":1903}
+{"id":"client-scope/main.spec.ts:75 › Client scopes filtering › filters items by assigned type 'optional'","status":"passed","retry":0,"durationMs":8835,"startMs":1794685936642,"ioWaitMs":1883}
+{"id":"client-scope/main.spec.ts:90 › Client scopes filtering › filters items by assigned type 'all'","status":"passed","retry":0,"durationMs":8610,"startMs":1794685945499,"ioWaitMs":1874}
+{"id":"client-scope/main.spec.ts:104 › Client scopes filtering › filters items by protocol 'openid'","status":"passed","retry":0,"durationMs":8652,"startMs":1794685954124,"ioWaitMs":1810}
+{"id":"client-scope/main.spec.ts:118 › Client scopes filtering › filters items by protocol 'saml'","status":"passed","retry":0,"durationMs":7550,"startMs":1794685962790,"ioWaitMs":1815}
+{"id":"client-scope/main.spec.ts:132 › Client scopes filtering › shows items on next page are more than 11","status":"passed","retry":0,"durationMs":7409,"startMs":1794685970355,"ioWaitMs":1805}
+{"id":"client-scope/main.spec.ts:144 › Client scopes modification › modifies selected item type to 'default'","status":"passed","retry":0,"durationMs":7720,"startMs":1794685977777,"ioWaitMs":1889}
+{"id":"client-scope/main.spec.ts:162 › Client scopes creation › fails creating client scope with an existing name","status":"passed","retry":0,"durationMs":7610,"startMs":1794685985513,"ioWaitMs":1403}
+{"id":"client-scope/main.spec.ts:183 › Client scopes creation › hides 'consent text' field when 'display consent' switch is disabled","status":"passed","retry":0,"durationMs":6732,"startMs":1794685993140,"ioWaitMs":1324}
+{"id":"client-scope/main.spec.ts:198 › Client scopes creation › creates and deletes a client scope","status":"passed","retry":0,"durationMs":13080,"startMs":1794685999883,"ioWaitMs":3790}
+{"id":"clients/scope.spec.ts:105 › Client details - Client scopes subtab › Should list client scopes","status":"passed","retry":0,"durationMs":10026,"startMs":1794686013036,"ioWaitMs":1618}
+{"id":"clients/scope.spec.ts:111 › Client details - Client scopes subtab › Should search existing client scope by name","status":"passed","retry":0,"durationMs":9553,"startMs":1794686024813,"ioWaitMs":2215}
+{"id":"clients/scope.spec.ts:117 › Client details - Client scopes subtab › Should search non-existent client scope by name","status":"passed","retry":0,"durationMs":9620,"startMs":1794686034378,"ioWaitMs":2234}
+{"id":"clients/scope.spec.ts:122 › Client details - Client scopes subtab › Should add client scope with optional assigned type","status":"passed","retry":0,"durationMs":10295,"startMs":1794686044012,"ioWaitMs":2565}
+{"id":"clients/scope.spec.ts:141 › Client details - Client scopes subtab › Should change item AssignedType to default from search bar","status":"passed","retry":0,"durationMs":10575,"startMs":1794686054322,"ioWaitMs":2940}
+{"id":"clients/scope.spec.ts:155 › Client details - Client scopes subtab › Should show items on next page are more than 11","status":"passed","retry":0,"durationMs":9557,"startMs":1794686064920,"ioWaitMs":2215}
+{"id":"clients/scope.spec.ts:161 › Client details - Client scopes subtab › Should remove client scope","status":"passed","retry":0,"durationMs":10486,"startMs":1794686074490,"ioWaitMs":2904}
+{"id":"clients/scope.spec.ts:170 › Client details - Client scopes subtab › Should remove multiple client scopes from search bar","status":"passed","retry":0,"durationMs":10796,"startMs":1794686084998,"ioWaitMs":2839}
+{"id":"clients/scope.spec.ts:216 › Client scopes evaluate subtab › check effective protocol mappers list","status":"passed","retry":0,"durationMs":9903,"startMs":1794686096146,"ioWaitMs":1690}
+{"id":"clients/scope.spec.ts:226 › Client scopes evaluate subtab › check generated id token and user info","status":"passed","retry":0,"durationMs":9585,"startMs":1794686106794,"ioWaitMs":2095}
