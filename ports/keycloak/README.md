@@ -208,6 +208,20 @@ sites twice a run (561 crossings over three runs against 567). Over the whole su
 old park log counted 29 `determineScopeType` and 16 `changeScope` parks per run; the
 whole-suite figures below predate these changes and were not re-measured.
 
+All five client-scope specs, where those two sites run most (45 tests, profiled on the
+same 45, three rounds of the fetch and migrating arms, `results/client-scope-20mbit/`):
+migration alone −17.7% (92.4 → 76.0 s; 44 tests pass in every run, `mappers.spec.ts:85`
+fails on stock too). Inside those tests the migrating arm makes 329 crossings a run where
+the fetch arm makes 528, and its 84 parks a run are at 4 sites, all after the run's last
+server call. The same 44 tests in the whole-suite rows, measured before these changes:
+−18.2% (90.1 → 73.7 s). So the saving did not move (16.2 s a run both times) although the
+migrating arm crosses less than it did: 329 crossings a run against 356, all of the
+difference resumes (109 against 136). A resume now takes 117 ms on average against 99 ms. The 15 tests that lost crossings save 10.0 s
+where they saved 8.5 s; the other 29 save 6.2 s where they saved 7.7 s. The two
+measurements are not like for like (4 shards of the 434-test run on the whole-suite
+profile; a 45-test run on its own profile), so the 1.5 s those 29 tests lost is not
+attributed to the framework or to the setting.
+
 Where migrated runs come home (`TIERLESS_PARK_LOG`, the gateway's park log), on the 81
 tests of 2026-11-07: 59 parks at 9 sites. `RealmSettingsTabs.save` runs its PUT on the gateway
 and comes home at `addAlert` in 21 of 26 saves (5 came home before the PUT, at the token

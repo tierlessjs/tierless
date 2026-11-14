@@ -1,33 +1,9 @@
 {
   "mode": "auto",
-  "modules": 96,
+  "modules": 90,
   "compiledModules": 17,
-  "compiledPrograms": 59,
+  "compiledPrograms": 60,
   "perModule": {
-    "../../../../../packages/tierless/src/browser.mjs": {
-      "compiled": false,
-      "methods": []
-    },
-    "../../../../../packages/tierless/src/fetch.mjs": {
-      "compiled": false,
-      "methods": []
-    },
-    "../../../../../packages/tierless/src/graph.mjs": {
-      "compiled": false,
-      "methods": []
-    },
-    "../../../../../packages/tierless/src/host.mjs": {
-      "compiled": false,
-      "methods": []
-    },
-    "../../../../../packages/tierless/src/runtime.mjs": {
-      "compiled": false,
-      "methods": []
-    },
-    "../../../../../packages/tierless/src/wire-io.mjs": {
-      "compiled": false,
-      "methods": []
-    },
     "src/helpers/checkAndSetApiUrl.ts": {
       "compiled": false,
       "methods": []
@@ -503,8 +479,7 @@
         {
           "class": "store:auth",
           "method": "refreshUserInfo",
-          "program": null,
-          "error": "Property property of OptionalMemberExpression expected node to be of a type [\"Identifier\",\"PrivateName\"] but instead got \"MemberExpression\""
+          "program": "auth$refreshUserInfo"
         },
         {
           "class": "store:auth",
