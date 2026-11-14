@@ -156,6 +156,22 @@ const noTwin = connect(bundle);
     lastState?.where === "browser" && lastState?.calls === 0 && !("scopes" in (lastState ?? {})), JSON.stringify(lastState));
 }
 
+// ---- a decision that is not ready yet (the profile of a comparison run still loading):
+// the offer is awaited, then the chain crosses exactly as with a ready answer
+{
+  reset();
+  const live = new Client("browser", log);
+  let asked = 0;
+  const r = await bhost.runLocal(withTwin, "scopes$load", [{ client: live, label: "n" }], {
+    migrate: () => { asked++; return new Promise<boolean>((res) => setTimeout(() => res(true), 20)); },
+  });
+  check("late decision: the offer waited for it, then ONE crossing served the chain",
+    asked === 1 && r === "n:2,20,17" && log.join(",") === "server:a,server:b,server:c" && counts.resume === 1, JSON.stringify({ asked, r, log, counts }));
+  reset();
+  const r2 = await bhost.runLocal(withTwin, "scopes$load", [{ client: new Client("browser", log), label: "n" }], { migrate: async () => false });
+  check("late decision, answer no: the chain runs at home", r2 === "n:2,20,17" && log.join(",") === "browser:a,browser:b,browser:c" && !counts.resume, JSON.stringify({ r2, log, counts }));
+}
+
 // ---- a BIG borrowed client: its graph is far over the codec's 8 KB inline threshold, but
 // it ships as a handle anyway — the size estimate must not charge it to the frame's args
 // array (Keycloak: the whole args array was excised, the gateway read F.args[0] undefined)

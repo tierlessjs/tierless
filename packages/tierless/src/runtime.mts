@@ -419,7 +419,7 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump & { run
     // (name "dyn:<member>", args [recv, ...callArgs]) and the owner re-dispatches it
     // here before stepping on, or the resume would read a stale ret.
     // Returns a park to ship, or null when the call settled (ret set / frame pushed / unwound).
-    const dispatchDyn = async (stack: Frame[], r: { recv: unknown; path?: string[]; member: string; args: unknown[]; fn?: 1 }, offer?: (req: { name: string; args: unknown[] }, migratable?: boolean) => boolean): Promise<HomePark | null> => {
+    const dispatchDyn = async (stack: Frame[], r: { recv: unknown; path?: string[]; member: string; args: unknown[]; fn?: 1 }, offer?: (req: { name: string; args: unknown[] }, migratable?: boolean) => boolean | Promise<boolean>): Promise<HomePark | null> => {
       const top = stack[stack.length - 1];
       // a THUNK, invoked inside the try: a synchronous throw from the member call
       // itself (a getter, a sync method body) unwinds exactly like a rejection —
@@ -468,7 +468,10 @@ export function makePump(bundle: Bundle, { twins }: PumpOpts = {}): Pump & { run
       const offerable = !!offer && path.length > 0 && !isHandle(r.recv) && isPlain(r.recv) && !!stampOf((r.recv as Record<string, unknown>)[path[0]]);
       if (offerable) {
         const name = "dyn:" + [...path, r.member].join(".");
-        if (offer!({ name, args: r.args })) return { op: "home", tier: PEER, name, args: [r.recv, ...r.args] };
+        // a decision that is not ready yet (a profile still loading) is awaited; a ready one
+        // costs no tick, so the call is dispatched exactly when the original would have made it
+        const go = offer!({ name, args: r.args });
+        if (typeof go === "boolean" ? go : await go) return { op: "home", tier: PEER, name, args: [r.recv, ...r.args] };
       }
       if (isHandle(recv)) {
         const h = recv, rest = path.slice(i);

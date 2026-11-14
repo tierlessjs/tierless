@@ -46,7 +46,7 @@ export interface Connection {
             fn: string;
             pc: number;
             entry?: string;
-        }) => boolean;
+        }) => boolean | Promise<boolean>;
     }): Promise<unknown>;
     /** ONE resource request executed on the SERVER over this session — no machine, no
      *  frame: the fetch-arm crossing as a first-class op (host.mts execOver). The
@@ -96,5 +96,5 @@ export declare function bindMethods(bundle: Bundle & {
         fn: string;
         pc: number;
         entry?: string;
-    }) => boolean;
+    }) => boolean | Promise<boolean>;
 }): void;

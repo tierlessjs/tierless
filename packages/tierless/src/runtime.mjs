@@ -680,7 +680,10 @@ export function makePump(bundle, { twins } = {}) {
             const offerable = !!offer && path.length > 0 && !isHandle(r.recv) && isPlain(r.recv) && !!stampOf(r.recv[path[0]]);
             if (offerable) {
                 const name = "dyn:" + [...path, r.member].join(".");
-                if (offer({ name, args: r.args }))
+                // a decision that is not ready yet (a profile still loading) is awaited; a ready one
+                // costs no tick, so the call is dispatched exactly when the original would have made it
+                const go = offer({ name, args: r.args });
+                if (typeof go === "boolean" ? go : await go)
                     return { op: "home", tier: PEER, name, args: [r.recv, ...r.args] };
             }
             if (isHandle(recv)) {

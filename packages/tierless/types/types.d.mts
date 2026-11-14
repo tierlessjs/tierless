@@ -101,7 +101,7 @@ export type Pump = (stack: Frame[], ownsHere: (tier: string) => boolean, execHer
 offer?: (req: {
     name: string;
     args: unknown[];
-}, migratable?: boolean) => boolean) => Promise<{
+}, migratable?: boolean) => boolean | Promise<boolean>) => Promise<{
     done: true;
     value: unknown;
 } | {
@@ -170,7 +170,7 @@ export interface Host {
             fn: string;
             pc: number;
             entry?: string;
-        }) => boolean;
+        }) => boolean | Promise<boolean>;
         trace?: boolean;
     }): Promise<unknown>;
     handleStart(payload: any, bin: Uint8Array | null, peer?: Peer): Promise<{

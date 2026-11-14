@@ -68,7 +68,7 @@ export interface Connection {
   /** Run entry(...args) HERE; foreign resources are fetched over the session (the frame
    *  never ships — the compiled-class-method path, see bindMethods). opts.exec serves
    *  pinned requests on this tier; opts.pins adds the resource family's declared pins. */
-  runLocal(entry: string, args?: unknown[], module?: string, opts?: { exec?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => unknown | Promise<unknown>; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => import("./types.mjs").ResourceRequest | null | Promise<import("./types.mjs").ResourceRequest | null>; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean }): Promise<unknown>;
+  runLocal(entry: string, args?: unknown[], module?: string, opts?: { exec?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => unknown | Promise<unknown>; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => import("./types.mjs").ResourceRequest | null | Promise<import("./types.mjs").ResourceRequest | null>; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean | Promise<boolean> }): Promise<unknown>;
   /** ONE resource request executed on the SERVER over this session — no machine, no
    *  frame: the fetch-arm crossing as a first-class op (host.mts execOver). The
    *  I/O-bottom adapter path: an app's axios adapter crosses here per request. */
@@ -95,8 +95,9 @@ export const mergedAppHash = (): string => "merged:" + [...appHashes].sort().joi
 // run on the fetch arm, the same cold-start rule as a late-arriving profile.
 let pendingProfile: Profile | null = null;
 // the comparison-run READINESS BARRIER (docs/corpus.md run protocol): two comparison
-// runs must make the same decisions, so the first compiled-method call cannot race the
-// profile fetch — bindMethods stubs hold until this settles when a profileUrl is set
+// runs must make the same decisions, so no DECISION races the profile fetch — a migrate
+// question asked while this is set waits for it. The call itself starts at once (its
+// synchronous prefix runs on the call, as the original's does). null once settled.
 let profileFetched: Promise<void> | null = null;
 // the profile driving placement, kept to re-check every module that loads after it
 // activated (trace.mts profileCovers: a module it never saw switches it off for good)
@@ -193,12 +194,13 @@ export function connect({ url, protocols, exec, bundle, tier = "browser", heap =
     appTrace = { rate: 1, sink };
   }
   if (profileUrl) {                                          // COMPARISON run: locked profile, no exploration
-    profileFetched = fetch(profileUrl).then((r) => (r.ok ? r.json() : null)).then((p) => {
+    const fetched: Promise<void> = fetch(profileUrl).then((r) => (r.ok ? r.json() : null)).then((p) => {
       if (!p) return;
       pendingProfile = p as Profile;
       tryActivateProfile();
       if (pendingProfile) console.warn("tierless: profile pending — built for " + pendingProfile.bundle + ", app is currently " + mergedAppHash() + " (revalidates as modules register)");
-    }).catch(() => {});
+    }).catch(() => {}).then(() => { if (profileFetched === fetched) profileFetched = null; });
+    profileFetched = fetched;
   }
 
   // §5 heap coherence for this connection, shared by every module-host on it (each host
@@ -234,7 +236,7 @@ export function connect({ url, protocols, exec, bundle, tier = "browser", heap =
     },
     // NO ready-gate: the machine's synchronous prefix must run on the call, exactly like
     // the original async function's body — the gated peer holds its first crossing instead
-    runLocal: async (entry: string, args: unknown[] = [], module: string = "", opts?: { exec?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => unknown | Promise<unknown>; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => import("./types.mjs").ResourceRequest | null | Promise<import("./types.mjs").ResourceRequest | null>; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean }): Promise<unknown> => {
+    runLocal: async (entry: string, args: unknown[] = [], module: string = "", opts?: { exec?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => unknown | Promise<unknown>; pins?: (req: import("./types.mjs").ResourceRequest) => boolean; map?: (req: import("./types.mjs").ResourceRequest, frame?: import("./types.mjs").Frame) => import("./types.mjs").ResourceRequest | null | Promise<import("./types.mjs").ResourceRequest | null>; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean | Promise<boolean> }): Promise<unknown> => {
       const h = hosts.get(module || "");
       if (!h) throw new Error("tierless: no bundle registered" + (module ? " for " + module : ""));
       return h.runLocal(peer, entry, args, opts);
@@ -347,7 +349,7 @@ let appUnwindSet = false;
  *  the shared connection. Methods run on the FETCH path: the frame — whose arg 0 is the
  *  live instance, often a framework proxy — stays in the browser and mutates the real
  *  object; only resource requests and results cross. Call once per compiled module. */
-export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (prog: string, self: unknown, args: unknown[]) => Promise<unknown>) => void }, { module = "", migrate }: { module?: string; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean } = {}): void {
+export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (prog: string, self: unknown, args: unknown[]) => Promise<unknown>) => void }, { module = "", migrate }: { module?: string; migrate?: (req: import("./types.mjs").ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean | Promise<boolean> } = {}): void {
   if (typeof bundle.__bindTierlessMethods !== "function") throw new Error("tierless: bundle has no compiled class methods (rebuild with a compiler that emits __bindTierlessMethods)");
   for (const [k, v] of Object.entries(bundle.PROGRAMS)) {
     // a collision is guaranteed wrongness, not a warning: programs are named Class$method,
@@ -360,7 +362,6 @@ export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (pro
   if (!appUnwindSet) { APP_MERGED.__unwind = bundle.__unwind; appUnwindSet = true; }   // driver-identical across compiled modules
   if (typeof bundle.BUNDLE_HASH === "string") { appHashes.push(bundle.BUNDLE_HASH); tryActivateProfile(); }   // the merged world's profile-validity key grew — a pending profile may match now
   bundle.__bindTierlessMethods(async (prog, self, args) => {
-    if (profileFetched) await profileFetched;   // comparison-run barrier: no call decides before the profile settled
     const conn = sharedConn();
     conn.register(module, APP_MERGED);
     // pinned requests (declared: blob/stream responses; owned values: callbacks,
@@ -385,7 +386,7 @@ export function bindMethods(bundle: Bundle & { __bindTierlessMethods?: (fn: (pro
       },
       // §6 at the park: an explicit opt wins; otherwise the app-wide profile rule
       // (loaded by connect({ profileUrl }) on comparison runs; null = cold = fetch arm)
-      migrate: migrate ?? ((req, site) => appMigrate?.(req, site) ?? false),
+      migrate: migrate ?? ((req, site) => (profileFetched ? profileFetched.then(() => appMigrate?.(req, site) ?? false) : appMigrate?.(req, site) ?? false)),
     });
   });
 }

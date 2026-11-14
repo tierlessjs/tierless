@@ -39,8 +39,9 @@ export const mergedAppHash = () => "merged:" + [...appHashes].sort().join("+");
 // run on the fetch arm, the same cold-start rule as a late-arriving profile.
 let pendingProfile = null;
 // the comparison-run READINESS BARRIER (docs/corpus.md run protocol): two comparison
-// runs must make the same decisions, so the first compiled-method call cannot race the
-// profile fetch — bindMethods stubs hold until this settles when a profileUrl is set
+// runs must make the same decisions, so no DECISION races the profile fetch — a migrate
+// question asked while this is set waits for it. The call itself starts at once (its
+// synchronous prefix runs on the call, as the original's does). null once settled.
 let profileFetched = null;
 // the profile driving placement, kept to re-check every module that loads after it
 // activated (trace.mts profileCovers: a module it never saw switches it off for good)
@@ -153,14 +154,16 @@ traceUrl = globalThis.__TIERLESS_TRACE__ ?? stored("tierlessTraceUrl"), profileU
         appTrace = { rate: 1, sink };
     }
     if (profileUrl) { // COMPARISON run: locked profile, no exploration
-        profileFetched = fetch(profileUrl).then((r) => (r.ok ? r.json() : null)).then((p) => {
+        const fetched = fetch(profileUrl).then((r) => (r.ok ? r.json() : null)).then((p) => {
             if (!p)
                 return;
             pendingProfile = p;
             tryActivateProfile();
             if (pendingProfile)
                 console.warn("tierless: profile pending — built for " + pendingProfile.bundle + ", app is currently " + mergedAppHash() + " (revalidates as modules register)");
-        }).catch(() => { });
+        }).catch(() => { }).then(() => { if (profileFetched === fetched)
+            profileFetched = null; });
+        profileFetched = fetched;
     }
     // §5 heap coherence for this connection, shared by every module-host on it (each host
     // applies it only if its own bundle is heap-compiled). serve() lets the server fetch
@@ -328,8 +331,6 @@ export function bindMethods(bundle, { module = "", migrate } = {}) {
         tryActivateProfile();
     } // the merged world's profile-validity key grew — a pending profile may match now
     bundle.__bindTierlessMethods(async (prog, self, args) => {
-        if (profileFetched)
-            await profileFetched; // comparison-run barrier: no call decides before the profile settled
         const conn = sharedConn();
         conn.register(module, APP_MERGED);
         // pinned requests (declared: blob/stream responses; owned values: callbacks,
@@ -354,7 +355,7 @@ export function bindMethods(bundle, { module = "", migrate } = {}) {
             },
             // §6 at the park: an explicit opt wins; otherwise the app-wide profile rule
             // (loaded by connect({ profileUrl }) on comparison runs; null = cold = fetch arm)
-            migrate: migrate ?? ((req, site) => appMigrate?.(req, site) ?? false),
+            migrate: migrate ?? ((req, site) => (profileFetched ? profileFetched.then(() => appMigrate?.(req, site) ?? false) : appMigrate?.(req, site) ?? false)),
         });
     });
 }

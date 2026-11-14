@@ -54,9 +54,10 @@ roles within a run:
    profile artifact; a key the profile doesn't cover takes the deterministic
    fallback (straight to network — behaves like stock, never manufactures a wait).
    No racing, no learning, nothing self-modifying: two comparison runs of the same
-   build and profile make the same decisions — the browser HOLDS the first
-   compiled-method call until the profile fetch settles, so decisions cannot
-   depend on fetch timing. Emits the measured JSONL that
+   build and profile make the same decisions — a migrate decision asked before the
+   profile fetch settles WAITS for it, so decisions cannot depend on fetch timing.
+   The call itself starts at once: its code up to the first decision runs on the
+   call, as on the other two runs. Emits the measured JSONL that
    `ports/report.mts` joins against the baseline.
 
 Measurement and certification never share a stack: each run gets a freshly booted

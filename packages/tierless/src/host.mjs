@@ -389,7 +389,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
                 // can serve. Errors the compiled code catches unwind over there; only uncaught
                 // ones surface here, exactly as they would have escaped the local pump.
                 const top = stack[stack.length - 1];
-                if (!parked || (migrate && !refused && !refusedStack(stack) && migrate(parked, { fn: top.fn, pc: top.pc, entry }))) {
+                if (!parked || (migrate && !refused && !refusedStack(stack) && await migrate(parked, { fn: top.fn, pc: top.pc, entry }))) {
                     if (!heapTier) {
                         const objs = new Map();
                         let n = 0;

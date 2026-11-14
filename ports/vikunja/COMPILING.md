@@ -66,6 +66,8 @@ that fails on the pre-fix code:
   `localStorage` tens of ms late, saw a token written for the NEXT page, and
   double-consumed it (412). The readiness gate moved to the peer's request(), so
   machines start on the call and only the first crossing waits (method-live pin).
+  Comparison runs had a second gate with the same effect: every call waited for the
+  profile download. It now holds the first migrate decision instead (method-live pin).
 
 The three earlier hand-list entries above describe the same mechanics on the narrow
 surface and stand unchanged; the twins audit (patch 0007) is untouched — which

@@ -96,7 +96,7 @@ export type Pump = (
    *  Also told (migratable false, answer ignored) about every other dynamic park settled
    *  here — `await Promise.all(xs.map(async …))` — so a profiling run sees the work that
    *  follows a borrowed call and can learn the chain. */
-  offer?: (req: { name: string; args: unknown[] }, migratable?: boolean) => boolean,
+  offer?: (req: { name: string; args: unknown[] }, migratable?: boolean) => boolean | Promise<boolean>,
 ) => Promise<{ done: true; value: unknown } | { done: false; request: PumpRequest; stack: Frame[] }>;
 
 /** The RPC peer from tierless/transport (structural — anything with request/on works). */
@@ -135,7 +135,7 @@ export interface Host {
    *  host objects) — executes here through opts.exec instead of crossing. opts.migrate
    *  flips a park to the migrate arm (docs/migrate-arm.md): the continuation ships to
    *  the resource's tier and comes home by the stop rule. */
-  runLocal(peer: Peer, entry: string, args?: unknown[], opts?: { exec?: (req: ResourceRequest, frame?: Frame) => unknown | Promise<unknown>; pins?: (req: ResourceRequest) => boolean; map?: (req: ResourceRequest, frame?: Frame) => ResourceRequest | null | Promise<ResourceRequest | null>; migrate?: (req: ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean; trace?: boolean }): Promise<unknown>;
+  runLocal(peer: Peer, entry: string, args?: unknown[], opts?: { exec?: (req: ResourceRequest, frame?: Frame) => unknown | Promise<unknown>; pins?: (req: ResourceRequest) => boolean; map?: (req: ResourceRequest, frame?: Frame) => ResourceRequest | null | Promise<ResourceRequest | null>; migrate?: (req: ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean | Promise<boolean>; trace?: boolean }): Promise<unknown>;
   // `peer` is the socket the message arrived on; the host services any §5 deref back over
   // it (needed only when heap coherence is configured — omit it and derefs aren't served).
   handleStart(payload: any, bin: Uint8Array | null, peer?: Peer): Promise<{ obj: HostReply; bin?: Uint8Array }>;

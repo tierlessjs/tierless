@@ -313,7 +313,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
       // map/exec receive the PARKED TOP FRAME too: with nested machines (a store method
       // calling service methods), the instance that owns a park is that frame's args[0],
       // not the run's own arg 0 — interceptor chains and pinned fallbacks must follow it.
-      const { exec: overrideExec, pins, map, migrate } = opts as { exec?: (req: ResourceRequest, frame?: Frame) => unknown; pins?: (req: ResourceRequest) => boolean; map?: (req: ResourceRequest, frame?: Frame) => ResourceRequest | null | Promise<ResourceRequest | null>; migrate?: (req: ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean };
+      const { exec: overrideExec, pins, map, migrate } = opts as { exec?: (req: ResourceRequest, frame?: Frame) => unknown; pins?: (req: ResourceRequest) => boolean; map?: (req: ResourceRequest, frame?: Frame) => ResourceRequest | null | Promise<ResourceRequest | null>; migrate?: (req: ResourceRequest, site: { fn: string; pc: number; entry?: string }) => boolean | Promise<boolean> };
       const baseExec = execOn(peer);
       const localExec: Exec = overrideExec ? (r) => overrideExec(r, stack[stack.length - 1]) : baseExec;
       const sid = newSid();
@@ -344,7 +344,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
         // It is also a TOUCH a profiling run must record (unsized: it hasn't settled), or
         // a profile could never learn that such calls chain — profiling runs have no
         // migrate callback, so the hook is live whenever either is.
-        const offer = migrate || rec ? (r: { name: string; args: unknown[] }, migratable = true): boolean => {
+        const offer = migrate || rec ? (r: { name: string; args: unknown[] }, migratable = true): boolean | Promise<boolean> => {
           const t = stack[stack.length - 1];
           const req = { op: "resource", tier: "peer", name: r.name, args: r.args } as ResourceRequest;
           rec?.res(stack, req, undefined, -1);
@@ -380,7 +380,7 @@ export function makeHost({ bundle, tier, exec, owns, meta = {}, trace, coherence
         // can serve. Errors the compiled code catches unwind over there; only uncaught
         // ones surface here, exactly as they would have escaped the local pump.
         const top = stack[stack.length - 1];
-        if (!parked || (migrate && !refused && !refusedStack(stack) && migrate(parked, { fn: top.fn, pc: top.pc, entry }))) {
+        if (!parked || (migrate && !refused && !refusedStack(stack) && await migrate(parked, { fn: top.fn, pc: top.pc, entry }))) {
           if (!heapTier) { const objs = new Map<string, unknown>(); let n = 0; heapTier = { id: tier, heapPut: (v) => { const k = "l" + n++; objs.set(k, v); return k; }, heapGet: (hid) => objs.get(hid) }; }
           // the stack may hold views of the PEER's objects from an earlier round: their
           // writes here ride along (viewDeltas)

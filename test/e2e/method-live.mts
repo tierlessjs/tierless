@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { wsPort, makePeer } from "tierless/transport";
-import { makeHost } from "tierless";
+import { makeHost, answerWith } from "tierless";
 import { httpResources } from "tierless/adapt";
 import { makeCheck } from "../lib/check.mts";
 
@@ -81,8 +81,10 @@ const twin = {
 };
 const wss = new WebSocketServer({ port: 0 });
 await new Promise<void>((r) => wss.on("listening", r));
+let resumes = 0;   // continuations that migrated in
 wss.on("connection", (sock: unknown) => {
-  makeHost({ bundle, tier: "server", exec: httpResources(twin) }).answer(makePeer(wsPort(sock)));
+  const host = makeHost({ bundle, tier: "server", exec: httpResources(twin) });
+  answerWith(makePeer(wsPort(sock)), () => ({ ...host, handleResume: (p, bin, peer) => { resumes++; return host.handleResume(p, bin, peer); } }));
 });
 
 // ---- browser tier: live instance, method host over the session -------------------------
@@ -166,6 +168,29 @@ check("unbound module: the untouched original runs against the instance's own ht
   check("the machine's synchronous prefix ran ON the call (socket still connecting)", args3s.page === 1, JSON.stringify(args3s));
   const out3s = await p3s;
   check("…and the gated first crossing still completes the run once the socket opens", out3s.length === 2 && inst3s.totalPages === 3, JSON.stringify(out3s));
+
+  // a COMPARISON run (connect({ profileUrl })): the profile is still downloading when the
+  // page's first calls are made. The call starts at once all the same; its first DECISION
+  // waits for the profile, so two comparison runs decide alike. (vikunja email-confirm
+  // again: calls held behind the profile fetch read localStorage late and posted the
+  // confirm token twice — 412 on the profile arm only.)
+  const profile = { v: 1, bundle: "merged:" + bundle3.BUNDLE_HASH, runs: { total: 1, complete: 1 },
+    sites: Object.fromEntries(Array.from({ length: 64 }, (_, pc) => ["Svc$getAll|" + pc + "|http.get", { modal: "Svc$getAll|0|http.get", stability: 1 }])) };
+  const psrv = require("node:http").createServer((_q: unknown, res: { setHeader(k: string, v: string): void; end(b: string): void }) =>
+    setTimeout(() => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(profile)); }, 150));
+  await new Promise<void>((r) => psrv.listen(0, r));
+  configureTierless({ url: `ws://localhost:${(wss.address() as { port: number }).port}`, tier: "browser", preconnect: true, profileUrl: `http://localhost:${psrv.address().port}/profile` });   // preconnect: the profile fetch is already in flight when the call is made
+  const inst4 = new bundle3.Svc({});
+  const args4 = { page: 0 };
+  const before = resumes;
+  const p4 = inst4.getAll(args4) as Promise<Array<{ tagged: boolean }>>;
+  check("comparison run: the synchronous prefix ran ON the call (profile still downloading)", args4.page === 1, JSON.stringify(args4));
+  const out4 = await p4;
+  check("…and its first decision waited for the profile: the run migrated", resumes === before + 1 && out4.length === 2 && out4[0].tagged && inst4.totalPages === 3 && inst4.done === true, JSON.stringify({ resumes: resumes - before, out4, totalPages: inst4.totalPages, done: inst4.done }));
+  const p5 = inst4.getAll({ page: 0 }) as Promise<unknown[]>;
+  await p5;
+  check("…and a call after the profile settled migrates too", resumes === before + 2, String(resumes - before));
+  psrv.close();
 }
 
 ws.close(); wss.close();
