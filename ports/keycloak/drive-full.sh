@@ -41,6 +41,8 @@ for r in $(seq 1 "$ROUNDS"); do for arm in baseline fetch profile; do
   for k in $(seq 1 "$SHARDS"); do
     part="$OUT/$arm-r$r-s$k"
     [ -s "$part.jsonl" ] && continue
+    # DEADLINE=<epoch s>: start no shard after it, so a capped session stops between shards
+    if [ -n "${DEADLINE:-}" ] && [ "$(date +%s)" -ge "$DEADLINE" ]; then echo "## deadline reached before round $r $arm shard $k ($(date -u +%H:%M))"; exit 3; fi
     echo "== round $r: $arm shard $k/$SHARDS ($(date -u +%H:%M))"
     env "${extra[@]}" TIERLESS_RTT_MS="$RTT" TIERLESS_SPEC="--shard=$k/$SHARDS" timeout 5400 node ports/keycloak/suite.mts $flag > "$part.log" 2>&1
     cp "ports/work/$work/io.txt" "$part.io"
