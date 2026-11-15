@@ -208,24 +208,41 @@ sites twice a run (561 crossings over three runs against 567). Over the whole su
 old park log counted 29 `determineScopeType` and 16 `changeScope` parks per run; the
 whole-suite figures below predate these changes and were not re-measured.
 
-All five client-scope specs, where those two sites run most (45 tests, profiled on the
-same 45, three rounds of the fetch and migrating arms, `results/client-scope-20mbit/`):
-migration alone −17.7% (92.4 → 76.0 s; 44 tests pass in every run, `mappers.spec.ts:85`
-fails on stock too). Inside those tests the migrating arm makes 329 crossings a run where
-the fetch arm makes 528, and its 84 parks a run are at 4 sites, all after the run's last
-server call. The same 44 tests in the whole-suite rows, measured before these changes:
-−18.2% (90.1 → 73.7 s). So the saving did not move (16.2 s a run both times) although the
-migrating arm crosses less than it did: 329 crossings a run against 356, all of the
-difference resumes (109 against 136). A resume now takes 117 ms on average against 99 ms.
-The 15 tests that lost crossings save 10.0 s where they saved 8.5 s; the other 29 save
-6.2 s where they saved 7.7 s. The two measurements are not like for like (4 shards of the
-434-test run on the whole-suite profile; a 45-test run on its own profile), so the 1.5 s
-those 29 tests lost is not attributed to the framework or to the setting.
+**Old against new framework, back to back** (2026-11-15). The framework at 401a7d0 (before
+sibling calls, slices, the view budget, the reduced patch and the profile-download fix) and
+the framework at HEAD each built their own console and learned their own profile over the
+45 client-scope tests. Then 3 rounds of the fetch and migrating arms at 80 ms + 20 Mbit/s,
+the order alternated per round, every run with the gateway's wire log (`results/ab-20mbit/`;
+`node ports/report-ab.mjs results/ab-20mbit/old results/ab-20mbit/new`). Both builds compile
+the same 95 programs. 44 tests pass in every run (`mappers.spec.ts:85` fails on stock too).
 
-Those rounds ran before one more fix: on a profile run every compiled call waited for the
-profile download before it started (docs/corpus.md, found on Vikunja). The console rebuilt
-with the fix, one migrating round over the same specs: 44 pass, the same 329 crossings
-and 84 parks, 75.7 s of I/O wait (the three rounds before: 75.4 to 76.6 s).
+| | 401a7d0 | HEAD |
+|---|---|---|
+| Fetch arm I/O wait | 91.1 s | 91.0 s |
+| Migrating arm I/O wait | 77.0 s | 75.0 s |
+| Saving | 15.5 % | 17.6 % |
+| Resumes per run | 136 | 109 |
+| Mean resume | 107 ms | 112 ms |
+| Mean resume, tests whose resume count did not change | 126.2 ms | 125.0 ms |
+| Gateway time per resume | 24 ms | 28 ms |
+
+HEAD's migrating arm is faster in every round (by 1.9, 2.3 and 1.8 s); within a build the
+rounds vary by 1.0 s or less. All of the gain is in the 15 tests that open a client scope.
+`EditClientScope`'s loader awaits `determineScopeType`: on the old framework that sent the
+run home and back (29 times a run), on HEAD it runs as a sub-frame on the gateway. The other
+29 tests change by +0.1, −0.3 and +0.2 s. A resume costs the same on both builds (126.2
+against 125.0 ms over 123 resumes where the count did not change); the mean is longer on
+HEAD only because the 27 resumes it no longer makes were short ones. Exec crossings on the
+same API path differ by −0.1 ms on the fetch arm. On the migrating arm they are 1.6 ms
+slower on HEAD, nearly all on the page's boot `GET /admin/realms/<id>`, whose gateway time did
+not change (it takes about 90 or about 255 ms; why it lands slow more often is not known).
+
+An earlier comparison of these 44 tests against the whole-suite rows showed the same 16.2 s
+saving before and after, and was not like for like: the old framework saves 16.2 s inside
+the 434-test run and 14.2 s on its own 45-test runs. About 0.8 s of that gap is in the first
+11 tests, where the whole suite had already warmed the gateway. The rest is in later tests on
+the migrating arm only, measured on other days, on the whole-suite profile and in 4 shards;
+the data cannot separate those.
 
 Where migrated runs come home (`TIERLESS_PARK_LOG`, the gateway's park log), on the 81
 tests of 2026-11-07: 59 parks at 9 sites. `RealmSettingsTabs.save` runs its PUT on the gateway
