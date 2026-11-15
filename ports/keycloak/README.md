@@ -61,7 +61,9 @@ in the nothing-migrating arm).
 
 The same arms on a **20 Mbit/s link** as well (`TIERLESS_BPS=20000000`: one modeled line
 shared by every connection of both relays; `results/chains-20mbit/`,
-`results/flows-20mbit/`):
+`results/flows-20mbit/`). Every 20 Mbit/s result in this README was measured before
+2026-11-15 on the link model without TCP (no handshake, slow start or idle restart;
+`docs/corpus.md`, "Bandwidth") and has not been re-run on the current model:
 
 | | migration alone (same build) | against stock | ported, nothing migrating, against stock |
 |---|---|---|---|

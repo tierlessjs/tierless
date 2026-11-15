@@ -75,6 +75,20 @@ both reports):
 - **truth** (`TIERLESS_WIRE_TRUTH=1`, counting relay) — TCP-true bytes, both variants.
 - **rtt** (`TIERLESS_RTT_MS=<n>`, latency proxy) — shaped timing, both variants.
 
+**Bandwidth.** `TIERLESS_BPS=<bits/s>` adds one modeled access link (`makeLink` in
+`ports/latency-proxy.mts`), shared by every connection of both relays as a user's line is.
+On it each connection direction runs a TCP sender with Linux defaults: a new connection
+pays its handshake round trip, sending starts at 10 segments and grows by slow start, and
+slow start restarts after idle. The model leaves out loss, the receive window, TLS and
+BBR's pacing. Against kernel TCP on a 20 Mbit/s, 40 ms one-way link
+(`test/probes/tcp-link.mts`) it gives 567 ms for 413 KB on a new connection (kernel 567)
+and 249 ms for the first 47 KB reply on a new websocket (kernel 248). It is off for a
+small reply racing a hot bulk connection (128-138 ms vs 82-92 on an idle kernel host) and
+for the queue a long transfer builds (srtt 277 ms vs 179 after 5 MB), both because its
+slow start ends later than the kernel's, and for the spread of parallel bulk downloads.
+Bandwidth-shaped results measured before 2026-11-15 used a FIFO link without TCP (105 ms
+for that websocket reply) and are not comparable with later ones.
+
 `report-time.mts` then decomposes `net = dur(rtt) − dur(floor)` per test per arm — the
 only component transport can move — and compares it across arms. A port whose numbers
 are quoted without the network-wait decomposition is quoted incomplete.
@@ -371,7 +385,8 @@ code: its client-scope loaders (three awaited admin-client calls in one componen
 function) compile with `closures` and run on a session twin as one crossing. At 80 ms RTT
 over the two specs that exercise them, the same build is 5% faster with chains migrating
 than without (3 rounds, 17 of 21 tests faster). Over the whole suite (434 tests, 3 rounds
-at 80 ms RTT + 20 Mbit/s, 292 migrated crossings per run) the same build waits 4.9% less
+at 80 ms RTT + 20 Mbit/s on the link model before TCP (see "Bandwidth"), 292 migrated
+crossings per run) the same build waits 4.9% less
 I/O time with chains migrating than without (357 tests compared), and 10.0% less than
 stock (356); wall clock 2% less. Details in the port README.
 

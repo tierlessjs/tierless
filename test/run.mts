@@ -67,6 +67,7 @@ const cases: Case[] = [
   { file: "test/e2e/webtransport-live.mts", needs: ["the WebTransport adapter length-frames tierless messages over a WHATWG byte duplex and carries full execs"] },
   { file: "test/e2e/policy-live.mts",    needs: ["informed FETCH", "priced migrate vs fetch from real bytes and steered the socket"] },
   { file: "test/probes/latency-link.mts", needs: ["the relay's bandwidth cap is one link shared by every connection behind it"] },
+  { file: "test/probes/tcp-link.mts", needs: ["with a Link the relay runs TCP as a kernel sender would; without one it is RTT-only"] },
   { file: "test/probes/trace.mts",       needs: ["run-level sampling, a wire-borne trace flag with one cross-tier order, truncation-safe profiles with per-feature size models, and a stability-gated trajectory rule over a greedy floor"] },
   { file: "test/e2e/trio-live.mts",      needs: ["traces recorded through the real host priced fetchA's whole suffix and flipped a locally-losing hop", "the hash gate refuses stale history"] },
   { file: "test/e2e/sink-throw.mts",     needs: ["a throwing sink is contained and counted: observability never changes the observed run's outcome"] },

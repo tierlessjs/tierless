@@ -576,10 +576,19 @@ export function wsIoTap() {
     const pending = new Map();
     const side = (onMessage) => {
         let buf = Buffer.alloc(0), http = true, parts = [], compressed = false, window = Buffer.alloc(0);
+        // chunks wait in `more` until buf can hold the `need` bytes parsing waits for: joining
+        // every chunk into buf would copy a large frame once per TCP segment
+        let more = [], moreN = 0, need = 0;
         return (chunk, at, onHead) => {
             if (dead)
                 return;
-            buf = Buffer.concat([buf, chunk]);
+            more.push(chunk);
+            moreN += chunk.length;
+            if (buf.length + moreN < need)
+                return;
+            buf = Buffer.concat([buf, ...more]);
+            more = [];
+            moreN = 0;
             if (http) {
                 const end = buf.indexOf("\r\n\r\n");
                 if (end < 0)
@@ -589,27 +598,35 @@ export function wsIoTap() {
                 buf = buf.subarray(end + 4);
             }
             for (;;) {
-                if (buf.length < 2)
+                if (buf.length < 2) {
+                    need = 2;
                     return;
+                }
                 const fin = buf[0] & 0x80, rsv1 = buf[0] & 0x40, op = buf[0] & 0x0f, masked = buf[1] & 0x80;
                 let len = buf[1] & 0x7f, off = 2;
                 if (len === 126) {
-                    if (buf.length < 4)
+                    if (buf.length < 4) {
+                        need = 4;
                         return;
+                    }
                     len = buf.readUInt16BE(2);
                     off = 4;
                 }
                 else if (len === 127) {
-                    if (buf.length < 10)
+                    if (buf.length < 10) {
+                        need = 10;
                         return;
+                    }
                     len = Number(buf.readBigUInt64BE(2));
                     off = 10;
                 }
                 const mask = masked ? buf.subarray(off, off + 4) : null;
                 if (masked)
                     off += 4;
-                if (buf.length < off + len)
+                if (buf.length < off + len) {
+                    need = off + len;
                     return;
+                }
                 const payload = Buffer.from(buf.subarray(off, off + len));
                 if (mask)
                     for (let k = 0; k < payload.length; k++)
